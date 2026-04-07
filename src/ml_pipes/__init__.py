@@ -1,4 +1,4 @@
-from .core import Context, Pipeline, PipelineValidationError, Value
+from .core import Context, Operator, Pipeline, PipelineValidationError, Value
 from .ops import (
     DecodeOp,
     DecodePredictionsOp,
@@ -24,6 +24,7 @@ __all__ = [
     "ImagePayload",
     "NMSOp",
     "NormalizeOp",
+    "Operator",
     "Pipeline",
     "PipelineValidationError",
     "ProjectToInputOp",

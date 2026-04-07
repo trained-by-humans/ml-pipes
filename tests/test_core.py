@@ -4,27 +4,27 @@ from ml_pipes import Context, Pipeline, PipelineValidationError, Value
 
 
 class IntToString:
-    def __call__(self, value: int) -> str:
-        return str(value)
+    def __call__(self, value: Value[int]) -> Value[str]:
+        return Value(str(value.data), value.context)
 
 
 class StringToFloat:
-    def __call__(self, value: str) -> float:
-        return float(value)
+    def __call__(self, value: Value[str]) -> Value[float]:
+        return Value(float(value.data), value.context)
 
 
 class FloatToBool:
-    def __call__(self, value: float) -> bool:
-        return value > 0
+    def __call__(self, value: Value[float]) -> Value[bool]:
+        return Value(value.data > 0, value.context)
 
 
 class BoolToBytes:
-    def __call__(self, value: bool) -> bytes:
-        return b"1" if value else b"0"
+    def __call__(self, value: Value[bool]) -> Value[bytes]:
+        return Value(b"1" if value.data else b"0", value.context)
 
 
 class ObjectConsumer:
-    def __call__(self, value: object) -> object:
+    def __call__(self, value: Value[object]) -> Value[object]:
         return value
 
 
@@ -41,12 +41,12 @@ def test_context_add_returns_new_context():
 def test_pipeline_applies_operators_in_order():
     pipeline = Pipeline(
         [
-            lambda value: value + 2,
-            lambda value: value * 3,
+            lambda value: Value(value.data + 2, value.context),
+            lambda value: Value(value.data * 3, value.context),
         ]
     )
 
-    assert pipeline(4) == 18
+    assert pipeline(4).data == 18
 
 
 def test_value_default_context():

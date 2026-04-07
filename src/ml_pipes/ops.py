@@ -1,25 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
-from .core import Context, Value
+from .core import Value
 from .transforms import ResizeTransform
 from .types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
 
 
 class DecodeOp:
-    def __call__(self, image_path: str | Path | Value[Any]) -> Value[ImagePayload]:
-        if isinstance(image_path, Value):
-            raw_path = image_path.data
-            context = image_path.context
-        else:
-            raw_path = image_path
-            context = Context()
-
-        path = Path(raw_path)
+    def __call__(self, value: Value[str | Path]) -> Value[ImagePayload]:
+        path = Path(value.data)
         if not path.is_file():
             raise FileNotFoundError(f"Image not found: {path}")
 
@@ -29,7 +21,7 @@ class DecodeOp:
         if image is None:
             raise ValueError(f"Failed to decode image: {path}")
         payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
-        return Value(payload, context.with_metadata(source_image=image.copy(), source_path=str(path)))
+        return Value(payload, value.context.with_metadata(source_image=image.copy(), source_path=str(path)))
 
 
 class ResizeOp:

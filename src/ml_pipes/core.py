@@ -7,6 +7,8 @@ from typing import Any, Generic, Iterable, Mapping, Protocol, TypeVar, get_args,
 
 
 T = TypeVar("T")
+PayloadInT = TypeVar("PayloadInT")
+PayloadOutT = TypeVar("PayloadOutT")
 
 
 @dataclass(frozen=True)
@@ -29,8 +31,8 @@ class Value(Generic[T]):
     context: Context = field(default_factory=Context)
 
 
-class Operator(Protocol):
-    def __call__(self, value: Any) -> Any:
+class Operator(Protocol[PayloadInT, PayloadOutT]):
+    def __call__(self, value: Value[PayloadInT]) -> Value[PayloadOutT]:
         ...
 
 
@@ -39,13 +41,13 @@ class PipelineValidationError(ValueError):
 
 
 class Pipeline:
-    def __init__(self, operators: Iterable[Operator], validate_on_init: bool = False):
+    def __init__(self, operators: Iterable[Operator[Any, Any]], validate_on_init: bool = False):
         self.operators = list(operators)
         if validate_on_init:
             self.validate()
 
     def __call__(self, value: Any) -> Any:
-        current = value
+        current = value if isinstance(value, Value) else Value(value)
         for operator in self.operators:
             current = operator(current)
         return current
@@ -74,7 +76,7 @@ class Pipeline:
             previous_name = name
 
     @staticmethod
-    def _resolve_operator_contract(operator: Operator) -> tuple[Any, Any]:
+    def _resolve_operator_contract(operator: Operator[Any, Any]) -> tuple[Any, Any]:
         call = getattr(operator, "__call__")
         hints = get_type_hints(call)
         signature = inspect.signature(call)
