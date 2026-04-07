@@ -1,14 +1,31 @@
 import pytest
 
-from ml_pipes import (
-    Context,
-    DecodeOp,
-    NormalizeOp,
-    Pipeline,
-    PipelineValidationError,
-    ResizeOp,
-    Value,
-)
+from ml_pipes import Context, Pipeline, PipelineValidationError, Value
+
+
+class IntToString:
+    def __call__(self, value: int) -> str:
+        return str(value)
+
+
+class StringToFloat:
+    def __call__(self, value: str) -> float:
+        return float(value)
+
+
+class FloatToBool:
+    def __call__(self, value: float) -> bool:
+        return value > 0
+
+
+class BoolToBytes:
+    def __call__(self, value: bool) -> bytes:
+        return b"1" if value else b"0"
+
+
+class ObjectConsumer:
+    def __call__(self, value: object) -> object:
+        return value
 
 
 def test_context_add_returns_new_context():
@@ -40,20 +57,20 @@ def test_value_default_context():
 
 
 def test_pipeline_validate_accepts_compatible_operator_chain():
-    pipeline = Pipeline([DecodeOp(), ResizeOp(), NormalizeOp()])
+    pipeline = Pipeline([IntToString(), StringToFloat(), FloatToBool()])
 
     pipeline.validate()
 
 
 def test_pipeline_validate_rejects_incompatible_operator_chain():
-    pipeline = Pipeline([NormalizeOp(), ResizeOp()])
+    pipeline = Pipeline([IntToString(), BoolToBytes()])
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
 
 
 def test_pipeline_can_validate_during_initialization():
-    Pipeline([DecodeOp(), ResizeOp(), NormalizeOp()], validate_on_init=True)
+    Pipeline([IntToString(), StringToFloat(), FloatToBool()], validate_on_init=True)
 
 
 def test_pipeline_validate_requires_operator_annotations():
@@ -68,14 +85,6 @@ def test_pipeline_validate_requires_operator_annotations():
 
 
 def test_pipeline_validate_allows_broader_downstream_input_type():
-    class ProduceString:
-        def __call__(self, value: int) -> str:
-            return str(value)
-
-    class ConsumeObject:
-        def __call__(self, value: object) -> object:
-            return value
-
-    pipeline = Pipeline([ProduceString(), ConsumeObject()])
+    pipeline = Pipeline([IntToString(), ObjectConsumer()])
 
     pipeline.validate()
