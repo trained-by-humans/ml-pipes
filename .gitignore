@@ -1,0 +1,36 @@
+# macOS / editor noise
+.DS_Store
+.idea/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Downloaded demo assets and runtime outputs
+.example_assets/
+examples/.example_assets/
+*.onnx
+*.jpg
+*.png
+*.mp4

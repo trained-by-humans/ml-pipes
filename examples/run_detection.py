@@ -33,7 +33,16 @@ def main() -> int:
         ]
     )
     result = pipeline(image_path)
-    print(json.dumps(result.data, indent=2))
+    print(
+        json.dumps(
+            {
+                "boxes": result.data.boxes,
+                "scores": result.data.scores,
+                "classes": result.data.classes,
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

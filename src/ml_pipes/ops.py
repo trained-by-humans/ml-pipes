@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -8,23 +7,11 @@ import numpy as np
 
 from .core import Context, Value
 from .transforms import ResizeTransform
-
-
-@dataclass(frozen=True)
-class DetectionBatch:
-    boxes: np.ndarray
-    scores: np.ndarray
-    classes: np.ndarray
-
-
-@dataclass(frozen=True)
-class DrawnImage:
-    image: np.ndarray
-    detections: dict[str, list[Any]]
+from .types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
 
 
 class DecodeOp:
-    def __call__(self, image_path: str | Path | Value[Any]) -> Value[np.ndarray]:
+    def __call__(self, image_path: str | Path | Value[Any]) -> Value[ImagePayload]:
         if isinstance(image_path, Value):
             raw_path = image_path.data
             context = image_path.context
@@ -41,7 +28,8 @@ class DecodeOp:
         image = cv2.imread(str(path), cv2.IMREAD_COLOR)
         if image is None:
             raise ValueError(f"Failed to decode image: {path}")
-        return Value(image, context.with_metadata(source_image=image.copy(), source_path=str(path)))
+        payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
+        return Value(payload, context.with_metadata(source_image=image.copy(), source_path=str(path)))
 
 
 class ResizeOp:
@@ -49,10 +37,11 @@ class ResizeOp:
         self.size = size
         self.pad_value = pad_value
 
-    def __call__(self, value: Value[np.ndarray]) -> Value[np.ndarray]:
+    def __call__(self, value: Value[ImagePayload]) -> Value[ImagePayload]:
         import cv2
 
-        image = value.data
+        self._validate_image_payload(value.data)
+        image = value.data.array
         original_h, original_w = image.shape[:2]
         target_h, target_w = self.size
         scale = min(target_h / original_h, target_w / original_w)
@@ -83,16 +72,35 @@ class ResizeOp:
             pad=(float(left), float(top)),
             original_shape=(original_h, original_w),
         )
-        return Value(padded, value.context.add(transform))
+        payload = ImagePayload(
+            array=padded,
+            color_space=value.data.color_space,
+            layout=value.data.layout,
+        )
+        return Value(payload, value.context.add(transform))
+
+    @staticmethod
+    def _validate_image_payload(payload: ImagePayload) -> None:
+        if payload.layout != "HWC":
+            raise ValueError(f"ResizeOp expects HWC image layout, got {payload.layout}")
 
 
 class NormalizeOp:
-    def __call__(self, value: Value[np.ndarray]) -> Value[np.ndarray]:
-        image = value.data[..., ::-1]
+    def __call__(self, value: Value[ImagePayload]) -> Value[TensorPayload]:
+        if value.data.layout != "HWC":
+            raise ValueError(f"NormalizeOp expects HWC image layout, got {value.data.layout}")
+
+        image = value.data.array
+        if value.data.color_space == "BGR":
+            image = image[..., ::-1]
+        elif value.data.color_space != "RGB":
+            raise ValueError(f"NormalizeOp expects BGR or RGB image payload, got {value.data.color_space}")
+
         tensor = image.astype(np.float32) / 255.0
         tensor = np.transpose(tensor, (2, 0, 1))
         tensor = np.expand_dims(tensor, axis=0)
-        return Value(tensor, value.context)
+        payload = TensorPayload(array=tensor, layout="NCHW", dtype="float32")
+        return Value(payload, value.context)
 
 
 class InferOp:
@@ -110,14 +118,18 @@ class InferOp:
         )
         self.input_name = self.session.get_inputs()[0].name
 
-    def __call__(self, value: Value[np.ndarray]) -> Value[np.ndarray]:
-        outputs = self.session.run(None, {self.input_name: value.data})
-        return Value(np.asarray(outputs[0]), value.context)
+    def __call__(self, value: Value[TensorPayload]) -> Value[TensorPayload]:
+        if value.data.layout != "NCHW":
+            raise ValueError(f"InferOp expects NCHW tensor layout, got {value.data.layout}")
+
+        outputs = self.session.run(None, {self.input_name: value.data.array})
+        payload = TensorPayload(array=np.asarray(outputs[0]), layout="UNKNOWN", dtype=str(outputs[0].dtype))
+        return Value(payload, value.context)
 
 
 class DecodePredictionsOp:
-    def __call__(self, value: Value[np.ndarray]) -> Value[DetectionBatch]:
-        predictions = self._normalize_output_shape(np.asarray(value.data))
+    def __call__(self, value: Value[TensorPayload]) -> Value[DetectionBatch]:
+        predictions = self._normalize_output_shape(np.asarray(value.data.array))
         if predictions.shape[1] < 6:
             raise ValueError(
                 "Unsupported YOLOv8 output: expected at least 4 box values and 2 class scores"
@@ -239,7 +251,7 @@ class NMSOp:
 
 
 class ProjectToInputOp:
-    def __call__(self, value: Value[DetectionBatch]) -> Value[dict[str, list[Any]]]:
+    def __call__(self, value: Value[DetectionBatch]) -> Value[DetectionResult]:
         transform = self._find_resize_transform(value.context)
         boxes = value.data.boxes.copy()
         scores = value.data.scores.astype(np.float32)
@@ -256,11 +268,11 @@ class ProjectToInputOp:
         boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))
 
         return Value(
-            {
-                "boxes": boxes.tolist(),
-                "scores": scores.tolist(),
-                "classes": classes.tolist(),
-            },
+            DetectionResult(
+                boxes=boxes.tolist(),
+                scores=scores.tolist(),
+                classes=classes.tolist(),
+            ),
             value.context,
         )
 
@@ -285,7 +297,7 @@ class DrawBoxesOp:
         self.thickness = thickness
         self.font_scale = font_scale
 
-    def __call__(self, value: Value[dict[str, list[Any]]]) -> Value[DrawnImage]:
+    def __call__(self, value: Value[DetectionResult]) -> Value[ImagePayload]:
         import cv2
 
         source_image = value.context.metadata.get("source_image")
@@ -294,9 +306,9 @@ class DrawBoxesOp:
 
         image = np.asarray(source_image).copy()
         detections = value.data
-        boxes = detections.get("boxes", [])
-        scores = detections.get("scores", [])
-        classes = detections.get("classes", [])
+        boxes = detections.boxes
+        scores = detections.scores
+        classes = detections.classes
 
         for box, score, class_id in zip(boxes, scores, classes, strict=True):
             x1, y1, x2, y2 = [int(round(coord)) for coord in box]
@@ -315,7 +327,7 @@ class DrawBoxesOp:
                 cv2.LINE_AA,
             )
 
-        return Value(DrawnImage(image=image, detections=detections), value.context)
+        return Value(ImagePayload(array=image, color_space="BGR", layout="HWC"), value.context)
 
     def _format_label(self, class_id: int, score: float) -> str:
         if self.class_names is not None and 0 <= class_id < len(self.class_names):
@@ -329,11 +341,14 @@ class SaveImageOp:
     def __init__(self, output_path: str | Path):
         self.output_path = Path(output_path)
 
-    def __call__(self, value: Value[DrawnImage]) -> Value[DrawnImage]:
+    def __call__(self, value: Value[ImagePayload]) -> Value[ImagePayload]:
         import cv2
 
+        if value.data.layout != "HWC":
+            raise ValueError(f"SaveImageOp expects HWC image layout, got {value.data.layout}")
+
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        written = cv2.imwrite(str(self.output_path), value.data.image)
+        written = cv2.imwrite(str(self.output_path), value.data.array)
         if not written:
             raise ValueError(f"Failed to write image: {self.output_path}")
         return value

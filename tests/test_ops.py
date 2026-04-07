@@ -5,13 +5,13 @@ import numpy as np
 from ml_pipes.core import Context, Value
 from ml_pipes.ops import (
     DecodePredictionsOp,
-    DetectionBatch,
     DrawBoxesOp,
     NMSOp,
     ProjectToInputOp,
     SaveImageOp,
 )
 from ml_pipes.transforms import ResizeTransform
+from ml_pipes.types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
 
 
 def test_decode_predictions_accepts_channel_first_yolov8_output():
@@ -29,7 +29,7 @@ def test_decode_predictions_accepts_channel_first_yolov8_output():
         dtype=np.float32,
     )
 
-    result = DecodePredictionsOp()(Value(raw))
+    result = DecodePredictionsOp()(Value(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32")))
 
     assert result.data.boxes.shape == (2, 4)
     assert result.data.classes.tolist() == [0, 1]
@@ -86,9 +86,9 @@ def test_project_to_input_reverses_padding_and_scale():
 
     result = ProjectToInputOp()(value)
 
-    assert result.data["boxes"] == [[10.0, 10.0, 50.0, 50.0]]
-    assert result.data["scores"] == [0.8999999761581421]
-    assert result.data["classes"] == [3]
+    assert result.data.boxes == [[10.0, 10.0, 50.0, 50.0]]
+    assert result.data.scores == [0.8999999761581421]
+    assert result.data.classes == [3]
 
 
 def test_project_to_input_clips_boxes_to_original_bounds():
@@ -102,29 +102,30 @@ def test_project_to_input_clips_boxes_to_original_bounds():
 
     result = ProjectToInputOp()(value)
 
-    assert result.data["boxes"] == [[0.0, 0.0, 200.0, 100.0]]
+    assert result.data.boxes == [[0.0, 0.0, 200.0, 100.0]]
 
 
 def test_draw_boxes_draws_on_source_image():
     image = np.zeros((32, 32, 3), dtype=np.uint8)
-    detections = {
-        "boxes": [[4.0, 4.0, 20.0, 20.0]],
-        "scores": [0.9],
-        "classes": [1],
-    }
+    detections = DetectionResult(
+        boxes=[[4.0, 4.0, 20.0, 20.0]],
+        scores=[0.9],
+        classes=[1],
+    )
     context = Context(metadata={"source_image": image})
 
     result = DrawBoxesOp(class_names=["zero", "one"], color=(0, 255, 0))(Value(detections, context))
 
-    assert result.data.image.shape == image.shape
-    assert np.any(result.data.image != 0)
-    assert result.data.detections == detections
+    assert result.data.array.shape == image.shape
+    assert result.data.color_space == "BGR"
+    assert result.data.layout == "HWC"
+    assert np.any(result.data.array != 0)
 
 
 def test_save_image_writes_output(tmp_path: Path):
     image = np.full((16, 16, 3), 255, dtype=np.uint8)
     drawn = Value(
-        data=type("Drawn", (), {"image": image, "detections": {}})(),
+        data=ImagePayload(array=image, color_space="BGR", layout="HWC"),
         context=Context(),
     )
     output_path = tmp_path / "annotated.jpg"

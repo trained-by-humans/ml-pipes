@@ -178,7 +178,7 @@ def main() -> int:
             "label": COCO_CLASSES[class_id] if 0 <= class_id < len(COCO_CLASSES) else str(class_id),
         }
         for box, score, class_id in zip(
-            result.data["boxes"], result.data["scores"], result.data["classes"], strict=True
+            result.data.boxes, result.data.scores, result.data.classes, strict=True
         )
     ]
     print(

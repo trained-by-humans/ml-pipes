@@ -11,13 +11,17 @@ from .ops import (
     SaveImageOp,
 )
 from .transforms import ResizeTransform
+from .types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
 
 __all__ = [
     "Context",
     "DecodeOp",
     "DecodePredictionsOp",
+    "DetectionBatch",
+    "DetectionResult",
     "DrawBoxesOp",
     "InferOp",
+    "ImagePayload",
     "NMSOp",
     "NormalizeOp",
     "Pipeline",
@@ -25,5 +29,6 @@ __all__ = [
     "ResizeOp",
     "ResizeTransform",
     "SaveImageOp",
+    "TensorPayload",
     "Value",
 ]
