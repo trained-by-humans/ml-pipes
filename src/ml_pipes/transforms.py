@@ -5,6 +5,6 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ResizeTransform:
-    scale: float
+    scale: tuple[float, float]
     pad: tuple[float, float]
     original_shape: tuple[int, int]

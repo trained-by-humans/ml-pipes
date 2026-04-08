@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -24,9 +25,21 @@ class DecodeOp:
 
 
 class ResizeOp:
-    def __init__(self, size: tuple[int, int] = (640, 640), pad_value: int = 114):
+    def __init__(
+        self,
+        size: tuple[int, int] = (640, 640),
+        mode: Literal["letterbox", "resize"] = "letterbox",
+        pad_value: int = 114,
+        interpolation: Literal["nearest", "linear", "cubic", "area"] = "linear",
+        center: bool = True,
+        allow_scale_up: bool = True,
+    ):
         self.size = size
+        self.mode = mode
         self.pad_value = pad_value
+        self.interpolation = interpolation
+        self.center = center
+        self.allow_scale_up = allow_scale_up
 
     def __call__(self, value: ImagePayload) -> tuple[ImagePayload, ResizeTransform]:
         import cv2
@@ -35,36 +48,55 @@ class ResizeOp:
         image = value.array
         original_h, original_w = image.shape[:2]
         target_h, target_w = self.size
-        scale = min(target_h / original_h, target_w / original_w)
+        interpolation = self._resolve_interpolation(cv2)
 
-        resized_w = int(round(original_w * scale))
-        resized_h = int(round(original_h * scale))
-        resized = cv2.resize(image, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
+        if self.mode == "letterbox":
+            ratio = min(target_h / original_h, target_w / original_w)
+            if not self.allow_scale_up:
+                ratio = min(ratio, 1.0)
 
-        dw = target_w - resized_w
-        dh = target_h - resized_h
-        left = int(np.floor(dw / 2))
-        right = int(np.ceil(dw / 2))
-        top = int(np.floor(dh / 2))
-        bottom = int(np.ceil(dh / 2))
+            resized_w = int(round(original_w * ratio))
+            resized_h = int(round(original_h * ratio))
+            resized = cv2.resize(image, (resized_w, resized_h), interpolation=interpolation)
 
-        padded = cv2.copyMakeBorder(
-            resized,
-            top,
-            bottom,
-            left,
-            right,
-            cv2.BORDER_CONSTANT,
-            value=(self.pad_value, self.pad_value, self.pad_value),
-        )
+            dw = target_w - resized_w
+            dh = target_h - resized_h
+            if self.center:
+                left = int(np.floor(dw / 2))
+                right = int(np.ceil(dw / 2))
+                top = int(np.floor(dh / 2))
+                bottom = int(np.ceil(dh / 2))
+            else:
+                left = 0
+                top = 0
+                right = int(dw)
+                bottom = int(dh)
+
+            resized = cv2.copyMakeBorder(
+                resized,
+                top,
+                bottom,
+                left,
+                right,
+                cv2.BORDER_CONSTANT,
+                value=(self.pad_value, self.pad_value, self.pad_value),
+            )
+            scale = (ratio, ratio)
+            pad = (float(left), float(top))
+        elif self.mode == "resize":
+            resized = cv2.resize(image, (target_w, target_h), interpolation=interpolation)
+            scale = (target_w / original_w, target_h / original_h)
+            pad = (0.0, 0.0)
+        else:
+            raise ValueError(f"Unsupported resize mode: {self.mode}")
 
         transform = ResizeTransform(
             scale=scale,
-            pad=(float(left), float(top)),
+            pad=pad,
             original_shape=(original_h, original_w),
         )
         payload = ImagePayload(
-            array=padded,
+            array=resized,
             color_space=value.color_space,
             layout=value.layout,
         )
@@ -75,27 +107,83 @@ class ResizeOp:
         if payload.layout != "HWC":
             raise ValueError(f"ResizeOp expects HWC image layout, got {payload.layout}")
 
+    def _resolve_interpolation(self, cv2: object) -> int:
+        mapping = {
+            "nearest": cv2.INTER_NEAREST,
+            "linear": cv2.INTER_LINEAR,
+            "cubic": cv2.INTER_CUBIC,
+            "area": cv2.INTER_AREA,
+        }
+        return mapping[self.interpolation]
+
 
 class NormalizeOp:
+    def __init__(
+        self,
+        output_dtype: str = "float32",
+        scale: float = 1.0 / 255.0,
+        mean: tuple[float, ...] | None = None,
+        std: tuple[float, ...] | None = None,
+        output_layout: Literal["NCHW", "NHWC", "CHW", "HWC"] = "NCHW",
+        output_color_space: Literal["RGB", "BGR"] = "RGB",
+        add_batch_dim: bool = True,
+    ):
+        self.output_dtype = output_dtype
+        self.scale = scale
+        self.mean = mean
+        self.std = std
+        self.output_layout = output_layout
+        self.output_color_space = output_color_space
+        self.add_batch_dim = add_batch_dim
+
     def __call__(self, value: ImagePayload) -> TensorPayload:
         if value.layout != "HWC":
             raise ValueError(f"NormalizeOp expects HWC image layout, got {value.layout}")
 
         image = value.array
-        if value.color_space == "BGR":
+        if value.color_space != self.output_color_space and {
+            value.color_space,
+            self.output_color_space,
+        } == {"BGR", "RGB"}:
             image = image[..., ::-1]
-        elif value.color_space != "RGB":
-            raise ValueError(f"NormalizeOp expects BGR or RGB image payload, got {value.color_space}")
+        elif value.color_space != self.output_color_space:
+            raise ValueError(
+                f"NormalizeOp cannot convert {value.color_space} to {self.output_color_space}"
+            )
 
-        tensor = image.astype(np.float32) / 255.0
-        tensor = np.transpose(tensor, (2, 0, 1))
-        tensor = np.expand_dims(tensor, axis=0)
-        payload = TensorPayload(array=tensor, layout="NCHW", dtype="float32")
+        tensor = image.astype(np.dtype(self.output_dtype))
+        tensor = tensor * self.scale
+        if self.mean is not None:
+            tensor = tensor - np.asarray(self.mean, dtype=tensor.dtype)
+        if self.std is not None:
+            tensor = tensor / np.asarray(self.std, dtype=tensor.dtype)
+
+        if self.output_layout in {"NCHW", "CHW"}:
+            tensor = np.transpose(tensor, (2, 0, 1))
+        elif self.output_layout not in {"NHWC", "HWC"}:
+            raise ValueError(f"Unsupported output layout: {self.output_layout}")
+
+        final_layout = self.output_layout
+        if self.add_batch_dim:
+            tensor = np.expand_dims(tensor, axis=0)
+            if self.output_layout in {"CHW", "HWC"}:
+                final_layout = f"N{self.output_layout}"
+
+        payload = TensorPayload(array=tensor, layout=final_layout, dtype=str(tensor.dtype))
         return payload
 
 
 class InferOp:
-    def __init__(self, model_path: str | Path):
+    def __init__(
+        self,
+        model_path: str | Path,
+        providers: tuple[str, ...] = ("CPUExecutionProvider",),
+        input_name: str | None = None,
+        output_index: int = 0,
+        output_name: str | None = None,
+        expected_input_layout: str = "NCHW",
+        output_layout: str = "UNKNOWN",
+    ):
         path = Path(model_path)
         if not path.is_file():
             raise FileNotFoundError(f"Model not found: {path}")
@@ -105,32 +193,61 @@ class InferOp:
         self.model_path = path
         self.session = ort.InferenceSession(
             str(path),
-            providers=["CPUExecutionProvider"],
+            providers=list(providers),
         )
-        self.input_name = self.session.get_inputs()[0].name
+        self.input_name = input_name or self.session.get_inputs()[0].name
+        self.output_index = output_index
+        self.output_name = output_name
+        self.expected_input_layout = expected_input_layout
+        self.output_layout = output_layout
 
     def __call__(self, value: TensorPayload) -> TensorPayload:
-        if value.layout != "NCHW":
-            raise ValueError(f"InferOp expects NCHW tensor layout, got {value.layout}")
+        if value.layout != self.expected_input_layout:
+            raise ValueError(f"InferOp expects {self.expected_input_layout} tensor layout, got {value.layout}")
 
         outputs = self.session.run(None, {self.input_name: value.array})
-        payload = TensorPayload(array=np.asarray(outputs[0]), layout="UNKNOWN", dtype=str(outputs[0].dtype))
+        if self.output_name is not None:
+            output_names = [output.name for output in self.session.get_outputs()]
+            if self.output_name not in output_names:
+                raise ValueError(f"Output {self.output_name!r} not found in model outputs: {output_names}")
+            output = outputs[output_names.index(self.output_name)]
+        else:
+            output = outputs[self.output_index]
+
+        payload = TensorPayload(array=np.asarray(output), layout=self.output_layout, dtype=str(output.dtype))
         return payload
 
 
 class DecodePredictionsOp:
+    def __init__(
+        self,
+        num_box_values: int = 4,
+        class_start_index: int = 4,
+        input_box_format: Literal["xywh", "xyxy"] = "xywh",
+        transpose_output: Literal["auto", "never", "always"] = "auto",
+        squeeze_batch_dim: bool = True,
+        score_activation: Literal["none", "sigmoid", "softmax"] = "none",
+    ):
+        self.num_box_values = num_box_values
+        self.class_start_index = class_start_index
+        self.input_box_format = input_box_format
+        self.transpose_output = transpose_output
+        self.squeeze_batch_dim = squeeze_batch_dim
+        self.score_activation = score_activation
+
     def __call__(self, value: TensorPayload) -> DetectionBatch:
         predictions = self._normalize_output_shape(np.asarray(value.array))
-        if predictions.shape[1] < 6:
+        if predictions.shape[1] < self.class_start_index + 2:
             raise ValueError(
                 "Unsupported YOLOv8 output: expected at least 4 box values and 2 class scores"
             )
 
-        boxes_xywh = predictions[:, :4]
-        class_scores = predictions[:, 4:]
+        boxes = predictions[:, : self.num_box_values]
+        class_scores = predictions[:, self.class_start_index :]
+        class_scores = self._activate_scores(class_scores)
         classes = np.argmax(class_scores, axis=1).astype(np.int32)
         scores = class_scores[np.arange(class_scores.shape[0]), classes]
-        boxes_xyxy = self._xywh_to_xyxy(boxes_xywh)
+        boxes_xyxy = self._to_xyxy(boxes)
         batch = DetectionBatch(
             boxes=boxes_xyxy.astype(np.float32),
             scores=scores.astype(np.float32),
@@ -138,9 +255,8 @@ class DecodePredictionsOp:
         )
         return batch
 
-    @staticmethod
-    def _normalize_output_shape(output: np.ndarray) -> np.ndarray:
-        if output.ndim == 3 and output.shape[0] == 1:
+    def _normalize_output_shape(self, output: np.ndarray) -> np.ndarray:
+        if output.ndim == 3 and self.squeeze_batch_dim and output.shape[0] == 1:
             output = output[0]
         elif output.ndim != 2:
             raise ValueError(f"Unsupported YOLOv8 output shape: {output.shape}")
@@ -148,20 +264,39 @@ class DecodePredictionsOp:
         if output.ndim != 2:
             raise ValueError(f"Unsupported YOLOv8 output shape: {output.shape}")
 
-        if output.shape[0] > output.shape[1] and output.shape[1] >= 6:
+        if self.transpose_output == "never":
             return output
-        if output.shape[0] >= 6:
+        if self.transpose_output == "always":
+            return output.T
+        if output.shape[0] > output.shape[1] and output.shape[1] >= self.class_start_index + 2:
+            return output
+        if output.shape[0] >= self.class_start_index + 2:
             return output.T
         raise ValueError(f"Unsupported YOLOv8 output shape: {output.shape}")
 
-    @staticmethod
-    def _xywh_to_xyxy(boxes: np.ndarray) -> np.ndarray:
+    def _to_xyxy(self, boxes: np.ndarray) -> np.ndarray:
+        if self.input_box_format == "xyxy":
+            return boxes
+        if self.input_box_format != "xywh":
+            raise ValueError(f"Unsupported box format: {self.input_box_format}")
+
         centers = boxes[:, :2]
         sizes = boxes[:, 2:4]
         half_sizes = sizes / 2.0
         top_left = centers - half_sizes
         bottom_right = centers + half_sizes
         return np.concatenate((top_left, bottom_right), axis=1)
+
+    def _activate_scores(self, scores: np.ndarray) -> np.ndarray:
+        if self.score_activation == "none":
+            return scores
+        if self.score_activation == "sigmoid":
+            return 1.0 / (1.0 + np.exp(-scores))
+        if self.score_activation == "softmax":
+            shifted = scores - np.max(scores, axis=1, keepdims=True)
+            exp = np.exp(shifted)
+            return exp / np.sum(exp, axis=1, keepdims=True)
+        raise ValueError(f"Unsupported score activation: {self.score_activation}")
 
 
 class NMSOp:
@@ -248,11 +383,11 @@ class ProjectToInputOp:
         classes = value.classes.astype(np.int32)
 
         pad_x, pad_y = transform.pad
-        scale = transform.scale
+        scale_x, scale_y = transform.scale
         original_h, original_w = transform.original_shape
 
-        boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_x) / scale
-        boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale
+        boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_x) / scale_x
+        boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale_y
 
         boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(original_w))
         boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))

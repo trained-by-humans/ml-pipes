@@ -6,11 +6,40 @@ from ml_pipes.ops import (
     DecodePredictionsOp,
     DrawBoxesOp,
     NMSOp,
+    NormalizeOp,
     ProjectToInputOp,
+    ResizeOp,
     SaveImageOp,
 )
 from ml_pipes.transforms import ResizeTransform
 from ml_pipes.types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
+
+
+def test_resize_op_can_do_plain_resize_without_padding():
+    image = np.zeros((10, 20, 3), dtype=np.uint8)
+    payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
+
+    resized, transform = ResizeOp(size=(40, 40), mode="resize")(payload)
+
+    assert resized.array.shape == (40, 40, 3)
+    assert transform.scale == (2.0, 4.0)
+    assert transform.pad == (0.0, 0.0)
+
+
+def test_normalize_op_can_keep_bgr_and_hwc_without_batch():
+    image = np.array([[[10, 20, 30]]], dtype=np.uint8)
+    payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
+
+    tensor = NormalizeOp(
+        output_color_space="BGR",
+        output_layout="HWC",
+        add_batch_dim=False,
+        scale=1.0,
+    )(payload)
+
+    assert tensor.layout == "HWC"
+    assert tensor.array.shape == (1, 1, 3)
+    assert tensor.array.tolist() == [[[10.0, 20.0, 30.0]]]
 
 
 def test_decode_predictions_accepts_channel_first_yolov8_output():
@@ -33,6 +62,46 @@ def test_decode_predictions_accepts_channel_first_yolov8_output():
     assert result.boxes.shape == (2, 4)
     assert result.classes.tolist() == [0, 1]
     assert np.allclose(result.scores, [0.9, 0.8])
+
+
+def test_decode_predictions_can_read_xyxy_without_transpose():
+    raw = np.array(
+        [
+            [1.0, 2.0, 11.0, 12.0, 0.1, 0.9],
+            [5.0, 6.0, 15.0, 16.0, 0.8, 0.2],
+        ],
+        dtype=np.float32,
+    )
+
+    result = DecodePredictionsOp(
+        input_box_format="xyxy",
+        transpose_output="never",
+        class_start_index=4,
+    )(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"))
+
+    assert result.boxes.tolist() == [[1.0, 2.0, 11.0, 12.0], [5.0, 6.0, 15.0, 16.0]]
+    assert result.classes.tolist() == [1, 0]
+
+
+def test_decode_predictions_can_apply_sigmoid_to_scores():
+    raw = np.array(
+        [
+            [
+                [10.0],
+                [20.0],
+                [4.0],
+                [6.0],
+                [0.0],
+                [2.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+
+    result = DecodePredictionsOp(score_activation="sigmoid")(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"))
+
+    assert result.classes.tolist() == [1]
+    assert np.allclose(result.scores, [1.0 / (1.0 + np.exp(-2.0))])
 
 
 def test_nms_keeps_overlapping_boxes_from_different_classes():
@@ -75,7 +144,7 @@ def test_nms_suppresses_same_class_overlap():
 
 
 def test_project_to_input_reverses_padding_and_scale():
-    transform = ResizeTransform(scale=2.0, pad=(10.0, 20.0), original_shape=(100, 200))
+    transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200))
     detections = DetectionBatch(
         boxes=np.array([[30.0, 40.0, 110.0, 120.0]], dtype=np.float32),
         scores=np.array([0.9], dtype=np.float32),
@@ -89,7 +158,7 @@ def test_project_to_input_reverses_padding_and_scale():
 
 
 def test_project_to_input_clips_boxes_to_original_bounds():
-    transform = ResizeTransform(scale=2.0, pad=(10.0, 20.0), original_shape=(100, 200))
+    transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200))
     detections = DetectionBatch(
         boxes=np.array([[-50.0, -50.0, 500.0, 400.0]], dtype=np.float32),
         scores=np.array([0.9], dtype=np.float32),
