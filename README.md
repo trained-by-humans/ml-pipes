@@ -34,7 +34,7 @@ This repo also includes a public demo that downloads:
 Run it with:
 
 ```bash
-python examples/run_public_demo.py
+python examples/run_yolo8n_onnx.py
 ```
 
 The first run downloads the model and image into `.example_assets/`.
@@ -45,7 +45,7 @@ It also writes an annotated image to `.example_assets/coco_000000039769_annotate
 To exercise the parameterized operator configs, there is also a YOLO11 FP16 example:
 
 ```bash
-python examples/run_yolo11_fp16_demo.py
+python examples/run_yolo11n_onnx_fp16.py
 ```
 
 This uses different operator settings from the YOLOv8 demo, including FP16 normalization/inference and a separate public ONNX model.

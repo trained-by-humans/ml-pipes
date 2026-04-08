@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
-import urllib.request
 from pathlib import Path
 
 import numpy as np
 
 from ml_pipes import (
     DecodeOp,
-    DrawBoxesOp,
     InferOp,
     NormalizeOp,
     Pipeline,
@@ -19,18 +16,21 @@ from ml_pipes import (
     Recall,
     ResizeOp,
     RuntimeOutputs,
-    SaveImageOp,
     Select,
     Store,
+)
+from common import (
+    COCO_IMAGE_NAME,
+    COCO_IMAGE_URL,
+    build_output_path,
+    download_if_missing,
+    render_and_save_detections,
 )
 from ml_pipes.types import DetectionBatch, TensorPayload
 
 
 MODEL_URL = "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model.onnx"
-IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
-
 MODEL_NAME = "rfdetr_nano.onnx"
-IMAGE_NAME = "coco_000000039769.jpg"
 
 RFDETR_BOX_NAMES = ("pred_boxes", "boxes", "dets")
 RFDETR_LOGIT_NAMES = ("pred_logits", "logits", "labels")
@@ -164,16 +164,6 @@ def _softmax(values: np.ndarray) -> np.ndarray:
     exp_values = np.exp(shifted)
     return exp_values / np.sum(exp_values, axis=1, keepdims=True)
 
-
-def download_if_missing(url: str, destination: Path) -> None:
-    if destination.exists():
-        return
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url, timeout=120) as response, destination.open("wb") as target:
-        shutil.copyfileobj(response, target)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an RF-DETR ONNX demo on a public COCO image.")
     parser.add_argument(
@@ -185,8 +175,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(".example_assets/coco_000000039769_rfdetr_annotated.jpg"),
-        help="Where to save the annotated image.",
+        default=None,
+        help="Where to save the annotated image. Defaults to the input image name with the model name as suffix.",
     )
     return parser.parse_args()
 
@@ -195,24 +185,22 @@ def main() -> int:
     args = parse_args()
     assets_dir = args.assets_dir
     model_path = assets_dir / MODEL_NAME
-    image_path = assets_dir / IMAGE_NAME
+    image_path = assets_dir / COCO_IMAGE_NAME
+    output_path = args.output or build_output_path(assets_dir, COCO_IMAGE_NAME, MODEL_NAME)
 
     print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
     download_if_missing(MODEL_URL, model_path)
 
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(IMAGE_URL, image_path)
+    download_if_missing(COCO_IMAGE_URL, image_path)
 
-    source_image = DecodeOp()(image_path)
     pipeline = build_pipeline(model_path)
     result = pipeline(image_path)
-    Pipeline(
-        [
-            lambda detections: (detections, source_image.array),
-            DrawBoxesOp(),
-            SaveImageOp(args.output),
-        ]
-    )(result)
+    render_and_save_detections(
+        image_path=image_path,
+        detections=result,
+        output_path=output_path,
+    )
 
     detections = [
         {
@@ -227,7 +215,7 @@ def main() -> int:
             {
                 "image": str(image_path),
                 "model": str(model_path),
-                "annotated_image": str(args.output),
+                "annotated_image": str(output_path),
                 "detections": detections,
                 "config": {
                     "model_family": "rf-detr",
