@@ -14,14 +14,14 @@ from .ops import (
     SaveImageOp,
 )
 from .transforms import ResizeTransform
-from .types import DetectionBatch, DetectionResult, ImagePayload, RuntimeOutputs, TensorPayload
+from .types import DetectionArrays, Detections, ImagePayload, RuntimeOutputs, TensorPayload
 
 __all__ = [
     "Context",
     "DecodeOp",
     "DecodePredictionsOp",
-    "DetectionBatch",
-    "DetectionResult",
+    "DetectionArrays",
+    "Detections",
     "DrawBoxesOp",
     "InferOp",
     "ImagePayload",

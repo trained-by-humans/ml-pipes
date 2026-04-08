@@ -38,7 +38,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
         [
             DecodeOp(),
             ResizeOp(
-                size=(640, 640),
+                target_size=(640, 640),
                 mode="letterbox",
                 pad_value=114,
                 interpolation="linear",

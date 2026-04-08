@@ -10,12 +10,12 @@ from typing import TextIO
 import numpy as np
 
 from .transforms import ResizeTransform
-from .types import DetectionBatch, DetectionResult, ImagePayload, RuntimeOutputs, TensorPayload
+from .types import DetectionArrays, Detections, ImagePayload, RuntimeOutputs, TensorPayload
 
 
 class DecodeOp:
-    def __call__(self, value: str | Path) -> ImagePayload:
-        path = Path(value)
+    def __call__(self, image_path: str | Path) -> ImagePayload:
+        path = Path(image_path)
         if not path.is_file():
             raise FileNotFoundError(f"Image not found: {path}")
 
@@ -31,25 +31,25 @@ class DecodeOp:
 class ResizeOp:
     def __init__(
         self,
-        size: tuple[int, int] = (640, 640),
+        target_size: tuple[int, int] = (640, 640),
         mode: Literal["letterbox", "resize"] = "letterbox",
         pad_value: int = 114,
         interpolation: Literal["nearest", "linear", "cubic", "area"] = "linear",
         center: bool = True,
         allow_scale_up: bool = True,
     ):
-        self.size = size
+        self.size = target_size
         self.mode = mode
         self.pad_value = pad_value
         self.interpolation = interpolation
         self.center = center
         self.allow_scale_up = allow_scale_up
 
-    def __call__(self, value: ImagePayload) -> tuple[ImagePayload, ResizeTransform]:
+    def __call__(self, image_payload: ImagePayload) -> tuple[ImagePayload, ResizeTransform]:
         import cv2
 
-        self._validate_image_payload(value)
-        image = value.array
+        self._validate_image_payload(image_payload)
+        image = image_payload.array
         original_h, original_w = image.shape[:2]
         target_h, target_w = self.size
         interpolation = self._resolve_interpolation(cv2)
@@ -101,8 +101,8 @@ class ResizeOp:
         )
         payload = ImagePayload(
             array=resized,
-            color_space=value.color_space,
-            layout=value.layout,
+            color_space=image_payload.color_space,
+            layout=image_payload.layout,
         )
         return payload, transform
 
@@ -140,19 +140,19 @@ class NormalizeOp:
         self.output_color_space = output_color_space
         self.add_batch_dim = add_batch_dim
 
-    def __call__(self, value: ImagePayload) -> TensorPayload:
-        if value.layout != "HWC":
-            raise ValueError(f"NormalizeOp expects HWC image layout, got {value.layout}")
+    def __call__(self, image_payload: ImagePayload) -> TensorPayload:
+        if image_payload.layout != "HWC":
+            raise ValueError(f"NormalizeOp expects HWC image layout, got {image_payload.layout}")
 
-        image = value.array
-        if value.color_space != self.output_color_space and {
-            value.color_space,
+        image = image_payload.array
+        if image_payload.color_space != self.output_color_space and {
+            image_payload.color_space,
             self.output_color_space,
         } == {"BGR", "RGB"}:
             image = image[..., ::-1]
-        elif value.color_space != self.output_color_space:
+        elif image_payload.color_space != self.output_color_space:
             raise ValueError(
-                f"NormalizeOp cannot convert {value.color_space} to {self.output_color_space}"
+                f"NormalizeOp cannot convert {image_payload.color_space} to {self.output_color_space}"
             )
 
         tensor = image.astype(np.dtype(self.output_dtype))
@@ -250,8 +250,8 @@ class DecodePredictionsOp:
         self.squeeze_batch_dim = squeeze_batch_dim
         self.score_activation = score_activation
 
-    def __call__(self, value: RuntimeOutputs) -> DetectionBatch:
-        export_output = self._select_export_output(value)
+    def __call__(self, runtime_outputs: RuntimeOutputs) -> DetectionArrays:
+        export_output = self._select_export_output(runtime_outputs)
         predictions = self._normalize_output_shape(np.asarray(export_output.array))
         if predictions.shape[1] < self.class_start_index + 2:
             raise ValueError(
@@ -264,7 +264,7 @@ class DecodePredictionsOp:
         classes = np.argmax(class_scores, axis=1).astype(np.int32)
         scores = class_scores[np.arange(class_scores.shape[0]), classes]
         boxes_xyxy = self._to_xyxy(boxes)
-        batch = DetectionBatch(
+        batch = DetectionArrays(
             boxes=boxes_xyxy.astype(np.float32),
             scores=scores.astype(np.float32),
             classes=classes,
@@ -341,15 +341,15 @@ class NMSOp:
         self.iou_threshold = iou_threshold
         self.max_detections = max_detections
 
-    def __call__(self, value: DetectionBatch) -> DetectionBatch:
-        detections = value
+    def __call__(self, detection_arrays: DetectionArrays) -> DetectionArrays:
+        detections = detection_arrays
         mask = detections.scores >= self.conf_threshold
         boxes = detections.boxes[mask]
         scores = detections.scores[mask]
         classes = detections.classes[mask]
 
         if boxes.size == 0:
-            empty = DetectionBatch(
+            empty = DetectionArrays(
                 boxes=np.zeros((0, 4), dtype=np.float32),
                 scores=np.zeros((0,), dtype=np.float32),
                 classes=np.zeros((0,), dtype=np.int32),
@@ -378,7 +378,7 @@ class NMSOp:
         final_order = np.argsort(scores[kept])[::-1]
         kept = kept[final_order][: self.max_detections]
 
-        filtered = DetectionBatch(
+        filtered = DetectionArrays(
             boxes=boxes[kept],
             scores=scores[kept],
             classes=classes[kept],
@@ -408,7 +408,7 @@ class NMSOp:
 
 
 class ProjectToInputOp:
-    def __call__(self, value: DetectionBatch, transform: ResizeTransform) -> DetectionResult:
+    def __call__(self, value: DetectionArrays, transform: ResizeTransform) -> Detections:
         boxes = value.boxes.copy()
         scores = value.scores.astype(np.float32)
         classes = value.classes.astype(np.int32)
@@ -423,7 +423,7 @@ class ProjectToInputOp:
         boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(original_w))
         boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))
 
-        return DetectionResult(
+        return Detections(
             boxes=boxes.tolist(),
             scores=scores.tolist(),
             classes=classes.tolist(),
@@ -443,14 +443,14 @@ class DrawBoxesOp:
         self.thickness = thickness
         self.font_scale = font_scale
 
-    def __call__(self, value: DetectionResult, source_image: ImagePayload) -> ImagePayload:
+    def __call__(self, detections: Detections, source_image: ImagePayload) -> ImagePayload:
         import cv2
 
         if source_image is None:
             raise ValueError("source_image missing from context; cannot draw detections")
 
         image = np.asarray(source_image).copy()
-        detections = value
+        detections = detections
         boxes = detections.boxes
         scores = detections.scores
         classes = detections.classes
@@ -486,17 +486,17 @@ class SaveImageOp:
     def __init__(self, output_path: str | Path):
         self.output_path = Path(output_path)
 
-    def __call__(self, value: ImagePayload) -> ImagePayload:
+    def __call__(self, image_payload: ImagePayload) -> ImagePayload:
         import cv2
 
-        if value.layout != "HWC":
-            raise ValueError(f"SaveImageOp expects HWC image layout, got {value.layout}")
+        if image_payload.layout != "HWC":
+            raise ValueError(f"SaveImageOp expects HWC image layout, got {image_payload.layout}")
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        written = cv2.imwrite(str(self.output_path), value.array)
+        written = cv2.imwrite(str(self.output_path), image_payload.array)
         if not written:
             raise ValueError(f"Failed to write image: {self.output_path}")
-        return value
+        return image_payload
 
 
 class MapToObjectsOp:
@@ -506,13 +506,13 @@ class MapToObjectsOp:
     ):
         self.field_sources = field_sources
 
-    def __call__(self, value: object) -> list[dict[str, object]]:
+    def __call__(self, prediction_arrays: object) -> list[dict[str, object]]:
         columns: dict[str, Sequence[object]] = {}
         for field_name, source in self.field_sources.items():
             if isinstance(source, str):
-                column = getattr(value, source)
+                column = getattr(prediction_arrays, source)
             else:
-                column = source(value)
+                column = source(prediction_arrays)
             columns[field_name] = column
 
         lengths = {len(column) for column in columns.values()}
@@ -543,17 +543,17 @@ class LogDetectionsOp:
         self.indent = indent
         self.stream = stream or sys.stdout
 
-    def __call__(self, value: list[dict[str, object]]) -> list[dict[str, object]]:
+    def __call__(self, prediction_objects: list[dict[str, object]]) -> list[dict[str, object]]:
         print(
             json.dumps(
                 {
                     "model": str(self.model_path),
-                    "image": str(self.image_path),
+                    "original_image": str(self.image_path),
                     "annotated_image": str(self.annotated_image_path),
-                    "detections": value,
+                    "predictions": prediction_objects,
                 },
                 indent=self.indent,
             ),
             file=self.stream,
         )
-        return value
+        return prediction_objects

@@ -27,14 +27,14 @@ class RuntimeOutputs:
 
 
 @dataclass(frozen=True)
-class DetectionBatch:
+class DetectionArrays:
     boxes: np.ndarray
     scores: np.ndarray
     classes: np.ndarray
 
 
 @dataclass(frozen=True)
-class DetectionResult:
+class Detections:
     boxes: list[list[float]]
     scores: list[float]
     classes: list[int]

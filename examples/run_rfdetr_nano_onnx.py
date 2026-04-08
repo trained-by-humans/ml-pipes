@@ -27,7 +27,7 @@ from common import (
     download_if_missing,
     render_and_save_detections,
 )
-from ml_pipes.types import DetectionBatch, TensorPayload
+from ml_pipes.types import DetectionArrays, TensorPayload
 
 
 MODEL_URL = "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model.onnx"
@@ -42,7 +42,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
         [
             DecodeOp(),
             ResizeOp(
-                size=(640, 640),
+                target_size=(640, 640),
                 mode="resize",
                 interpolation="linear",
             ),
@@ -73,7 +73,7 @@ def decode_rfdetr_outputs(
     input_size: tuple[int, int],
     score_threshold: float = 0.25,
     max_detections: int = 20,
-) -> DetectionBatch:
+) -> DetectionArrays:
     box_tensor = _select_rfdetr_tensor(runtime_outputs, RFDETR_BOX_NAMES, expected_last_dim=4)
     logit_tensor = _select_rfdetr_tensor(runtime_outputs, RFDETR_LOGIT_NAMES, expected_last_dim=None)
 
@@ -100,7 +100,7 @@ def decode_rfdetr_outputs(
         ordered = kept_indices[np.argsort(scores[kept_indices])[::-1]]
         kept_indices = ordered[:max_detections]
 
-    return DetectionBatch(
+    return DetectionArrays(
         boxes=boxes_xyxy[kept_indices],
         scores=scores[kept_indices],
         classes=classes[kept_indices],

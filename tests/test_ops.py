@@ -15,14 +15,14 @@ from ml_pipes.ops import (
     SaveImageOp,
 )
 from ml_pipes.transforms import ResizeTransform
-from ml_pipes.types import DetectionBatch, DetectionResult, ImagePayload, RuntimeOutputs, TensorPayload
+from ml_pipes.types import DetectionArrays, Detections, ImagePayload, RuntimeOutputs, TensorPayload
 
 
 def test_resize_op_can_do_plain_resize_without_padding():
     image = np.zeros((10, 20, 3), dtype=np.uint8)
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
 
-    resized, transform = ResizeOp(size=(40, 40), mode="resize")(payload)
+    resized, transform = ResizeOp(target_size=(40, 40), mode="resize")(payload)
 
     assert resized.array.shape == (40, 40, 3)
     assert transform.scale == (2.0, 4.0)
@@ -175,7 +175,7 @@ def test_decode_predictions_can_select_export_output_by_name():
 
 
 def test_nms_keeps_overlapping_boxes_from_different_classes():
-    detections = DetectionBatch(
+    detections = DetectionArrays(
         boxes=np.array(
             [
                 [10, 10, 50, 50],
@@ -194,7 +194,7 @@ def test_nms_keeps_overlapping_boxes_from_different_classes():
 
 
 def test_nms_suppresses_same_class_overlap():
-    detections = DetectionBatch(
+    detections = DetectionArrays(
         boxes=np.array(
             [
                 [10, 10, 50, 50],
@@ -215,7 +215,7 @@ def test_nms_suppresses_same_class_overlap():
 
 def test_project_to_input_reverses_padding_and_scale():
     transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200))
-    detections = DetectionBatch(
+    detections = DetectionArrays(
         boxes=np.array([[30.0, 40.0, 110.0, 120.0]], dtype=np.float32),
         scores=np.array([0.9], dtype=np.float32),
         classes=np.array([3], dtype=np.int32),
@@ -229,7 +229,7 @@ def test_project_to_input_reverses_padding_and_scale():
 
 def test_project_to_input_clips_boxes_to_original_bounds():
     transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200))
-    detections = DetectionBatch(
+    detections = DetectionArrays(
         boxes=np.array([[-50.0, -50.0, 500.0, 400.0]], dtype=np.float32),
         scores=np.array([0.9], dtype=np.float32),
         classes=np.array([1], dtype=np.int32),
@@ -241,7 +241,7 @@ def test_project_to_input_clips_boxes_to_original_bounds():
 
 def test_draw_boxes_draws_on_source_image():
     image = np.zeros((32, 32, 3), dtype=np.uint8)
-    detections = DetectionResult(
+    detections = Detections(
         boxes=[[4.0, 4.0, 20.0, 20.0]],
         scores=[0.9],
         classes=[1],
@@ -266,7 +266,7 @@ def test_save_image_writes_output(tmp_path: Path):
 
 
 def test_map_to_objects_can_convert_detection_result():
-    detections = DetectionResult(
+    detections = Detections(
         boxes=[[1.0, 2.0, 3.0, 4.0]],
         scores=[0.9],
         classes=[1],
