@@ -1,4 +1,4 @@
-from .core import Context, Operator, Pipeline, PipelineValidationError, Value
+from .core import Context, Pipeline, PipelineValidationError, Recall, Select, Store
 from .ops import (
     DecodeOp,
     DecodePredictionsOp,
@@ -24,13 +24,14 @@ __all__ = [
     "ImagePayload",
     "NMSOp",
     "NormalizeOp",
-    "Operator",
     "Pipeline",
     "PipelineValidationError",
     "ProjectToInputOp",
+    "Recall",
     "ResizeOp",
     "ResizeTransform",
     "SaveImageOp",
+    "Select",
+    "Store",
     "TensorPayload",
-    "Value",
 ]

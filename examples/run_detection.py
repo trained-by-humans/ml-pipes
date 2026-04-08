@@ -11,7 +11,10 @@ from ml_pipes import (
     NormalizeOp,
     Pipeline,
     ProjectToInputOp,
+    Recall,
     ResizeOp,
+    Select,
+    Store,
 )
 
 
@@ -21,24 +24,32 @@ def main() -> int:
         return 1
 
     model_path, image_path = sys.argv[1], sys.argv[2]
+    infer = InferOp(model_path)
+    normalize = NormalizeOp()
+    decode_predictions = DecodePredictionsOp()
+    nms = NMSOp()
     pipeline = Pipeline(
         [
             DecodeOp(),
             ResizeOp((640, 640)),
-            NormalizeOp(),
-            InferOp(model_path),
-            DecodePredictionsOp(),
-            NMSOp(),
+            Store("resize_transform", index=1),
+            Select(0),
+            normalize,
+            infer,
+            decode_predictions,
+            nms,
+            Recall("resize_transform"),
             ProjectToInputOp(),
         ]
     )
+
     result = pipeline(image_path)
     print(
         json.dumps(
             {
-                "boxes": result.data.boxes,
-                "scores": result.data.scores,
-                "classes": result.data.classes,
+                "boxes": result.boxes,
+                "scores": result.scores,
+                "classes": result.classes,
             },
             indent=2,
         )

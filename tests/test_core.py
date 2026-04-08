@@ -1,31 +1,56 @@
 import pytest
 
-from ml_pipes import Context, Pipeline, PipelineValidationError, Value
+from ml_pipes import Context, Pipeline, PipelineValidationError, Recall, Select, Store
 
 
 class IntToString:
-    def __call__(self, value: Value[int]) -> Value[str]:
-        return Value(str(value.data), value.context)
+    def __call__(self, value: int) -> str:
+        return str(value)
 
 
 class StringToFloat:
-    def __call__(self, value: Value[str]) -> Value[float]:
-        return Value(float(value.data), value.context)
+    def __call__(self, value: str) -> float:
+        return float(value)
 
 
 class FloatToBool:
-    def __call__(self, value: Value[float]) -> Value[bool]:
-        return Value(value.data > 0, value.context)
+    def __call__(self, value: float) -> bool:
+        return value > 0
 
 
 class BoolToBytes:
-    def __call__(self, value: Value[bool]) -> Value[bytes]:
-        return Value(b"1" if value.data else b"0", value.context)
+    def __call__(self, value: bool) -> bytes:
+        return b"1" if value else b"0"
 
 
 class ObjectConsumer:
-    def __call__(self, value: Value[object]) -> Value[object]:
+    def __call__(self, value: object) -> object:
         return value
+
+
+class IntToPair:
+    def __call__(self, value: int) -> tuple[int, str]:
+        return value, str(value)
+
+
+class PairToString:
+    def __call__(self, number: int, text: str) -> str:
+        return f"{number}:{text}"
+
+
+class PairToBool:
+    def __call__(self, number: int, text: str) -> bool:
+        return text == str(number)
+
+
+class TripleConsumer:
+    def __call__(self, x: int, y: str, z: float) -> str:
+        return f"{x}-{y}-{z}"
+
+
+class StringPairConsumer:
+    def __call__(self, left: str, right: str) -> str:
+        return f"{left}|{right}"
 
 
 def test_context_add_returns_new_context():
@@ -41,19 +66,25 @@ def test_context_add_returns_new_context():
 def test_pipeline_applies_operators_in_order():
     pipeline = Pipeline(
         [
-            lambda value: Value(value.data + 2, value.context),
-            lambda value: Value(value.data * 3, value.context),
+            lambda value: value + 2,
+            lambda value: value * 3,
         ]
     )
 
-    assert pipeline(4).data == 18
+    assert pipeline(4) == 18
 
 
 def test_value_default_context():
-    value = Value(data="image")
+    context = Context()
 
-    assert value.context.transforms == ()
-    assert value.context.metadata == {}
+    assert context.transforms == ()
+    assert context.metadata == {}
+
+
+def test_pipeline_unpacks_tuple_output_into_next_operator():
+    pipeline = Pipeline([IntToPair(), PairToString()])
+
+    assert pipeline(7) == "7:7"
 
 
 def test_pipeline_validate_accepts_compatible_operator_chain():
@@ -88,3 +119,53 @@ def test_pipeline_validate_allows_broader_downstream_input_type():
     pipeline = Pipeline([IntToString(), ObjectConsumer()])
 
     pipeline.validate()
+
+
+def test_pipeline_validate_accepts_tuple_output_for_multi_arg_operator():
+    pipeline = Pipeline([IntToPair(), PairToBool()])
+
+    pipeline.validate()
+
+
+def test_pipeline_validate_rejects_tuple_output_with_wrong_arity():
+    pipeline = Pipeline([IntToPair(), TripleConsumer()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.validate()
+
+
+def test_pipeline_can_store_select_and_recall_values():
+    pipeline = Pipeline(
+        [
+            IntToPair(),
+            Store("saved_text", index=1),
+            Select(0),
+            IntToString(),
+            Recall("saved_text"),
+            StringPairConsumer(),
+        ]
+    )
+
+    assert pipeline(9) == "9|9"
+
+
+def test_pipeline_validate_accepts_store_select_and_recall():
+    pipeline = Pipeline(
+        [
+            IntToPair(),
+            Store("saved_text", index=1),
+            Select(0),
+            IntToString(),
+            Recall("saved_text"),
+            StringPairConsumer(),
+        ]
+    )
+
+    pipeline.validate()
+
+
+def test_pipeline_validate_rejects_recall_before_store():
+    pipeline = Pipeline([IntToString(), Recall("missing_value"), StringPairConsumer()])
+
+    with pytest.raises(PipelineValidationError, match="was not stored"):
+        pipeline.validate()

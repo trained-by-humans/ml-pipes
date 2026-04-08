@@ -16,8 +16,11 @@ from ml_pipes import (
     NormalizeOp,
     Pipeline,
     ProjectToInputOp,
+    Recall,
     ResizeOp,
     SaveImageOp,
+    Select,
+    Store,
 )
 
 
@@ -111,14 +114,21 @@ COCO_CLASSES = [
 
 
 def build_pipeline(model_path: Path) -> Pipeline:
+    normalize = NormalizeOp()
+    infer = InferOp(model_path)
+    decode_predictions = DecodePredictionsOp()
+    nms = NMSOp()
     return Pipeline(
         [
             DecodeOp(),
             ResizeOp((640, 640)),
-            NormalizeOp(),
-            InferOp(model_path),
-            DecodePredictionsOp(),
-            NMSOp(),
+            Store("resize_transform", index=1),
+            Select(0),
+            normalize,
+            infer,
+            decode_predictions,
+            nms,
+            Recall("resize_transform"),
             ProjectToInputOp(),
         ]
     )
@@ -162,10 +172,12 @@ def main() -> int:
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(IMAGE_URL, image_path)
 
+    source_image = DecodeOp()(image_path)
     pipeline = build_pipeline(model_path)
     result = pipeline(image_path)
     annotated = Pipeline(
         [
+            lambda detections: (detections, source_image.array),
             DrawBoxesOp(class_names=COCO_CLASSES),
             SaveImageOp(args.output),
         ]
@@ -177,9 +189,7 @@ def main() -> int:
             "class_id": class_id,
             "label": COCO_CLASSES[class_id] if 0 <= class_id < len(COCO_CLASSES) else str(class_id),
         }
-        for box, score, class_id in zip(
-            result.data.boxes, result.data.scores, result.data.classes, strict=True
-        )
+        for box, score, class_id in zip(result.boxes, result.scores, result.classes, strict=True)
     ]
     print(
         json.dumps(
