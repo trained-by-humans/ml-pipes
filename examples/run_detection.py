@@ -24,20 +24,16 @@ def main() -> int:
         return 1
 
     model_path, image_path = sys.argv[1], sys.argv[2]
-    infer = InferOp(model_path)
-    normalize = NormalizeOp()
-    decode_predictions = DecodePredictionsOp()
-    nms = NMSOp()
     pipeline = Pipeline(
         [
             DecodeOp(),
             ResizeOp((640, 640)),
             Store("resize_transform", index=1),
             Select(0),
-            normalize,
-            infer,
-            decode_predictions,
-            nms,
+            NormalizeOp(),
+            InferOp(model_path),
+            DecodePredictionsOp(),
+            NMSOp(),
             Recall("resize_transform"),
             ProjectToInputOp(),
         ]

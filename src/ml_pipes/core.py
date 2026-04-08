@@ -1,135 +1,14 @@
 from __future__ import annotations
 
 import inspect
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from types import UnionType
-from typing import Any, Callable, Generic, Iterable, Mapping, TypeVar, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Iterable, get_args, get_origin, get_type_hints
 
-
-T = TypeVar("T")
-
-
-@dataclass(frozen=True)
-class Context:
-    transforms: tuple[Any, ...] = field(default_factory=tuple)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    def add(self, transform: Any) -> "Context":
-        return Context(self.transforms + (transform,), dict(self.metadata))
-
-    def with_metadata(self, **metadata: Any) -> "Context":
-        merged = dict(self.metadata)
-        merged.update(metadata)
-        return Context(self.transforms, merged)
-
-    def store(self, name: str, value: Any) -> "Context":
-        return self.with_metadata(**{name: value})
-
-    def load(self, name: str) -> Any:
-        if name not in self.metadata:
-            raise KeyError(f"Context value not found: {name}")
-        return self.metadata[name]
+from .context import Context, ContextOp
 
 
 class PipelineValidationError(ValueError):
     pass
-
-
-class ContextOp(ABC):
-    @abstractmethod
-    def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def resolve_contract(
-        self, current_output: Any | None, stored_annotations: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Any]:
-        raise NotImplementedError
-
-
-class Store(ContextOp):
-    def __init__(self, name: str, index: int | None = None):
-        self.name = name
-        self.index = index
-
-    def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
-        value = self._extract(current)
-        return current, context.store(self.name, value)
-
-    def resolve_contract(
-        self, current_output: Any | None, stored_annotations: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Any]:
-        stored_annotations[self.name] = self._extract_annotation(current_output)
-        return (Any,), Any if current_output is None else current_output
-
-    def _extract(self, current: Any) -> Any:
-        if self.index is None:
-            return current
-        if not isinstance(current, tuple):
-            raise TypeError(f"Store({self.name!r}) cannot index non-tuple value")
-        return current[self.index]
-
-    def _extract_annotation(self, annotation: Any | None) -> Any:
-        if annotation is None:
-            return Any
-        if self.index is None:
-            return annotation
-        parts = Pipeline._expand_output_annotation(annotation)
-        if self.index >= len(parts):
-            return Any
-        return parts[self.index]
-
-
-class Recall(ContextOp):
-    def __init__(self, name: str):
-        self.name = name
-
-    def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
-        stored = context.load(self.name)
-        if isinstance(current, tuple):
-            return current + (stored,), context
-        return (current, stored), context
-
-    def resolve_contract(
-        self, current_output: Any | None, stored_annotations: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Any]:
-        if self.name not in stored_annotations:
-            raise PipelineValidationError(f"Recall({self.name!r}) references a value that was not stored")
-
-        stored_annotation = stored_annotations[self.name]
-        if current_output is None:
-            return (Any,), (Any, stored_annotation)
-
-        current_parts = Pipeline._expand_output_annotation(current_output)
-        return (Any,), current_parts + (stored_annotation,)
-
-
-class Select(ContextOp):
-    def __init__(self, *indices: int):
-        if not indices:
-            raise ValueError("Select requires at least one index")
-        self.indices = indices
-
-    def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
-        if not isinstance(current, tuple):
-            raise TypeError("Select can only be applied to tuple outputs")
-
-        selected = tuple(current[index] for index in self.indices)
-        if len(selected) == 1:
-            return selected[0], context
-        return selected, context
-
-    def resolve_contract(
-        self, current_output: Any | None, stored_annotations: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], Any]:
-        parts = Pipeline._expand_output_annotation(current_output)
-        selected = tuple(parts[index] for index in self.indices if index < len(parts))
-        if len(selected) != len(self.indices):
-            raise PipelineValidationError("Select references tuple indices that are not available")
-        if len(selected) == 1:
-            return (Any,), selected[0]
-        return (Any,), selected
 
 
 class Pipeline:
@@ -159,7 +38,12 @@ class Pipeline:
 
         for operator in self.operators:
             if isinstance(operator, ContextOp):
-                _, output_type = operator.resolve_contract(previous_output_type, stored_annotations)
+                _, output_type = operator.resolve_contract(
+                    previous_output_type,
+                    stored_annotations,
+                    self._expand_output_annotation,
+                    PipelineValidationError,
+                )
             else:
                 input_types, output_type = self._resolve_operator_contract(operator)
                 name = operator.__class__.__name__

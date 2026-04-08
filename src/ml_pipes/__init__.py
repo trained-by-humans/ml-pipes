@@ -1,4 +1,5 @@
-from .core import Context, Pipeline, PipelineValidationError, Recall, Select, Store
+from .context import Context, Recall, Select, Store
+from .core import Pipeline, PipelineValidationError
 from .ops import (
     DecodeOp,
     DecodePredictionsOp,

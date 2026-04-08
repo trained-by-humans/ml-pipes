@@ -55,12 +55,10 @@ class StringPairConsumer:
 
 def test_context_add_returns_new_context():
     context = Context()
-    next_context = context.add("resize")
+    next_context = context.store("resize_transform", "resize")
 
-    assert context.transforms == ()
-    assert context.metadata == {}
-    assert next_context.transforms == ("resize",)
-    assert next_context.metadata == {}
+    assert context.values == {}
+    assert next_context.values == {"resize_transform": "resize"}
 
 
 def test_pipeline_applies_operators_in_order():
@@ -77,8 +75,7 @@ def test_pipeline_applies_operators_in_order():
 def test_value_default_context():
     context = Context()
 
-    assert context.transforms == ()
-    assert context.metadata == {}
+    assert context.values == {}
 
 
 def test_pipeline_unpacks_tuple_output_into_next_operator():

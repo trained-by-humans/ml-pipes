@@ -114,20 +114,16 @@ COCO_CLASSES = [
 
 
 def build_pipeline(model_path: Path) -> Pipeline:
-    normalize = NormalizeOp()
-    infer = InferOp(model_path)
-    decode_predictions = DecodePredictionsOp()
-    nms = NMSOp()
     return Pipeline(
         [
             DecodeOp(),
             ResizeOp((640, 640)),
             Store("resize_transform", index=1),
             Select(0),
-            normalize,
-            infer,
-            decode_predictions,
-            nms,
+            NormalizeOp(),
+            InferOp(model_path),
+            DecodePredictionsOp(),
+            NMSOp(),
             Recall("resize_transform"),
             ProjectToInputOp(),
         ]
