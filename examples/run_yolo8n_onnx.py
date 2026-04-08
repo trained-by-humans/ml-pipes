@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -9,6 +8,8 @@ from ml_pipes import (
     DecodeOp,
     DecodePredictionsOp,
     InferOp,
+    LogDetectionsOp,
+    MapToObjectsOp,
     NMSOp,
     NormalizeOp,
     Pipeline,
@@ -86,26 +87,22 @@ def main() -> int:
         output_path=output_path,
         class_names=COCO_CLASSES,
     )
-    detections = [
-        {
-            "box": box,
-            "score": score,
-            "class_id": class_id,
-            "label": COCO_CLASSES[class_id] if 0 <= class_id < len(COCO_CLASSES) else str(class_id),
-        }
-        for box, score, class_id in zip(result.boxes, result.scores, result.classes, strict=True)
-    ]
-    print(
-        json.dumps(
-            {
-                "model": str(model_path),
-                "image": str(image_path),
-                "annotated_image": str(output_path),
-                "detections": detections,
-            },
-            indent=2,
-        )
-    )
+    Pipeline(
+        [
+            MapToObjectsOp(
+                field_sources={
+                    "box": "boxes",
+                    "score": "scores",
+                    "class_id": "classes",
+                },
+            ),
+            LogDetectionsOp(
+                model_path=model_path,
+                image_path=image_path,
+                annotated_image_path=output_path,
+            ),
+        ]
+    )(result)
     return 0
 
 

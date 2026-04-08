@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal
+from typing import TextIO
 
 import numpy as np
 
@@ -492,4 +496,64 @@ class SaveImageOp:
         written = cv2.imwrite(str(self.output_path), value.array)
         if not written:
             raise ValueError(f"Failed to write image: {self.output_path}")
+        return value
+
+
+class MapToObjectsOp:
+    def __init__(
+        self,
+        field_sources: dict[str, str | Callable[[object], Sequence[object]]],
+    ):
+        self.field_sources = field_sources
+
+    def __call__(self, value: object) -> list[dict[str, object]]:
+        columns: dict[str, Sequence[object]] = {}
+        for field_name, source in self.field_sources.items():
+            if isinstance(source, str):
+                column = getattr(value, source)
+            else:
+                column = source(value)
+            columns[field_name] = column
+
+        lengths = {len(column) for column in columns.values()}
+        if len(lengths) > 1:
+            raise ValueError(f"CollectionsToObjectsOp requires equal-length collections, got lengths {sorted(lengths)}")
+
+        records: list[dict[str, object]] = []
+        field_names = tuple(columns.keys())
+        rows = zip(*(columns[field_name] for field_name in field_names), strict=True)
+        for row in rows:
+            record = dict(zip(field_names, row, strict=True))
+            records.append(record)
+        return records
+
+
+class LogDetectionsOp:
+    def __init__(
+        self,
+        model_path: str | Path,
+        image_path: str | Path,
+        annotated_image_path: str | Path,
+        indent: int = 2,
+        stream: TextIO | None = None,
+    ):
+        self.model_path = Path(model_path)
+        self.image_path = Path(image_path)
+        self.annotated_image_path = Path(annotated_image_path)
+        self.indent = indent
+        self.stream = stream or sys.stdout
+
+    def __call__(self, value: list[dict[str, object]]) -> list[dict[str, object]]:
+        print(
+            json.dumps(
+                {
+                    "model": str(self.model_path),
+                    "image": str(self.image_path),
+                    "annotated_image": str(self.annotated_image_path),
+                    "detections": value,
+                },
+                indent=self.indent,
+            ),
+            file=self.stream,
+        )
         return value

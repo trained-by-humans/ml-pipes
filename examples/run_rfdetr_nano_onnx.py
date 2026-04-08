@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -10,6 +9,8 @@ import numpy as np
 from ml_pipes import (
     DecodeOp,
     InferOp,
+    LogDetectionsOp,
+    MapToObjectsOp,
     NormalizeOp,
     Pipeline,
     ProjectToInputOp,
@@ -201,33 +202,22 @@ def main() -> int:
         detections=result,
         output_path=output_path,
     )
-
-    detections = [
-        {
-            "box": box,
-            "score": score,
-            "class_id": class_id,
-        }
-        for box, score, class_id in zip(result.boxes, result.scores, result.classes, strict=True)
-    ]
-    print(
-        json.dumps(
-            {
-                "image": str(image_path),
-                "model": str(model_path),
-                "annotated_image": str(output_path),
-                "detections": detections,
-                "config": {
-                    "model_family": "rf-detr",
-                    "runtime": "onnx",
-                    "resize_mode": "resize",
-                    "normalize_dtype": "float32",
-                    "decoder": "example-local rf-detr decoder",
-                },
-            },
-            indent=2,
-        )
-    )
+    Pipeline(
+        [
+            MapToObjectsOp(
+                field_sources={
+                    "box": "boxes",
+                    "score": "scores",
+                    "class_id": "classes",
+                }
+            ),
+            LogDetectionsOp(
+                model_path=model_path,
+                image_path=image_path,
+                annotated_image_path=output_path,
+            ),
+        ]
+    )(result)
     return 0
 
 
