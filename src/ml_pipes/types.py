@@ -20,6 +20,13 @@ class TensorPayload:
 
 
 @dataclass(frozen=True)
+class RuntimeOutputs:
+    # Runtime-facing output tensors exactly as exposed by the exported graph.
+    tensors: tuple[TensorPayload, ...]
+    names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class DetectionBatch:
     boxes: np.ndarray
     scores: np.ndarray

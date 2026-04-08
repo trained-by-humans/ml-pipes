@@ -137,8 +137,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             ),
             InferOp(
                 model_path,
-                expected_input_layout="NCHW",
-                output_layout="UNKNOWN",
+                expected_input_layout="NCHW"
             ),
             DecodePredictionsOp(
                 num_box_values=4,

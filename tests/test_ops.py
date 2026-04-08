@@ -12,7 +12,7 @@ from ml_pipes.ops import (
     SaveImageOp,
 )
 from ml_pipes.transforms import ResizeTransform
-from ml_pipes.types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
+from ml_pipes.types import DetectionBatch, DetectionResult, ImagePayload, RuntimeOutputs, TensorPayload
 
 
 def test_resize_op_can_do_plain_resize_without_padding():
@@ -57,7 +57,12 @@ def test_decode_predictions_accepts_channel_first_yolov8_output():
         dtype=np.float32,
     )
 
-    result = DecodePredictionsOp()(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"))
+    result = DecodePredictionsOp()(
+        RuntimeOutputs(
+            tensors=(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"),),
+            names=("output_0",),
+        )
+    )
 
     assert result.boxes.shape == (2, 4)
     assert result.classes.tolist() == [0, 1]
@@ -77,7 +82,12 @@ def test_decode_predictions_can_read_xyxy_without_transpose():
         input_box_format="xyxy",
         transpose_output="never",
         class_start_index=4,
-    )(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"))
+    )(
+        RuntimeOutputs(
+            tensors=(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"),),
+            names=("output_0",),
+        )
+    )
 
     assert result.boxes.tolist() == [[1.0, 2.0, 11.0, 12.0], [5.0, 6.0, 15.0, 16.0]]
     assert result.classes.tolist() == [1, 0]
@@ -98,10 +108,67 @@ def test_decode_predictions_can_apply_sigmoid_to_scores():
         dtype=np.float32,
     )
 
-    result = DecodePredictionsOp(score_activation="sigmoid")(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"))
+    result = DecodePredictionsOp(score_activation="sigmoid")(
+        RuntimeOutputs(
+            tensors=(TensorPayload(array=raw, layout="UNKNOWN", dtype="float32"),),
+            names=("output_0",),
+        )
+    )
 
     assert result.classes.tolist() == [1]
     assert np.allclose(result.scores, [1.0 / (1.0 + np.exp(-2.0))])
+
+
+def test_decode_predictions_can_select_export_output_by_index():
+    aux = TensorPayload(array=np.zeros((1, 2), dtype=np.float32), layout="UNKNOWN", dtype="float32")
+    predictions = TensorPayload(
+        array=np.array(
+            [
+                [
+                    [10.0],
+                    [20.0],
+                    [4.0],
+                    [6.0],
+                    [0.9],
+                    [0.1],
+                ]
+            ],
+            dtype=np.float32,
+        ),
+        layout="UNKNOWN",
+        dtype="float32",
+    )
+    runtime_outputs = RuntimeOutputs(tensors=(aux, predictions), names=("aux", "predictions"))
+
+    result = DecodePredictionsOp(export_output_index=1)(runtime_outputs)
+
+    assert result.boxes.shape == (1, 4)
+    assert result.classes.tolist() == [0]
+
+
+def test_decode_predictions_can_select_export_output_by_name():
+    aux = TensorPayload(array=np.zeros((1, 2), dtype=np.float32), layout="UNKNOWN", dtype="float32")
+    predictions = TensorPayload(
+        array=np.array(
+            [
+                [1.0, 2.0, 11.0, 12.0, 0.1, 0.9],
+                [5.0, 6.0, 15.0, 16.0, 0.8, 0.2],
+            ],
+            dtype=np.float32,
+        ),
+        layout="UNKNOWN",
+        dtype="float32",
+    )
+    runtime_outputs = RuntimeOutputs(tensors=(aux, predictions), names=("aux", "pred_boxes"))
+
+    result = DecodePredictionsOp(
+        export_output_name="pred_boxes",
+        input_box_format="xyxy",
+        transpose_output="never",
+    )(runtime_outputs)
+
+    assert result.boxes.tolist() == [[1.0, 2.0, 11.0, 12.0], [5.0, 6.0, 15.0, 16.0]]
+    assert result.classes.tolist() == [1, 0]
 
 
 def test_nms_keeps_overlapping_boxes_from_different_classes():

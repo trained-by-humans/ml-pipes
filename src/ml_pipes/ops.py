@@ -6,7 +6,7 @@ from typing import Literal
 import numpy as np
 
 from .transforms import ResizeTransform
-from .types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
+from .types import DetectionBatch, DetectionResult, ImagePayload, RuntimeOutputs, TensorPayload
 
 
 class DecodeOp:
@@ -177,12 +177,14 @@ class InferOp:
     def __init__(
         self,
         model_path: str | Path,
+        # Runtime-facing execution provider config.
         providers: tuple[str, ...] = ("CPUExecutionProvider",),
+        # Runtime-facing input binding. Input names come from the exported graph.
         input_name: str | None = None,
-        output_index: int = 0,
-        output_name: str | None = None,
+        # Runtime-facing input tensor contract.
         expected_input_layout: str = "NCHW",
-        output_layout: str = "UNKNOWN",
+        # Runtime-facing output tensor metadata aligned with exported graph output order.
+        output_layouts: tuple[str, ...] | None = None,
     ):
         path = Path(model_path)
         if not path.is_file():
@@ -196,31 +198,38 @@ class InferOp:
             providers=list(providers),
         )
         self.input_name = input_name or self.session.get_inputs()[0].name
-        self.output_index = output_index
-        self.output_name = output_name
         self.expected_input_layout = expected_input_layout
-        self.output_layout = output_layout
+        self.output_layouts = output_layouts
+        self.output_names = tuple(output.name for output in self.session.get_outputs())
 
-    def __call__(self, value: TensorPayload) -> TensorPayload:
+    def __call__(self, value: TensorPayload) -> RuntimeOutputs:
         if value.layout != self.expected_input_layout:
             raise ValueError(f"InferOp expects {self.expected_input_layout} tensor layout, got {value.layout}")
 
         outputs = self.session.run(None, {self.input_name: value.array})
-        if self.output_name is not None:
-            output_names = [output.name for output in self.session.get_outputs()]
-            if self.output_name not in output_names:
-                raise ValueError(f"Output {self.output_name!r} not found in model outputs: {output_names}")
-            output = outputs[output_names.index(self.output_name)]
+        if self.output_layouts is None:
+            output_layouts = tuple("UNKNOWN" for _ in outputs)
         else:
-            output = outputs[self.output_index]
+            if len(self.output_layouts) != len(outputs):
+                raise ValueError(
+                    f"InferOp expected {len(self.output_layouts)} output layouts, got {len(outputs)} outputs"
+                )
+            output_layouts = self.output_layouts
 
-        payload = TensorPayload(array=np.asarray(output), layout=self.output_layout, dtype=str(output.dtype))
-        return payload
+        runtime_output_names = self.output_names or tuple(f"output_{index}" for index in range(len(outputs)))
+        tensors = tuple(
+            TensorPayload(array=np.asarray(output), layout=layout, dtype=str(output.dtype))
+            for output, layout in zip(outputs, output_layouts, strict=True)
+        )
+        return RuntimeOutputs(tensors=tensors, names=runtime_output_names)
 
 
 class DecodePredictionsOp:
     def __init__(
         self,
+        # Export/model-facing output selection. Names and indexes come from the exported model artifact.
+        export_output_index: int = 0,
+        export_output_name: str | None = None,
         num_box_values: int = 4,
         class_start_index: int = 4,
         input_box_format: Literal["xywh", "xyxy"] = "xywh",
@@ -228,6 +237,8 @@ class DecodePredictionsOp:
         squeeze_batch_dim: bool = True,
         score_activation: Literal["none", "sigmoid", "softmax"] = "none",
     ):
+        self.export_output_index = export_output_index
+        self.export_output_name = export_output_name
         self.num_box_values = num_box_values
         self.class_start_index = class_start_index
         self.input_box_format = input_box_format
@@ -235,8 +246,9 @@ class DecodePredictionsOp:
         self.squeeze_batch_dim = squeeze_batch_dim
         self.score_activation = score_activation
 
-    def __call__(self, value: TensorPayload) -> DetectionBatch:
-        predictions = self._normalize_output_shape(np.asarray(value.array))
+    def __call__(self, value: RuntimeOutputs) -> DetectionBatch:
+        export_output = self._select_export_output(value)
+        predictions = self._normalize_output_shape(np.asarray(export_output.array))
         if predictions.shape[1] < self.class_start_index + 2:
             raise ValueError(
                 "Unsupported YOLOv8 output: expected at least 4 box values and 2 class scores"
@@ -254,6 +266,21 @@ class DecodePredictionsOp:
             classes=classes,
         )
         return batch
+
+    def _select_export_output(self, value: RuntimeOutputs) -> TensorPayload:
+        if self.export_output_name is not None:
+            if self.export_output_name not in value.names:
+                raise ValueError(
+                    f"DecodePredictionsOp export output {self.export_output_name!r} not found in {value.names}"
+                )
+            return value.tensors[value.names.index(self.export_output_name)]
+
+        if self.export_output_index >= len(value.tensors):
+            raise ValueError(
+                f"DecodePredictionsOp export output index {self.export_output_index} out of range "
+                f"for {len(value.tensors)} runtime outputs"
+            )
+        return value.tensors[self.export_output_index]
 
     def _normalize_output_shape(self, output: np.ndarray) -> np.ndarray:
         if output.ndim == 3 and self.squeeze_batch_dim and output.shape[0] == 1:

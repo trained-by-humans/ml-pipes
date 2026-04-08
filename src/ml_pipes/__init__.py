@@ -12,7 +12,7 @@ from .ops import (
     SaveImageOp,
 )
 from .transforms import ResizeTransform
-from .types import DetectionBatch, DetectionResult, ImagePayload, TensorPayload
+from .types import DetectionBatch, DetectionResult, ImagePayload, RuntimeOutputs, TensorPayload
 
 __all__ = [
     "Context",
@@ -31,6 +31,7 @@ __all__ = [
     "Recall",
     "ResizeOp",
     "ResizeTransform",
+    "RuntimeOutputs",
     "SaveImageOp",
     "Select",
     "Store",
