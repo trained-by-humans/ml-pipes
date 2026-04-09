@@ -11,7 +11,15 @@ from typing import TextIO
 import numpy as np
 
 from .transforms import ResizeTransform
-from .types import DetectionArrays, Detections, ImagePayload, RuntimeOutputs, TensorPayload
+from .types import (
+    DetectionArrays,
+    Detections,
+    ImagePayload,
+    RuntimeOutputs,
+    SegmentationCandidates,
+    Segmentations,
+    TensorPayload,
+)
 
 
 class DecodeOp:
@@ -99,6 +107,7 @@ class ResizeOp:
             scale=scale,
             pad=pad,
             original_shape=(original_h, original_w),
+            resized_shape=resized.shape[:2],
         )
         payload = ImagePayload(
             array=resized,
@@ -382,10 +391,11 @@ class NMSOp:
 
     def __call__(self, detection_arrays: DetectionArrays) -> DetectionArrays:
         detections = detection_arrays
-        mask = detections.scores >= self.conf_threshold
-        boxes = detections.boxes[mask]
-        scores = detections.scores[mask]
-        classes = detections.classes[mask]
+        boxes, scores, classes, kept = self._filter_and_keep_indices(
+            detections.boxes,
+            detections.scores,
+            detections.classes,
+        )
 
         if boxes.size == 0:
             empty = DetectionArrays(
@@ -394,6 +404,26 @@ class NMSOp:
                 classes=np.zeros((0,), dtype=np.int32),
             )
             return empty
+
+        filtered = DetectionArrays(
+            boxes=boxes[kept],
+            scores=scores[kept],
+            classes=classes[kept],
+        )
+        return filtered
+
+    def _filter_and_keep_indices(
+        self,
+        boxes: np.ndarray,
+        scores: np.ndarray,
+        classes: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        mask = scores >= self.conf_threshold
+        boxes = boxes[mask]
+        scores = scores[mask]
+        classes = classes[mask]
+        if boxes.size == 0:
+            return boxes, scores, classes, np.zeros((0,), dtype=np.int32)
 
         kept_indices: list[int] = []
         for class_id in np.unique(classes):
@@ -416,13 +446,7 @@ class NMSOp:
         kept = np.asarray(kept_indices, dtype=np.int32)
         final_order = np.argsort(scores[kept])[::-1]
         kept = kept[final_order][: self.max_detections]
-
-        filtered = DetectionArrays(
-            boxes=boxes[kept],
-            scores=scores[kept],
-            classes=classes[kept],
-        )
-        return filtered
+        return boxes, scores, classes, kept
 
     @staticmethod
     def _compute_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
@@ -467,6 +491,250 @@ class ProjectToInputOp:
             scores=scores.tolist(),
             classes=classes.tolist(),
         )
+
+
+class DecodeSegmentationOp:
+    def __init__(
+        self,
+        export_detection_output_index: int = 0,
+        export_detection_output_name: str | None = None,
+        export_prototype_output_index: int = 1,
+        export_prototype_output_name: str | None = None,
+        num_box_values: int = 4,
+        class_start_index: int = 4,
+        num_masks: int = 32,
+        input_box_format: Literal["xywh", "xyxy"] = "xywh",
+        transpose_output: Literal["auto", "never", "always"] = "auto",
+        squeeze_batch_dim: bool = True,
+        score_activation: Literal["none", "sigmoid", "softmax"] = "none",
+    ):
+        self.export_detection_output_index = export_detection_output_index
+        self.export_detection_output_name = export_detection_output_name
+        self.export_prototype_output_index = export_prototype_output_index
+        self.export_prototype_output_name = export_prototype_output_name
+        self.num_box_values = num_box_values
+        self.class_start_index = class_start_index
+        self.num_masks = num_masks
+        self.input_box_format = input_box_format
+        self.transpose_output = transpose_output
+        self.squeeze_batch_dim = squeeze_batch_dim
+        self.score_activation = score_activation
+
+    def __call__(self, runtime_outputs: RuntimeOutputs) -> SegmentationCandidates:
+        detection_output = self._select_export_output(
+            runtime_outputs,
+            output_index=self.export_detection_output_index,
+            output_name=self.export_detection_output_name,
+        )
+        prototype_output = self._select_export_output(
+            runtime_outputs,
+            output_index=self.export_prototype_output_index,
+            output_name=self.export_prototype_output_name,
+        )
+
+        predictions = self._normalize_prediction_shape(np.asarray(detection_output.array))
+        prototypes = self._normalize_prototype_shape(np.asarray(prototype_output.array))
+        expected_columns = self.class_start_index + 1 + self.num_masks
+        if predictions.shape[1] < expected_columns:
+            raise ValueError(
+                "Unsupported YOLO-seg output: expected box, class, and mask coefficient columns"
+            )
+
+        boxes = predictions[:, : self.num_box_values]
+        mask_coefficients = predictions[:, -self.num_masks :]
+        class_scores = predictions[:, self.class_start_index : -self.num_masks]
+        class_scores = self._activate_scores(class_scores)
+        classes = np.argmax(class_scores, axis=1).astype(np.int32)
+        scores = class_scores[np.arange(class_scores.shape[0]), classes]
+        return SegmentationCandidates(
+            boxes=self._to_xyxy(boxes).astype(np.float32),
+            scores=scores.astype(np.float32),
+            classes=classes,
+            mask_coefficients=mask_coefficients.astype(np.float32),
+            prototypes=prototypes.astype(np.float32),
+        )
+
+    def _select_export_output(
+        self,
+        value: RuntimeOutputs,
+        *,
+        output_index: int,
+        output_name: str | None,
+    ) -> TensorPayload:
+        if output_name is not None:
+            if output_name not in value.names:
+                raise ValueError(f"Segmentation export output {output_name!r} not found in {value.names}")
+            return value.tensors[value.names.index(output_name)]
+        if output_index >= len(value.tensors):
+            raise ValueError(
+                f"Segmentation export output index {output_index} out of range for {len(value.tensors)} runtime outputs"
+            )
+        return value.tensors[output_index]
+
+    def _normalize_prediction_shape(self, output: np.ndarray) -> np.ndarray:
+        if output.ndim == 3 and self.squeeze_batch_dim and output.shape[0] == 1:
+            output = output[0]
+        elif output.ndim != 2:
+            raise ValueError(f"Unsupported YOLO-seg detection output shape: {output.shape}")
+
+        if self.transpose_output == "never":
+            return output
+        if self.transpose_output == "always":
+            return output.T
+        if output.shape[0] > output.shape[1] and output.shape[1] >= self.class_start_index + 1 + self.num_masks:
+            return output
+        if output.shape[0] >= self.class_start_index + 1 + self.num_masks:
+            return output.T
+        raise ValueError(f"Unsupported YOLO-seg detection output shape: {output.shape}")
+
+    def _normalize_prototype_shape(self, output: np.ndarray) -> np.ndarray:
+        if output.ndim == 4 and self.squeeze_batch_dim and output.shape[0] == 1:
+            output = output[0]
+        if output.ndim != 3:
+            raise ValueError(f"Unsupported YOLO-seg prototype output shape: {output.shape}")
+        if output.shape[0] != self.num_masks:
+            raise ValueError(
+                f"YOLO-seg prototype output expected {self.num_masks} mask channels, got {output.shape[0]}"
+            )
+        return output
+
+    def _to_xyxy(self, boxes: np.ndarray) -> np.ndarray:
+        if self.input_box_format == "xyxy":
+            return boxes
+        if self.input_box_format != "xywh":
+            raise ValueError(f"Unsupported box format: {self.input_box_format}")
+        centers = boxes[:, :2]
+        sizes = boxes[:, 2:4]
+        half_sizes = sizes / 2.0
+        top_left = centers - half_sizes
+        bottom_right = centers + half_sizes
+        return np.concatenate((top_left, bottom_right), axis=1)
+
+    def _activate_scores(self, scores: np.ndarray) -> np.ndarray:
+        if self.score_activation == "none":
+            return scores
+        if self.score_activation == "sigmoid":
+            return 1.0 / (1.0 + np.exp(-scores))
+        if self.score_activation == "softmax":
+            shifted = scores - np.max(scores, axis=1, keepdims=True)
+            exp = np.exp(shifted)
+            return exp / np.sum(exp, axis=1, keepdims=True)
+        raise ValueError(f"Unsupported score activation: {self.score_activation}")
+
+
+class SegmentationNMSOp(NMSOp):
+    def __call__(self, value: SegmentationCandidates) -> SegmentationCandidates:
+        boxes, scores, classes, kept = self._filter_and_keep_indices(
+            value.boxes,
+            value.scores,
+            value.classes,
+        )
+        if boxes.size == 0:
+            return SegmentationCandidates(
+                boxes=np.zeros((0, 4), dtype=np.float32),
+                scores=np.zeros((0,), dtype=np.float32),
+                classes=np.zeros((0,), dtype=np.int32),
+                mask_coefficients=np.zeros((0, value.mask_coefficients.shape[1]), dtype=np.float32),
+                prototypes=value.prototypes,
+            )
+        return SegmentationCandidates(
+            boxes=boxes[kept],
+            scores=scores[kept],
+            classes=classes[kept],
+            mask_coefficients=value.mask_coefficients[value.scores >= self.conf_threshold][kept],
+            prototypes=value.prototypes,
+        )
+
+
+class ProjectSegmentationsOp:
+    def __init__(self, mask_threshold: float = 0.0):
+        self.mask_threshold = mask_threshold
+
+    def __call__(self, value: SegmentationCandidates, transform: ResizeTransform) -> Segmentations:
+        boxes = value.boxes.copy()
+        scores = value.scores.astype(np.float32)
+        classes = value.classes.astype(np.int32)
+
+        masks = self._process_masks(
+            value.prototypes,
+            value.mask_coefficients,
+            boxes,
+            transform.resized_shape,
+            transform,
+        )
+        valid = np.asarray([mask.any() for mask in masks], dtype=bool)
+        boxes = boxes[valid]
+        scores = scores[valid]
+        classes = classes[valid]
+        masks = [mask for mask, keep in zip(masks, valid, strict=True) if keep]
+
+        pad_x, pad_y = transform.pad
+        scale_x, scale_y = transform.scale
+        original_h, original_w = transform.original_shape
+
+        boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_x) / scale_x
+        boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale_y
+        boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(original_w))
+        boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))
+
+        return Segmentations(
+            boxes=boxes.tolist(),
+            scores=scores.tolist(),
+            classes=classes.tolist(),
+            masks=masks,
+        )
+
+    def _process_masks(
+        self,
+        prototypes: np.ndarray,
+        mask_coefficients: np.ndarray,
+        boxes: np.ndarray,
+        resized_shape: tuple[int, int],
+        transform: ResizeTransform,
+    ) -> list[np.ndarray]:
+        import cv2
+
+        channels, mask_h, mask_w = prototypes.shape
+        masks = mask_coefficients @ prototypes.reshape(channels, -1)
+        masks = masks.reshape(-1, mask_h, mask_w)
+
+        width_ratio = mask_w / resized_shape[1]
+        height_ratio = mask_h / resized_shape[0]
+        downsampled_boxes = boxes.copy()
+        downsampled_boxes[:, [0, 2]] *= width_ratio
+        downsampled_boxes[:, [1, 3]] *= height_ratio
+        masks = self._crop_masks(masks, downsampled_boxes)
+
+        projected: list[np.ndarray] = []
+        for mask in masks:
+            upsampled = cv2.resize(mask, (resized_shape[1], resized_shape[0]), interpolation=cv2.INTER_LINEAR)
+            scaled = self._scale_mask_to_input(upsampled, transform)
+            projected.append((scaled > self.mask_threshold).astype(np.uint8))
+        return projected
+
+    def _scale_mask_to_input(self, mask: np.ndarray, transform: ResizeTransform) -> np.ndarray:
+        import cv2
+
+        resized_h, resized_w = transform.resized_shape
+        pad_x, pad_y = transform.pad
+        top = max(int(round(pad_y - 0.1)), 0)
+        left = max(int(round(pad_x - 0.1)), 0)
+        bottom = min(int(round(resized_h - pad_y + 0.1)), resized_h)
+        right = min(int(round(resized_w - pad_x + 0.1)), resized_w)
+        mask = mask[top:bottom, left:right]
+        original_h, original_w = transform.original_shape
+        return cv2.resize(mask, (original_w, original_h), interpolation=cv2.INTER_LINEAR)
+
+    def _crop_masks(self, masks: np.ndarray, boxes: np.ndarray) -> np.ndarray:
+        num_masks, height, width = masks.shape
+        x1 = boxes[:, 0].clip(0, width)
+        y1 = boxes[:, 1].clip(0, height)
+        x2 = boxes[:, 2].clip(0, width)
+        y2 = boxes[:, 3].clip(0, height)
+
+        rows = np.arange(width, dtype=np.float32)[None, None, :]
+        cols = np.arange(height, dtype=np.float32)[None, :, None]
+        return masks * ((rows >= x1[:, None, None]) * (rows < x2[:, None, None]) * (cols >= y1[:, None, None]) * (cols < y2[:, None, None]))
 
 
 class DrawBoxesOp:

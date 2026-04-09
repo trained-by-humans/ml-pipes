@@ -4,7 +4,9 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-from ml_pipes import DecodeOp, DrawBoxesOp, Pipeline, SaveImageOp
+import numpy as np
+
+from ml_pipes import DecodeOp, Detections, DrawBoxesOp, ImagePayload, Pipeline, SaveImageOp, Segmentations
 
 
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
@@ -117,6 +119,45 @@ def render_and_save_detections(
             SaveImageOp(output_path),
         ]
     )(detections)
+
+
+def render_and_save_segmentations(
+    image_path: Path,
+    segmentations: Segmentations,
+    output_path: Path,
+    class_names: list[str] | None = None,
+    alpha: float = 0.45,
+) -> None:
+    source_image = DecodeOp()(image_path)
+    image = source_image.array.copy()
+    for mask, class_id in zip(segmentations.masks, segmentations.classes, strict=True):
+        color = np.asarray(_class_color(int(class_id)), dtype=np.float32)
+        mask_bool = np.asarray(mask, dtype=bool)
+        if mask_bool.ndim != 2:
+            raise ValueError(f"Expected 2D segmentation mask, got shape {mask_bool.shape}")
+        if np.any(mask_bool):
+            blended = (1.0 - alpha) * image[mask_bool].astype(np.float32) + alpha * color
+            image[mask_bool] = blended.astype(np.uint8)
+
+    detections = Detections(
+        boxes=segmentations.boxes,
+        scores=segmentations.scores,
+        classes=segmentations.classes,
+    )
+    boxed = DrawBoxesOp(class_names=class_names)(
+        detections,
+        ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout),
+    )
+    SaveImageOp(output_path)(boxed)
+
+
+def _class_color(class_id: int) -> tuple[int, int, int]:
+    # Deterministic BGR color palette from class id.
+    return (
+        int((37 * class_id + 17) % 255),
+        int((91 * class_id + 53) % 255),
+        int((17 * class_id + 191) % 255),
+    )
 
 
 def build_output_path(

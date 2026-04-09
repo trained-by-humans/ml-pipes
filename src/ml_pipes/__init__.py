@@ -4,24 +4,36 @@ from .ops import (
     CastTensorOp,
     DecodeOp,
     DecodePredictionsOp,
+    DecodeSegmentationOp,
     DrawBoxesOp,
     InferOp,
     LogDetectionsOp,
     MapToObjectsOp,
     NMSOp,
     NormalizeOp,
+    ProjectSegmentationsOp,
     ProjectToInputOp,
     ResizeOp,
     SaveImageOp,
+    SegmentationNMSOp,
 )
 from .transforms import ResizeTransform
-from .types import DetectionArrays, Detections, ImagePayload, RuntimeOutputs, TensorPayload
+from .types import (
+    DetectionArrays,
+    Detections,
+    ImagePayload,
+    RuntimeOutputs,
+    SegmentationCandidates,
+    Segmentations,
+    TensorPayload,
+)
 
 __all__ = [
     "CastTensorOp",
     "Context",
     "DecodeOp",
     "DecodePredictionsOp",
+    "DecodeSegmentationOp",
     "DetectionArrays",
     "Detections",
     "DrawBoxesOp",
@@ -33,6 +45,7 @@ __all__ = [
     "NormalizeOp",
     "Pipeline",
     "PipelineValidationError",
+    "ProjectSegmentationsOp",
     "ProjectToInputOp",
     "Recall",
     "ResizeOp",
@@ -40,6 +53,9 @@ __all__ = [
     "RuntimeOutputs",
     "SaveImageOp",
     "Select",
+    "SegmentationCandidates",
+    "SegmentationNMSOp",
+    "Segmentations",
     "Store",
     "TensorPayload",
 ]

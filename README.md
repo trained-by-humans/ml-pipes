@@ -49,3 +49,17 @@ python examples/run_yolo11n_onnx_fp16.py
 ```
 
 This uses different operator settings from the YOLOv8 demo, including FP16 normalization/inference and a separate public ONNX model.
+
+## Segmentation Demo
+
+For instance segmentation with YOLO-seg operators:
+
+```bash
+python examples/run_yolo11n_seg_onnx.py
+```
+
+This example uses:
+
+- `DecodeSegmentationOp`
+- `SegmentationNMSOp`
+- `ProjectSegmentationsOp`

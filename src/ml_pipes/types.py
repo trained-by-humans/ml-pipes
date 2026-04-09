@@ -38,3 +38,20 @@ class Detections:
     boxes: list[list[float]]
     scores: list[float]
     classes: list[int]
+
+
+@dataclass(frozen=True)
+class SegmentationCandidates:
+    boxes: np.ndarray
+    scores: np.ndarray
+    classes: np.ndarray
+    mask_coefficients: np.ndarray
+    prototypes: np.ndarray
+
+
+@dataclass(frozen=True)
+class Segmentations:
+    boxes: list[list[float]]
+    scores: list[float]
+    classes: list[int]
+    masks: list[np.ndarray]

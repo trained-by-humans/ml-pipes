@@ -6,18 +6,28 @@ import numpy as np
 from ml_pipes.ops import (
     CastTensorOp,
     DecodePredictionsOp,
+    DecodeSegmentationOp,
     DrawBoxesOp,
     InferOp,
     LogDetectionsOp,
     MapToObjectsOp,
     NMSOp,
     NormalizeOp,
+    ProjectSegmentationsOp,
     ProjectToInputOp,
     ResizeOp,
     SaveImageOp,
+    SegmentationNMSOp,
 )
 from ml_pipes.transforms import ResizeTransform
-from ml_pipes.types import DetectionArrays, Detections, ImagePayload, RuntimeOutputs, TensorPayload
+from ml_pipes.types import (
+    DetectionArrays,
+    Detections,
+    ImagePayload,
+    RuntimeOutputs,
+    SegmentationCandidates,
+    TensorPayload,
+)
 
 
 def test_resize_op_can_do_plain_resize_without_padding():
@@ -29,6 +39,7 @@ def test_resize_op_can_do_plain_resize_without_padding():
     assert resized.array.shape == (40, 40, 3)
     assert transform.scale == (2.0, 4.0)
     assert transform.pad == (0.0, 0.0)
+    assert transform.resized_shape == (40, 40)
 
 
 def test_normalize_op_can_keep_bgr_and_hwc_without_batch():
@@ -192,6 +203,88 @@ def test_decode_predictions_can_select_export_output_by_name():
     assert result.classes.tolist() == [1, 0]
 
 
+def test_decode_segmentation_can_select_detection_and_prototype_outputs():
+    detections = TensorPayload(
+        array=np.array(
+            [
+                [
+                    [10.0],
+                    [20.0],
+                    [4.0],
+                    [6.0],
+                    [0.9],
+                    [0.1],
+                    [0.2],
+                    [0.8],
+                ]
+            ],
+            dtype=np.float32,
+        ),
+        layout="UNKNOWN",
+        dtype="float32",
+    )
+    prototypes = TensorPayload(
+        array=np.ones((1, 2, 4, 4), dtype=np.float32),
+        layout="UNKNOWN",
+        dtype="float32",
+    )
+    runtime_outputs = RuntimeOutputs(
+        tensors=(prototypes, detections),
+        names=("proto", "pred"),
+    )
+
+    result = DecodeSegmentationOp(
+        export_detection_output_name="pred",
+        export_prototype_output_name="proto",
+        num_masks=2,
+    )(runtime_outputs)
+
+    assert result.boxes.shape == (1, 4)
+    assert result.mask_coefficients.shape == (1, 2)
+    assert result.prototypes.shape == (2, 4, 4)
+    assert result.classes.tolist() == [0]
+
+
+def test_segmentation_nms_preserves_mask_coefficients():
+    candidates = SegmentationCandidates(
+        boxes=np.array([[10, 10, 40, 40], [12, 12, 38, 38]], dtype=np.float32),
+        scores=np.array([0.95, 0.85], dtype=np.float32),
+        classes=np.array([0, 0], dtype=np.int32),
+        mask_coefficients=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        prototypes=np.ones((2, 8, 8), dtype=np.float32),
+    )
+
+    result = SegmentationNMSOp(conf_threshold=0.25, iou_threshold=0.4)(candidates)
+
+    assert result.boxes.shape == (1, 4)
+    assert result.mask_coefficients.tolist() == [[1.0, 2.0]]
+
+
+def test_project_segmentations_projects_masks_to_original_image():
+    candidates = SegmentationCandidates(
+        boxes=np.array([[1.0, 1.0, 3.0, 3.0]], dtype=np.float32),
+        scores=np.array([0.9], dtype=np.float32),
+        classes=np.array([1], dtype=np.int32),
+        mask_coefficients=np.array([[1.0]], dtype=np.float32),
+        prototypes=np.ones((1, 4, 4), dtype=np.float32),
+    )
+    transform = ResizeTransform(
+        scale=(2.0, 2.0),
+        pad=(0.0, 0.0),
+        original_shape=(2, 2),
+        resized_shape=(4, 4),
+    )
+
+    result = ProjectSegmentationsOp(mask_threshold=0.0)(candidates, transform)
+
+    assert result.boxes == [[0.5, 0.5, 1.5, 1.5]]
+    assert result.scores == [0.8999999761581421]
+    assert result.classes == [1]
+    assert len(result.masks) == 1
+    assert result.masks[0].shape == (2, 2)
+    assert np.all(result.masks[0] == 1)
+
+
 def test_cast_tensor_op_can_cast_iterable_of_tensor_payloads():
     tensors = (
         TensorPayload(array=np.array([[1.0, 2.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
@@ -302,7 +395,7 @@ def test_nms_suppresses_same_class_overlap():
 
 
 def test_project_to_input_reverses_padding_and_scale():
-    transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200))
+    transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200), resized_shape=(240, 420))
     detections = DetectionArrays(
         boxes=np.array([[30.0, 40.0, 110.0, 120.0]], dtype=np.float32),
         scores=np.array([0.9], dtype=np.float32),
@@ -316,7 +409,7 @@ def test_project_to_input_reverses_padding_and_scale():
 
 
 def test_project_to_input_clips_boxes_to_original_bounds():
-    transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200))
+    transform = ResizeTransform(scale=(2.0, 2.0), pad=(10.0, 20.0), original_shape=(100, 200), resized_shape=(240, 420))
     detections = DetectionArrays(
         boxes=np.array([[-50.0, -50.0, 500.0, 400.0]], dtype=np.float32),
         scores=np.array([0.9], dtype=np.float32),
