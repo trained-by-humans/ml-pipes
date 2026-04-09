@@ -49,13 +49,12 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Store("resize_transform", index=1),
             Select(0),
             NormalizeOp(
-                output_dtype="float32",
                 scale=1.0 / 255.0,
                 output_layout="NCHW",
                 output_color_space="RGB",
                 add_batch_dim=True,
             ),
-            InferOp(model_path, expected_input_layout="NCHW"),
+            InferOp(model_path, expected_input_layout="NCHW", expected_model_dtype="float32"),
             lambda runtime_outputs: decode_rfdetr_outputs(
                 runtime_outputs,
                 input_size=(640, 640),

@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from ml_pipes.ops import (
+    CastTensorOp,
     DecodePredictionsOp,
     DrawBoxesOp,
     InferOp,
@@ -42,8 +43,24 @@ def test_normalize_op_can_keep_bgr_and_hwc_without_batch():
     )(payload)
 
     assert tensor.layout == "HWC"
+    assert tensor.dtype == "float32"
     assert tensor.array.shape == (1, 1, 3)
     assert tensor.array.tolist() == [[[10.0, 20.0, 30.0]]]
+
+
+def test_normalize_op_preserves_floating_input_dtype():
+    image = np.array([[[10.0, 20.0, 30.0]]], dtype=np.float16)
+    payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
+
+    tensor = NormalizeOp(
+        output_color_space="BGR",
+        output_layout="HWC",
+        add_batch_dim=False,
+        scale=1.0,
+    )(payload)
+
+    assert tensor.array.dtype == np.float16
+    assert tensor.dtype == "float16"
 
 
 def test_decode_predictions_accepts_channel_first_yolov8_output():
@@ -175,7 +192,51 @@ def test_decode_predictions_can_select_export_output_by_name():
     assert result.classes.tolist() == [1, 0]
 
 
-def test_infer_op_can_cast_runtime_outputs_to_requested_dtype():
+def test_cast_tensor_op_can_cast_iterable_of_tensor_payloads():
+    tensors = (
+        TensorPayload(array=np.array([[1.0, 2.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
+        TensorPayload(array=np.array([[3.0, 4.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
+    )
+
+    result = CastTensorOp("float32")(tensors)
+
+    assert isinstance(result, tuple)
+    assert result[0].array.dtype == np.float32
+    assert result[0].dtype == "float32"
+    assert result[1].array.dtype == np.float32
+    assert result[1].dtype == "float32"
+
+
+def test_cast_tensor_op_can_cast_selected_dataclass_field():
+    runtime_outputs = RuntimeOutputs(
+        tensors=(
+            TensorPayload(array=np.array([[1.0, 2.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
+        ),
+        names=("output_0",),
+    )
+
+    result = CastTensorOp("float32", selector="tensors")(runtime_outputs)
+
+    assert isinstance(result, RuntimeOutputs)
+    assert result.names == ("output_0",)
+    assert result.tensors[0].array.dtype == np.float32
+    assert result.tensors[0].dtype == "float32"
+
+
+def test_cast_tensor_op_can_cast_single_tensor_payload():
+    payload = TensorPayload(
+        array=np.array([[1.0, 2.0]], dtype=np.float32),
+        layout="NCHW",
+        dtype="float32",
+    )
+
+    result = CastTensorOp("float16")(payload)
+
+    assert result.array.dtype == np.float16
+    assert result.dtype == "float16"
+
+
+def test_infer_op_requires_requested_model_dtype():
     class _FakeSession:
         def run(self, _output_names, _inputs):
             return [np.array([[1.0, 2.0]], dtype=np.float16)]
@@ -184,8 +245,8 @@ def test_infer_op_can_cast_runtime_outputs_to_requested_dtype():
     infer.session = _FakeSession()
     infer.input_name = "images"
     infer.expected_input_layout = "NCHW"
+    infer.model_dtype = np.dtype("float32")
     infer.output_layouts = ("UNKNOWN",)
-    infer.output_dtype = "float32"
     infer.output_names = ("output_0",)
 
     value = TensorPayload(
@@ -193,11 +254,12 @@ def test_infer_op_can_cast_runtime_outputs_to_requested_dtype():
         layout="NCHW",
         dtype="float16",
     )
-    result = infer(value)
-
-    assert result.names == ("output_0",)
-    assert result.tensors[0].array.dtype == np.float32
-    assert result.tensors[0].dtype == "float32"
+    try:
+        infer(value)
+    except ValueError as error:
+        assert "model dtype" in str(error)
+    else:
+        raise AssertionError("InferOp should reject mismatched model dtype")
 
 
 def test_nms_keeps_overlapping_boxes_from_different_classes():

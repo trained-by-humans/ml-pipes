@@ -1,6 +1,7 @@
 from .context import Context, Recall, Select, Store
 from .core import Pipeline, PipelineValidationError
 from .ops import (
+    CastTensorOp,
     DecodeOp,
     DecodePredictionsOp,
     DrawBoxesOp,
@@ -17,6 +18,7 @@ from .transforms import ResizeTransform
 from .types import DetectionArrays, Detections, ImagePayload, RuntimeOutputs, TensorPayload
 
 __all__ = [
+    "CastTensorOp",
     "Context",
     "DecodeOp",
     "DecodePredictionsOp",

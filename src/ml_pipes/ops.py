@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import is_dataclass, replace
 from pathlib import Path
 from typing import Literal
 from typing import TextIO
@@ -124,7 +125,6 @@ class ResizeOp:
 class NormalizeOp:
     def __init__(
         self,
-        output_dtype: str = "float32",
         scale: float = 1.0 / 255.0,
         mean: tuple[float, ...] | None = None,
         std: tuple[float, ...] | None = None,
@@ -132,7 +132,6 @@ class NormalizeOp:
         output_color_space: Literal["RGB", "BGR"] = "RGB",
         add_batch_dim: bool = True,
     ):
-        self.output_dtype = output_dtype
         self.scale = scale
         self.mean = mean
         self.std = std
@@ -155,7 +154,10 @@ class NormalizeOp:
                 f"NormalizeOp cannot convert {image_payload.color_space} to {self.output_color_space}"
             )
 
-        tensor = image.astype(np.dtype(self.output_dtype))
+        if np.issubdtype(image.dtype, np.floating):
+            tensor = image.copy()
+        else:
+            tensor = image.astype(np.float32)
         tensor = tensor * self.scale
         if self.mean is not None:
             tensor = tensor - np.asarray(self.mean, dtype=tensor.dtype)
@@ -177,6 +179,33 @@ class NormalizeOp:
         return payload
 
 
+class CastTensorOp:
+    def __init__(self, dtype: str, selector: str | None = None):
+        self.dtype = np.dtype(dtype)
+        self.selector = selector
+
+    def __call__(self, value: object) -> object:
+        if self.selector is not None:
+            selected = getattr(value, self.selector)
+            casted = self._cast_tensor_value(selected)
+            if is_dataclass(value):
+                return replace(value, **{self.selector: casted})
+            raise TypeError(
+                f"CastTensorOp selector={self.selector!r} requires a dataclass value, got {type(value)!r}"
+            )
+        return self._cast_tensor_value(value)
+
+    def _cast_tensor_value(self, value: object) -> TensorPayload | tuple[TensorPayload, ...]:
+        if isinstance(value, TensorPayload):
+            return TensorPayload(array=value.array.astype(self.dtype), layout=value.layout, dtype=str(self.dtype))
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+            return tuple(
+                TensorPayload(array=tensor.array.astype(self.dtype), layout=tensor.layout, dtype=str(self.dtype))
+                for tensor in value
+            )
+        raise TypeError(f"CastTensorOp does not support value type {type(value)!r}")
+
+
 class InferOp:
     def __init__(
         self,
@@ -187,10 +216,10 @@ class InferOp:
         input_name: str | None = None,
         # Runtime-facing input tensor contract.
         expected_input_layout: str = "NCHW",
+        # Model-facing input dtype contract.
+        expected_model_dtype: str | None = None,
         # Runtime-facing output tensor metadata aligned with exported graph output order.
         output_layouts: tuple[str, ...] | None = None,
-        # Runtime-facing output cast policy. None preserves the runtime dtype.
-        output_dtype: str | None = None,
     ):
         path = Path(model_path)
         if not path.is_file():
@@ -205,15 +234,22 @@ class InferOp:
         )
         self.input_name = input_name or self.session.get_inputs()[0].name
         self.expected_input_layout = expected_input_layout
+        self.model_dtype = np.dtype(expected_model_dtype) if expected_model_dtype is not None else None
         self.output_layouts = output_layouts
-        self.output_dtype = output_dtype
         self.output_names = tuple(output.name for output in self.session.get_outputs())
 
-    def __call__(self, value: TensorPayload) -> RuntimeOutputs:
-        if value.layout != self.expected_input_layout:
-            raise ValueError(f"InferOp expects {self.expected_input_layout} tensor layout, got {value.layout}")
+    def __call__(self, tensor_payload: TensorPayload) -> RuntimeOutputs:
+        if tensor_payload.layout != self.expected_input_layout:
+            raise ValueError(
+                f"InferOp expects {self.expected_input_layout} tensor layout, got {tensor_payload.layout}"
+            )
 
-        outputs = self.session.run(None, {self.input_name: value.array})
+        actual_dtype = np.dtype(tensor_payload.dtype)
+        if self.model_dtype is not None and actual_dtype != self.model_dtype:
+            raise ValueError(f"InferOp expects model dtype {self.model_dtype}, got {actual_dtype}")
+
+        outputs = self.session.run(None, {self.input_name: tensor_payload.array})
+
         if self.output_layouts is None:
             output_layouts = tuple("UNKNOWN" for _ in outputs)
         else:
@@ -225,16 +261,10 @@ class InferOp:
 
         runtime_output_names = self.output_names or tuple(f"output_{index}" for index in range(len(outputs)))
         tensors = tuple(
-            self._to_tensor_payload(output, layout)
+            TensorPayload(array=np.asarray(output), layout=layout, dtype=str(np.asarray(output).dtype))
             for output, layout in zip(outputs, output_layouts, strict=True)
         )
         return RuntimeOutputs(tensors=tensors, names=runtime_output_names)
-
-    def _to_tensor_payload(self, output: np.ndarray, layout: str) -> TensorPayload:
-        array = np.asarray(output)
-        if self.output_dtype is not None:
-            array = array.astype(np.dtype(self.output_dtype))
-        return TensorPayload(array=array, layout=layout, dtype=str(array.dtype))
 
 
 class DecodePredictionsOp:

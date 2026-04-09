@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from ml_pipes import (
+    CastTensorOp,
     DecodeOp,
     DecodePredictionsOp,
     InferOp,
@@ -48,16 +49,18 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Store("resize_transform", index=1),
             Select(0),
             NormalizeOp(
-                output_dtype="float16",
                 scale=1.0 / 255.0,
                 output_layout="NCHW",
                 output_color_space="RGB",
                 add_batch_dim=True,
             ),
+            CastTensorOp("float16"),
             InferOp(
                 model_path,
-                expected_input_layout="NCHW"
+                expected_input_layout="NCHW",
+                expected_model_dtype="float16",
             ),
+            CastTensorOp("float32", selector="tensors"),
             DecodePredictionsOp(
                 num_box_values=4,
                 class_start_index=4,
