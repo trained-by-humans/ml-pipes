@@ -189,6 +189,8 @@ class InferOp:
         expected_input_layout: str = "NCHW",
         # Runtime-facing output tensor metadata aligned with exported graph output order.
         output_layouts: tuple[str, ...] | None = None,
+        # Runtime-facing output cast policy. None preserves the runtime dtype.
+        output_dtype: str | None = None,
     ):
         path = Path(model_path)
         if not path.is_file():
@@ -204,6 +206,7 @@ class InferOp:
         self.input_name = input_name or self.session.get_inputs()[0].name
         self.expected_input_layout = expected_input_layout
         self.output_layouts = output_layouts
+        self.output_dtype = output_dtype
         self.output_names = tuple(output.name for output in self.session.get_outputs())
 
     def __call__(self, value: TensorPayload) -> RuntimeOutputs:
@@ -222,10 +225,16 @@ class InferOp:
 
         runtime_output_names = self.output_names or tuple(f"output_{index}" for index in range(len(outputs)))
         tensors = tuple(
-            TensorPayload(array=np.asarray(output), layout=layout, dtype=str(output.dtype))
+            self._to_tensor_payload(output, layout)
             for output, layout in zip(outputs, output_layouts, strict=True)
         )
         return RuntimeOutputs(tensors=tensors, names=runtime_output_names)
+
+    def _to_tensor_payload(self, output: np.ndarray, layout: str) -> TensorPayload:
+        array = np.asarray(output)
+        if self.output_dtype is not None:
+            array = array.astype(np.dtype(self.output_dtype))
+        return TensorPayload(array=array, layout=layout, dtype=str(array.dtype))
 
 
 class DecodePredictionsOp:
@@ -548,9 +557,9 @@ class LogDetectionsOp:
             json.dumps(
                 {
                     "model": str(self.model_path),
-                    "original_image": str(self.image_path),
+                    "image": str(self.image_path),
                     "annotated_image": str(self.annotated_image_path),
-                    "predictions": prediction_objects,
+                    "detections": prediction_objects,
                 },
                 indent=self.indent,
             ),

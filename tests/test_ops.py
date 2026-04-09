@@ -6,6 +6,7 @@ import numpy as np
 from ml_pipes.ops import (
     DecodePredictionsOp,
     DrawBoxesOp,
+    InferOp,
     LogDetectionsOp,
     MapToObjectsOp,
     NMSOp,
@@ -172,6 +173,31 @@ def test_decode_predictions_can_select_export_output_by_name():
 
     assert result.boxes.tolist() == [[1.0, 2.0, 11.0, 12.0], [5.0, 6.0, 15.0, 16.0]]
     assert result.classes.tolist() == [1, 0]
+
+
+def test_infer_op_can_cast_runtime_outputs_to_requested_dtype():
+    class _FakeSession:
+        def run(self, _output_names, _inputs):
+            return [np.array([[1.0, 2.0]], dtype=np.float16)]
+
+    infer = InferOp.__new__(InferOp)
+    infer.session = _FakeSession()
+    infer.input_name = "images"
+    infer.expected_input_layout = "NCHW"
+    infer.output_layouts = ("UNKNOWN",)
+    infer.output_dtype = "float32"
+    infer.output_names = ("output_0",)
+
+    value = TensorPayload(
+        array=np.zeros((1, 3, 8, 8), dtype=np.float16),
+        layout="NCHW",
+        dtype="float16",
+    )
+    result = infer(value)
+
+    assert result.names == ("output_0",)
+    assert result.tensors[0].array.dtype == np.float32
+    assert result.tensors[0].dtype == "float32"
 
 
 def test_nms_keeps_overlapping_boxes_from_different_classes():
