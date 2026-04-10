@@ -533,8 +533,8 @@ class ConvertBoxFormat:
 class NMS:
     """Non-Maximum Suppression on named tensors in a TensorRegistry.
 
-    Filters boxes, scores, and classes in-place. Optionally filters additional
-    tensors (e.g. mask coefficients for segmentation) via also_filter.
+    Filters boxes, scores, and classes in-place.
+    Optionally stores the kept indices under kept_as for use with FilterBy.
     """
 
     def __init__(
@@ -542,7 +542,7 @@ class NMS:
         boxes: str = "boxes",
         scores: str = "scores",
         classes: str = "classes",
-        also_filter: list[str] | None = None,
+        kept_as: str | None = None,
         conf_threshold: float = 0.25,
         iou_threshold: float = 0.45,
         max_detections: int = 300,
@@ -550,7 +550,7 @@ class NMS:
         self.boxes = boxes
         self.scores = scores
         self.classes = classes
-        self.also_filter: list[str] = also_filter or []
+        self.kept_as = kept_as
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
         self.max_detections = max_detections
@@ -575,8 +575,8 @@ class NMS:
         registry[self.boxes] = boxes[kept_original]
         registry[self.scores] = scores[kept_original]
         registry[self.classes] = classes[kept_original]
-        for name in self.also_filter:
-            registry[name] = registry[name][kept_original]
+        if self.kept_as is not None:
+            registry[self.kept_as] = kept_original
         return registry
 
     def _nms_indices(
@@ -631,6 +631,25 @@ class NMS:
         return intersection / union
 
 
+class FilterBy:
+    """Filters a tensor by an index array stored in the registry: as_ = src[indices].
+
+    Pair with NMS(kept_as=...) to synchronise extra tensors (e.g. mask coefficients)
+    with the boxes/scores/classes that NMS already filtered.
+
+    Defaults to in-place (overwrites src) when as_ is not provided.
+    """
+
+    def __init__(self, name: str, indices: str, as_: str | None = None):
+        self.name = name
+        self.indices = indices
+        self.as_ = as_ or name
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = registry[self.name][registry[self.indices]]
+        return registry
+
+
 # ---------------------------------------------------------------------------
 # Segmentation
 # ---------------------------------------------------------------------------
@@ -659,29 +678,17 @@ class ReconstructMasks:
 # Projection
 # ---------------------------------------------------------------------------
 
-class Project:
-    """Projects boxes (and optionally masks) from model space to original image space.
+class ProjectBoxes:
+    """Projects boxes from model space to original image space.
 
     Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
-    When masks is specified, also crops, upsamples, and thresholds the mask tensors.
     """
 
-    def __init__(
-        self,
-        boxes: str = "boxes",
-        masks: str | None = None,
-        mask_threshold: float = 0.0,
-    ):
-        self.boxes = boxes
-        self.masks = masks
-        self.mask_threshold = mask_threshold
+    def __init__(self, name: str = "boxes"):
+        self.name = name
 
     def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
-        boxes = registry[self.boxes].copy()
-
-        if self.masks is not None:
-            registry[self.masks] = self._project_masks(registry[self.masks], boxes, transform)
-
+        boxes = registry[self.name].copy()
         pad_x, pad_y = transform.pad
         scale_x, scale_y = transform.scale
         original_h, original_w = transform.original_shape
@@ -690,8 +697,28 @@ class Project:
         boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale_y
         boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(original_w))
         boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))
-        registry[self.boxes] = boxes
+        registry[self.name] = boxes
+        return registry
 
+
+class ProjectMasks:
+    """Crops, upsamples, and thresholds masks using model-space boxes and a resize transform.
+
+    Must be called before ProjectBoxes — it requires boxes still in model (pre-projection) space
+    to correctly crop masks at prototype resolution.
+
+    Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
+    """
+
+    def __init__(self, masks: str = "masks", boxes: str = "boxes", mask_threshold: float = 0.0):
+        self.masks = masks
+        self.boxes = boxes
+        self.mask_threshold = mask_threshold
+
+    def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
+        registry[self.masks] = self._project_masks(
+            registry[self.masks], registry[self.boxes], transform
+        )
         return registry
 
     def _project_masks(

@@ -13,7 +13,7 @@ from ml_pipes import (
     NormalizeOp,
     Pick,
     Pipeline,
-    Project,
+    ProjectBoxes,
     Recall,
     ResizeOp,
     Select,
@@ -49,7 +49,7 @@ def main() -> int:
             ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
             NMS(),
             Recall("resize_transform"),
-            Project(),
+            ProjectBoxes(),
             ToDetections(),
         ]
     )

@@ -16,7 +16,7 @@ from ml_pipes import (
     NormalizeOp,
     Pick,
     Pipeline,
-    Project,
+    ProjectBoxes,
     Recall,
     ResizeOp,
     Select,
@@ -59,7 +59,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
             NMS(),
             Recall("resize_transform"),
-            Project(),
+            ProjectBoxes(),
             ToDetections(),
         ]
     )
