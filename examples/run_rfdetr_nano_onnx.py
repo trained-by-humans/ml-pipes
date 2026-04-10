@@ -7,18 +7,26 @@ from pathlib import Path
 import numpy as np
 
 from ml_pipes import (
+    ArgMax,
+    ConvertBoxFormat,
     DecodeOp,
+    GatherScores,
     InferOp,
     LogDetectionsOp,
     MapToObjectsOp,
+    NMS,
     NormalizeOp,
+    Pick,
     Pipeline,
-    ProjectToInputOp,
+    Project,
     Recall,
     ResizeOp,
-    RuntimeOutputs,
     Select,
+    Softmax,
+    Squeeze,
     Store,
+    TensorRegistry,
+    ToDetections,
 )
 from common import (
     COCO_IMAGE_NAME,
@@ -27,27 +35,34 @@ from common import (
     download_if_missing,
     render_and_save_detections,
 )
-from ml_pipes.types import DetectionArrays, TensorPayload
 
 
 MODEL_URL = "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model.onnx"
 MODEL_NAME = "rfdetr_nano.onnx"
 
-RFDETR_BOX_NAMES = ("pred_boxes", "boxes", "dets")
-RFDETR_LOGIT_NAMES = ("pred_logits", "logits", "labels")
+# RF-DETR exports normalized boxes in (cx, cy, w, h) format.
+# Multiply by input size to get pixel coordinates.
+INPUT_SIZE = (640, 640)
+
+
+def _denormalize_boxes(registry: TensorRegistry) -> TensorRegistry:
+    """Scales normalized (cx, cy, w, h) boxes to pixel coordinates."""
+    boxes = registry["boxes"]
+    if np.max(np.abs(boxes)) <= 2.0:
+        boxes = boxes.copy()
+        boxes[:, [0, 2]] *= float(INPUT_SIZE[1])
+        boxes[:, [1, 3]] *= float(INPUT_SIZE[0])
+        registry["boxes"] = boxes
+    return registry
 
 
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
             DecodeOp(),
-            ResizeOp(
-                target_size=(640, 640),
-                mode="resize",
-                interpolation="linear",
-            ),
+            ResizeOp(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
             Store("resize_transform", index=1),
-            Select(0),
+            Pick(0),
             NormalizeOp(
                 scale=1.0 / 255.0,
                 output_layout="NCHW",
@@ -55,114 +70,21 @@ def build_pipeline(model_path: Path) -> Pipeline:
                 add_batch_dim=True,
             ),
             InferOp(model_path, expected_input_layout="NCHW", expected_model_dtype="float32"),
-            lambda runtime_outputs: decode_rfdetr_outputs(
-                runtime_outputs,
-                input_size=(640, 640),
-                score_threshold=0.25,
-                max_detections=20,
-            ),
+            Select("pred_boxes", "logits", as_=("boxes", "logits")),
+            Squeeze("boxes"),                                   # (1, N, 4) → (N, 4)
+            Squeeze("logits"),                                  # (1, N, C) → (N, C)
+            Softmax("logits"),
+            ArgMax("logits", as_="classes"),
+            GatherScores("logits", "classes", as_="scores"),
+            _denormalize_boxes,                                 # normalized cxcywh → pixel cxcywh
+            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            NMS(conf_threshold=0.25, iou_threshold=1.0, max_detections=20),
             Recall("resize_transform"),
-            ProjectToInputOp(),
+            Project(),
+            ToDetections(),
         ]
     )
 
-
-def decode_rfdetr_outputs(
-    runtime_outputs: RuntimeOutputs,
-    input_size: tuple[int, int],
-    score_threshold: float = 0.25,
-    max_detections: int = 20,
-) -> DetectionArrays:
-    box_tensor = _select_rfdetr_tensor(runtime_outputs, RFDETR_BOX_NAMES, expected_last_dim=4)
-    logit_tensor = _select_rfdetr_tensor(runtime_outputs, RFDETR_LOGIT_NAMES, expected_last_dim=None)
-
-    boxes = _squeeze_batch_dim(box_tensor.array, "boxes")
-    logits = _squeeze_batch_dim(logit_tensor.array, "logits")
-
-    if boxes.ndim != 2 or boxes.shape[1] != 4:
-        raise ValueError(f"RF-DETR boxes must have shape (N, 4), got {boxes.shape}")
-    if logits.ndim != 2:
-        raise ValueError(f"RF-DETR logits must have shape (N, C), got {logits.shape}")
-    if boxes.shape[0] != logits.shape[0]:
-        raise ValueError(
-            f"RF-DETR boxes/logits count mismatch: {boxes.shape[0]} boxes vs {logits.shape[0]} logits"
-        )
-
-    probabilities = _softmax(logits)
-    classes = np.argmax(probabilities, axis=1).astype(np.int32)
-    scores = probabilities[np.arange(probabilities.shape[0]), classes].astype(np.float32)
-
-    boxes_xyxy = _rfdetr_boxes_to_xyxy(boxes.astype(np.float32), input_size=input_size)
-    keep = scores >= score_threshold
-    kept_indices = np.where(keep)[0]
-    if kept_indices.size > max_detections:
-        ordered = kept_indices[np.argsort(scores[kept_indices])[::-1]]
-        kept_indices = ordered[:max_detections]
-
-    return DetectionArrays(
-        boxes=boxes_xyxy[kept_indices],
-        scores=scores[kept_indices],
-        classes=classes[kept_indices],
-    )
-
-
-def _select_rfdetr_tensor(
-    runtime_outputs: RuntimeOutputs,
-    candidate_names: tuple[str, ...],
-    expected_last_dim: int | None,
-) -> TensorPayload:
-    for name in candidate_names:
-        if name in runtime_outputs.names:
-            return runtime_outputs.tensors[runtime_outputs.names.index(name)]
-
-    matching_tensors: list[TensorPayload] = []
-    for tensor in runtime_outputs.tensors:
-        if tensor.array.ndim < 2:
-            continue
-        if expected_last_dim is not None and tensor.array.shape[-1] != expected_last_dim:
-            continue
-        if expected_last_dim is None and tensor.array.shape[-1] == 4:
-            continue
-        matching_tensors.append(tensor)
-
-    if len(matching_tensors) == 1:
-        return matching_tensors[0]
-
-    raise ValueError(
-        f"Could not resolve RF-DETR output from names {runtime_outputs.names}. "
-        f"Expected one of {candidate_names}."
-    )
-
-
-def _squeeze_batch_dim(array: np.ndarray, label: str) -> np.ndarray:
-    if array.ndim == 3 and array.shape[0] == 1:
-        return array[0]
-    if array.ndim == 2:
-        return array
-    raise ValueError(f"Unsupported RF-DETR {label} shape: {array.shape}")
-
-
-def _rfdetr_boxes_to_xyxy(boxes: np.ndarray, input_size: tuple[int, int]) -> np.ndarray:
-    input_h, input_w = input_size
-    absolute_boxes = boxes.copy()
-
-    # RF-DETR exports typically use normalized cx, cy, w, h boxes.
-    if np.max(np.abs(absolute_boxes)) <= 2.0:
-        absolute_boxes[:, [0, 2]] *= float(input_w)
-        absolute_boxes[:, [1, 3]] *= float(input_h)
-
-    centers = absolute_boxes[:, :2]
-    sizes = absolute_boxes[:, 2:4]
-    half_sizes = sizes / 2.0
-    top_left = centers - half_sizes
-    bottom_right = centers + half_sizes
-    return np.concatenate((top_left, bottom_right), axis=1)
-
-
-def _softmax(values: np.ndarray) -> np.ndarray:
-    shifted = values - np.max(values, axis=1, keepdims=True)
-    exp_values = np.exp(shifted)
-    return exp_values / np.sum(exp_values, axis=1, keepdims=True)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an RF-DETR ONNX demo on a public COCO image.")

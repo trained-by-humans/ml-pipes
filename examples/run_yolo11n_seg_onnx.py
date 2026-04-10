@@ -7,19 +7,27 @@ from pathlib import Path
 import numpy as np
 
 from ml_pipes import (
+    ArgMax,
+    ConvertBoxFormat,
     DecodeOp,
-    DecodeSegmentationOp,
+    GatherScores,
     InferOp,
     LogDetectionsOp,
     MapToObjectsOp,
+    NMS,
     NormalizeOp,
+    Pick,
     Pipeline,
-    ProjectSegmentationsOp,
+    Project,
+    ReconstructMasks,
     Recall,
     ResizeOp,
-    SegmentationNMSOp,
     Select,
+    Slice,
+    Squeeze,
     Store,
+    ToSegmentations,
+    Transpose,
 )
 from common import (
     COCO_CLASSES,
@@ -34,6 +42,10 @@ from common import (
 MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx"
 MODEL_NAME = "yolo11n-seg.onnx"
 
+# output0: (1, 116, 8400) — 4 box + 80 class + 32 mask coefficients
+# output1: (1, 32, 160, 160) — prototype masks
+NUM_MASKS = 32
+
 
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
@@ -41,20 +53,24 @@ def build_pipeline(model_path: Path) -> Pipeline:
             DecodeOp(),
             ResizeOp((640, 640)),
             Store("resize_transform", index=1),
-            Select(0),
+            Pick(0),
             NormalizeOp(),
             InferOp(model_path, expected_input_layout="NCHW", expected_model_dtype="float32"),
-            DecodeSegmentationOp(
-                export_detection_output_index=0,
-                export_prototype_output_index=1,
-                num_masks=32,
-                input_box_format="xywh",
-                transpose_output="auto",
-                squeeze_batch_dim=True,
-            ),
-            SegmentationNMSOp(conf_threshold=0.25, iou_threshold=0.45, max_detections=100),
+            Select("output0", "output1", as_=("preds", "protos")),
+            Squeeze("preds"),                                              # (1, 116, N) → (116, N)
+            Squeeze("protos"),                                             # (1, 32, H, W) → (32, H, W)
+            Transpose("preds"),                                            # (116, N) → (N, 116)
+            Slice("preds", slice(None, 4), as_="boxes"),                  # (N, 4)
+            Slice("preds", slice(4, -NUM_MASKS), as_="class_scores"),     # (N, 80)
+            Slice("preds", slice(-NUM_MASKS, None), as_="mask_coeffs"),   # (N, 32)
+            ArgMax("class_scores", as_="classes"),
+            GatherScores("class_scores", "classes", as_="scores"),
+            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            NMS(also_filter=["mask_coeffs"]),
+            ReconstructMasks("mask_coeffs", "protos"),
             Recall("resize_transform"),
-            ProjectSegmentationsOp(mask_threshold=0.5),
+            Project(masks="masks", mask_threshold=0.5),
+            ToSegmentations(),
         ]
     )
 

@@ -114,7 +114,7 @@ def render_and_save_detections(
     source_image = DecodeOp()(image_path)
     Pipeline(
         [
-            lambda value: (value, source_image.array),
+            lambda value: (value, source_image),
             DrawBoxesOp(class_names=class_names),
             SaveImageOp(output_path),
         ]

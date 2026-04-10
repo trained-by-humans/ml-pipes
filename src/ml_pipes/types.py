@@ -26,11 +26,31 @@ class RuntimeOutputs:
     names: tuple[str, ...]
 
 
-@dataclass(frozen=True)
-class DetectionArrays:
-    boxes: np.ndarray
-    scores: np.ndarray
-    classes: np.ndarray
+class TensorRegistry:
+    """Mutable named store for intermediate tensors during post-processing."""
+
+    def __init__(self, tensors: dict[str, np.ndarray] | None = None):
+        self._tensors: dict[str, np.ndarray] = dict(tensors) if tensors else {}
+
+    def __getitem__(self, name: str) -> np.ndarray:
+        try:
+            return self._tensors[name]
+        except KeyError:
+            available = sorted(self._tensors)
+            raise KeyError(f"Tensor {name!r} not found in registry. Available: {available}")
+
+    def __setitem__(self, name: str, value: np.ndarray) -> None:
+        self._tensors[name] = value
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._tensors
+
+    def keys(self) -> object:
+        return self._tensors.keys()
+
+    def __repr__(self) -> str:
+        shapes = {k: v.shape for k, v in self._tensors.items()}
+        return f"TensorRegistry({shapes})"
 
 
 @dataclass(frozen=True)
@@ -38,15 +58,6 @@ class Detections:
     boxes: list[list[float]]
     scores: list[float]
     classes: list[int]
-
-
-@dataclass(frozen=True)
-class SegmentationCandidates:
-    boxes: np.ndarray
-    scores: np.ndarray
-    classes: np.ndarray
-    mask_coefficients: np.ndarray
-    prototypes: np.ndarray
 
 
 @dataclass(frozen=True)

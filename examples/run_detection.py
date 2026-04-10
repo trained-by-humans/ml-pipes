@@ -4,17 +4,24 @@ import json
 import sys
 
 from ml_pipes import (
+    ArgMax,
+    ConvertBoxFormat,
     DecodeOp,
-    DecodePredictionsOp,
+    GatherScores,
     InferOp,
-    NMSOp,
+    NMS,
     NormalizeOp,
+    Pick,
     Pipeline,
-    ProjectToInputOp,
+    Project,
     Recall,
     ResizeOp,
     Select,
+    Slice,
+    Squeeze,
     Store,
+    ToDetections,
+    Transpose,
 )
 
 
@@ -29,13 +36,21 @@ def main() -> int:
             DecodeOp(),
             ResizeOp((640, 640)),
             Store("resize_transform", index=1),
-            Select(0),
+            Pick(0),
             NormalizeOp(),
             InferOp(model_path),
-            DecodePredictionsOp(),
-            NMSOp(),
+            Select("output0", as_="preds"),
+            Squeeze("preds"),
+            Transpose("preds"),
+            Slice("preds", slice(None, 4), as_="boxes"),
+            Slice("preds", slice(4, None), as_="scores"),
+            ArgMax("scores", as_="classes"),
+            GatherScores("scores", "classes"),
+            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            NMS(),
             Recall("resize_transform"),
-            ProjectToInputOp(),
+            Project(),
+            ToDetections(),
         ]
     )
 

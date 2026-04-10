@@ -5,19 +5,26 @@ import sys
 from pathlib import Path
 
 from ml_pipes import (
+    ArgMax,
+    ConvertBoxFormat,
     DecodeOp,
-    DecodePredictionsOp,
+    GatherScores,
     InferOp,
     LogDetectionsOp,
     MapToObjectsOp,
-    NMSOp,
+    NMS,
     NormalizeOp,
+    Pick,
     Pipeline,
-    ProjectToInputOp,
+    Project,
     Recall,
     ResizeOp,
     Select,
+    Slice,
+    Squeeze,
     Store,
+    ToDetections,
+    Transpose,
 )
 from common import (
     COCO_CLASSES,
@@ -39,15 +46,24 @@ def build_pipeline(model_path: Path) -> Pipeline:
             DecodeOp(),
             ResizeOp((640, 640)),
             Store("resize_transform", index=1),
-            Select(0),
+            Pick(0),
             NormalizeOp(),
             InferOp(model_path),
-            DecodePredictionsOp(),
-            NMSOp(),
+            Select("output0", as_="preds"),
+            Squeeze("preds"),
+            Transpose("preds"),
+            Slice("preds", slice(None, 4), as_="boxes"),
+            Slice("preds", slice(4, None), as_="scores"),
+            ArgMax("scores", as_="classes"),
+            GatherScores("scores", "classes"),
+            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            NMS(),
             Recall("resize_transform"),
-            ProjectToInputOp(),
+            Project(),
+            ToDetections(),
         ]
     )
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a public YOLOv8n ONNX demo on a COCO image.")

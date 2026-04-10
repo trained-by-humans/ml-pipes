@@ -12,15 +12,18 @@ import numpy as np
 
 from .transforms import ResizeTransform
 from .types import (
-    DetectionArrays,
     Detections,
     ImagePayload,
     RuntimeOutputs,
-    SegmentationCandidates,
     Segmentations,
     TensorPayload,
+    TensorRegistry,
 )
 
+
+# ---------------------------------------------------------------------------
+# Image / preprocessing
+# ---------------------------------------------------------------------------
 
 class DecodeOp:
     def __call__(self, image_path: str | Path) -> ImagePayload:
@@ -215,6 +218,10 @@ class CastTensorOp:
         raise TypeError(f"CastTensorOp does not support value type {type(value)!r}")
 
 
+# ---------------------------------------------------------------------------
+# Inference
+# ---------------------------------------------------------------------------
+
 class InferOp:
     def __init__(
         self,
@@ -276,155 +283,308 @@ class InferOp:
         return RuntimeOutputs(tensors=tensors, names=runtime_output_names)
 
 
-class DecodePredictionsOp:
-    def __init__(
-        self,
-        # Export/model-facing output selection. Names and indexes come from the exported model artifact.
-        export_output_index: int = 0,
-        export_output_name: str | None = None,
-        num_box_values: int = 4,
-        class_start_index: int = 4,
-        input_box_format: Literal["xywh", "xyxy"] = "xywh",
-        transpose_output: Literal["auto", "never", "always"] = "auto",
-        squeeze_batch_dim: bool = True,
-        score_activation: Literal["none", "sigmoid", "softmax"] = "none",
-    ):
-        self.export_output_index = export_output_index
-        self.export_output_name = export_output_name
-        self.num_box_values = num_box_values
-        self.class_start_index = class_start_index
-        self.input_box_format = input_box_format
-        self.transpose_output = transpose_output
-        self.squeeze_batch_dim = squeeze_batch_dim
-        self.score_activation = score_activation
+# ---------------------------------------------------------------------------
+# Registry creation
+# ---------------------------------------------------------------------------
 
-    def __call__(self, runtime_outputs: RuntimeOutputs) -> DetectionArrays:
-        export_output = self._select_export_output(runtime_outputs)
-        predictions = self._normalize_output_shape(np.asarray(export_output.array))
-        if predictions.shape[1] < self.class_start_index + 2:
-            raise ValueError(
-                "Unsupported YOLOv8 output: expected at least 4 box values and 2 class scores"
-            )
+class Select:
+    """Extracts named tensors from RuntimeOutputs into a TensorRegistry.
 
-        boxes = predictions[:, : self.num_box_values]
-        class_scores = predictions[:, self.class_start_index :]
-        class_scores = self._activate_scores(class_scores)
-        classes = np.argmax(class_scores, axis=1).astype(np.int32)
-        scores = class_scores[np.arange(class_scores.shape[0]), classes]
-        boxes_xyxy = self._to_xyxy(boxes)
-        batch = DetectionArrays(
-            boxes=boxes_xyxy.astype(np.float32),
-            scores=scores.astype(np.float32),
-            classes=classes,
-        )
-        return batch
+    Single output with rename:  Select("output0", as_="preds")
+    Multiple outputs:           Select("output0", "output1", as_=("preds", "protos"))
+    """
 
-    def _select_export_output(self, value: RuntimeOutputs) -> TensorPayload:
-        if self.export_output_name is not None:
-            if self.export_output_name not in value.names:
+    def __init__(self, *names: str, as_: str | tuple[str, ...] | None = None):
+        if not names:
+            raise ValueError("Select requires at least one output name")
+        if as_ is not None:
+            aliases: tuple[str, ...] = (as_,) if isinstance(as_, str) else tuple(as_)
+            if len(aliases) != len(names):
                 raise ValueError(
-                    f"DecodePredictionsOp export output {self.export_output_name!r} not found in {value.names}"
+                    f"Select: as_ length ({len(aliases)}) must match names length ({len(names)})"
                 )
-            return value.tensors[value.names.index(self.export_output_name)]
+        else:
+            aliases = names
+        self._mapping: dict[str, str] = dict(zip(names, aliases))
 
-        if self.export_output_index >= len(value.tensors):
-            raise ValueError(
-                f"DecodePredictionsOp export output index {self.export_output_index} out of range "
-                f"for {len(value.tensors)} runtime outputs"
-            )
-        return value.tensors[self.export_output_index]
+    def __call__(self, outputs: RuntimeOutputs) -> TensorRegistry:
+        registry = TensorRegistry()
+        for src, dst in self._mapping.items():
+            if src not in outputs.names:
+                raise KeyError(
+                    f"Select: output {src!r} not found. Available: {list(outputs.names)}"
+                )
+            idx = list(outputs.names).index(src)
+            registry[dst] = outputs.tensors[idx].array
+        return registry
 
-    def _normalize_output_shape(self, output: np.ndarray) -> np.ndarray:
-        if output.ndim == 3 and self.squeeze_batch_dim and output.shape[0] == 1:
-            output = output[0]
-        elif output.ndim != 2:
-            raise ValueError(f"Unsupported YOLOv8 output shape: {output.shape}")
 
-        if output.ndim != 2:
-            raise ValueError(f"Unsupported YOLOv8 output shape: {output.shape}")
+# ---------------------------------------------------------------------------
+# Tensor shape manipulation
+# ---------------------------------------------------------------------------
 
-        if self.transpose_output == "never":
-            return output
-        if self.transpose_output == "always":
-            return output.T
-        if output.shape[0] > output.shape[1] and output.shape[1] >= self.class_start_index + 2:
-            return output
-        if output.shape[0] >= self.class_start_index + 2:
-            return output.T
-        raise ValueError(f"Unsupported YOLOv8 output shape: {output.shape}")
+class Squeeze:
+    """Removes size-1 dimensions from a named tensor."""
 
-    def _to_xyxy(self, boxes: np.ndarray) -> np.ndarray:
-        if self.input_box_format == "xyxy":
+    def __init__(self, name: str, axis: int | tuple[int, ...] | None = None, as_: str | None = None):
+        self.name = name
+        self.axis = axis
+        self.as_ = as_ or name
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        tensor = registry[self.name]
+        registry[self.as_] = np.squeeze(tensor, axis=self.axis) if self.axis is not None else np.squeeze(tensor)
+        return registry
+
+
+class Transpose:
+    """Transposes a named tensor."""
+
+    def __init__(self, name: str, axes: tuple[int, ...] | None = None, as_: str | None = None):
+        self.name = name
+        self.axes = axes
+        self.as_ = as_ or name
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = np.transpose(registry[self.name], self.axes)
+        return registry
+
+
+# ---------------------------------------------------------------------------
+# Tensor indexing
+# ---------------------------------------------------------------------------
+
+class Slice:
+    """Slices columns from a 2D named tensor: as_ = src[:, s].
+
+    Defaults to in-place (overwrites src) when as_ is not provided.
+    """
+
+    def __init__(self, src: str, s: slice, as_: str | None = None):
+        self.src = src
+        self.s = s
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = registry[self.src][:, self.s]
+        return registry
+
+
+class Gather:
+    """Gathers values: as_ = src[arange(N), indices].
+
+    Defaults to in-place (overwrites src) when as_ is not provided.
+    """
+
+    def __init__(self, src: str, indices: str, as_: str | None = None):
+        self.src = src
+        self.indices = indices
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        src = registry[self.src]
+        idx = registry[self.indices]
+        registry[self.as_] = src[np.arange(src.shape[0]), idx]
+        return registry
+
+
+# ---------------------------------------------------------------------------
+# Math / activations
+# ---------------------------------------------------------------------------
+
+class ArgMax:
+    """Computes argmax along an axis: as_ = argmax(src, axis).
+
+    Defaults to in-place (overwrites src) when as_ is not provided.
+    """
+
+    def __init__(self, src: str, axis: int = -1, as_: str | None = None):
+        self.src = src
+        self.axis = axis
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = np.argmax(registry[self.src], axis=self.axis).astype(np.int32)
+        return registry
+
+
+class GatherScores:
+    """Reduces a 2D score matrix to 1D by picking each row's value at its class index.
+
+    Equivalent to: scores[arange(N), classes]
+    Writes result back to scores (or as_) in the registry.
+    """
+
+    def __init__(self, scores: str, classes: str, as_: str | None = None):
+        self.scores = scores
+        self.classes = classes
+        self.as_ = as_ or scores
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        scores = registry[self.scores]
+        classes = registry[self.classes]
+        registry[self.as_] = scores[np.arange(scores.shape[0]), classes].astype(np.float32)
+        return registry
+
+
+class Softmax:
+    """Applies softmax along an axis.
+
+    Defaults to in-place (overwrites src) when as_ is not provided.
+    """
+
+    def __init__(self, name: str, axis: int = -1, as_: str | None = None):
+        self.name = name
+        self.axis = axis
+        self.as_ = as_ or name
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        x = registry[self.name]
+        shifted = x - np.max(x, axis=self.axis, keepdims=True)
+        exp = np.exp(shifted)
+        registry[self.as_] = exp / np.sum(exp, axis=self.axis, keepdims=True)
+        return registry
+
+
+class Sigmoid:
+    """Applies sigmoid elementwise.
+
+    Defaults to in-place (overwrites src) when as_ is not provided.
+    """
+
+    def __init__(self, name: str, as_: str | None = None):
+        self.name = name
+        self.as_ = as_ or name
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = 1.0 / (1.0 + np.exp(-registry[self.name]))
+        return registry
+
+
+# ---------------------------------------------------------------------------
+# Geometry
+# ---------------------------------------------------------------------------
+
+_BOX_FORMATS = ("xyxy", "xywh", "cxcywh")
+
+
+class ConvertBoxFormat:
+    """Converts bounding boxes between coordinate formats.
+
+    Supported formats:
+      "xyxy"   — (x1, y1, x2, y2) corner coordinates
+      "xywh"   — (x, y, w, h) top-left corner + size
+      "cxcywh" — (cx, cy, w, h) center + size  (YOLO model output)
+
+    Defaults to in-place (overwrites src) when as_ is not provided.
+    """
+
+    def __init__(self, name: str, from_: str, to: str, as_: str | None = None):
+        if from_ not in _BOX_FORMATS:
+            raise ValueError(f"ConvertBoxFormat: unknown from_ format {from_!r}. Choose from {_BOX_FORMATS}")
+        if to not in _BOX_FORMATS:
+            raise ValueError(f"ConvertBoxFormat: unknown to format {to!r}. Choose from {_BOX_FORMATS}")
+        self.name = name
+        self.from_ = from_
+        self.to = to
+        self.as_ = as_ or name
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        boxes = registry[self.name]
+        registry[self.as_] = self._convert(boxes, self.from_, self.to)
+        return registry
+
+    @staticmethod
+    def _convert(boxes: np.ndarray, from_: str, to: str) -> np.ndarray:
+        if from_ == to:
             return boxes
-        if self.input_box_format != "xywh":
-            raise ValueError(f"Unsupported box format: {self.input_box_format}")
 
-        centers = boxes[:, :2]
-        sizes = boxes[:, 2:4]
-        half_sizes = sizes / 2.0
-        top_left = centers - half_sizes
-        bottom_right = centers + half_sizes
-        return np.concatenate((top_left, bottom_right), axis=1)
+        # Normalise everything to xyxy first, then convert to target
+        if from_ == "xyxy":
+            xyxy = boxes
+        elif from_ == "xywh":
+            xyxy = np.concatenate(
+                [boxes[:, :2], boxes[:, :2] + boxes[:, 2:4]], axis=1
+            )
+        elif from_ == "cxcywh":
+            half = boxes[:, 2:4] / 2.0
+            xyxy = np.concatenate([boxes[:, :2] - half, boxes[:, :2] + half], axis=1)
+        else:
+            raise ValueError(from_)
 
-    def _activate_scores(self, scores: np.ndarray) -> np.ndarray:
-        if self.score_activation == "none":
-            return scores
-        if self.score_activation == "sigmoid":
-            return 1.0 / (1.0 + np.exp(-scores))
-        if self.score_activation == "softmax":
-            shifted = scores - np.max(scores, axis=1, keepdims=True)
-            exp = np.exp(shifted)
-            return exp / np.sum(exp, axis=1, keepdims=True)
-        raise ValueError(f"Unsupported score activation: {self.score_activation}")
+        if to == "xyxy":
+            return xyxy.astype(np.float32)
+        if to == "xywh":
+            return np.concatenate(
+                [xyxy[:, :2], xyxy[:, 2:4] - xyxy[:, :2]], axis=1
+            ).astype(np.float32)
+        if to == "cxcywh":
+            wh = xyxy[:, 2:4] - xyxy[:, :2]
+            return np.concatenate(
+                [xyxy[:, :2] + wh / 2.0, wh], axis=1
+            ).astype(np.float32)
+        raise ValueError(to)
 
 
-class NMSOp:
+# ---------------------------------------------------------------------------
+# Detection
+# ---------------------------------------------------------------------------
+
+class NMS:
+    """Non-Maximum Suppression on named tensors in a TensorRegistry.
+
+    Filters boxes, scores, and classes in-place. Optionally filters additional
+    tensors (e.g. mask coefficients for segmentation) via also_filter.
+    """
+
     def __init__(
         self,
+        boxes: str = "boxes",
+        scores: str = "scores",
+        classes: str = "classes",
+        also_filter: list[str] | None = None,
         conf_threshold: float = 0.25,
         iou_threshold: float = 0.45,
         max_detections: int = 300,
     ):
+        self.boxes = boxes
+        self.scores = scores
+        self.classes = classes
+        self.also_filter: list[str] = also_filter or []
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
         self.max_detections = max_detections
 
-    def __call__(self, detection_arrays: DetectionArrays) -> DetectionArrays:
-        detections = detection_arrays
-        boxes, scores, classes, kept = self._filter_and_keep_indices(
-            detections.boxes,
-            detections.scores,
-            detections.classes,
-        )
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        boxes = registry[self.boxes]
+        scores = registry[self.scores]
+        classes = registry[self.classes]
 
-        if boxes.size == 0:
-            empty = DetectionArrays(
-                boxes=np.zeros((0, 4), dtype=np.float32),
-                scores=np.zeros((0,), dtype=np.float32),
-                classes=np.zeros((0,), dtype=np.int32),
-            )
-            return empty
+        conf_mask = scores >= self.conf_threshold
+        filtered_boxes = boxes[conf_mask]
+        filtered_scores = scores[conf_mask]
+        filtered_classes = classes[conf_mask]
+        original_indices = np.where(conf_mask)[0]
 
-        filtered = DetectionArrays(
-            boxes=boxes[kept],
-            scores=scores[kept],
-            classes=classes[kept],
-        )
-        return filtered
+        if filtered_boxes.size == 0:
+            kept_original = np.zeros((0,), dtype=np.int32)
+        else:
+            kept_filtered = self._nms_indices(filtered_boxes, filtered_scores, filtered_classes)
+            kept_original = original_indices[kept_filtered]
 
-    def _filter_and_keep_indices(
+        registry[self.boxes] = boxes[kept_original]
+        registry[self.scores] = scores[kept_original]
+        registry[self.classes] = classes[kept_original]
+        for name in self.also_filter:
+            registry[name] = registry[name][kept_original]
+        return registry
+
+    def _nms_indices(
         self,
         boxes: np.ndarray,
         scores: np.ndarray,
         classes: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        mask = scores >= self.conf_threshold
-        boxes = boxes[mask]
-        scores = scores[mask]
-        classes = classes[mask]
-        if boxes.size == 0:
-            return boxes, scores, classes, np.zeros((0,), dtype=np.int32)
-
+    ) -> np.ndarray:
         kept_indices: list[int] = []
         for class_id in np.unique(classes):
             class_indices = np.where(classes == class_id)[0]
@@ -435,7 +595,6 @@ class NMSOp:
                 kept_indices.append(current)
                 if len(kept_indices) >= self.max_detections or ordered.size == 1:
                     break
-
                 remaining = ordered[1:]
                 ious = self._compute_iou(boxes[current], boxes[remaining])
                 ordered = remaining[ious < self.iou_threshold]
@@ -443,10 +602,12 @@ class NMSOp:
             if len(kept_indices) >= self.max_detections:
                 break
 
+        if not kept_indices:
+            return np.zeros((0,), dtype=np.int32)
+
         kept = np.asarray(kept_indices, dtype=np.int32)
         final_order = np.argsort(scores[kept])[::-1]
-        kept = kept[final_order][: self.max_detections]
-        return boxes, scores, classes, kept
+        return kept[final_order][: self.max_detections]
 
     @staticmethod
     def _compute_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
@@ -470,203 +631,56 @@ class NMSOp:
         return intersection / union
 
 
-class ProjectToInputOp:
-    def __call__(self, value: DetectionArrays, transform: ResizeTransform) -> Detections:
-        boxes = value.boxes.copy()
-        scores = value.scores.astype(np.float32)
-        classes = value.classes.astype(np.int32)
+# ---------------------------------------------------------------------------
+# Segmentation
+# ---------------------------------------------------------------------------
 
-        pad_x, pad_y = transform.pad
-        scale_x, scale_y = transform.scale
-        original_h, original_w = transform.original_shape
+class ReconstructMasks:
+    """Reconstructs raw segmentation masks from coefficients and prototypes.
 
-        boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_x) / scale_x
-        boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale_y
+    dst = (coefficients @ prototypes.reshape(C, -1)).reshape(N, H, W)
+    """
 
-        boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(original_w))
-        boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))
+    def __init__(self, coefficients: str, prototypes: str, dst: str = "masks"):
+        self.coefficients = coefficients
+        self.prototypes = prototypes
+        self.dst = dst
 
-        return Detections(
-            boxes=boxes.tolist(),
-            scores=scores.tolist(),
-            classes=classes.tolist(),
-        )
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        coefficients = registry[self.coefficients]  # (N, C)
+        prototypes = registry[self.prototypes]       # (C, H, W)
+        channels, mask_h, mask_w = prototypes.shape
+        masks = coefficients @ prototypes.reshape(channels, -1)
+        registry[self.dst] = masks.reshape(-1, mask_h, mask_w)
+        return registry
 
 
-class DecodeSegmentationOp:
+# ---------------------------------------------------------------------------
+# Projection
+# ---------------------------------------------------------------------------
+
+class Project:
+    """Projects boxes (and optionally masks) from model space to original image space.
+
+    Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
+    When masks is specified, also crops, upsamples, and thresholds the mask tensors.
+    """
+
     def __init__(
         self,
-        export_detection_output_index: int = 0,
-        export_detection_output_name: str | None = None,
-        export_prototype_output_index: int = 1,
-        export_prototype_output_name: str | None = None,
-        num_box_values: int = 4,
-        class_start_index: int = 4,
-        num_masks: int = 32,
-        input_box_format: Literal["xywh", "xyxy"] = "xywh",
-        transpose_output: Literal["auto", "never", "always"] = "auto",
-        squeeze_batch_dim: bool = True,
-        score_activation: Literal["none", "sigmoid", "softmax"] = "none",
+        boxes: str = "boxes",
+        masks: str | None = None,
+        mask_threshold: float = 0.0,
     ):
-        self.export_detection_output_index = export_detection_output_index
-        self.export_detection_output_name = export_detection_output_name
-        self.export_prototype_output_index = export_prototype_output_index
-        self.export_prototype_output_name = export_prototype_output_name
-        self.num_box_values = num_box_values
-        self.class_start_index = class_start_index
-        self.num_masks = num_masks
-        self.input_box_format = input_box_format
-        self.transpose_output = transpose_output
-        self.squeeze_batch_dim = squeeze_batch_dim
-        self.score_activation = score_activation
-
-    def __call__(self, runtime_outputs: RuntimeOutputs) -> SegmentationCandidates:
-        detection_output = self._select_export_output(
-            runtime_outputs,
-            output_index=self.export_detection_output_index,
-            output_name=self.export_detection_output_name,
-        )
-        prototype_output = self._select_export_output(
-            runtime_outputs,
-            output_index=self.export_prototype_output_index,
-            output_name=self.export_prototype_output_name,
-        )
-
-        predictions = self._normalize_prediction_shape(np.asarray(detection_output.array))
-        prototypes = self._normalize_prototype_shape(np.asarray(prototype_output.array))
-        expected_columns = self.class_start_index + 1 + self.num_masks
-        if predictions.shape[1] < expected_columns:
-            raise ValueError(
-                "Unsupported YOLO-seg output: expected box, class, and mask coefficient columns"
-            )
-
-        boxes = predictions[:, : self.num_box_values]
-        mask_coefficients = predictions[:, -self.num_masks :]
-        class_scores = predictions[:, self.class_start_index : -self.num_masks]
-        class_scores = self._activate_scores(class_scores)
-        classes = np.argmax(class_scores, axis=1).astype(np.int32)
-        scores = class_scores[np.arange(class_scores.shape[0]), classes]
-        return SegmentationCandidates(
-            boxes=self._to_xyxy(boxes).astype(np.float32),
-            scores=scores.astype(np.float32),
-            classes=classes,
-            mask_coefficients=mask_coefficients.astype(np.float32),
-            prototypes=prototypes.astype(np.float32),
-        )
-
-    def _select_export_output(
-        self,
-        value: RuntimeOutputs,
-        *,
-        output_index: int,
-        output_name: str | None,
-    ) -> TensorPayload:
-        if output_name is not None:
-            if output_name not in value.names:
-                raise ValueError(f"Segmentation export output {output_name!r} not found in {value.names}")
-            return value.tensors[value.names.index(output_name)]
-        if output_index >= len(value.tensors):
-            raise ValueError(
-                f"Segmentation export output index {output_index} out of range for {len(value.tensors)} runtime outputs"
-            )
-        return value.tensors[output_index]
-
-    def _normalize_prediction_shape(self, output: np.ndarray) -> np.ndarray:
-        if output.ndim == 3 and self.squeeze_batch_dim and output.shape[0] == 1:
-            output = output[0]
-        elif output.ndim != 2:
-            raise ValueError(f"Unsupported YOLO-seg detection output shape: {output.shape}")
-
-        if self.transpose_output == "never":
-            return output
-        if self.transpose_output == "always":
-            return output.T
-        if output.shape[0] > output.shape[1] and output.shape[1] >= self.class_start_index + 1 + self.num_masks:
-            return output
-        if output.shape[0] >= self.class_start_index + 1 + self.num_masks:
-            return output.T
-        raise ValueError(f"Unsupported YOLO-seg detection output shape: {output.shape}")
-
-    def _normalize_prototype_shape(self, output: np.ndarray) -> np.ndarray:
-        if output.ndim == 4 and self.squeeze_batch_dim and output.shape[0] == 1:
-            output = output[0]
-        if output.ndim != 3:
-            raise ValueError(f"Unsupported YOLO-seg prototype output shape: {output.shape}")
-        if output.shape[0] != self.num_masks:
-            raise ValueError(
-                f"YOLO-seg prototype output expected {self.num_masks} mask channels, got {output.shape[0]}"
-            )
-        return output
-
-    def _to_xyxy(self, boxes: np.ndarray) -> np.ndarray:
-        if self.input_box_format == "xyxy":
-            return boxes
-        if self.input_box_format != "xywh":
-            raise ValueError(f"Unsupported box format: {self.input_box_format}")
-        centers = boxes[:, :2]
-        sizes = boxes[:, 2:4]
-        half_sizes = sizes / 2.0
-        top_left = centers - half_sizes
-        bottom_right = centers + half_sizes
-        return np.concatenate((top_left, bottom_right), axis=1)
-
-    def _activate_scores(self, scores: np.ndarray) -> np.ndarray:
-        if self.score_activation == "none":
-            return scores
-        if self.score_activation == "sigmoid":
-            return 1.0 / (1.0 + np.exp(-scores))
-        if self.score_activation == "softmax":
-            shifted = scores - np.max(scores, axis=1, keepdims=True)
-            exp = np.exp(shifted)
-            return exp / np.sum(exp, axis=1, keepdims=True)
-        raise ValueError(f"Unsupported score activation: {self.score_activation}")
-
-
-class SegmentationNMSOp(NMSOp):
-    def __call__(self, value: SegmentationCandidates) -> SegmentationCandidates:
-        boxes, scores, classes, kept = self._filter_and_keep_indices(
-            value.boxes,
-            value.scores,
-            value.classes,
-        )
-        if boxes.size == 0:
-            return SegmentationCandidates(
-                boxes=np.zeros((0, 4), dtype=np.float32),
-                scores=np.zeros((0,), dtype=np.float32),
-                classes=np.zeros((0,), dtype=np.int32),
-                mask_coefficients=np.zeros((0, value.mask_coefficients.shape[1]), dtype=np.float32),
-                prototypes=value.prototypes,
-            )
-        return SegmentationCandidates(
-            boxes=boxes[kept],
-            scores=scores[kept],
-            classes=classes[kept],
-            mask_coefficients=value.mask_coefficients[value.scores >= self.conf_threshold][kept],
-            prototypes=value.prototypes,
-        )
-
-
-class ProjectSegmentationsOp:
-    def __init__(self, mask_threshold: float = 0.0):
+        self.boxes = boxes
+        self.masks = masks
         self.mask_threshold = mask_threshold
 
-    def __call__(self, value: SegmentationCandidates, transform: ResizeTransform) -> Segmentations:
-        boxes = value.boxes.copy()
-        scores = value.scores.astype(np.float32)
-        classes = value.classes.astype(np.int32)
+    def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
+        boxes = registry[self.boxes].copy()
 
-        masks = self._process_masks(
-            value.prototypes,
-            value.mask_coefficients,
-            boxes,
-            transform.resized_shape,
-            transform,
-        )
-        valid = np.asarray([mask.any() for mask in masks], dtype=bool)
-        boxes = boxes[valid]
-        scores = scores[valid]
-        classes = classes[valid]
-        masks = [mask for mask, keep in zip(masks, valid, strict=True) if keep]
+        if self.masks is not None:
+            registry[self.masks] = self._project_masks(registry[self.masks], boxes, transform)
 
         pad_x, pad_y = transform.pad
         scale_x, scale_y = transform.scale
@@ -676,43 +690,39 @@ class ProjectSegmentationsOp:
         boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale_y
         boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(original_w))
         boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))
+        registry[self.boxes] = boxes
 
-        return Segmentations(
-            boxes=boxes.tolist(),
-            scores=scores.tolist(),
-            classes=classes.tolist(),
-            masks=masks,
-        )
+        return registry
 
-    def _process_masks(
+    def _project_masks(
         self,
-        prototypes: np.ndarray,
-        mask_coefficients: np.ndarray,
+        masks: np.ndarray,
         boxes: np.ndarray,
-        resized_shape: tuple[int, int],
         transform: ResizeTransform,
     ) -> list[np.ndarray]:
         import cv2
 
-        channels, mask_h, mask_w = prototypes.shape
-        masks = mask_coefficients @ prototypes.reshape(channels, -1)
-        masks = masks.reshape(-1, mask_h, mask_w)
+        _, mask_h, mask_w = masks.shape
+        resized_shape = transform.resized_shape
 
         width_ratio = mask_w / resized_shape[1]
         height_ratio = mask_h / resized_shape[0]
         downsampled_boxes = boxes.copy()
         downsampled_boxes[:, [0, 2]] *= width_ratio
         downsampled_boxes[:, [1, 3]] *= height_ratio
-        masks = self._crop_masks(masks, downsampled_boxes)
+        cropped = self._crop_masks(masks, downsampled_boxes)
 
         projected: list[np.ndarray] = []
-        for mask in masks:
-            upsampled = cv2.resize(mask, (resized_shape[1], resized_shape[0]), interpolation=cv2.INTER_LINEAR)
-            scaled = self._scale_mask_to_input(upsampled, transform)
+        for mask in cropped:
+            upsampled = cv2.resize(
+                mask, (resized_shape[1], resized_shape[0]), interpolation=cv2.INTER_LINEAR
+            )
+            scaled = self._scale_to_original(upsampled, transform)
             projected.append((scaled > self.mask_threshold).astype(np.uint8))
         return projected
 
-    def _scale_mask_to_input(self, mask: np.ndarray, transform: ResizeTransform) -> np.ndarray:
+    @staticmethod
+    def _scale_to_original(mask: np.ndarray, transform: ResizeTransform) -> np.ndarray:
         import cv2
 
         resized_h, resized_w = transform.resized_shape
@@ -725,7 +735,8 @@ class ProjectSegmentationsOp:
         original_h, original_w = transform.original_shape
         return cv2.resize(mask, (original_w, original_h), interpolation=cv2.INTER_LINEAR)
 
-    def _crop_masks(self, masks: np.ndarray, boxes: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _crop_masks(masks: np.ndarray, boxes: np.ndarray) -> np.ndarray:
         num_masks, height, width = masks.shape
         x1 = boxes[:, 0].clip(0, width)
         y1 = boxes[:, 1].clip(0, height)
@@ -734,8 +745,62 @@ class ProjectSegmentationsOp:
 
         rows = np.arange(width, dtype=np.float32)[None, None, :]
         cols = np.arange(height, dtype=np.float32)[None, :, None]
-        return masks * ((rows >= x1[:, None, None]) * (rows < x2[:, None, None]) * (cols >= y1[:, None, None]) * (cols < y2[:, None, None]))
+        return masks * (
+            (rows >= x1[:, None, None])
+            * (rows < x2[:, None, None])
+            * (cols >= y1[:, None, None])
+            * (cols < y2[:, None, None])
+        )
 
+
+# ---------------------------------------------------------------------------
+# Output conversion
+# ---------------------------------------------------------------------------
+
+class ToDetections:
+    """Converts named tensors in a TensorRegistry to a Detections output."""
+
+    def __init__(self, boxes: str = "boxes", scores: str = "scores", classes: str = "classes"):
+        self.boxes = boxes
+        self.scores = scores
+        self.classes = classes
+
+    def __call__(self, registry: TensorRegistry) -> Detections:
+        return Detections(
+            boxes=registry[self.boxes].tolist(),
+            scores=registry[self.scores].tolist(),
+            classes=registry[self.classes].tolist(),
+        )
+
+
+class ToSegmentations:
+    """Converts named tensors in a TensorRegistry to a Segmentations output."""
+
+    def __init__(
+        self,
+        boxes: str = "boxes",
+        scores: str = "scores",
+        classes: str = "classes",
+        masks: str = "masks",
+    ):
+        self.boxes = boxes
+        self.scores = scores
+        self.classes = classes
+        self.masks = masks
+
+    def __call__(self, registry: TensorRegistry) -> Segmentations:
+        masks_data = registry[self.masks]
+        return Segmentations(
+            boxes=registry[self.boxes].tolist(),
+            scores=registry[self.scores].tolist(),
+            classes=registry[self.classes].tolist(),
+            masks=list(masks_data) if isinstance(masks_data, np.ndarray) else masks_data,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Visualization / side-effects
+# ---------------------------------------------------------------------------
 
 class DrawBoxesOp:
     def __init__(
@@ -756,8 +821,7 @@ class DrawBoxesOp:
         if source_image is None:
             raise ValueError("source_image missing from context; cannot draw detections")
 
-        image = np.asarray(source_image).copy()
-        detections = detections
+        image = source_image.array.copy()
         boxes = detections.boxes
         scores = detections.scores
         classes = detections.classes
