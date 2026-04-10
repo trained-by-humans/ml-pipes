@@ -660,7 +660,7 @@ class ReconstructMasks:
     dst = (coefficients @ prototypes.reshape(C, -1)).reshape(N, H, W)
     """
 
-    def __init__(self, coefficients: str, prototypes: str, dst: str = "masks"):
+    def __init__(self, coefficients: str, prototypes: str, dst: str):
         self.coefficients = coefficients
         self.prototypes = prototypes
         self.dst = dst
