@@ -4,8 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
-
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
@@ -21,11 +19,11 @@ from ml_pipes import (
     ProjectBoxes,
     Recall,
     ResizeOp,
+    Scale,
     Select,
     Softmax,
     Squeeze,
     Store,
-    TensorRegistry,
     ToDetections,
 )
 from common import (
@@ -43,17 +41,6 @@ MODEL_NAME = "rfdetr_nano.onnx"
 # RF-DETR exports normalized boxes in (cx, cy, w, h) format.
 # Multiply by input size to get pixel coordinates.
 INPUT_SIZE = (640, 640)
-
-
-def _denormalize_boxes(registry: TensorRegistry) -> TensorRegistry:
-    """Scales normalized (cx, cy, w, h) boxes to pixel coordinates."""
-    boxes = registry["boxes"]
-    if np.max(np.abs(boxes)) <= 2.0:
-        boxes = boxes.copy()
-        boxes[:, [0, 2]] *= float(INPUT_SIZE[1])
-        boxes[:, [1, 3]] *= float(INPUT_SIZE[0])
-        registry["boxes"] = boxes
-    return registry
 
 
 def build_pipeline(model_path: Path) -> Pipeline:
@@ -76,7 +63,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Softmax("logits"),
             ArgMax("logits", as_="classes"),
             GatherScores("logits", "classes", as_="scores"),
-            _denormalize_boxes,                                 # normalized cxcywh → pixel cxcywh
+            Scale("boxes", by=(INPUT_SIZE[1], INPUT_SIZE[0], INPUT_SIZE[1], INPUT_SIZE[0])),  # normalized cxcywh → pixel cxcywh
             ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
             NMS(conf_threshold=0.25, iou_threshold=1.0, max_detections=20),
             Recall("resize_transform"),

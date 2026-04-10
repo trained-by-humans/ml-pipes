@@ -465,6 +465,28 @@ class Sigmoid:
 # Geometry
 # ---------------------------------------------------------------------------
 
+class Scale:
+    """Multiplies a tensor element-wise by a scalar or a per-column broadcast array.
+
+    Useful for converting normalized coordinates to pixel space (denormalize)
+    or pixel coordinates to [0, 1] space (normalize).
+    Defaults to in-place (overwrites src) when as_ is not provided.
+
+    Examples:
+      Scale("boxes", by=640.0)                           # uniform scale
+      Scale("boxes", by=(width, height, width, height))  # per-column for cxcywh / xyxy
+    """
+
+    def __init__(self, name: str, by: float | tuple | list, as_: str | None = None):
+        self.name = name
+        self.by = np.asarray(by, dtype=np.float32)
+        self.as_ = as_ or name
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = registry[self.name] * self.by
+        return registry
+
+
 _BOX_FORMATS = ("xyxy", "xywh", "cxcywh")
 
 
