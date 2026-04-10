@@ -54,6 +54,14 @@ class TensorRegistry:
 
 
 @dataclass(frozen=True)
+class ResizeTransform:
+    scale: tuple[float, float]
+    pad: tuple[float, float]
+    original_shape: tuple[int, int]
+    resized_shape: tuple[int, int]
+
+
+@dataclass(frozen=True)
 class Detections:
     boxes: list[list[float]]
     scores: list[float]

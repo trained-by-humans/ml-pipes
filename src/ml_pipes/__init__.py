@@ -29,10 +29,10 @@ from .ops import (
     ToSegmentations,
     Transpose,
 )
-from .transforms import ResizeTransform
 from .types import (
     Detections,
     ImagePayload,
+    ResizeTransform,
     RuntimeOutputs,
     Segmentations,
     TensorPayload,

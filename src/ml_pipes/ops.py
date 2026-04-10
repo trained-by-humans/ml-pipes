@@ -10,7 +10,7 @@ from typing import TextIO
 
 import numpy as np
 
-from .transforms import ResizeTransform
+from .types import ResizeTransform
 from .types import (
     Detections,
     ImagePayload,
