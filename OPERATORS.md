@@ -1,9 +1,45 @@
-# Operator reference
+# Operators
 
 Operators are the building blocks of a pipeline. They fall into four families:
 [Transform](#transform-operators) · [Tensor](#tensor-operators) · [Context](#context-operators) · [Side-effect](#side-effect-operators)
 
 ---
+
+## Design Principles
+
+Every operator in the library is designed to uphold the following properties.
+They are not style guidelines — they are what makes operators safe to compose
+and swap without side effects.
+
+**Stateless.** An operator holds only the configuration given at construction
+time (`name`, `axis`, `threshold`, etc.). It has no mutable state that
+accumulates between calls. Calling it twice on the same input produces the
+same output.
+
+**Single-responsibility.** Each operator does exactly one thing. `Squeeze`
+removes unit dimensions. `ConvertBoxFormat` converts between coordinate
+formats. `NMS` filters by confidence and IoU. Complexity is built by
+composing simple operators, not by adding parameters to existing ones.
+
+**Model-agnostic.** No operator knows which model produced the tensors it
+processes. `NMS`, `ProjectBoxes`, and `Softmax` are generic. Model-specific
+adaptations live in the pipeline list as individual operators, not inside
+shared infrastructure.
+
+**Precision-agnostic.** Operators preserve the dtype of their input. A
+pipeline that runs in float32 runs in float16 without modifying any operator.
+`NormalizeOp` is the single fixed-precision boundary: it converts uint8 input
+to float, and its output dtype becomes the working precision for everything
+that follows.
+
+**Runtime-agnostic.** Operators use NumPy. They impose no dependency on
+PyTorch, TensorFlow, or any specific hardware. `InferOp` is the only step
+that touches a runtime; everything before and after is plain NumPy and
+transfers to any compute environment.
+
+**Composable.** Every operator has the same contract: receive a value, return
+a value. Any Python callable fits. Pipelines are plain lists — operators can
+be reordered, replaced, or inserted without touching anything else.
 
 ## Transform operators
 
