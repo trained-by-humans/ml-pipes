@@ -95,6 +95,154 @@ subclass setup.
 using Python type annotations, catching operator mismatches before any data
 flows through.
 
+---
+
+## Comparison with other approaches
+
+Below is the same task — YOLOv8n object detection on a single image — implemented
+with three different approaches.
+
+### Ultralytics
+
+Ultralytics ships a high-level API tightly coupled to the YOLO model family:
+
+```python
+from ultralytics import YOLO
+
+model = YOLO("yolov8n.pt")
+results = model.predict("image.jpg", conf=0.25, iou=0.45)
+
+for r in results:
+    print(r.boxes.xyxy)   # boxes in original image space
+    print(r.boxes.cls)    # class indices
+    print(r.boxes.conf)   # confidence scores
+```
+
+Three lines from model load to result. The entire preprocessing, inference, and
+postprocessing pipeline runs inside `predict`. This is the right choice if you
+are building exclusively with YOLO models and the default postprocessing meets
+your needs.
+
+The cost is opacity and lock-in. You cannot swap a preprocessing step, insert a
+custom tensor operation, or reuse any of the internal logic with a non-YOLO model.
+The pipeline is not a list of steps you control — it is a method you call.
+
+---
+
+### Raw ONNX Runtime
+
+Without a framework, you own everything:
+
+```python
+import cv2
+import numpy as np
+import onnxruntime as ort
+
+session = ort.InferenceSession("yolov8n.onnx")
+
+# Preprocess
+img = cv2.imread("image.jpg")
+orig_h, orig_w = img.shape[:2]
+resized = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (640, 640))
+tensor = resized.transpose(2, 0, 1)[np.newaxis].astype(np.float32) / 255.0
+
+# Infer
+preds = session.run(None, {session.get_inputs()[0].name: tensor})[0]
+
+# Adapt layout: (1, 84, 8400) → (8400, 84)
+preds = preds.squeeze().T
+boxes_cxcywh = preds[:, :4]
+class_scores  = preds[:, 4:]
+classes = class_scores.argmax(axis=1)
+scores  = class_scores[np.arange(len(classes)), classes]
+
+# Confidence filter
+keep = scores >= 0.25
+boxes_cxcywh, scores, classes = boxes_cxcywh[keep], scores[keep], classes[keep]
+
+# cxcywh → xyxy
+x1 = boxes_cxcywh[:, 0] - boxes_cxcywh[:, 2] / 2
+y1 = boxes_cxcywh[:, 1] - boxes_cxcywh[:, 3] / 2
+x2 = boxes_cxcywh[:, 0] + boxes_cxcywh[:, 2] / 2
+y2 = boxes_cxcywh[:, 1] + boxes_cxcywh[:, 3] / 2
+boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+
+# NMS
+indices = cv2.dnn.NMSBoxes(boxes_xyxy.tolist(), scores.tolist(), 0.25, 0.45)
+boxes_xyxy, scores, classes = boxes_xyxy[indices], scores[indices], classes[indices]
+
+# Scale back to original image space
+boxes_xyxy[:, [0, 2]] *= orig_w / 640
+boxes_xyxy[:, [1, 3]] *= orig_h / 640
+```
+
+Maximum control, but every part is hand-written. Switching to RF-DETR means
+rewriting the entire preprocessing and postprocessing block from scratch — the
+confidence filter, box conversion, NMS, and projection are all repeated. Nothing
+here is reusable across model families.
+
+---
+
+### ml-pipes
+
+```python
+from ml_pipes import (
+    ArgMax, ConvertBoxFormat, DecodeOp, GatherScores, InferOp,
+    NMS, NormalizeOp, Pick, Pipeline, ProjectBoxes, Recall,
+    ResizeOp, Select, Slice, Squeeze, Store, ToDetections, Transpose,
+)
+
+pipeline = Pipeline([
+    DecodeOp(),
+    ResizeOp((640, 640)),
+    Store("resize_transform", index=1),
+    Pick(0),
+    NormalizeOp(),
+    InferOp("yolov8n.onnx"),
+    Select("output0", as_="preds"),
+    Squeeze("preds"),
+    Transpose("preds"),
+    Slice("preds", slice(None, 4), as_="boxes"),
+    Slice("preds", slice(4, None), as_="scores"),
+    ArgMax("scores", as_="classes"),
+    GatherScores("scores", "classes"),
+    ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+    NMS(),
+    Recall("resize_transform"),
+    ProjectBoxes(),
+    ToDetections(),
+])
+
+detections = pipeline("image.jpg")
+```
+
+More explicit than Ultralytics and more structured than raw ONNX. Every step is
+named and individually testable. Switching to RF-DETR changes three operators
+(`Scale` for normalised boxes, `Softmax` before `ArgMax`) — all preprocessing
+and projection operators are identical and unchanged.
+
+---
+
+### Summary
+
+| | Ultralytics | Raw ONNX Runtime | ml-pipes |
+|---|---|---|---|
+| Model scope | YOLO family | Any ONNX | Any ONNX |
+| Pipeline visibility | Opaque | Fully explicit | Fully explicit |
+| Operator reuse across models | Not applicable | Manual copy-paste | Shared operator library |
+| Custom postprocessing | Subclass or post-hoc | Full freedom | Insert any callable |
+| Testability | Integration tests only | Unit tests with boilerplate | Unit tests on individual operators |
+| Brevity | High | Low | Medium |
+| ONNX-native | Export step required | Yes | Yes |
+
+Ultralytics is the right tool when you are building exclusively with YOLO models
+and want the smallest possible surface area. Raw ONNX Runtime is the right tool
+for zero-dependency constraints or highly unusual models. ml-pipes sits in
+between: the explicit control of raw ONNX with a reusable operator library that
+eliminates the repeated boilerplate.
+
+---
+
 ## Architecture
 
 ### Pipeline
