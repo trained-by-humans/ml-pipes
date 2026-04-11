@@ -1,9 +1,454 @@
 # ml-pipes
 
-A composable ONNX inference pipeline library. Pipelines are built by chaining
-generic operators — no subclassing, no model-specific base classes. Each
-operator does one thing; different models and tasks are handled by composing
-the right operators in the right order.
+A composable inference pipeline library for ONNX models. Pipelines are built
+by chaining small, generic operators — no subclassing, no model-specific base
+classes, no framework lock-in.
+
+## Design principle
+
+Most inference SDKs are built around inheritance: a `Detector` base class with
+a `YoloDetector` subclass, a `Segmentor` base class with a `MaskRCNNSegmentor`
+subclass. This feels natural at first, but it couples the pipeline logic to a
+specific model family. Adding a new model means subclassing; changing
+postprocessing means overriding methods; reusing a preprocessing step across
+model families means fighting the hierarchy.
+
+**ml-pipes takes the opposite approach: composition.**
+
+A pipeline is a plain list of small, single-purpose operators. Each operator
+does one thing and knows nothing about the model, task, or runtime. Different
+models produce different outputs — but at some level of abstraction they all
+produce boxes, scores, class indices, and optionally masks. The right operators
+applied in the right order produce the right result regardless of model family.
+
+```
+image file
+  → decode → resize → normalize             # preprocessing, model-agnostic
+  → infer                                   # the only model-specific step
+  → select → squeeze → transpose            # adapt raw output to registry
+  → slice → argmax → gather_scores          # extract semantic tensors
+  → convert_box_format → nms                # detection-specific logic
+  → recall transform → project_boxes        # postprocessing, model-agnostic
+  → to_detections                           # output type
+```
+
+The same operators appear in every detection pipeline. Switching from YOLOv8
+to RF-DETR changes three lines (a `Scale` for normalized boxes and different
+softmax/argmax handling) — the rest is identical.
+
+### Why function-style coding is natural for inference
+
+A neural network is, fundamentally, a function: it maps an input tensor to
+output tensors. The entire inference pipeline — decode, resize, normalize,
+infer, postprocess — is also a function: it maps an image to a structured
+prediction. Every step in between is a function too. The problem is shaped like
+function composition from top to bottom, so the code should be too.
+
+Object-oriented inheritance fights this shape. A `Detector` class with a
+`predict` method hides the transformation sequence inside method calls and
+inherited overrides. To understand what happens to the data you trace through
+multiple layers of the class hierarchy. The interesting computation — what
+actually happens to the tensors — is scattered.
+
+A pipeline list makes the data transformation the primary artifact. Reading the
+pipeline top to bottom tells you exactly what happens to the data, in order,
+without indirection. There is no hidden state between steps: each operator
+receives a value, returns a value, and has no memory of previous calls. This
+mirrors how you reason about inference — "resize the image, normalize it, run
+the model, squeeze the batch dimension, threshold by confidence" — and it means
+that reasoning is directly visible in the code rather than distributed across a
+class hierarchy.
+
+This also means the pipeline is inspectable and debuggable at every boundary.
+Inserting a `print` function or a logging step at any position in the list
+shows you the exact value flowing through at that point. There are no private
+fields to dig into, no method override chain to follow.
+
+## Advantages
+
+**Portability across model families.**
+A new model is a new pipeline, not a new class. YOLOv8, YOLO11, RF-DETR,
+Mask R-CNN, and future models all run through the same operator library.
+
+**Explicit, readable pipelines.**
+The pipeline list is a complete description of what happens to the data.
+There are no hidden method overrides, no inherited behaviour to trace. Reading
+the pipeline list tells you everything.
+
+**Reusability without abstraction overhead.**
+`NormalizeOp`, `ConvertBoxFormat`, `ProjectBoxes` are used across every model.
+They are not tied to any base class. There is no cost to reuse them — just add
+them to a pipeline.
+
+**Model-specific logic stays at the boundary.**
+When a model has quirky output (e.g. RF-DETR's normalized boxes), the
+adaptation is a single operator or plain callable in the pipeline. It doesn't
+pollute shared infrastructure.
+
+**Testability.**
+Each operator is a plain Python object. Testing `NMS` means calling
+`NMS()(registry)` with a hand-crafted `TensorRegistry`. No mocking, no
+subclass setup.
+
+**Optional early validation.**
+`Pipeline(validate_on_init=True)` checks type contracts at construction time
+using Python type annotations, catching operator mismatches before any data
+flows through.
+
+## Architecture
+
+### Pipeline
+
+`Pipeline` is a list of callables executed in sequence. The output of each
+step becomes the input of the next. Any Python callable can appear in the
+list — operator instances, plain functions, or lambdas.
+
+```python
+from ml_pipes import Pipeline
+
+pipeline = Pipeline([
+    step_one,
+    step_two,
+    step_three,
+])
+
+result = pipeline(input_value)
+```
+
+When an operator accepts more than one positional argument, the pipeline
+expects the current value to be a tuple matching the argument count. This is
+how `Recall` injects a stored value alongside the flowing registry.
+
+### Operators
+
+Operators are the building blocks of a pipeline. They fall into four families:
+**transform** (type changes), **tensor** (endomorphic on `TensorRegistry`),
+**context** (side-channel), and **side-effect** (tap pattern).
+
+The full operator reference — including all parameters, input/output types, and
+the `as_` in-place/new-key contract — is in [OPERATORS.md](OPERATORS.md).
+
+### Context
+
+The pipeline is linear: a single value flows from step to step. Some
+postprocessing steps need information computed much earlier — for example, the
+resize transform from preprocessing is needed when projecting boxes back to
+original image space. Threading this through every intermediate operator would
+pollute all signatures.
+
+The context system solves this with an immutable side-channel:
+
+- `Store(name)` — saves the current value (or a tuple element via `index=`)
+  into a context dictionary. The flowing value is unchanged.
+- `Recall(name)` — retrieves a stored value and appends it to the current
+  value, producing a tuple. The next operator then receives both.
+
+```python
+ResizeOp((640, 640)),                    # current = (ImagePayload, ResizeTransform)
+Store("resize_transform", index=1),      # store transform; current unchanged
+Pick(0),                                 # current = ImagePayload
+...                                      # inference and postprocessing
+Recall("resize_transform"),              # current = (TensorRegistry, ResizeTransform)
+ProjectBoxes(),                          # receives (registry, transform)
+```
+
+`Recall` is idempotent — the stored value is not consumed. Calling `Recall`
+for the same key twice lets two operators (e.g. `ProjectMasks` and
+`ProjectBoxes`) independently receive the same transform.
+
+### TensorRegistry
+
+`TensorRegistry` is the intermediate representation used throughout
+postprocessing. It is a mutable named store of NumPy arrays, created by
+`Select` from the raw `RuntimeOutputs` of inference and passed through every
+tensor operator until `ToDetections` or `ToSegmentations` converts it to a
+typed output.
+
+```python
+from ml_pipes import TensorRegistry
+
+registry = TensorRegistry({"boxes": boxes_array, "scores": scores_array})
+registry["classes"] = classes_array
+print(registry["boxes"].shape)
+```
+
+### Types
+
+The types in `ml_pipes.types` describe the values flowing through the pipeline
+at each stage:
+
+| Type | Where it appears | Description |
+|---|---|---|
+| `ImagePayload` | after `DecodeOp`, through preprocessing | HWC NumPy array with color space and layout metadata |
+| `TensorPayload` | after `NormalizeOp`, into `InferOp` | CHW/NCHW float array with layout and dtype metadata |
+| `RuntimeOutputs` | from `InferOp` | raw ONNX output tensors with their graph names |
+| `TensorRegistry` | from `Select` through all postprocessing | named tensor store |
+| `ResizeTransform` | stored via `Store`, recalled via `Recall` | scale, pad, and shape metadata from `ResizeOp` |
+| `Detections` | from `ToDetections` | typed output: boxes, scores, classes |
+| `Segmentations` | from `ToSegmentations` | typed output: boxes, scores, classes, masks |
+
+## Building a pipeline for a custom model
+
+This is the general process for adding support for a new ONNX model.
+
+### Step 1 — Inspect the model outputs
+
+Load the model in Netron or run a quick inspection with ONNX Runtime to find
+the output tensor names and shapes:
+
+```python
+import onnxruntime as ort
+session = ort.InferenceSession("model.onnx")
+for o in session.get_outputs():
+    print(o.name, o.shape)
+```
+
+### Step 2 — Map outputs to the TensorRegistry
+
+Use `Select` to extract tensors by their graph output names, renaming to
+semantic names:
+
+```python
+# Single output
+Select("output0", as_="preds")
+
+# Multiple outputs
+Select("output0", "output1", as_=("preds", "protos"))
+
+# Already semantically named (e.g. some Mask R-CNN exports)
+Select("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks"))
+```
+
+### Step 3 — Adapt the raw tensor layout
+
+Different model families export predictions in different layouts:
+
+```python
+# YOLO8/11: (1, features, N) — squeeze batch dim, then transpose
+Squeeze("preds"),          # (1, 116, N) → (116, N)
+Transpose("preds"),        # (116, N) → (N, 116)
+
+# YOLOv5: (1, N, features) — no transpose needed
+Squeeze("preds"),          # (1, 25200, 117) → (25200, 117)
+```
+
+### Step 4 — Slice out semantic tensors
+
+```python
+Slice("preds", slice(None, 4), as_="boxes"),          # (N, 4)
+Slice("preds", slice(4, -32), as_="class_scores"),    # (N, 80)
+Slice("preds", slice(-32, None), as_="mask_coeffs"),  # (N, 32)
+```
+
+### Step 5 — Handle model-specific coordinate formats
+
+Some models output normalized coordinates that need scaling to pixel space
+before NMS:
+
+```python
+# RF-DETR: normalized cxcywh → pixel cxcywh
+Scale("boxes", by=(input_w, input_h, input_w, input_h)),
+ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+```
+
+For truly model-specific logic that doesn't fit any operator, use a plain
+callable:
+
+```python
+def _my_model_quirk(registry: TensorRegistry) -> TensorRegistry:
+    # handle whatever the model does unusually
+    registry["boxes"] = ...
+    return registry
+
+pipeline = Pipeline([
+    ...,
+    _my_model_quirk,
+    ...
+])
+```
+
+### Step 6 — NMS and projection
+
+Store the resize transform before inference so it can be recalled for
+projection:
+
+```python
+ResizeOp((640, 640)),
+Store("resize_transform", index=1),
+Pick(0),
+...                                     # inference and postprocessing
+NMS(),
+Recall("resize_transform"),
+ProjectBoxes(),
+ToDetections(),
+```
+
+For segmentation, project masks before boxes:
+
+```python
+NMS(kept_as="kept"),
+FilterBy("mask_coeffs", "kept"),
+ReconstructMasks("mask_coeffs", "protos", dst="masks"),
+Recall("resize_transform"),
+ProjectMasks("masks", mask_threshold=0.5),
+Recall("resize_transform"),
+ProjectBoxes(),
+ToSegmentations(),
+```
+
+### Complete example
+
+```python
+from ml_pipes import (
+    ArgMax, ConvertBoxFormat, DecodeOp, GatherScores, InferOp,
+    NMS, NormalizeOp, Pick, Pipeline, ProjectBoxes, Recall,
+    ResizeOp, Select, Slice, Squeeze, Store, ToDetections, Transpose,
+)
+
+pipeline = Pipeline([
+    DecodeOp(),
+    ResizeOp((640, 640)),
+    Store("resize_transform", index=1),
+    Pick(0),
+    NormalizeOp(),
+    InferOp("model.onnx"),
+    Select("output0", as_="preds"),
+    Squeeze("preds"),
+    Transpose("preds"),
+    Slice("preds", slice(None, 4), as_="boxes"),
+    Slice("preds", slice(4, None), as_="scores"),
+    ArgMax("scores", as_="classes"),
+    GatherScores("scores", "classes"),
+    ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+    NMS(),
+    Recall("resize_transform"),
+    ProjectBoxes(),
+    ToDetections(),
+])
+
+detections = pipeline("image.jpg")
+print(detections.boxes, detections.scores, detections.classes)
+```
+
+## Writing a custom operator
+
+An operator is any Python callable. For stateless, single-use logic, a plain
+function is enough:
+
+```python
+def drop_background_class(registry: TensorRegistry) -> TensorRegistry:
+    # remove class 0 (background) detections
+    kept = registry["classes"] != 0
+    for key in ("boxes", "scores", "classes"):
+        registry[key] = registry[key][kept]
+    return registry
+```
+
+For reusable, parameterised operators, use a class with `__call__`:
+
+```python
+from ml_pipes import TensorRegistry
+
+class DropClass:
+    """Removes all detections whose class index equals `class_id`."""
+
+    def __init__(self, class_id: int):
+        self.class_id = class_id
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        kept = registry["classes"] != self.class_id
+        for key in ("boxes", "scores", "classes"):
+            registry[key] = registry[key][kept]
+        return registry
+```
+
+Used in a pipeline:
+
+```python
+Pipeline([
+    ...,
+    NMS(),
+    DropClass(class_id=0),    # remove background before projecting
+    Recall("resize_transform"),
+    ProjectBoxes(),
+    ToDetections(),
+])
+```
+
+### Accessing the context from a custom operator
+
+If your operator needs a value stored via `Store`, annotate the second
+positional parameter with its type. After a matching `Recall`, the pipeline
+will pass the stored value automatically:
+
+```python
+from ml_pipes import TensorRegistry, ResizeTransform
+
+def my_projection(registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
+    orig_h, orig_w = transform.original_shape
+    # ... custom projection logic
+    return registry
+```
+
+```python
+Pipeline([
+    ...,
+    Recall("resize_transform"),
+    my_projection,              # receives (registry, transform)
+    ToDetections(),
+])
+```
+
+### Contract validation
+
+Add type annotations to `__call__` and `Pipeline(validate_on_init=True)` will
+verify that each operator's input type is compatible with the previous
+operator's output type at construction time:
+
+```python
+class DropClass:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        ...
+```
+
+## Extending the pipeline
+
+### Wrapping a pipeline
+
+If you run the same model repeatedly, wrap the pipeline in a function or class
+that owns the `Pipeline` instance:
+
+```python
+class YoloDetector:
+    def __init__(self, model_path: str, conf_threshold: float = 0.25):
+        self._pipeline = Pipeline([
+            DecodeOp(),
+            ResizeOp((640, 640)),
+            Store("resize_transform", index=1),
+            Pick(0),
+            NormalizeOp(),
+            InferOp(model_path),
+            Select("output0", as_="preds"),
+            Squeeze("preds"),
+            Transpose("preds"),
+            Slice("preds", slice(None, 4), as_="boxes"),
+            Slice("preds", slice(4, None), as_="scores"),
+            ArgMax("scores", as_="classes"),
+            GatherScores("scores", "classes"),
+            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            NMS(conf_threshold=conf_threshold),
+            Recall("resize_transform"),
+            ProjectBoxes(),
+            ToDetections(),
+        ])
+
+    def __call__(self, image_path: str) -> Detections:
+        return self._pipeline(image_path)
+```
+
+### Chaining pipelines
+
+TBA.
 
 ## Install
 
@@ -11,228 +456,23 @@ the right operators in the right order.
 pip install -e .
 ```
 
-## Core concepts
-
-### Pipeline
-
-A `Pipeline` is a list of callables executed in sequence. Each step receives
-the output of the previous step as its input.
-
-```python
-from ml_pipes import Pipeline, DecodeOp, ResizeOp, NormalizeOp, InferOp
-
-pipeline = Pipeline([
-    DecodeOp(),
-    ResizeOp((640, 640)),
-    NormalizeOp(),
-    InferOp("model.onnx"),
-    ...
-])
-
-result = pipeline("image.jpg")
-```
-
-Any plain callable (function or lambda) can be dropped into the pipeline
-alongside operators — useful for model-specific logic that doesn't warrant a
-dedicated operator.
-
-### TensorRegistry
-
-After inference, outputs are extracted into a `TensorRegistry` — a mutable
-named store of NumPy arrays. All post-processing operators read from and write
-to the registry by tensor name.
-
-```python
-Select("output0", as_="preds")   # RuntimeOutputs → TensorRegistry
-Squeeze("preds")                  # (1, 116, N) → (116, N), in-place
-Transpose("preds")                # (116, N) → (N, 116), in-place
-```
-
-All tensor operators accept an optional `as_` parameter. When omitted the
-result overwrites the source tensor (in-place). When provided a new tensor is
-created under that name.
-
-### Context — Store / Recall
-
-`Store` and `Recall` thread values across pipeline phases via an immutable
-side-channel. This is how a resize transform computed during preprocessing is
-made available during postprocessing without passing it through every operator
-in between.
-
-```python
-ResizeOp((640, 640)),
-Store("resize_transform", index=1),   # store the transform, keep image flowing
-Pick(0),                               # drop the transform from current value
-...
-Recall("resize_transform"),            # append transform → (registry, transform)
-ProjectBoxes(),                        # receives (registry, transform)
-```
-
----
-
-## Operators
-
-### Pre-processing
-
-| Operator | Description |
-|---|---|
-| `DecodeOp()` | Decode an image file path or bytes into an `ImagePayload` |
-| `ResizeOp(target_size, mode, ...)` | Resize or letterbox an image |
-| `NormalizeOp(scale, mean, std, output_layout, output_color_space, add_batch_dim)` | Scale, normalize, transpose layout, convert color space |
-| `CastTensorOp(dtype)` | Cast tensor dtype (e.g. float32 → float16) |
-
-### Inference
-
-| Operator | Description |
-|---|---|
-| `InferOp(model_path, expected_input_layout, expected_model_dtype)` | Run ONNX Runtime inference, returns `RuntimeOutputs` |
-
-### Registry
-
-| Operator | Description |
-|---|---|
-| `Select(*names, as_=...)` | Extract named tensors from `RuntimeOutputs` into a `TensorRegistry` |
-
-### Shape
-
-| Operator | Description |
-|---|---|
-| `Squeeze(name, axis, as_)` | Remove unit dimensions |
-| `Transpose(name, axes, as_)` | Permute axes |
-
-### Indexing
-
-| Operator | Description |
-|---|---|
-| `Slice(name, slice, as_)` | Slice a tensor along the last axis |
-| `Gather(name, indices, as_)` | Index into a tensor |
-| `FilterBy(name, indices, as_)` | Filter tensor rows by an index array stored in the registry |
-
-### Math
-
-| Operator | Description |
-|---|---|
-| `ArgMax(name, axis, as_)` | Argmax along an axis |
-| `GatherScores(scores, classes, as_)` | Gather per-detection scores at class indices |
-| `Softmax(name, axis, as_)` | Softmax along an axis |
-| `Sigmoid(name, as_)` | Element-wise sigmoid |
-| `Scale(name, by, as_)` | Multiply by a scalar or per-column array — use for normalizing or denormalizing coordinates |
-
-### Geometry
-
-| Operator | Description |
-|---|---|
-| `ConvertBoxFormat(name, from_, to, as_)` | Convert between `xyxy`, `xywh`, `cxcywh` |
-
-### Detection
-
-| Operator | Description |
-|---|---|
-| `NMS(boxes, scores, classes, conf_threshold, iou_threshold, max_detections, kept_as)` | Non-maximum suppression. Set `kept_as` to store the kept indices for use with `FilterBy`. |
-
-### Segmentation
-
-| Operator | Description |
-|---|---|
-| `ReconstructMasks(coefficients, prototypes, dst)` | Reconstruct masks via `coeffs @ protos` (YOLO-style prototype-based segmentation) |
-
-### Projection
-
-| Operator | Description |
-|---|---|
-| `ProjectBoxes(name)` | Inverse-transform boxes from model input space to original image space. Requires `Recall` of a `ResizeTransform`. |
-| `ProjectMasks(masks, boxes, mask_threshold)` | Crop, upsample, and threshold prototype masks. Must be called **before** `ProjectBoxes`. Requires `Recall` of a `ResizeTransform`. |
-
-### Output
-
-| Operator | Description |
-|---|---|
-| `ToDetections(boxes, scores, classes)` | Convert `TensorRegistry` to a `Detections` dataclass |
-| `ToSegmentations(boxes, scores, classes, masks)` | Convert `TensorRegistry` to a `Segmentations` dataclass |
-
-### Context
-
-| Operator | Description |
-|---|---|
-| `Store(name, index)` | Store a value (or element of a tuple) into the pipeline context |
-| `Recall(name)` | Append a stored value to the current pipeline value |
-| `Pick(index)` | Select one element from a tuple |
-
-### Side effects
-
-| Operator | Description |
-|---|---|
-| `DrawBoxesOp()` | Draw bounding boxes on an image |
-| `SaveImageOp(path)` | Save an image to disk |
-| `MapToObjectsOp(field_sources)` | Map detection fields to a list of structured objects |
-| `LogDetectionsOp(model_path, image_path, annotated_image_path)` | Log detections to stdout as JSON |
-
----
-
 ## Examples
 
-All examples download the model and a COCO validation image on first run into
-`.example_assets/` and write an annotated output image to the same directory.
+All examples auto-download their model and a COCO validation image into
+`.example_assets/` on first run.
 
-### Generic detection (bring your own model)
-
-```bash
-python examples/run_detection.py path/to/model.onnx path/to/image.jpg
-```
-
-### YOLOv8n — object detection
+| Example | Model | Task | Notable pipeline features |
+|---|---|---|---|
+| `run_detection.py` | any YOLOv8-compatible | detection | generic, bring your own model |
+| `run_yolo8n_onnx.py` | YOLOv8n | detection | baseline YOLO pipeline |
+| `run_yolo11n_onnx_fp16.py` | YOLO11n FP16 | detection | `CastTensorOp` for FP16, letterbox resize |
+| `run_rfdetr_nano_onnx.py` | RF-DETR nano | detection | `Scale` for normalized boxes, softmax logits |
+| `run_yolo11n_seg_onnx.py` | YOLO11n-seg | instance segmentation | prototype masks, `ReconstructMasks` + `FilterBy` |
+| `run_maskrcnn_onnx.py` | Mask R-CNN int8 | instance segmentation | CNN family, NMS baked in, 28×28 RoI masks, BGR mean subtraction |
 
 ```bash
 python examples/run_yolo8n_onnx.py
-```
-
-### YOLO11n FP16 — object detection (letterbox + float16)
-
-```bash
-python examples/run_yolo11n_onnx_fp16.py
-```
-
-Demonstrates `CastTensorOp` for FP16 inference and letterbox resize with
-center padding.
-
-### RF-DETR nano — transformer-based detection
-
-```bash
-python examples/run_rfdetr_nano_onnx.py
-```
-
-RF-DETR outputs normalized `(cx, cy, w, h)` boxes. The pipeline uses `Scale`
-to convert to pixel coordinates before box format conversion and NMS.
-
-### YOLO11n-seg — instance segmentation (prototype-based)
-
-```bash
 python examples/run_yolo11n_seg_onnx.py
-```
-
-Demonstrates the prototype-based mask pipeline:
-`ReconstructMasks` → `ProjectMasks` → `ProjectBoxes`.
-
-### Mask R-CNN int8 — instance segmentation (CNN family)
-
-```bash
+python examples/run_rfdetr_nano_onnx.py
 python examples/run_maskrcnn_onnx.py
-```
-
-Structurally different from the YOLO segmentation pipeline: NMS is baked into
-the model, masks are per-instance 28×28 RoI probabilities rather than
-prototype coefficients, and preprocessing uses BGR mean subtraction without
-normalizing to [0, 1].
-
----
-
-## Pipeline contracts
-
-Operators declare their input and output types via Python type annotations.
-`Pipeline(validate_on_init=True)` checks that each operator's input type is
-compatible with the previous operator's output type at construction time,
-catching mismatches before any data flows through.
-
-```python
-pipeline = Pipeline([...], validate_on_init=True)
 ```
