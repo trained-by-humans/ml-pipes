@@ -809,7 +809,8 @@ class ProjectRoIMasks:
     For models that output one small fixed-size mask per detection relative to its bounding box
     (e.g. Mask R-CNN), rather than a shared prototype feature map (cf. ProjectMasks).
 
-    Input masks may be (N, H, W) or (N, 1, H, W); the channel dim is squeezed automatically.
+    Expects masks of shape (N, H, W). If the model outputs (N, 1, H, W), add
+    Squeeze("masks", axis=1) before this operator.
 
     Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
     Must be called AFTER ProjectBoxes — needs boxes already in original image space.
@@ -824,11 +825,8 @@ class ProjectRoIMasks:
         import cv2
 
         boxes = registry[self.boxes]   # (N, 4) xyxy — original image space
-        masks = registry[self.masks]   # (N, 1, H, W) or (N, H, W)
+        masks = registry[self.masks]   # (N, H, W)
         orig_h, orig_w = transform.original_shape
-
-        if masks.ndim == 4:
-            masks = masks[:, 0]        # (N, 1, H, W) → (N, H, W)
 
         canvas = np.zeros((len(boxes), orig_h, orig_w), dtype=bool)
         for i, (box, mask) in enumerate(zip(boxes, masks)):

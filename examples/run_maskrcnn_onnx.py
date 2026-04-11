@@ -19,6 +19,7 @@ from ml_pipes import (
     Recall,
     ResizeOp,
     Select,
+    Squeeze,
     Store,
     TensorRegistry,
     ToSegmentations,
@@ -73,9 +74,10 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Select("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             _filter_detections,
             Recall("resize_transform"),
-            ProjectBoxes(),                # model space → original image space
+            ProjectBoxes(),                        # model space → original image space
+            Squeeze("masks", axis=1),              # (N, 1, 28, 28) → (N, 28, 28)
             Recall("resize_transform"),
-            ProjectRoIMasks(mask_threshold=0.5),  # 28×28 RoI logits → full-image binary masks
+            ProjectRoIMasks(mask_threshold=0.5),   # 28×28 RoI masks → full-image binary masks
             ToSegmentations(),
         ]
     )
