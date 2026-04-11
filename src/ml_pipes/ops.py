@@ -423,7 +423,7 @@ class GatherScores:
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         scores = registry[self.scores]
         classes = registry[self.classes]
-        registry[self.as_] = scores[np.arange(scores.shape[0]), classes].astype(np.float32)
+        registry[self.as_] = scores[np.arange(scores.shape[0]), classes].astype(scores.dtype)
         return registry
 
 
@@ -479,11 +479,12 @@ class Scale:
 
     def __init__(self, name: str, by: float | tuple | list, as_: str | None = None):
         self.name = name
-        self.by = np.asarray(by, dtype=np.float32)
+        self.by = np.asarray(by)
         self.as_ = as_ or name
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = registry[self.name] * self.by
+        tensor = registry[self.name]
+        registry[self.as_] = tensor * self.by.astype(tensor.dtype)
         return registry
 
 
@@ -535,16 +536,16 @@ class ConvertBoxFormat:
             raise ValueError(from_)
 
         if to == "xyxy":
-            return xyxy.astype(np.float32)
+            return xyxy.astype(boxes.dtype)
         if to == "xywh":
             return np.concatenate(
                 [xyxy[:, :2], xyxy[:, 2:4] - xyxy[:, :2]], axis=1
-            ).astype(np.float32)
+            ).astype(boxes.dtype)
         if to == "cxcywh":
             wh = xyxy[:, 2:4] - xyxy[:, :2]
             return np.concatenate(
                 [xyxy[:, :2] + wh / 2.0, wh], axis=1
-            ).astype(np.float32)
+            ).astype(boxes.dtype)
         raise ValueError(to)
 
 
