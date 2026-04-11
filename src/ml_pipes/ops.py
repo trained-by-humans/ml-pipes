@@ -725,12 +725,10 @@ class ProjectBoxes:
 
 
 class ProjectMasks:
-    """Crops, upsamples, and thresholds masks using model-space boxes and a resize transform.
-
-    Must be called before ProjectBoxes — it requires boxes still in model (pre-projection) space
-    to correctly crop masks at prototype resolution.
+    """Upsamples prototype masks to original image size and zeros out each mask outside its box.
 
     Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
+    Must be called AFTER ProjectBoxes — boxes are expected in original image space.
     """
 
     def __init__(self, masks: str = "masks", boxes: str = "boxes", mask_threshold: float = 0.0):
@@ -739,68 +737,32 @@ class ProjectMasks:
         self.mask_threshold = mask_threshold
 
     def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
-        registry[self.masks] = self._project_masks(
-            registry[self.masks], registry[self.boxes], transform
-        )
-        return registry
-
-    def _project_masks(
-        self,
-        masks: np.ndarray,
-        boxes: np.ndarray,
-        transform: ResizeTransform,
-    ) -> list[np.ndarray]:
         import cv2
 
-        _, mask_h, mask_w = masks.shape
-        resized_shape = transform.resized_shape
-
-        width_ratio = mask_w / resized_shape[1]
-        height_ratio = mask_h / resized_shape[0]
-        downsampled_boxes = boxes.copy()
-        downsampled_boxes[:, [0, 2]] *= width_ratio
-        downsampled_boxes[:, [1, 3]] *= height_ratio
-        cropped = self._crop_masks(masks, downsampled_boxes)
-
-        projected: list[np.ndarray] = []
-        for mask in cropped:
-            upsampled = cv2.resize(
-                mask, (resized_shape[1], resized_shape[0]), interpolation=cv2.INTER_LINEAR
-            )
-            scaled = self._scale_to_original(upsampled, transform)
-            projected.append((scaled > self.mask_threshold).astype(np.uint8))
-        return projected
-
-    @staticmethod
-    def _scale_to_original(mask: np.ndarray, transform: ResizeTransform) -> np.ndarray:
-        import cv2
-
+        masks = registry[self.masks]   # (N, proto_H, proto_W)
+        boxes = registry[self.boxes]   # (N, 4) xyxy — original image space
         resized_h, resized_w = transform.resized_shape
+        orig_h, orig_w = transform.original_shape
         pad_x, pad_y = transform.pad
-        top = max(int(round(pad_y - 0.1)), 0)
-        left = max(int(round(pad_x - 0.1)), 0)
+
+        top    = max(int(round(pad_y - 0.1)), 0)
+        left   = max(int(round(pad_x - 0.1)), 0)
         bottom = min(int(round(resized_h - pad_y + 0.1)), resized_h)
-        right = min(int(round(resized_w - pad_x + 0.1)), resized_w)
-        mask = mask[top:bottom, left:right]
-        original_h, original_w = transform.original_shape
-        return cv2.resize(mask, (original_w, original_h), interpolation=cv2.INTER_LINEAR)
+        right  = min(int(round(resized_w - pad_x + 0.1)), resized_w)
 
-    @staticmethod
-    def _crop_masks(masks: np.ndarray, boxes: np.ndarray) -> np.ndarray:
-        num_masks, height, width = masks.shape
-        x1 = boxes[:, 0].clip(0, width)
-        y1 = boxes[:, 1].clip(0, height)
-        x2 = boxes[:, 2].clip(0, width)
-        y2 = boxes[:, 3].clip(0, height)
+        projected = []
+        for mask, box in zip(masks, boxes):
+            upsampled = cv2.resize(mask, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
+            full = cv2.resize(upsampled[top:bottom, left:right], (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+            x1, y1 = max(0, int(box[0])), max(0, int(box[1]))
+            x2, y2 = min(orig_w, int(box[2])), min(orig_h, int(box[3]))
+            canvas = np.zeros((orig_h, orig_w), dtype=np.float32)
+            if x2 > x1 and y2 > y1:
+                canvas[y1:y2, x1:x2] = full[y1:y2, x1:x2]
+            projected.append((canvas > self.mask_threshold).astype(np.uint8))
 
-        rows = np.arange(width, dtype=np.float32)[None, None, :]
-        cols = np.arange(height, dtype=np.float32)[None, :, None]
-        return masks * (
-            (rows >= x1[:, None, None])
-            * (rows < x2[:, None, None])
-            * (cols >= y1[:, None, None])
-            * (cols < y2[:, None, None])
-        )
+        registry[self.masks] = projected
+        return registry
 
 
 class ProjectRoIMasks:

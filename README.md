@@ -431,16 +431,16 @@ ProjectBoxes(),
 ToDetections(),
 ```
 
-For segmentation, project masks before boxes:
+For segmentation, project boxes first, then masks:
 
 ```python
 NMS(kept_as="kept"),
 FilterBy("mask_coeffs", "kept"),
 ReconstructMasks("mask_coeffs", "protos", dst="masks"),
 Recall("resize_transform"),
-ProjectMasks("masks", mask_threshold=0.5),
-Recall("resize_transform"),
 ProjectBoxes(),
+Recall("resize_transform"),
+ProjectMasks("masks", mask_threshold=0.5),
 ToSegmentations(),
 ```
 

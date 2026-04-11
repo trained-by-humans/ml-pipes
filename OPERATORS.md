@@ -142,7 +142,7 @@ them to inject the stored transform.
 | Operator | Notes |
 |---|---|
 | `ProjectBoxes(name)` | Inverse-transforms boxes from model input space to original image space, accounting for scale and letterbox padding. |
-| `ProjectMasks(masks, boxes, mask_threshold)` | Crops prototype masks at box coordinates, upsamples to original image size, and thresholds. **Must be called before `ProjectBoxes`** — needs boxes still in model space. |
+| `ProjectMasks(masks, boxes, mask_threshold)` | Upsamples prototype masks to original image size and zeros out each mask outside its bounding box. **Must be called after `ProjectBoxes`** — boxes are expected in original image space. |
 | `ProjectRoIMasks(masks, boxes, mask_threshold)` | Resizes per-instance RoI masks `(N, H, W)` to their bounding boxes and embeds them into a full-image canvas. **Must be called after `ProjectBoxes`** — needs boxes in original image space. For `(N, 1, H, W)` outputs, add `Squeeze("masks", axis=1)` first. |
 
 ---
