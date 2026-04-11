@@ -803,6 +803,47 @@ class ProjectMasks:
         )
 
 
+class ProjectRoIMasks:
+    """Resizes per-instance RoI masks to their bounding boxes and embeds them into a full-image canvas.
+
+    For models that output one small fixed-size mask per detection relative to its bounding box
+    (e.g. Mask R-CNN), rather than a shared prototype feature map (cf. ProjectMasks).
+
+    Input masks may be (N, H, W) or (N, 1, H, W); the channel dim is squeezed automatically.
+
+    Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
+    Must be called AFTER ProjectBoxes — needs boxes already in original image space.
+    """
+
+    def __init__(self, masks: str = "masks", boxes: str = "boxes", mask_threshold: float = 0.5):
+        self.masks = masks
+        self.boxes = boxes
+        self.mask_threshold = mask_threshold
+
+    def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
+        import cv2
+
+        boxes = registry[self.boxes]   # (N, 4) xyxy — original image space
+        masks = registry[self.masks]   # (N, 1, H, W) or (N, H, W)
+        orig_h, orig_w = transform.original_shape
+
+        if masks.ndim == 4:
+            masks = masks[:, 0]        # (N, 1, H, W) → (N, H, W)
+
+        canvas = np.zeros((len(boxes), orig_h, orig_w), dtype=bool)
+        for i, (box, mask) in enumerate(zip(boxes, masks)):
+            x1, y1, x2, y2 = box.astype(int)
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(orig_w, x2), min(orig_h, y2)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            resized = cv2.resize(mask.astype(np.float32), (x2 - x1, y2 - y1), interpolation=cv2.INTER_LINEAR)
+            canvas[i, y1:y2, x1:x2] = resized > self.mask_threshold
+
+        registry[self.masks] = canvas
+        return registry
+
+
 # ---------------------------------------------------------------------------
 # Output conversion
 # ---------------------------------------------------------------------------

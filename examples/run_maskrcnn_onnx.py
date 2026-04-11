@@ -15,9 +15,9 @@ from ml_pipes import (
     Pick,
     Pipeline,
     ProjectBoxes,
+    ProjectRoIMasks,
     Recall,
     ResizeOp,
-    ResizeTransform,
     Select,
     Store,
     TensorRegistry,
@@ -55,32 +55,6 @@ def _filter_detections(registry: TensorRegistry) -> TensorRegistry:
     return registry
 
 
-def _project_rcnn_masks(registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
-    """Resize each 28×28 RoI logit mask to its bounding box and embed into original-size canvas.
-
-    Must be called AFTER ProjectBoxes — needs boxes already in original image space.
-    """
-    import cv2
-
-    boxes = registry["boxes"]         # (N, 4) xyxy — original image space after ProjectBoxes
-    masks_logits = registry["masks"]  # (N, 1, 28, 28) — raw logits from model
-    orig_h, orig_w = transform.original_shape
-
-    full_masks = np.zeros((len(boxes), orig_h, orig_w), dtype=bool)
-    for i, (box, logits) in enumerate(zip(boxes, masks_logits)):
-        x1, y1, x2, y2 = box.astype(int)
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(orig_w, x2), min(orig_h, y2)
-        if x2 <= x1 or y2 <= y1:
-            continue
-        mask = logits[0].astype(np.float32)
-        resized = cv2.resize(mask, (x2 - x1, y2 - y1), interpolation=cv2.INTER_LINEAR)
-        full_masks[i, y1:y2, x1:x2] = resized > 0.5
-
-    registry["masks"] = full_masks
-    return registry
-
-
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
@@ -101,7 +75,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Recall("resize_transform"),
             ProjectBoxes(),                # model space → original image space
             Recall("resize_transform"),
-            _project_rcnn_masks,           # 28×28 RoI logits → full-image binary masks
+            ProjectRoIMasks(mask_threshold=0.5),  # 28×28 RoI logits → full-image binary masks
             ToSegmentations(),
         ]
     )
