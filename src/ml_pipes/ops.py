@@ -725,10 +725,14 @@ class ProjectBoxes:
 
 
 class ProjectMasks:
-    """Upsamples prototype masks to original image size and zeros out each mask outside its box.
+    """Zeros prototype masks outside each bounding box, then upsamples to original image size.
+
+    Zeroing is applied in prototype space (small tensor, vectorised across all N masks) before
+    upsampling, which keeps the operation GPU-friendly — the expensive resize only runs on
+    already-sparse data. Boxes are converted from original image space to prototype space
+    internally, so this operator must be called AFTER ProjectBoxes.
 
     Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
-    Must be called AFTER ProjectBoxes — boxes are expected in original image space.
     """
 
     def __init__(self, masks: str = "masks", boxes: str = "boxes", mask_threshold: float = 0.0):
@@ -743,23 +747,37 @@ class ProjectMasks:
         boxes = registry[self.boxes]   # (N, 4) xyxy — original image space
         resized_h, resized_w = transform.resized_shape
         orig_h, orig_w = transform.original_shape
+        scale_x, scale_y = transform.scale
         pad_x, pad_y = transform.pad
+        _, proto_h, proto_w = masks.shape
 
+        # Convert boxes from original image space to prototype space:
+        #   original → model input:  x_model = x_orig * scale + pad
+        #   model input → prototype: x_proto = x_model * (proto / resized)
+        proto_boxes = boxes.astype(np.float32).copy()
+        proto_boxes[:, [0, 2]] = (proto_boxes[:, [0, 2]] * scale_x + pad_x) * (proto_w / resized_w)
+        proto_boxes[:, [1, 3]] = (proto_boxes[:, [1, 3]] * scale_y + pad_y) * (proto_h / resized_h)
+
+        # Zero outside each box — vectorised on the small (N, proto_H, proto_W) tensor
+        x1 = proto_boxes[:, 0].clip(0, proto_w)[:, None, None]
+        y1 = proto_boxes[:, 1].clip(0, proto_h)[:, None, None]
+        x2 = proto_boxes[:, 2].clip(0, proto_w)[:, None, None]
+        y2 = proto_boxes[:, 3].clip(0, proto_h)[:, None, None]
+        cols = np.arange(proto_w, dtype=np.float32)[None, None, :]
+        rows = np.arange(proto_h, dtype=np.float32)[None, :, None]
+        masks = masks * ((cols >= x1) & (cols < x2) & (rows >= y1) & (rows < y2))
+
+        # Upsample each zeroed mask to original image size
         top    = max(int(round(pad_y - 0.1)), 0)
         left   = max(int(round(pad_x - 0.1)), 0)
         bottom = min(int(round(resized_h - pad_y + 0.1)), resized_h)
         right  = min(int(round(resized_w - pad_x + 0.1)), resized_w)
 
         projected = []
-        for mask, box in zip(masks, boxes):
+        for mask in masks:
             upsampled = cv2.resize(mask, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
-            full = cv2.resize(upsampled[top:bottom, left:right], (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-            x1, y1 = max(0, int(box[0])), max(0, int(box[1]))
-            x2, y2 = min(orig_w, int(box[2])), min(orig_h, int(box[3]))
-            canvas = np.zeros((orig_h, orig_w), dtype=np.float32)
-            if x2 > x1 and y2 > y1:
-                canvas[y1:y2, x1:x2] = full[y1:y2, x1:x2]
-            projected.append((canvas > self.mask_threshold).astype(np.uint8))
+            projected.append((cv2.resize(upsampled[top:bottom, left:right], (orig_w, orig_h),
+                                         interpolation=cv2.INTER_LINEAR) > self.mask_threshold).astype(np.uint8))
 
         registry[self.masks] = projected
         return registry
