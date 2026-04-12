@@ -7,17 +7,17 @@ from pathlib import Path
 import numpy as np
 
 from ml_pipes import (
-    DecodeOp,
-    InferOp,
-    LogDetectionsOp,
-    MapToObjectsOp,
-    NormalizeOp,
+    Decode,
+    Infer,
+    LogDetections,
+    MapToObjects,
+    Normalize,
     Pick,
     Pipeline,
     ProjectBoxes,
     ProjectRoIMasks,
     Recall,
-    ResizeOp,
+    Resize,
     Select,
     Squeeze,
     Store,
@@ -59,18 +59,18 @@ def _filter_detections(registry: TensorRegistry) -> TensorRegistry:
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            DecodeOp(),
-            ResizeOp((800, 800)),
+            Decode(),
+            Resize((800, 800)),
             Store("resize_transform", index=1),
             Pick(0),
-            NormalizeOp(
+            Normalize(
                 scale=1.0,
                 mean=_IMAGENET_MEAN_BGR,
                 output_layout="CHW",
                 output_color_space="BGR",
                 add_batch_dim=False,
             ),
-            InferOp(model_path, expected_input_layout="CHW", expected_model_dtype="float32"),
+            Infer(model_path, expected_input_layout="CHW", expected_model_dtype="float32"),
             Select("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             _filter_detections,
             Recall("resize_transform"),
@@ -123,7 +123,7 @@ def main() -> int:
     )
     Pipeline(
         [
-            MapToObjectsOp(
+            MapToObjects(
                 field_sources={
                     "box": "boxes",
                     "score": "scores",
@@ -131,7 +131,7 @@ def main() -> int:
                     "mask_pixels": lambda value: [int(np.asarray(mask, dtype=np.uint8).sum()) for mask in value.masks],
                 },
             ),
-            LogDetectionsOp(
+            LogDetections(
                 model_path=model_path,
                 image_path=image_path,
                 annotated_image_path=output_path,

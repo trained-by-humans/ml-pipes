@@ -25,7 +25,7 @@ from .types import (
 # Image / preprocessing
 # ---------------------------------------------------------------------------
 
-class DecodeOp:
+class Decode:
     def __call__(self, image_path: str | Path) -> ImagePayload:
         path = Path(image_path)
         if not path.is_file():
@@ -40,7 +40,7 @@ class DecodeOp:
         return payload
 
 
-class ResizeOp:
+class Resize:
     def __init__(
         self,
         target_size: tuple[int, int] = (640, 640),
@@ -122,7 +122,7 @@ class ResizeOp:
     @staticmethod
     def _validate_image_payload(payload: ImagePayload) -> None:
         if payload.layout != "HWC":
-            raise ValueError(f"ResizeOp expects HWC image layout, got {payload.layout}")
+            raise ValueError(f"Resize expects HWC image layout, got {payload.layout}")
 
     def _resolve_interpolation(self, cv2: object) -> int:
         mapping = {
@@ -134,7 +134,7 @@ class ResizeOp:
         return mapping[self.interpolation]
 
 
-class NormalizeOp:
+class Normalize:
     def __init__(
         self,
         scale: float = 1.0 / 255.0,
@@ -153,7 +153,7 @@ class NormalizeOp:
 
     def __call__(self, image_payload: ImagePayload) -> TensorPayload:
         if image_payload.layout != "HWC":
-            raise ValueError(f"NormalizeOp expects HWC image layout, got {image_payload.layout}")
+            raise ValueError(f"Normalize expects HWC image layout, got {image_payload.layout}")
 
         image = image_payload.array
         if image_payload.color_space != self.output_color_space and {
@@ -163,7 +163,7 @@ class NormalizeOp:
             image = image[..., ::-1]
         elif image_payload.color_space != self.output_color_space:
             raise ValueError(
-                f"NormalizeOp cannot convert {image_payload.color_space} to {self.output_color_space}"
+                f"Normalize cannot convert {image_payload.color_space} to {self.output_color_space}"
             )
 
         if np.issubdtype(image.dtype, np.floating):
@@ -191,7 +191,7 @@ class NormalizeOp:
         return payload
 
 
-class CastTensorOp:
+class Cast:
     def __init__(self, dtype: str, selector: str | None = None):
         self.dtype = np.dtype(dtype)
         self.selector = selector
@@ -203,7 +203,7 @@ class CastTensorOp:
             if is_dataclass(value):
                 return replace(value, **{self.selector: casted})
             raise TypeError(
-                f"CastTensorOp selector={self.selector!r} requires a dataclass value, got {type(value)!r}"
+                f"Cast selector={self.selector!r} requires a dataclass value, got {type(value)!r}"
             )
         return self._cast_tensor_value(value)
 
@@ -215,14 +215,14 @@ class CastTensorOp:
                 TensorPayload(array=tensor.array.astype(self.dtype), layout=tensor.layout, dtype=str(self.dtype))
                 for tensor in value
             )
-        raise TypeError(f"CastTensorOp does not support value type {type(value)!r}")
+        raise TypeError(f"Cast does not support value type {type(value)!r}")
 
 
 # ---------------------------------------------------------------------------
 # Inference
 # ---------------------------------------------------------------------------
 
-class InferOp:
+class Infer:
     def __init__(
         self,
         model_path: str | Path,
@@ -257,12 +257,12 @@ class InferOp:
     def __call__(self, tensor_payload: TensorPayload) -> RuntimeOutputs:
         if tensor_payload.layout != self.expected_input_layout:
             raise ValueError(
-                f"InferOp expects {self.expected_input_layout} tensor layout, got {tensor_payload.layout}"
+                f"Infer expects {self.expected_input_layout} tensor layout, got {tensor_payload.layout}"
             )
 
         actual_dtype = np.dtype(tensor_payload.dtype)
         if self.model_dtype is not None and actual_dtype != self.model_dtype:
-            raise ValueError(f"InferOp expects model dtype {self.model_dtype}, got {actual_dtype}")
+            raise ValueError(f"Infer expects model dtype {self.model_dtype}, got {actual_dtype}")
 
         outputs = self.session.run(None, {self.input_name: tensor_payload.array})
 
@@ -271,7 +271,7 @@ class InferOp:
         else:
             if len(self.output_layouts) != len(outputs):
                 raise ValueError(
-                    f"InferOp expected {len(self.output_layouts)} output layouts, got {len(outputs)} outputs"
+                    f"Infer expected {len(self.output_layouts)} output layouts, got {len(outputs)} outputs"
                 )
             output_layouts = self.output_layouts
 
@@ -871,7 +871,7 @@ class ToSegmentations:
 # Visualization / side-effects
 # ---------------------------------------------------------------------------
 
-class DrawBoxesOp:
+class DrawBoxes:
     def __init__(
         self,
         class_names: list[str] | tuple[str, ...] | None = None,
@@ -922,7 +922,7 @@ class DrawBoxesOp:
         return f"{name} {score:.2f}"
 
 
-class SaveImageOp:
+class SaveImage:
     def __init__(self, output_path: str | Path):
         self.output_path = Path(output_path)
 
@@ -930,7 +930,7 @@ class SaveImageOp:
         import cv2
 
         if image_payload.layout != "HWC":
-            raise ValueError(f"SaveImageOp expects HWC image layout, got {image_payload.layout}")
+            raise ValueError(f"SaveImage expects HWC image layout, got {image_payload.layout}")
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         written = cv2.imwrite(str(self.output_path), image_payload.array)
@@ -939,7 +939,7 @@ class SaveImageOp:
         return image_payload
 
 
-class MapToObjectsOp:
+class MapToObjects:
     def __init__(
         self,
         field_sources: dict[str, str | Callable[[object], Sequence[object]]],
@@ -957,7 +957,7 @@ class MapToObjectsOp:
 
         lengths = {len(column) for column in columns.values()}
         if len(lengths) > 1:
-            raise ValueError(f"CollectionsToObjectsOp requires equal-length collections, got lengths {sorted(lengths)}")
+            raise ValueError(f"MapToObjects requires equal-length collections, got lengths {sorted(lengths)}")
 
         records: list[dict[str, object]] = []
         field_names = tuple(columns.keys())
@@ -968,7 +968,7 @@ class MapToObjectsOp:
         return records
 
 
-class LogDetectionsOp:
+class LogDetections:
     def __init__(
         self,
         model_path: str | Path,

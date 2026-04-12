@@ -28,12 +28,12 @@ shared infrastructure.
 
 **Precision-agnostic.** Operators preserve the dtype of their input. A
 pipeline that runs in float32 runs in float16 without modifying any operator.
-`NormalizeOp` is the single fixed-precision boundary: it converts uint8 input
+`Normalize` is the single fixed-precision boundary: it converts uint8 input
 to float, and its output dtype becomes the working precision for everything
 that follows.
 
 **Runtime-agnostic.** Operators use NumPy. They impose no dependency on
-PyTorch, TensorFlow, or any specific hardware. `InferOp` is the only step
+PyTorch, TensorFlow, or any specific hardware. `Infer` is the only step
 that touches a runtime; everything before and after is plain NumPy and
 transfers to any compute environment.
 
@@ -52,16 +52,16 @@ Image file into an inference-ready tensor:
 
 | Operator | Input → Output | Notes |
 |---|---|---|
-| `DecodeOp()` | `Path / str / bytes` → `ImagePayload` | Reads and decodes image file |
-| `ResizeOp(target_size, mode, interpolation, pad_value, center, allow_scale_up)` | `ImagePayload` → `(ImagePayload, ResizeTransform)` | `mode`: `"resize"` (stretch) or `"letterbox"` (aspect-ratio-preserving with padding) |
-| `NormalizeOp(scale, mean, std, output_layout, output_color_space, add_batch_dim)` | `ImagePayload` → `TensorPayload` | Scales, normalizes, transposes layout, optionally converts BGR↔RGB |
-| `CastTensorOp(dtype)` | `TensorPayload` → `TensorPayload` | Casts dtype, e.g. float32 → float16 |
+| `Decode()` | `Path / str / bytes` → `ImagePayload` | Reads and decodes image file |
+| `Resize(target_size, mode, interpolation, pad_value, center, allow_scale_up)` | `ImagePayload` → `(ImagePayload, ResizeTransform)` | `mode`: `"resize"` (stretch) or `"letterbox"` (aspect-ratio-preserving with padding) |
+| `Normalize(scale, mean, std, output_layout, output_color_space, add_batch_dim)` | `ImagePayload` → `TensorPayload` | Scales, normalizes, transposes layout, optionally converts BGR↔RGB |
+| `Cast(dtype)` | `TensorPayload` → `TensorPayload` | Casts dtype, e.g. float32 → float16 |
 
 ### Inference
 
 | Operator | Input → Output | Notes |
 |---|---|---|
-| `InferOp(model_path, expected_input_layout, expected_model_dtype)` | `TensorPayload` → `RuntimeOutputs` | Runs ONNX Runtime. Validates layout and dtype contract before inference. |
+| `Infer(model_path, expected_input_layout, expected_model_dtype)` | `TensorPayload` → `RuntimeOutputs` | Runs ONNX Runtime. Validates layout and dtype contract before inference. |
 
 ### Registry creation
 
@@ -75,7 +75,7 @@ Image file into an inference-ready tensor:
 |---|---|---|
 | `ToDetections(boxes, scores, classes)` | `TensorRegistry` → `Detections` | Finalises a detection pipeline |
 | `ToSegmentations(boxes, scores, classes, masks)` | `TensorRegistry` → `Segmentations` | Finalises a segmentation pipeline |
-| `MapToObjectsOp(field_sources)` | `Detections / Segmentations` → `list[dict]` | Converts typed prediction arrays to a list of per-object dicts |
+| `MapToObjects(field_sources)` | `Detections / Segmentations` → `list[dict]` | Converts typed prediction arrays to a list of per-object dicts |
 
 ---
 
@@ -169,6 +169,6 @@ pass the input value through unchanged.
 
 | Operator | Notes |
 |---|---|
-| `DrawBoxesOp()` | Draws bounding boxes on an `ImagePayload` |
-| `SaveImageOp(path)` | Saves an `ImagePayload` to disk |
-| `LogDetectionsOp(model_path, image_path, annotated_image_path)` | Logs detection results as JSON to stdout |
+| `DrawBoxes()` | Draws bounding boxes on an `ImagePayload` |
+| `SaveImage(path)` | Saves an `ImagePayload` to disk |
+| `LogDetections(model_path, image_path, annotated_image_path)` | Logs detection results as JSON to stdout |

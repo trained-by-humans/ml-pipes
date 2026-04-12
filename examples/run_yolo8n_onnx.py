@@ -7,18 +7,18 @@ from pathlib import Path
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
-    DecodeOp,
+    Decode,
     GatherScores,
-    InferOp,
-    LogDetectionsOp,
-    MapToObjectsOp,
+    Infer,
+    LogDetections,
+    MapToObjects,
     NMS,
-    NormalizeOp,
+    Normalize,
     Pick,
     Pipeline,
     ProjectBoxes,
     Recall,
-    ResizeOp,
+    Resize,
     Select,
     Slice,
     Squeeze,
@@ -43,12 +43,12 @@ MODEL_NAME = "yolov8n.onnx"
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            DecodeOp(),
-            ResizeOp((640, 640)),
+            Decode(),
+            Resize((640, 640)),
             Store("resize_transform", index=1),
             Pick(0),
-            NormalizeOp(),
-            InferOp(model_path),
+            Normalize(),
+            Infer(model_path),
             Select("output0", as_="preds"),
             Squeeze("preds"),
             Transpose("preds"),
@@ -105,14 +105,14 @@ def main() -> int:
     )
     Pipeline(
         [
-            MapToObjectsOp(
+            MapToObjects(
                 field_sources={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",
                 },
             ),
-            LogDetectionsOp(
+            LogDetections(
                 model_path=model_path,
                 image_path=image_path,
                 annotated_image_path=output_path,

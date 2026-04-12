@@ -7,18 +7,18 @@ from pathlib import Path
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
-    DecodeOp,
+    Decode,
     GatherScores,
-    InferOp,
-    LogDetectionsOp,
-    MapToObjectsOp,
+    Infer,
+    LogDetections,
+    MapToObjects,
     NMS,
-    NormalizeOp,
+    Normalize,
     Pick,
     Pipeline,
     ProjectBoxes,
     Recall,
-    ResizeOp,
+    Resize,
     Scale,
     Select,
     Softmax,
@@ -46,17 +46,17 @@ INPUT_SIZE = (640, 640)
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            DecodeOp(),
-            ResizeOp(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
+            Decode(),
+            Resize(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
             Store("resize_transform", index=1),
             Pick(0),
-            NormalizeOp(
+            Normalize(
                 scale=1.0 / 255.0,
                 output_layout="NCHW",
                 output_color_space="RGB",
                 add_batch_dim=True,
             ),
-            InferOp(model_path, expected_input_layout="NCHW", expected_model_dtype="float32"),
+            Infer(model_path, expected_input_layout="NCHW", expected_model_dtype="float32"),
             Select("pred_boxes", "logits", as_=("boxes", "logits")),
             Squeeze("boxes"),                                   # (1, N, 4) → (N, 4)
             Squeeze("logits"),                                  # (1, N, C) → (N, C)
@@ -112,14 +112,14 @@ def main() -> int:
     )
     Pipeline(
         [
-            MapToObjectsOp(
+            MapToObjects(
                 field_sources={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",
                 }
             ),
-            LogDetectionsOp(
+            LogDetections(
                 model_path=model_path,
                 image_path=image_path,
                 annotated_image_path=output_path,

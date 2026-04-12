@@ -6,20 +6,20 @@ from pathlib import Path
 
 from ml_pipes import (
     ArgMax,
-    CastTensorOp,
+    Cast,
     ConvertBoxFormat,
-    DecodeOp,
+    Decode,
     GatherScores,
-    InferOp,
-    LogDetectionsOp,
-    MapToObjectsOp,
+    Infer,
+    LogDetections,
+    MapToObjects,
     NMS,
-    NormalizeOp,
+    Normalize,
     Pick,
     Pipeline,
     ProjectBoxes,
     Recall,
-    ResizeOp,
+    Resize,
     Select,
     Slice,
     Squeeze,
@@ -44,8 +44,8 @@ MODEL_NAME = "yolo11n_fp16.onnx"
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            DecodeOp(),
-            ResizeOp(
+            Decode(),
+            Resize(
                 target_size=(640, 640),
                 mode="letterbox",
                 pad_value=114,
@@ -55,19 +55,19 @@ def build_pipeline(model_path: Path) -> Pipeline:
             ),
             Store("resize_transform", index=1),
             Pick(0),
-            NormalizeOp(
+            Normalize(
                 scale=1.0 / 255.0,
                 output_layout="NCHW",
                 output_color_space="RGB",
                 add_batch_dim=True,
             ),
-            CastTensorOp("float16"),
-            InferOp(
+            Cast("float16"),
+            Infer(
                 model_path,
                 expected_input_layout="NCHW",
                 expected_model_dtype="float16",
             ),
-            CastTensorOp("float32", selector="tensors"),
+            Cast("float32", selector="tensors"),
             Select("output0", as_="preds"),
             Squeeze("preds"),
             Transpose("preds"),
@@ -124,14 +124,14 @@ def main() -> int:
     )
     Pipeline(
         [
-            MapToObjectsOp(
+            MapToObjects(
                 field_sources={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",
                 },
             ),
-            LogDetectionsOp(
+            LogDetections(
                 model_path=model_path,
                 image_path=image_path,
                 annotated_image_path=output_path,

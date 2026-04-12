@@ -76,7 +76,7 @@ There are no hidden method overrides, no inherited behaviour to trace. Reading
 the pipeline list tells you everything.
 
 **Reusability without abstraction overhead.**
-`NormalizeOp`, `ConvertBoxFormat`, `ProjectBoxes` are used across every model.
+`Normalize`, `ConvertBoxFormat`, `ProjectBoxes` are used across every model.
 They are not tied to any base class. There is no cost to reuse them — just add
 them to a pipeline.
 
@@ -187,18 +187,18 @@ here is reusable across model families.
 
 ```python
 from ml_pipes import (
-    ArgMax, ConvertBoxFormat, DecodeOp, GatherScores, InferOp,
-    NMS, NormalizeOp, Pick, Pipeline, ProjectBoxes, Recall,
-    ResizeOp, Select, Slice, Squeeze, Store, ToDetections, Transpose,
+    ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
+    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
+    Resize, Select, Slice, Squeeze, Store, ToDetections, Transpose,
 )
 
 pipeline = Pipeline([
-    DecodeOp(),
-    ResizeOp((640, 640)),
+    Decode(),
+    Resize((640, 640)),
     Store("resize_transform", index=1),
     Pick(0),
-    NormalizeOp(),
-    InferOp("yolov8n.onnx"),
+    Normalize(),
+    Infer("yolov8n.onnx"),
     Select("output0", as_="preds"),
     Squeeze("preds"),
     Transpose("preds"),
@@ -292,7 +292,7 @@ The context system solves this with an immutable side-channel:
   value, producing a tuple. The next operator then receives both.
 
 ```python
-ResizeOp((640, 640)),                    # current = (ImagePayload, ResizeTransform)
+Resize((640, 640)),                      # current = (ImagePayload, ResizeTransform)
 Store("resize_transform", index=1),      # store transform; current unchanged
 Pick(0),                                 # current = ImagePayload
 ...                                      # inference and postprocessing
@@ -327,11 +327,11 @@ at each stage:
 
 | Type | Where it appears | Description |
 |---|---|---|
-| `ImagePayload` | after `DecodeOp`, through preprocessing | HWC NumPy array with color space and layout metadata |
-| `TensorPayload` | after `NormalizeOp`, into `InferOp` | CHW/NCHW float array with layout and dtype metadata |
-| `RuntimeOutputs` | from `InferOp` | raw ONNX output tensors with their graph names |
+| `ImagePayload` | after `Decode`, through preprocessing | HWC NumPy array with color space and layout metadata |
+| `TensorPayload` | after `Normalize`, into `Infer` | CHW/NCHW float array with layout and dtype metadata |
+| `RuntimeOutputs` | from `Infer` | raw ONNX output tensors with their graph names |
 | `TensorRegistry` | from `Select` through all postprocessing | named tensor store |
-| `ResizeTransform` | stored via `Store`, recalled via `Recall` | scale, pad, and shape metadata from `ResizeOp` |
+| `ResizeTransform` | stored via `Store`, recalled via `Recall` | scale, pad, and shape metadata from `Resize` |
 | `Detections` | from `ToDetections` | typed output: boxes, scores, classes |
 | `Segmentations` | from `ToSegmentations` | typed output: boxes, scores, classes, masks |
 
@@ -421,7 +421,7 @@ Store the resize transform before inference so it can be recalled for
 projection:
 
 ```python
-ResizeOp((640, 640)),
+Resize((640, 640)),
 Store("resize_transform", index=1),
 Pick(0),
 ...                                     # inference and postprocessing
@@ -448,18 +448,18 @@ ToSegmentations(),
 
 ```python
 from ml_pipes import (
-    ArgMax, ConvertBoxFormat, DecodeOp, GatherScores, InferOp,
-    NMS, NormalizeOp, Pick, Pipeline, ProjectBoxes, Recall,
-    ResizeOp, Select, Slice, Squeeze, Store, ToDetections, Transpose,
+    ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
+    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
+    Resize, Select, Slice, Squeeze, Store, ToDetections, Transpose,
 )
 
 pipeline = Pipeline([
-    DecodeOp(),
-    ResizeOp((640, 640)),
+    Decode(),
+    Resize((640, 640)),
     Store("resize_transform", index=1),
     Pick(0),
-    NormalizeOp(),
-    InferOp("model.onnx"),
+    Normalize(),
+    Infer("model.onnx"),
     Select("output0", as_="preds"),
     Squeeze("preds"),
     Transpose("preds"),
@@ -570,12 +570,12 @@ that owns the `Pipeline` instance:
 class YoloDetector:
     def __init__(self, model_path: str, conf_threshold: float = 0.25):
         self._pipeline = Pipeline([
-            DecodeOp(),
-            ResizeOp((640, 640)),
+            Decode(),
+            Resize((640, 640)),
             Store("resize_transform", index=1),
             Pick(0),
-            NormalizeOp(),
-            InferOp(model_path),
+            Normalize(),
+            Infer(model_path),
             Select("output0", as_="preds"),
             Squeeze("preds"),
             Transpose("preds"),
@@ -613,7 +613,7 @@ All examples auto-download their model and a COCO validation image into
 |---|---|---|---|
 | `run_detection.py` | any YOLOv8-compatible | detection | generic, bring your own model |
 | `run_yolo8n_onnx.py` | YOLOv8n | detection | baseline YOLO pipeline |
-| `run_yolo11n_onnx_fp16.py` | YOLO11n FP16 | detection | `CastTensorOp` for FP16, letterbox resize |
+| `run_yolo11n_onnx_fp16.py` | YOLO11n FP16 | detection | `Cast` for FP16, letterbox resize |
 | `run_rfdetr_nano_onnx.py` | RF-DETR nano | detection | `Scale` for normalized boxes, softmax logits |
 | `run_yolo11n_seg_onnx.py` | YOLO11n-seg | instance segmentation | prototype masks, `ReconstructMasks` + `FilterBy` |
 | `run_maskrcnn_onnx.py` | Mask R-CNN int8 | instance segmentation | CNN family, NMS baked in, 28×28 RoI masks, BGR mean subtraction |

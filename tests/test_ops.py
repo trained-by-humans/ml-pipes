@@ -4,19 +4,19 @@ from pathlib import Path
 import numpy as np
 
 from ml_pipes.ops import (
-    CastTensorOp,
+    Cast,
     DecodePredictionsOp,
     DecodeSegmentationOp,
-    DrawBoxesOp,
-    InferOp,
-    LogDetectionsOp,
-    MapToObjectsOp,
+    DrawBoxes,
+    Infer,
+    LogDetections,
+    MapToObjects,
     NMSOp,
-    NormalizeOp,
+    Normalize,
     ProjectSegmentationsOp,
     ProjectToInputOp,
-    ResizeOp,
-    SaveImageOp,
+    Resize,
+    SaveImage,
     SegmentationNMSOp,
 )
 from ml_pipes.transforms import ResizeTransform
@@ -34,7 +34,7 @@ def test_resize_op_can_do_plain_resize_without_padding():
     image = np.zeros((10, 20, 3), dtype=np.uint8)
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
 
-    resized, transform = ResizeOp(target_size=(40, 40), mode="resize")(payload)
+    resized, transform = Resize(target_size=(40, 40), mode="resize")(payload)
 
     assert resized.array.shape == (40, 40, 3)
     assert transform.scale == (2.0, 4.0)
@@ -46,7 +46,7 @@ def test_normalize_op_can_keep_bgr_and_hwc_without_batch():
     image = np.array([[[10, 20, 30]]], dtype=np.uint8)
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
 
-    tensor = NormalizeOp(
+    tensor = Normalize(
         output_color_space="BGR",
         output_layout="HWC",
         add_batch_dim=False,
@@ -63,7 +63,7 @@ def test_normalize_op_preserves_floating_input_dtype():
     image = np.array([[[10.0, 20.0, 30.0]]], dtype=np.float16)
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
 
-    tensor = NormalizeOp(
+    tensor = Normalize(
         output_color_space="BGR",
         output_layout="HWC",
         add_batch_dim=False,
@@ -291,7 +291,7 @@ def test_cast_tensor_op_can_cast_iterable_of_tensor_payloads():
         TensorPayload(array=np.array([[3.0, 4.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
     )
 
-    result = CastTensorOp("float32")(tensors)
+    result = Cast("float32")(tensors)
 
     assert isinstance(result, tuple)
     assert result[0].array.dtype == np.float32
@@ -308,7 +308,7 @@ def test_cast_tensor_op_can_cast_selected_dataclass_field():
         names=("output_0",),
     )
 
-    result = CastTensorOp("float32", selector="tensors")(runtime_outputs)
+    result = Cast("float32", selector="tensors")(runtime_outputs)
 
     assert isinstance(result, RuntimeOutputs)
     assert result.names == ("output_0",)
@@ -323,7 +323,7 @@ def test_cast_tensor_op_can_cast_single_tensor_payload():
         dtype="float32",
     )
 
-    result = CastTensorOp("float16")(payload)
+    result = Cast("float16")(payload)
 
     assert result.array.dtype == np.float16
     assert result.dtype == "float16"
@@ -334,7 +334,7 @@ def test_infer_op_requires_requested_model_dtype():
         def run(self, _output_names, _inputs):
             return [np.array([[1.0, 2.0]], dtype=np.float16)]
 
-    infer = InferOp.__new__(InferOp)
+    infer = Infer.__new__(Infer)
     infer.session = _FakeSession()
     infer.input_name = "images"
     infer.expected_input_layout = "NCHW"
@@ -352,7 +352,7 @@ def test_infer_op_requires_requested_model_dtype():
     except ValueError as error:
         assert "model dtype" in str(error)
     else:
-        raise AssertionError("InferOp should reject mismatched model dtype")
+        raise AssertionError("Infer should reject mismatched model dtype")
 
 
 def test_nms_keeps_overlapping_boxes_from_different_classes():
@@ -427,7 +427,7 @@ def test_draw_boxes_draws_on_source_image():
         scores=[0.9],
         classes=[1],
     )
-    result = DrawBoxesOp(class_names=["zero", "one"], color=(0, 255, 0))(detections, image)
+    result = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(detections, image)
 
     assert result.array.shape == image.shape
     assert result.color_space == "BGR"
@@ -440,7 +440,7 @@ def test_save_image_writes_output(tmp_path: Path):
     output_path = tmp_path / "annotated.jpg"
 
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
-    result = SaveImageOp(output_path)(payload)
+    result = SaveImage(output_path)(payload)
 
     assert output_path.is_file()
     assert result is payload
@@ -453,7 +453,7 @@ def test_map_to_objects_can_convert_detection_result():
         classes=[1],
     )
 
-    result = MapToObjectsOp(
+    result = MapToObjects(
         field_sources={
             "box": "boxes",
             "score": "scores",
@@ -474,7 +474,7 @@ def test_log_detections_prints_json_and_returns_input():
     stream = io.StringIO()
     detections = [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "class_id": 1}]
 
-    result = LogDetectionsOp(
+    result = LogDetections(
         model_path="model.onnx",
         image_path="image.jpg",
         annotated_image_path="image_model.jpg",
