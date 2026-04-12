@@ -59,7 +59,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             ArgMax("logits", as_="classes"),
             GatherScores("logits", "classes", as_="scores"),
             Scale("boxes", by=(INPUT_SIZE[1], INPUT_SIZE[0], INPUT_SIZE[1], INPUT_SIZE[0])),  # normalized cxcywh → pixel cxcywh
-            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            ConvertBoxFormat(from_="cxcywh"),
             NMS(conf_threshold=0.25, iou_threshold=1.0, max_detections=20),
             Recall("resize_transform"),
             ProjectBoxes(),

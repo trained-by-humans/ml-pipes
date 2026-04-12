@@ -56,7 +56,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Slice("preds", slice(4, None), as_="scores"),
             ArgMax("scores", as_="classes"),
             GatherScores("scores", "classes"),
-            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            ConvertBoxFormat(from_="cxcywh"),
             NMS(),
             Recall("resize_transform"),
             ProjectBoxes(),

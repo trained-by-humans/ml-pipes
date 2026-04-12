@@ -502,7 +502,7 @@ class ConvertBoxFormat:
     Defaults to in-place (overwrites src) when as_ is not provided.
     """
 
-    def __init__(self, src: str, from_: str, to: str, as_: str | None = None):
+    def __init__(self, src: str = "boxes", *, from_: str, to: str = "xyxy", as_: str | None = None):
         if from_ not in _BOX_FORMATS:
             raise ValueError(f"ConvertBoxFormat: unknown from_ format {from_!r}. Choose from {_BOX_FORMATS}")
         if to not in _BOX_FORMATS:

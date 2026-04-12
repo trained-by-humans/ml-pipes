@@ -120,7 +120,7 @@ Slice("preds", slice(None, 4), as_="boxes")         # creates "boxes", "preds" u
 
 | Operator | Notes |
 |---|---|
-| `ConvertBoxFormat(src, from_, to, as_)` | Converts between `"xyxy"`, `"xywh"`, `"cxcywh"` |
+| `ConvertBoxFormat(src, *, from_, to, as_)` | Converts between `"xyxy"`, `"xywh"`, `"cxcywh"`. `src` defaults to `"boxes"`, `to` defaults to `"xyxy"`. |
 
 ### Detection
 

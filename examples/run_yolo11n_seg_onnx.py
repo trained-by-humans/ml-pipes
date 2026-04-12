@@ -67,7 +67,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Slice("preds", slice(-NUM_MASKS, None), as_="mask_coeffs"),   # (N, 32)
             ArgMax("class_scores", as_="classes"),
             GatherScores("class_scores", "classes", as_="scores"),
-            ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
+            ConvertBoxFormat(from_="cxcywh"),
             NMS(kept_as="kept"),
             FilterBy("mask_coeffs", "kept"),
             ReconstructMasks("mask_coeffs", "protos", as_="masks"),
