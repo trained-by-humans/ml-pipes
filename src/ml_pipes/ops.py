@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import is_dataclass, replace
 from pathlib import Path
-from typing import Literal, Any
+from typing import Literal, Any, get_args
 from typing import TextIO
 
 import numpy as np
@@ -488,7 +488,8 @@ class Scale:
         return registry
 
 
-_BOX_FORMATS = ("xyxy", "xywh", "cxcywh")
+BoxFormat = Literal["xyxy", "xywh", "cxcywh"]
+_BOX_FORMATS: frozenset[str] = frozenset(get_args(BoxFormat))
 
 
 class ConvertBoxFormat:
@@ -502,11 +503,11 @@ class ConvertBoxFormat:
     Defaults to in-place (overwrites src) when as_ is not provided.
     """
 
-    def __init__(self, src: str = "boxes", *, from_: str, to: str = "xyxy", as_: str | None = None):
+    def __init__(self, src: str = "boxes", *, from_: BoxFormat, to: BoxFormat = "xyxy", as_: str | None = None):
         if from_ not in _BOX_FORMATS:
-            raise ValueError(f"ConvertBoxFormat: unknown from_ format {from_!r}. Choose from {_BOX_FORMATS}")
+            raise ValueError(f"ConvertBoxFormat: unknown from_ format {from_!r}. Choose from {sorted(_BOX_FORMATS)}")
         if to not in _BOX_FORMATS:
-            raise ValueError(f"ConvertBoxFormat: unknown to format {to!r}. Choose from {_BOX_FORMATS}")
+            raise ValueError(f"ConvertBoxFormat: unknown to format {to!r}. Choose from {sorted(_BOX_FORMATS)}")
         self.src = src
         self.from_ = from_
         self.to = to
