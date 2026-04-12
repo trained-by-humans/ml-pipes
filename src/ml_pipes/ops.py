@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import is_dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Any
 from typing import TextIO
 
 import numpy as np
@@ -997,3 +997,26 @@ class LogDetections:
             file=self.stream,
         )
         return prediction_objects
+
+
+class Pick:
+    """Selects one or more elements from a tuple by index, discarding the rest.
+
+    A pure routing operator: it changes which value flows forward but never
+    reads or writes the context. Commonly used after Store to discard the
+    ResizeTransform and keep only the ImagePayload before inference.
+    """
+
+    def __init__(self, *indices: int):
+        if not indices:
+            raise ValueError("Pick requires at least one index")
+        self.indices = indices
+
+    def __call__(self, current: tuple) -> Any:
+        if not isinstance(current, tuple):
+            raise TypeError("Pick can only be applied to tuple outputs")
+
+        selected = tuple(current[index] for index in self.indices)
+        if len(selected) == 1:
+            return selected[0]
+        return selected

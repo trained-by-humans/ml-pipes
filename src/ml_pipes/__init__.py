@@ -1,4 +1,4 @@
-from .context import Context, Pick, Recall, Store
+from .context import Context, Recall, Store
 from .core import Pipeline, PipelineValidationError
 from .ops import (
     ArgMax,
@@ -28,7 +28,7 @@ from .ops import (
     Squeeze,
     ToDetections,
     ToSegmentations,
-    Transpose,
+    Transpose, Pick,
 )
 from .types import (
     Detections,
