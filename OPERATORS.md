@@ -67,7 +67,7 @@ Image file into an inference-ready tensor:
 
 | Operator | Input → Output | Notes |
 |---|---|---|
-| `Select(*names, as_=...)` | `RuntimeOutputs` → `TensorRegistry` | Extracts tensors by their ONNX graph output names. `as_` renames — pass a tuple for multi-output. |
+| `Extract(*names, as_=...)` | `RuntimeOutputs` → `TensorRegistry` | Extracts tensors by their ONNX graph output names. `as_` renames — pass a tuple for multi-output. |
 
 ### Output
 

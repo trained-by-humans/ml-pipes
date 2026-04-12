@@ -18,7 +18,7 @@ from ml_pipes import (
     ProjectRoIMasks,
     Recall,
     Resize,
-    Select,
+    Extract,
     Squeeze,
     Store,
     TensorRegistry,
@@ -71,7 +71,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
                 add_batch_dim=False,
             ),
             Infer(model_path, input_layout="CHW", dtype="float32"),
-            Select("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
+            Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             _filter_detections,
             Recall("resize_transform"),
             ProjectBoxes(),                        # model space → original image space

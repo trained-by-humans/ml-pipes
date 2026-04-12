@@ -287,21 +287,21 @@ class Infer:
 # Registry creation
 # ---------------------------------------------------------------------------
 
-class Select:
+class Extract:
     """Extracts named tensors from RuntimeOutputs into a TensorRegistry.
 
-    Single output with rename:  Select("output0", as_="preds")
-    Multiple outputs:           Select("output0", "output1", as_=("preds", "protos"))
+    Single output with rename:  Extract("output0", as_="preds")
+    Multiple outputs:           Extract("output0", "output1", as_=("preds", "protos"))
     """
 
     def __init__(self, *names: str, as_: str | tuple[str, ...] | None = None):
         if not names:
-            raise ValueError("Select requires at least one output name")
+            raise ValueError("Extract requires at least one output name")
         if as_ is not None:
             aliases: tuple[str, ...] = (as_,) if isinstance(as_, str) else tuple(as_)
             if len(aliases) != len(names):
                 raise ValueError(
-                    f"Select: as_ length ({len(aliases)}) must match names length ({len(names)})"
+                    f"Extract: as_ length ({len(aliases)}) must match names length ({len(names)})"
                 )
         else:
             aliases = names
@@ -312,7 +312,7 @@ class Select:
         for src, dst in self._mapping.items():
             if src not in outputs.names:
                 raise KeyError(
-                    f"Select: output {src!r} not found. Available: {list(outputs.names)}"
+                    f"Extract: output {src!r} not found. Available: {list(outputs.names)}"
                 )
             idx = list(outputs.names).index(src)
             registry[dst] = outputs.tensors[idx].array

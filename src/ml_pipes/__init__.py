@@ -21,7 +21,7 @@ from .ops import (
     Resize,
     SaveImage,
     Scale,
-    Select,
+    Extract,
     Sigmoid,
     Slice,
     Softmax,

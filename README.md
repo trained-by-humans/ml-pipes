@@ -189,7 +189,7 @@ here is reusable across model families.
 from ml_pipes import (
     ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
     NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
-    Resize, Select, Slice, Squeeze, Store, ToDetections, Transpose,
+    Resize, Extract, Slice, Squeeze, Store, ToDetections, Transpose,
 )
 
 pipeline = Pipeline([
@@ -199,7 +199,7 @@ pipeline = Pipeline([
     Pick(0),
     Normalize(),
     Infer("yolov8n.onnx"),
-    Select("output0", as_="preds"),
+    Extract("output0", as_="preds"),
     Squeeze("preds"),
     Transpose("preds"),
     Slice("preds", slice(None, 4), as_="boxes"),
@@ -308,7 +308,7 @@ for the same key twice lets two operators (e.g. `ProjectMasks` and
 
 `TensorRegistry` is the intermediate representation used throughout
 postprocessing. It is a mutable named store of NumPy arrays, created by
-`Select` from the raw `RuntimeOutputs` of inference and passed through every
+`Extract` from the raw `RuntimeOutputs` of inference and passed through every
 tensor operator until `ToDetections` or `ToSegmentations` converts it to a
 typed output.
 
@@ -330,7 +330,7 @@ at each stage:
 | `ImagePayload` | after `Decode`, through preprocessing | HWC NumPy array with color space and layout metadata |
 | `TensorPayload` | after `Normalize`, into `Infer` | CHW/NCHW float array with layout and dtype metadata |
 | `RuntimeOutputs` | from `Infer` | raw ONNX output tensors with their graph names |
-| `TensorRegistry` | from `Select` through all postprocessing | named tensor store |
+| `TensorRegistry` | from `Extract` through all postprocessing | named tensor store |
 | `ResizeTransform` | stored via `Store`, recalled via `Recall` | scale, pad, and shape metadata from `Resize` |
 | `Detections` | from `ToDetections` | typed output: boxes, scores, classes |
 | `Segmentations` | from `ToSegmentations` | typed output: boxes, scores, classes, masks |
@@ -353,18 +353,18 @@ for o in session.get_outputs():
 
 ### Step 2 — Map outputs to the TensorRegistry
 
-Use `Select` to extract tensors by their graph output names, renaming to
+Use `Extract` to pull tensors by their graph output names into the registry, renaming to
 semantic names:
 
 ```python
 # Single output
-Select("output0", as_="preds")
+Extract("output0", as_="preds")
 
 # Multiple outputs
-Select("output0", "output1", as_=("preds", "protos"))
+Extract("output0", "output1", as_=("preds", "protos"))
 
 # Already semantically named (e.g. some Mask R-CNN exports)
-Select("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks"))
+Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks"))
 ```
 
 ### Step 3 — Adapt the raw tensor layout
@@ -450,7 +450,7 @@ ToSegmentations(),
 from ml_pipes import (
     ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
     NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
-    Resize, Select, Slice, Squeeze, Store, ToDetections, Transpose,
+    Resize, Extract, Slice, Squeeze, Store, ToDetections, Transpose,
 )
 
 pipeline = Pipeline([
@@ -460,7 +460,7 @@ pipeline = Pipeline([
     Pick(0),
     Normalize(),
     Infer("model.onnx"),
-    Select("output0", as_="preds"),
+    Extract("output0", as_="preds"),
     Squeeze("preds"),
     Transpose("preds"),
     Slice("preds", slice(None, 4), as_="boxes"),
@@ -576,7 +576,7 @@ class YoloDetector:
             Pick(0),
             Normalize(),
             Infer(model_path),
-            Select("output0", as_="preds"),
+            Extract("output0", as_="preds"),
             Squeeze("preds"),
             Transpose("preds"),
             Slice("preds", slice(None, 4), as_="boxes"),

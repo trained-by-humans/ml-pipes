@@ -20,7 +20,7 @@ from ml_pipes import (
     Recall,
     Resize,
     Scale,
-    Select,
+    Extract,
     Softmax,
     Squeeze,
     Store,
@@ -52,7 +52,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Pick(0),
             Normalize(),
             Infer(model_path, dtype="float32"),
-            Select("pred_boxes", "logits", as_=("boxes", "logits")),
+            Extract("pred_boxes", "logits", as_=("boxes", "logits")),
             Squeeze("boxes"),                                   # (1, N, 4) → (N, 4)
             Squeeze("logits"),                                  # (1, N, C) → (N, C)
             Softmax("logits"),

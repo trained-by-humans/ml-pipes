@@ -24,7 +24,7 @@ from ml_pipes import (
     ReconstructMasks,
     Recall,
     Resize,
-    Select,
+    Extract,
     Slice,
     Squeeze,
     Store,
@@ -58,7 +58,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Pick(0),
             Normalize(),
             Infer(model_path, dtype="float32"),
-            Select("output0", "output1", as_=("preds", "protos")),
+            Extract("output0", "output1", as_=("preds", "protos")),
             Squeeze("preds"),                                              # (1, 116, N) → (116, N)
             Squeeze("protos"),                                             # (1, 32, H, W) → (32, H, W)
             Transpose("preds"),                                            # (116, N) → (N, 116)
