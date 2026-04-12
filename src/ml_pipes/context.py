@@ -122,15 +122,22 @@ class Recall(ContextOp):
         return (Any,), current_parts + (stored_annotation,)
 
 
-class Select(ContextOp):
+class Pick(ContextOp):
+    """Selects one or more elements from a tuple by index, discarding the rest.
+
+    A pure control operator: it changes which value flows forward but does not
+    transform any data. Commonly used after Store to discard the ResizeTransform
+    and keep only the ImagePayload before inference.
+    """
+
     def __init__(self, *indices: int):
         if not indices:
-            raise ValueError("Select requires at least one index")
+            raise ValueError("Pick requires at least one index")
         self.indices = indices
 
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
         if not isinstance(current, tuple):
-            raise TypeError("Select can only be applied to tuple outputs")
+            raise TypeError("Pick can only be applied to tuple outputs")
 
         selected = tuple(current[index] for index in self.indices)
         if len(selected) == 1:
@@ -147,7 +154,7 @@ class Select(ContextOp):
         parts = expand_output_annotation(current_output)
         selected = tuple(parts[index] for index in self.indices if index < len(parts))
         if len(selected) != len(self.indices):
-            raise validation_error_type("Select references tuple indices that are not available")
+            raise validation_error_type("Pick references tuple indices that are not available")
         if len(selected) == 1:
             return (Any,), selected[0]
         return (Any,), selected

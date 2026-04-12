@@ -1,4 +1,4 @@
-from .context import Context, Recall, Select as Pick, Store
+from .context import Context, Pick, Recall, Store
 from .core import Pipeline, PipelineValidationError
 from .ops import (
     ArgMax,
