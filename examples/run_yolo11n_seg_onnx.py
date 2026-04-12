@@ -57,7 +57,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Store("resize_transform", index=1),
             Pick(0),
             Normalize(),
-            Infer(model_path, input_layout="NCHW", dtype="float32"),
+            Infer(model_path, dtype="float32"),
             Select("output0", "output1", as_=("preds", "protos")),
             Squeeze("preds"),                                              # (1, 116, N) → (116, N)
             Squeeze("protos"),                                             # (1, 32, H, W) → (32, H, W)
@@ -74,7 +74,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Recall("resize_transform"),
             ProjectBoxes(),
             Recall("resize_transform"),
-            ProjectMasks("masks", mask_threshold=0.5),
+            ProjectMasks(),
             ToSegmentations(),
         ]
     )

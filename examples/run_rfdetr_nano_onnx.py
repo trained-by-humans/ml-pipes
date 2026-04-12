@@ -50,13 +50,8 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Resize(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
             Store("resize_transform", index=1),
             Pick(0),
-            Normalize(
-                scale=1.0 / 255.0,
-                output_layout="NCHW",
-                output_color_space="RGB",
-                add_batch_dim=True,
-            ),
-            Infer(model_path, input_layout="NCHW", dtype="float32"),
+            Normalize(),
+            Infer(model_path, dtype="float32"),
             Select("pred_boxes", "logits", as_=("boxes", "logits")),
             Squeeze("boxes"),                                   # (1, N, 4) → (N, 4)
             Squeeze("logits"),                                  # (1, N, C) → (N, C)

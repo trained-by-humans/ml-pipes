@@ -77,7 +77,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             ProjectBoxes(),                        # model space → original image space
             Squeeze("masks", axis=1),              # (N, 1, 28, 28) → (N, 28, 28)
             Recall("resize_transform"),
-            ProjectRoIMasks(mask_threshold=0.5),   # 28×28 RoI masks → full-image binary masks
+            ProjectRoIMasks(),                      # 28×28 RoI masks → full-image binary masks
             ToSegmentations(),
         ]
     )

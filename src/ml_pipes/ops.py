@@ -735,7 +735,7 @@ class ProjectMasks:
     Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
     """
 
-    def __init__(self, masks: str = "masks", boxes: str = "boxes", mask_threshold: float = 0.0):
+    def __init__(self, masks: str = "masks", boxes: str = "boxes", mask_threshold: float = 0.5):
         self.masks = masks
         self.boxes = boxes
         self.mask_threshold = mask_threshold
