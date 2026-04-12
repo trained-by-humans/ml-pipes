@@ -999,6 +999,10 @@ class LogDetections:
         return prediction_objects
 
 
+# ---------------------------------------------------------------------------
+# Control
+# ---------------------------------------------------------------------------
+
 class Pick:
     """Selects one or more elements from a tuple by index, discarding the rest.
 
