@@ -56,7 +56,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
                 output_color_space="RGB",
                 add_batch_dim=True,
             ),
-            Infer(model_path, expected_input_layout="NCHW", expected_model_dtype="float32"),
+            Infer(model_path, input_layout="NCHW", dtype="float32"),
             Select("pred_boxes", "logits", as_=("boxes", "logits")),
             Squeeze("boxes"),                                   # (1, N, 4) → (N, 4)
             Squeeze("logits"),                                  # (1, N, C) → (N, C)
@@ -113,7 +113,7 @@ def main() -> int:
     Pipeline(
         [
             MapToObjects(
-                field_sources={
+                fields={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",

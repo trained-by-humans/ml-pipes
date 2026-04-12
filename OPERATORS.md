@@ -61,7 +61,7 @@ Image file into an inference-ready tensor:
 
 | Operator | Input → Output | Notes |
 |---|---|---|
-| `Infer(model_path, expected_input_layout, expected_model_dtype)` | `TensorPayload` → `RuntimeOutputs` | Runs ONNX Runtime. Validates layout and dtype contract before inference. |
+| `Infer(model_path, input_layout, dtype)` | `TensorPayload` → `RuntimeOutputs` | Runs ONNX Runtime. Validates layout and dtype contract before inference. |
 
 ### Registry creation
 
@@ -75,7 +75,7 @@ Image file into an inference-ready tensor:
 |---|---|---|
 | `ToDetections(boxes, scores, classes)` | `TensorRegistry` → `Detections` | Finalises a detection pipeline |
 | `ToSegmentations(boxes, scores, classes, masks)` | `TensorRegistry` → `Segmentations` | Finalises a segmentation pipeline |
-| `MapToObjects(field_sources)` | `Detections / Segmentations` → `list[dict]` | Converts typed prediction arrays to a list of per-object dicts |
+| `MapToObjects(fields)` | `Detections / Segmentations` → `list[dict]` | Converts typed prediction arrays to a list of per-object dicts |
 
 ---
 
@@ -95,32 +95,32 @@ Slice("preds", slice(None, 4), as_="boxes")         # creates "boxes", "preds" u
 
 | Operator | Notes |
 |---|---|
-| `Squeeze(name, axis, as_)` | Removes unit dimensions. Without `axis`, removes all. |
-| `Transpose(name, axes, as_)` | Permutes axes. Default reverses all axes. |
+| `Squeeze(src, axis, as_)` | Removes unit dimensions. Without `axis`, removes all. |
+| `Transpose(src, axes, as_)` | Permutes axes. Default reverses all axes. |
 
 ### Indexing
 
 | Operator | Notes |
 |---|---|
-| `Slice(name, slice, as_)` | Slices along the last axis: `Slice("preds", slice(None, 4), as_="boxes")` |
-| `Gather(name, indices, as_)` | Indexes into a tensor along axis 0 |
-| `FilterBy(name, indices, as_)` | Filters rows using an index array stored in the registry: `FilterBy("mask_coeffs", "kept")` |
+| `Slice(src, at, as_)` | Slices along the last axis: `Slice("preds", slice(None, 4), as_="boxes")` |
+| `Gather(src, indices, as_)` | Indexes into a tensor along axis 0 |
+| `FilterBy(src, indices, as_)` | Filters rows using an index array stored in the registry: `FilterBy("mask_coeffs", "kept")` |
 
 ### Math
 
 | Operator | Notes |
 |---|---|
-| `ArgMax(name, axis, as_)` | Returns index of max value along axis (default -1) |
+| `ArgMax(src, axis, as_)` | Returns index of max value along axis (default -1) |
 | `GatherScores(scores, classes, as_)` | Gathers `scores[i, classes[i]]` for each detection |
-| `Softmax(name, axis, as_)` | Softmax along axis (default -1) |
-| `Sigmoid(name, as_)` | Element-wise sigmoid |
-| `Scale(name, by, as_)` | Multiplies by a scalar or per-column array. Use `by=(W, H, W, H)` to denormalize `cxcywh` boxes, `by=1/255` to normalize pixel values. |
+| `Softmax(src, axis, as_)` | Softmax along axis (default -1) |
+| `Sigmoid(src, as_)` | Element-wise sigmoid |
+| `Scale(src, by, as_)` | Multiplies by a scalar or per-column array. Use `by=(W, H, W, H)` to denormalize `cxcywh` boxes, `by=1/255` to normalize pixel values. |
 
 ### Geometry
 
 | Operator | Notes |
 |---|---|
-| `ConvertBoxFormat(name, from_, to, as_)` | Converts between `"xyxy"`, `"xywh"`, `"cxcywh"` |
+| `ConvertBoxFormat(src, from_, to, as_)` | Converts between `"xyxy"`, `"xywh"`, `"cxcywh"` |
 
 ### Detection
 
@@ -132,7 +132,7 @@ Slice("preds", slice(None, 4), as_="boxes")         # creates "boxes", "preds" u
 
 | Operator | Notes |
 |---|---|
-| `ReconstructMasks(coefficients, prototypes, dst)` | Matrix multiply: `(N, C) @ (C, H*W)` → `(N, H, W)`. `dst` is required — no default — to keep the output name explicit. |
+| `ReconstructMasks(coefficients, prototypes, as_)` | Matrix multiply: `(N, C) @ (C, H*W)` → `(N, H, W)`. `as_` is required — no default — to keep the output name explicit. |
 
 ### Projection
 
@@ -141,7 +141,7 @@ them to inject the stored transform.
 
 | Operator | Notes |
 |---|---|
-| `ProjectBoxes(name)` | Inverse-transforms boxes from model input space to original image space, accounting for scale and letterbox padding. |
+| `ProjectBoxes(src)` | Inverse-transforms boxes from model input space to original image space, accounting for scale and letterbox padding. |
 | `ProjectMasks(masks, boxes, mask_threshold)` | Zeros prototype masks outside each bounding box (in prototype space, vectorised across all N masks), then upsamples to original image size. Boxes are converted from original image space to prototype space internally. **Must be called after `ProjectBoxes`**. |
 | `ProjectRoIMasks(masks, boxes, mask_threshold)` | Resizes per-instance RoI masks `(N, H, W)` to their bounding boxes and embeds them into a full-image canvas. **Must be called after `ProjectBoxes`** — needs boxes in original image space. For `(N, 1, H, W)` outputs, add `Squeeze("masks", axis=1)` first. |
 

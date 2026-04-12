@@ -70,7 +70,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
                 output_color_space="BGR",
                 add_batch_dim=False,
             ),
-            Infer(model_path, expected_input_layout="CHW", expected_model_dtype="float32"),
+            Infer(model_path, input_layout="CHW", dtype="float32"),
             Select("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             _filter_detections,
             Recall("resize_transform"),
@@ -124,7 +124,7 @@ def main() -> int:
     Pipeline(
         [
             MapToObjects(
-                field_sources={
+                fields={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",

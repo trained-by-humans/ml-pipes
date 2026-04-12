@@ -106,7 +106,7 @@ def main() -> int:
     Pipeline(
         [
             MapToObjects(
-                field_sources={
+                fields={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",

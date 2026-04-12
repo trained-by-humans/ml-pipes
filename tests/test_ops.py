@@ -308,7 +308,7 @@ def test_cast_tensor_op_can_cast_selected_dataclass_field():
         names=("output_0",),
     )
 
-    result = Cast("float32", selector="tensors")(runtime_outputs)
+    result = Cast("float32", field="tensors")(runtime_outputs)
 
     assert isinstance(result, RuntimeOutputs)
     assert result.names == ("output_0",)
@@ -337,7 +337,7 @@ def test_infer_op_requires_requested_model_dtype():
     infer = Infer.__new__(Infer)
     infer.session = _FakeSession()
     infer.input_name = "images"
-    infer.expected_input_layout = "NCHW"
+    infer.input_layout = "NCHW"
     infer.model_dtype = np.dtype("float32")
     infer.output_layouts = ("UNKNOWN",)
     infer.output_names = ("output_0",)
@@ -454,7 +454,7 @@ def test_map_to_objects_can_convert_detection_result():
     )
 
     result = MapToObjects(
-        field_sources={
+        fields={
             "box": "boxes",
             "score": "scores",
             "class_id": "classes",

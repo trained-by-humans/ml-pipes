@@ -436,7 +436,7 @@ For segmentation, project boxes first, then masks:
 ```python
 NMS(kept_as="kept"),
 FilterBy("mask_coeffs", "kept"),
-ReconstructMasks("mask_coeffs", "protos", dst="masks"),
+ReconstructMasks("mask_coeffs", "protos", as_="masks"),
 Recall("resize_transform"),
 ProjectBoxes(),
 Recall("resize_transform"),

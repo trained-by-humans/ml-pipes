@@ -64,10 +64,10 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Cast("float16"),
             Infer(
                 model_path,
-                expected_input_layout="NCHW",
-                expected_model_dtype="float16",
+                input_layout="NCHW",
+                dtype="float16",
             ),
-            Cast("float32", selector="tensors"),
+            Cast("float32", field="tensors"),
             Select("output0", as_="preds"),
             Squeeze("preds"),
             Transpose("preds"),
@@ -125,7 +125,7 @@ def main() -> int:
     Pipeline(
         [
             MapToObjects(
-                field_sources={
+                fields={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",

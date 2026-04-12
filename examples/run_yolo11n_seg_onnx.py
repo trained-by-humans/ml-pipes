@@ -57,7 +57,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Store("resize_transform", index=1),
             Pick(0),
             Normalize(),
-            Infer(model_path, expected_input_layout="NCHW", expected_model_dtype="float32"),
+            Infer(model_path, input_layout="NCHW", dtype="float32"),
             Select("output0", "output1", as_=("preds", "protos")),
             Squeeze("preds"),                                              # (1, 116, N) → (116, N)
             Squeeze("protos"),                                             # (1, 32, H, W) → (32, H, W)
@@ -70,7 +70,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
             ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
             NMS(kept_as="kept"),
             FilterBy("mask_coeffs", "kept"),
-            ReconstructMasks("mask_coeffs", "protos", dst="masks"),
+            ReconstructMasks("mask_coeffs", "protos", as_="masks"),
             Recall("resize_transform"),
             ProjectBoxes(),
             Recall("resize_transform"),
@@ -121,7 +121,7 @@ def main() -> int:
     Pipeline(
         [
             MapToObjects(
-                field_sources={
+                fields={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",

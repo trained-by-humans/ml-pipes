@@ -192,18 +192,18 @@ class Normalize:
 
 
 class Cast:
-    def __init__(self, dtype: str, selector: str | None = None):
+    def __init__(self, dtype: str, field: str | None = None):
         self.dtype = np.dtype(dtype)
-        self.selector = selector
+        self.field = field
 
     def __call__(self, value: object) -> object:
-        if self.selector is not None:
-            selected = getattr(value, self.selector)
+        if self.field is not None:
+            selected = getattr(value, self.field)
             casted = self._cast_tensor_value(selected)
             if is_dataclass(value):
-                return replace(value, **{self.selector: casted})
+                return replace(value, **{self.field: casted})
             raise TypeError(
-                f"Cast selector={self.selector!r} requires a dataclass value, got {type(value)!r}"
+                f"Cast field={self.field!r} requires a dataclass value, got {type(value)!r}"
             )
         return self._cast_tensor_value(value)
 
@@ -231,9 +231,9 @@ class Infer:
         # Runtime-facing input binding. Input names come from the exported graph.
         input_name: str | None = None,
         # Runtime-facing input tensor contract.
-        expected_input_layout: str = "NCHW",
+        input_layout: str = "NCHW",
         # Model-facing input dtype contract.
-        expected_model_dtype: str | None = None,
+        dtype: str | None = None,
         # Runtime-facing output tensor metadata aligned with exported graph output order.
         output_layouts: tuple[str, ...] | None = None,
     ):
@@ -249,15 +249,15 @@ class Infer:
             providers=list(providers),
         )
         self.input_name = input_name or self.session.get_inputs()[0].name
-        self.expected_input_layout = expected_input_layout
-        self.model_dtype = np.dtype(expected_model_dtype) if expected_model_dtype is not None else None
+        self.input_layout = input_layout
+        self.model_dtype = np.dtype(dtype) if dtype is not None else None
         self.output_layouts = output_layouts
         self.output_names = tuple(output.name for output in self.session.get_outputs())
 
     def __call__(self, tensor_payload: TensorPayload) -> RuntimeOutputs:
-        if tensor_payload.layout != self.expected_input_layout:
+        if tensor_payload.layout != self.input_layout:
             raise ValueError(
-                f"Infer expects {self.expected_input_layout} tensor layout, got {tensor_payload.layout}"
+                f"Infer expects {self.input_layout} tensor layout, got {tensor_payload.layout}"
             )
 
         actual_dtype = np.dtype(tensor_payload.dtype)
@@ -326,13 +326,13 @@ class Select:
 class Squeeze:
     """Removes size-1 dimensions from a named tensor."""
 
-    def __init__(self, name: str, axis: int | tuple[int, ...] | None = None, as_: str | None = None):
-        self.name = name
+    def __init__(self, src: str, axis: int | tuple[int, ...] | None = None, as_: str | None = None):
+        self.src = src
         self.axis = axis
-        self.as_ = as_ or name
+        self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        tensor = registry[self.name]
+        tensor = registry[self.src]
         registry[self.as_] = np.squeeze(tensor, axis=self.axis) if self.axis is not None else np.squeeze(tensor)
         return registry
 
@@ -340,13 +340,13 @@ class Squeeze:
 class Transpose:
     """Transposes a named tensor."""
 
-    def __init__(self, name: str, axes: tuple[int, ...] | None = None, as_: str | None = None):
-        self.name = name
+    def __init__(self, src: str, axes: tuple[int, ...] | None = None, as_: str | None = None):
+        self.src = src
         self.axes = axes
-        self.as_ = as_ or name
+        self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = np.transpose(registry[self.name], self.axes)
+        registry[self.as_] = np.transpose(registry[self.src], self.axes)
         return registry
 
 
@@ -360,13 +360,13 @@ class Slice:
     Defaults to in-place (overwrites src) when as_ is not provided.
     """
 
-    def __init__(self, src: str, s: slice, as_: str | None = None):
+    def __init__(self, src: str, at: slice, as_: str | None = None):
         self.src = src
-        self.s = s
+        self.at = at
         self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = registry[self.src][:, self.s]
+        registry[self.as_] = registry[self.src][:, self.at]
         return registry
 
 
@@ -433,13 +433,13 @@ class Softmax:
     Defaults to in-place (overwrites src) when as_ is not provided.
     """
 
-    def __init__(self, name: str, axis: int = -1, as_: str | None = None):
-        self.name = name
+    def __init__(self, src: str, axis: int = -1, as_: str | None = None):
+        self.src = src
         self.axis = axis
-        self.as_ = as_ or name
+        self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        x = registry[self.name]
+        x = registry[self.src]
         shifted = x - np.max(x, axis=self.axis, keepdims=True)
         exp = np.exp(shifted)
         registry[self.as_] = exp / np.sum(exp, axis=self.axis, keepdims=True)
@@ -452,12 +452,12 @@ class Sigmoid:
     Defaults to in-place (overwrites src) when as_ is not provided.
     """
 
-    def __init__(self, name: str, as_: str | None = None):
-        self.name = name
-        self.as_ = as_ or name
+    def __init__(self, src: str, as_: str | None = None):
+        self.src = src
+        self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = 1.0 / (1.0 + np.exp(-registry[self.name]))
+        registry[self.as_] = 1.0 / (1.0 + np.exp(-registry[self.src]))
         return registry
 
 
@@ -477,13 +477,13 @@ class Scale:
       Scale("boxes", by=(width, height, width, height))  # per-column for cxcywh / xyxy
     """
 
-    def __init__(self, name: str, by: float | tuple | list, as_: str | None = None):
-        self.name = name
+    def __init__(self, src: str, by: float | tuple | list, as_: str | None = None):
+        self.src = src
         self.by = np.asarray(by)
-        self.as_ = as_ or name
+        self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        tensor = registry[self.name]
+        tensor = registry[self.src]
         registry[self.as_] = tensor * self.by.astype(tensor.dtype)
         return registry
 
@@ -502,18 +502,18 @@ class ConvertBoxFormat:
     Defaults to in-place (overwrites src) when as_ is not provided.
     """
 
-    def __init__(self, name: str, from_: str, to: str, as_: str | None = None):
+    def __init__(self, src: str, from_: str, to: str, as_: str | None = None):
         if from_ not in _BOX_FORMATS:
             raise ValueError(f"ConvertBoxFormat: unknown from_ format {from_!r}. Choose from {_BOX_FORMATS}")
         if to not in _BOX_FORMATS:
             raise ValueError(f"ConvertBoxFormat: unknown to format {to!r}. Choose from {_BOX_FORMATS}")
-        self.name = name
+        self.src = src
         self.from_ = from_
         self.to = to
-        self.as_ = as_ or name
+        self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        boxes = registry[self.name]
+        boxes = registry[self.src]
         registry[self.as_] = self._convert(boxes, self.from_, self.to)
         return registry
 
@@ -663,13 +663,13 @@ class FilterBy:
     Defaults to in-place (overwrites src) when as_ is not provided.
     """
 
-    def __init__(self, name: str, indices: str, as_: str | None = None):
-        self.name = name
+    def __init__(self, src: str, indices: str, as_: str | None = None):
+        self.src = src
         self.indices = indices
-        self.as_ = as_ or name
+        self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = registry[self.name][registry[self.indices]]
+        registry[self.as_] = registry[self.src][registry[self.indices]]
         return registry
 
 
@@ -683,17 +683,17 @@ class ReconstructMasks:
     dst = (coefficients @ prototypes.reshape(C, -1)).reshape(N, H, W)
     """
 
-    def __init__(self, coefficients: str, prototypes: str, dst: str):
+    def __init__(self, coefficients: str, prototypes: str, as_: str):
         self.coefficients = coefficients
         self.prototypes = prototypes
-        self.dst = dst
+        self.as_ = as_
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         coefficients = registry[self.coefficients]  # (N, C)
         prototypes = registry[self.prototypes]       # (C, H, W)
         channels, mask_h, mask_w = prototypes.shape
         masks = coefficients @ prototypes.reshape(channels, -1)
-        registry[self.dst] = masks.reshape(-1, mask_h, mask_w)
+        registry[self.as_] = masks.reshape(-1, mask_h, mask_w)
         return registry
 
 
@@ -707,11 +707,11 @@ class ProjectBoxes:
     Accepts (TensorRegistry, ResizeTransform) — use Recall to provide the transform.
     """
 
-    def __init__(self, name: str = "boxes"):
-        self.name = name
+    def __init__(self, src: str = "boxes"):
+        self.src = src
 
     def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
-        boxes = registry[self.name].copy()
+        boxes = registry[self.src].copy()
         pad_x, pad_y = transform.pad
         scale_x, scale_y = transform.scale
         original_h, original_w = transform.original_shape
@@ -720,7 +720,7 @@ class ProjectBoxes:
         boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale_y
         boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(original_w))
         boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(original_h))
-        registry[self.name] = boxes
+        registry[self.src] = boxes
         return registry
 
 
@@ -942,13 +942,13 @@ class SaveImage:
 class MapToObjects:
     def __init__(
         self,
-        field_sources: dict[str, str | Callable[[object], Sequence[object]]],
+        fields: dict[str, str | Callable[[object], Sequence[object]]],
     ):
-        self.field_sources = field_sources
+        self.fields = fields
 
     def __call__(self, prediction_arrays: object) -> list[dict[str, object]]:
         columns: dict[str, Sequence[object]] = {}
-        for field_name, source in self.field_sources.items():
+        for field_name, source in self.fields.items():
             if isinstance(source, str):
                 column = getattr(prediction_arrays, source)
             else:
