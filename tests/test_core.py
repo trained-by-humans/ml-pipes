@@ -1,6 +1,6 @@
 import pytest
 
-from ml_pipes import Context, Pipeline, PipelineValidationError, Recall, Select, Store
+from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store
 
 
 class IntToString:
@@ -136,7 +136,7 @@ def test_pipeline_can_store_select_and_recall_values():
         [
             IntToPair(),
             Store("saved_text", index=1),
-            Select(0),
+            Pick(0),
             IntToString(),
             Recall("saved_text"),
             StringPairConsumer(),
@@ -151,7 +151,7 @@ def test_pipeline_validate_accepts_store_select_and_recall():
         [
             IntToPair(),
             Store("saved_text", index=1),
-            Select(0),
+            Pick(0),
             IntToString(),
             Recall("saved_text"),
             StringPairConsumer(),

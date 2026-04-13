@@ -92,6 +92,12 @@ class Pipeline:
 
     @classmethod
     def _is_annotation_compatible(cls, produced: Any, expected_inputs: tuple[Any, ...]) -> bool:
+        # When the next operator takes a single parameter, _build_call_args passes
+        # the whole current value without unpacking — so compare the unexpanded
+        # produced type against that single expected type.
+        if len(expected_inputs) == 1:
+            return cls._is_single_annotation_compatible(produced, expected_inputs[0])
+
         produced_types = cls._expand_output_annotation(produced)
         if len(produced_types) != len(expected_inputs):
             return False
@@ -119,8 +125,11 @@ class Pipeline:
         if cls._is_union_annotation(produced):
             return all(cls._is_single_annotation_compatible(option, expected) for option in get_args(produced))
 
-        if produced_origin is None or expected_origin is None:
+        if produced_origin is None:
             return False
+        if expected_origin is None:
+            # e.g. tuple[int, str] is assignable to bare tuple
+            return cls._is_concrete_assignable(produced_origin, expected)
         if produced_origin != expected_origin:
             return False
 

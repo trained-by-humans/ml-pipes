@@ -14,6 +14,7 @@ from .ops import (
     MapToObjects,
     NMS,
     Normalize,
+    Pick,
     ProjectBoxes,
     ProjectMasks,
     ProjectRoIMasks,
@@ -28,7 +29,7 @@ from .ops import (
     Squeeze,
     ToDetections,
     ToSegmentations,
-    Transpose, Pick,
+    Transpose,
 )
 from .types import (
     Detections,
@@ -48,6 +49,7 @@ __all__ = [
     "Decode",
     "Detections",
     "DrawBoxes",
+    "Extract",
     "FilterBy",
     "Gather",
     "GatherScores",
@@ -70,7 +72,6 @@ __all__ = [
     "RuntimeOutputs",
     "SaveImage",
     "Scale",
-    "Select",
     "Segmentations",
     "Sigmoid",
     "Slice",
