@@ -1,8 +1,53 @@
 # ml-pipes
 
-A composable inference pipeline library for ONNX models. Pipelines are built
-by chaining small, generic operators — no subclassing, no model-specific base
-classes, no framework lock-in.
+Composable ONNX inference pipelines. Build detection, segmentation, and
+classification pipelines by chaining small reusable operators — explicit,
+individually testable, and model-agnostic.
+
+## Install
+
+```bash
+pip install -e .
+```
+
+## Quick start
+
+```python
+from ml_pipes import (
+    ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
+    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
+    Resize, Extract, Slice, Squeeze, Store, ToDetections, Transpose,
+)
+
+pipeline = Pipeline([
+    Decode(),
+    Resize((640, 640)),
+    Store("resize_transform", index=1),
+    Pick(0),
+    Normalize(),
+    Infer("yolov8n.onnx"),
+    Extract("output0", as_="preds"),
+    Squeeze("preds"),
+    Transpose("preds"),
+    Slice("preds", slice(None, 4), as_="boxes"),
+    Slice("preds", slice(4, None), as_="scores"),
+    ArgMax("scores", as_="classes"),
+    GatherScores("scores", "classes"),
+    ConvertBoxFormat(from_="cxcywh"),
+    NMS(),
+    Recall("resize_transform"),
+    ProjectBoxes(),
+    ToDetections(),
+])
+
+detections = pipeline("image.jpg")
+print(detections.boxes, detections.scores, detections.classes)
+```
+
+Switching to a different model family (RF-DETR, Mask R-CNN, YOLO11) means
+changing the operators between `Infer` and `ToDetections` — preprocessing and
+projection operators are shared and unchanged. See
+[Building a pipeline for a custom model](#building-a-pipeline-for-a-custom-model).
 
 ## Design principle
 
@@ -95,8 +140,6 @@ subclass setup.
 using Python type annotations, catching operator mismatches before any data
 flows through.
 
----
-
 ## Comparison with other approaches
 
 Below is the same task — YOLOv8n object detection on a single image — implemented
@@ -126,8 +169,6 @@ your needs.
 The cost is opacity and lock-in. You cannot swap a preprocessing step, insert a
 custom tensor operation, or reuse any of the internal logic with a non-YOLO model.
 The pipeline is not a list of steps you control — it is a method you call.
-
----
 
 ### Raw ONNX Runtime
 
@@ -181,8 +222,6 @@ rewriting the entire preprocessing and postprocessing block from scratch — the
 confidence filter, box conversion, NMS, and projection are all repeated. Nothing
 here is reusable across model families.
 
----
-
 ### ml-pipes
 
 ```python
@@ -221,8 +260,6 @@ named and individually testable. Switching to RF-DETR changes three operators
 (`Scale` for normalised boxes, `Softmax` before `ArgMax`) — all preprocessing
 and projection operators are identical and unchanged.
 
----
-
 ### Summary
 
 | | Ultralytics | Raw ONNX Runtime | ml-pipes |
@@ -240,100 +277,6 @@ and want the smallest possible surface area. Raw ONNX Runtime is the right tool
 for zero-dependency constraints or highly unusual models. ml-pipes sits in
 between: the explicit control of raw ONNX with a reusable operator library that
 eliminates the repeated boilerplate.
-
----
-
-## Architecture
-
-### Pipeline
-
-`Pipeline` is a list of callables executed in sequence. The output of each
-step becomes the input of the next. Any Python callable can appear in the
-list — operator instances, plain functions, or lambdas.
-
-```python
-from ml_pipes import Pipeline
-
-pipeline = Pipeline([
-    step_one,
-    step_two,
-    step_three,
-])
-
-result = pipeline(input_value)
-```
-
-When an operator accepts more than one positional argument, the pipeline
-expects the current value to be a tuple matching the argument count. This is
-how `Recall` injects a stored value alongside the flowing registry.
-
-### Operators
-
-Operators are the building blocks of a pipeline. They fall into four families:
-**transform** (type changes), **tensor** (endomorphic on `TensorRegistry`),
-**context** (side-channel), and **side-effect** (tap pattern).
-
-The full operator reference — including all parameters, input/output types, and
-the `as_` in-place/new-key contract — is in [OPERATORS.md](OPERATORS.md).
-
-### Context
-
-The pipeline is linear: a single value flows from step to step. Some
-postprocessing steps need information computed much earlier — for example, the
-resize transform from preprocessing is needed when projecting boxes back to
-original image space. Threading this through every intermediate operator would
-pollute all signatures.
-
-The context system solves this with an immutable side-channel:
-
-- `Store(name)` — saves the current value (or a tuple element via `index=`)
-  into a context dictionary. The flowing value is unchanged.
-- `Recall(name)` — retrieves a stored value and appends it to the current
-  value, producing a tuple. The next operator then receives both.
-
-```python
-Resize((640, 640)),                      # current = (ImagePayload, ResizeTransform)
-Store("resize_transform", index=1),      # store transform; current unchanged
-Pick(0),                                 # current = ImagePayload
-...                                      # inference and postprocessing
-Recall("resize_transform"),              # current = (TensorRegistry, ResizeTransform)
-ProjectBoxes(),                          # receives (registry, transform)
-```
-
-`Recall` is idempotent — the stored value is not consumed. Calling `Recall`
-for the same key twice lets two operators (e.g. `ProjectMasks` and
-`ProjectBoxes`) independently receive the same transform.
-
-### TensorRegistry
-
-`TensorRegistry` is the intermediate representation used throughout
-postprocessing. It is a mutable named store of NumPy arrays, created by
-`Extract` from the raw `RuntimeOutputs` of inference and passed through every
-tensor operator until `ToDetections` or `ToSegmentations` converts it to a
-typed output.
-
-```python
-from ml_pipes import TensorRegistry
-
-registry = TensorRegistry({"boxes": boxes_array, "scores": scores_array})
-registry["classes"] = classes_array
-print(registry["boxes"].shape)
-```
-
-### Types
-
-The types in `ml_pipes.types` describe the values flowing through the pipeline
-at each stage:
-
-| Type | Where it appears | Description |
-|---|---|---|
-| `ImagePayload` | after `Decode`, through preprocessing | HWC NumPy array with color space and layout metadata |
-| `TensorPayload` | after `Normalize`, into `Infer` | CHW/NCHW float array with layout and dtype metadata |
-| `RuntimeOutputs` | from `Infer` | raw ONNX output tensors with their graph names |
-| `TensorRegistry` | from `Extract` through all postprocessing | named tensor store |
-| `ResizeTransform` | stored via `Store`, recalled via `Recall` | scale, pad, and shape metadata from `Resize` |
-| `Detections` | from `ToDetections` | typed output: boxes, scores, classes |
-| `Segmentations` | from `ToSegmentations` | typed output: boxes, scores, classes, masks |
 
 ## Building a pipeline for a custom model
 
@@ -598,12 +541,6 @@ class YoloDetector:
 
 TBA.
 
-## Install
-
-```bash
-pip install -e .
-```
-
 ## Examples
 
 All examples auto-download their model and sample assets into
@@ -653,8 +590,9 @@ python examples/run_video_yolo8n_onnx.py --input clip.mp4 --output annotated.mp4
 # Terminal 1 — start the server
 python examples/serve_yolo8n_onnx.py
 
-# Terminal 2 — send a test request (downloads the sample image if needed)
+# Terminal 2 — send a test request (uses bundled sample, or pass --input clip.mp4)
 python examples/serve_yolo8n_onnx.py --call
+python examples/serve_yolo8n_onnx.py --call --input photo.jpg
 
 # Or with curl
 curl -s -X POST http://localhost:5000/detect \
