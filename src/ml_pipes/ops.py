@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import is_dataclass, replace
 from pathlib import Path
-from typing import Literal, Any, get_args
+from typing import Literal, Any, get_args, get_origin
 from typing import TextIO
 
 import numpy as np
@@ -1020,8 +1020,20 @@ class Pick:
     def __call__(self, current: tuple) -> Any:
         if not isinstance(current, tuple):
             raise TypeError("Pick can only be applied to tuple outputs")
-
         selected = tuple(current[index] for index in self.indices)
         if len(selected) == 1:
             return selected[0]
         return selected
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        if current_output is None or get_origin(current_output) is not tuple:
+            return (Any,), Any
+        parts = get_args(current_output)
+        selected = tuple(parts[i] if i < len(parts) else Any for i in self.indices)
+        return (Any,), selected[0] if len(selected) == 1 else selected

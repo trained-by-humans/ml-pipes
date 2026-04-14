@@ -166,3 +166,18 @@ def test_pipeline_validate_rejects_recall_before_store():
 
     with pytest.raises(PipelineValidationError, match="was not stored"):
         pipeline.validate()
+
+
+def test_pipeline_validate_propagates_element_type_through_pick():
+    # Pick(0) on tuple[int, str] should produce int, which IntToString accepts.
+    pipeline = Pipeline([IntToPair(), Pick(0), IntToString()])
+
+    pipeline.validate()
+
+
+def test_pipeline_validate_rejects_wrong_type_downstream_of_pick():
+    # Pick(0) on tuple[int, str] produces int; StringToFloat expects str — mismatch.
+    pipeline = Pipeline([IntToPair(), Pick(0), StringToFloat()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.validate()

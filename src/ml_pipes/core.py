@@ -37,7 +37,7 @@ class Pipeline:
         stored_annotations: dict[str, Any] = {}
 
         for operator in self.operators:
-            if isinstance(operator, ContextOp):
+            if isinstance(operator, ContextOp) or hasattr(operator, "resolve_contract"):
                 _, output_type = operator.resolve_contract(
                     previous_output_type,
                     stored_annotations,
