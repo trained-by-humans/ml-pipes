@@ -10,6 +10,7 @@ from typing import TextIO
 
 import numpy as np
 
+from .batch import _BatchGate
 from .types import ResizeTransform
 from .types import (
     Detections,
@@ -1038,3 +1039,93 @@ class Pick:
         parts = get_args(current_output)
         selected = tuple(parts[i] if i < len(parts) else Any for i in self.indices)
         return (Any,), selected[0] if len(selected) == 1 else selected
+
+
+# ---------------------------------------------------------------------------
+# Batch coordination
+# ---------------------------------------------------------------------------
+
+class Batch:
+    """
+    Batch coordination entry point.
+
+    Multiple threads calling the same pipeline instance block here until
+    *size* samples have arrived or *timeout* seconds have elapsed since the
+    first arrival.  One thread is elected leader and continues through the
+    batch region; the rest wait for their individual results.
+
+    Pipeline handles the leader/waiter split; this operator owns the gate.
+
+    Example::
+
+        batch  = Batch(size=4, timeout=0.05)
+        unbatch = UnBatch()
+
+        pipeline = Pipeline([
+            ...,
+            batch,
+            Collate(),
+            Infer("model.onnx"),
+            Distribute(),
+            unbatch,
+            ...,
+        ])
+    """
+
+    def __init__(self, size: int, timeout: float = 0.05) -> None:
+        self.gate = _BatchGate(size, timeout)
+
+
+class UnBatch:
+    """
+    Batch coordination exit point.
+
+    Stateless marker.  Pipeline detects this operator, calls
+    ``gate.distribute()`` on the matching Batch's gate, and routes each
+    thread's individual result to the remaining operators.
+    """
+
+
+class Collate:
+    """
+    Stack a list of ``TensorPayload`` objects into a single batched tensor.
+
+    Input:  ``list[TensorPayload]`` — each with shape ``(1, C, H, W)`` or
+            ``(C, H, W)``.
+    Output: ``TensorPayload`` with shape ``(N, C, H, W)``.
+    """
+
+    def __call__(self, tensors: list[TensorPayload]) -> TensorPayload:
+        if not tensors:
+            raise ValueError("Collate received an empty list")
+        arrays = [t.array for t in tensors]
+        if arrays[0].ndim == 4 and arrays[0].shape[0] == 1:
+            # Each has a batch dim of 1 — concatenate along it.
+            batched = np.concatenate(arrays, axis=0)
+        else:
+            batched = np.stack(arrays, axis=0)
+        return TensorPayload(array=batched, layout=tensors[0].layout, dtype=tensors[0].dtype)
+
+
+class Distribute:
+    """
+    Split a batched ``RuntimeOutputs`` back into a list of per-sample outputs.
+
+    Input:  ``RuntimeOutputs`` — each tensor has shape ``(N, ...)``.
+    Output: ``list[RuntimeOutputs]`` of length N, each with shape ``(1, ...)``.
+    """
+
+    def __call__(self, outputs: RuntimeOutputs) -> list[RuntimeOutputs]:
+        n = outputs.tensors[0].array.shape[0]
+        result = []
+        for i in range(n):
+            sample_tensors = tuple(
+                TensorPayload(
+                    array=t.array[i : i + 1],
+                    layout=t.layout,
+                    dtype=t.dtype,
+                )
+                for t in outputs.tensors
+            )
+            result.append(RuntimeOutputs(tensors=sample_tensors, names=outputs.names))
+        return result
