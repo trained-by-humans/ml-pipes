@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ml_pipes import DecodeOp, Detections, DrawBoxesOp, ImagePayload, Pipeline, SaveImageOp, Segmentations
+from ml_pipes import Decode, Detections, DrawBoxes, ImagePayload, Pipeline, SaveImage, Segmentations
 
 
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
@@ -111,12 +111,12 @@ def render_and_save_detections(
     output_path: Path,
     class_names: list[str] | None = None,
 ) -> None:
-    source_image = DecodeOp()(image_path)
+    source_image = Decode()(image_path)
     Pipeline(
         [
-            lambda value: (value, source_image.array),
-            DrawBoxesOp(class_names=class_names),
-            SaveImageOp(output_path),
+            lambda value: (value, source_image),
+            DrawBoxes(class_names=class_names),
+            SaveImage(output_path),
         ]
     )(detections)
 
@@ -128,7 +128,7 @@ def render_and_save_segmentations(
     class_names: list[str] | None = None,
     alpha: float = 0.45,
 ) -> None:
-    source_image = DecodeOp()(image_path)
+    source_image = Decode()(image_path)
     image = source_image.array.copy()
     for mask, class_id in zip(segmentations.masks, segmentations.classes, strict=True):
         color = np.asarray(_class_color(int(class_id)), dtype=np.float32)
@@ -144,11 +144,11 @@ def render_and_save_segmentations(
         scores=segmentations.scores,
         classes=segmentations.classes,
     )
-    boxed = DrawBoxesOp(class_names=class_names)(
+    boxed = DrawBoxes(class_names=class_names)(
         detections,
         ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout),
     )
-    SaveImageOp(output_path)(boxed)
+    SaveImage(output_path)(boxed)
 
 
 def _class_color(class_id: int) -> tuple[int, int, int]:

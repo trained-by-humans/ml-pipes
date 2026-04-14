@@ -7,29 +7,22 @@ from pathlib import Path
 import numpy as np
 
 from ml_pipes import (
-    ArgMax,
-    ConvertBoxFormat,
     Decode,
-    GatherScores,
     Infer,
     LogDetections,
     MapToObjects,
-    NMS,
     Normalize,
     Pick,
     Pipeline,
-    FilterBy,
     ProjectBoxes,
-    ProjectMasks,
-    ReconstructMasks,
+    ProjectRoIMasks,
     Recall,
     Resize,
     Extract,
-    Slice,
     Squeeze,
     Store,
+    TensorRegistry,
     ToSegmentations,
-    Transpose,
 )
 from common import (
     COCO_CLASSES,
@@ -41,47 +34,57 @@ from common import (
 )
 
 
-MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx"
-MODEL_NAME = "yolo11n-seg.onnx"
+MODEL_URL = (
+    "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation"
+    "/mask-rcnn/model/MaskRCNN-12-int8.onnx"
+)
+MODEL_NAME = "MaskRCNN-12-int8.onnx"
 
-# output0: (1, 116, 8400) — 4 box + 80 class + 32 mask coefficients
-# output1: (1, 32, 160, 160) — prototype masks
-NUM_MASKS = 32
+# Input contract: float32, BGR, CHW (no batch dim), mean-subtracted with ImageNet BGR means.
+# NMS is baked into the model — outputs are already filtered detections.
+_IMAGENET_MEAN_BGR = (102.9801, 115.9465, 122.7717)
+CONF_THRESHOLD = 0.7
+
+
+def _filter_detections(registry: TensorRegistry) -> TensorRegistry:
+    """Keep detections above confidence threshold; convert 1-indexed COCO labels to 0-indexed."""
+    kept = np.where(registry["scores"] >= CONF_THRESHOLD)[0]
+    registry["boxes"] = registry["boxes"][kept]
+    registry["scores"] = registry["scores"][kept]
+    registry["masks"] = registry["masks"][kept]
+    registry["classes"] = registry["labels"][kept].astype(np.int32) - 1  # COCO 1-indexed → 0-indexed
+    return registry
 
 
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
             Decode(),
-            Resize((640, 640)),
+            Resize((800, 800)),
             Store("resize_transform", index=1),
             Pick(0),
-            Normalize(),
-            Infer(model_path, dtype="float32"),
-            Extract("output0", "output1", as_=("preds", "protos")),
-            Squeeze("preds"),                                              # (1, 116, N) → (116, N)
-            Squeeze("protos"),                                             # (1, 32, H, W) → (32, H, W)
-            Transpose("preds"),                                            # (116, N) → (N, 116)
-            Slice("preds", slice(None, 4), as_="boxes"),                  # (N, 4)
-            Slice("preds", slice(4, -NUM_MASKS), as_="class_scores"),     # (N, 80)
-            Slice("preds", slice(-NUM_MASKS, None), as_="mask_coeffs"),   # (N, 32)
-            ArgMax("class_scores", as_="classes"),
-            GatherScores("class_scores", "classes", as_="scores"),
-            ConvertBoxFormat(from_="cxcywh"),
-            NMS(kept_as="kept"),
-            FilterBy("mask_coeffs", "kept"),
-            ReconstructMasks("mask_coeffs", "protos", as_="masks"),
+            Normalize(
+                scale=1.0,
+                mean=_IMAGENET_MEAN_BGR,
+                output_layout="CHW",
+                output_color_space="BGR",
+                add_batch_dim=False,
+            ),
+            Infer(model_path, input_layout="CHW", dtype="float32"),
+            Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
+            _filter_detections,
             Recall("resize_transform"),
-            ProjectBoxes(),
+            ProjectBoxes(),                        # model space → original image space
+            Squeeze("masks", axis=1),              # (N, 1, 28, 28) → (N, 28, 28)
             Recall("resize_transform"),
-            ProjectMasks(),
+            ProjectRoIMasks(),                      # 28×28 RoI masks → full-image binary masks
             ToSegmentations(),
         ]
     )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a YOLO11n-seg ONNX instance segmentation demo on a COCO image.")
+    parser = argparse.ArgumentParser(description="Run a Mask R-CNN int8 ONNX instance segmentation demo on a COCO image.")
     parser.add_argument(
         "--assets-dir",
         type=Path,

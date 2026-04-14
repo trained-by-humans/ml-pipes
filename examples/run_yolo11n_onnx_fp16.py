@@ -5,20 +5,27 @@ import sys
 from pathlib import Path
 
 from ml_pipes import (
-    CastTensorOp,
-    DecodeOp,
-    DecodePredictionsOp,
-    InferOp,
-    LogDetectionsOp,
-    MapToObjectsOp,
-    NMSOp,
-    NormalizeOp,
+    ArgMax,
+    Cast,
+    ConvertBoxFormat,
+    Decode,
+    GatherScores,
+    Infer,
+    LogDetections,
+    MapToObjects,
+    NMS,
+    Normalize,
+    Pick,
     Pipeline,
-    ProjectToInputOp,
+    ProjectBoxes,
     Recall,
-    ResizeOp,
-    Select,
+    Resize,
+    Extract,
+    Slice,
+    Squeeze,
     Store,
+    ToDetections,
+    Transpose,
 )
 from common import (
     COCO_CLASSES,
@@ -37,8 +44,8 @@ MODEL_NAME = "yolo11n_fp16.onnx"
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            DecodeOp(),
-            ResizeOp(
+            Decode(),
+            Resize(
                 target_size=(640, 640),
                 mode="letterbox",
                 pad_value=114,
@@ -47,33 +54,26 @@ def build_pipeline(model_path: Path) -> Pipeline:
                 allow_scale_up=True,
             ),
             Store("resize_transform", index=1),
-            Select(0),
-            NormalizeOp(
-                scale=1.0 / 255.0,
-                output_layout="NCHW",
-                output_color_space="RGB",
-                add_batch_dim=True,
-            ),
-            CastTensorOp("float16"),
-            InferOp(
-                model_path,
-                expected_input_layout="NCHW",
-                expected_model_dtype="float16",
-            ),
-            CastTensorOp("float32", selector="tensors"),
-            DecodePredictionsOp(
-                num_box_values=4,
-                class_start_index=4,
-                input_box_format="xywh",
-                transpose_output="auto",
-                squeeze_batch_dim=True,
-                score_activation="none",
-            ),
-            NMSOp(),
+            Pick(0),
+            Normalize(),
+            Cast("float16"),
+            Infer(model_path, dtype="float16"),
+            Cast("float32", field="tensors"),
+            Extract("output0", as_="preds"),
+            Squeeze("preds"),
+            Transpose("preds"),
+            Slice("preds", slice(None, 4), as_="boxes"),
+            Slice("preds", slice(4, None), as_="scores"),
+            ArgMax("scores", as_="classes"),
+            GatherScores("scores", "classes"),
+            ConvertBoxFormat(from_="cxcywh"),
+            NMS(),
             Recall("resize_transform"),
-            ProjectToInputOp(),
+            ProjectBoxes(),
+            ToDetections(),
         ]
     )
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a YOLO11 FP16 ONNX demo on a COCO image.")
@@ -115,14 +115,14 @@ def main() -> int:
     )
     Pipeline(
         [
-            MapToObjectsOp(
-                field_sources={
+            MapToObjects(
+                fields={
                     "box": "boxes",
                     "score": "scores",
                     "class_id": "classes",
                 },
             ),
-            LogDetectionsOp(
+            LogDetections(
                 model_path=model_path,
                 image_path=image_path,
                 annotated_image_path=output_path,
