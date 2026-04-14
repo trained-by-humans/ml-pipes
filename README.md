@@ -606,8 +606,10 @@ pip install -e .
 
 ## Examples
 
-All examples auto-download their model and a COCO validation image into
+All examples auto-download their model and sample assets into
 `.example_assets/` on first run.
+
+### Inference on files
 
 | Example | Model | Task | Notable pipeline features |
 |---|---|---|---|
@@ -623,4 +625,39 @@ python examples/run_yolo8n_onnx.py
 python examples/run_yolo11n_seg_onnx.py
 python examples/run_rfdetr_nano_onnx.py
 python examples/run_maskrcnn_onnx.py
+```
+
+### Live and video inference
+
+| Example | Model | Task | Notes |
+|---|---|---|---|
+| `run_webcam_yolo8n_onnx.py` | YOLOv8n | live detection | reads from the default camera; press Q to quit |
+| `run_video_yolo8n_onnx.py` | YOLOv8n | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
+
+```bash
+# Live webcam — press Q to quit
+python examples/run_webcam_yolo8n_onnx.py
+
+# Video file — uses bundled sample, or pass --input clip.mp4
+python examples/run_video_yolo8n_onnx.py
+python examples/run_video_yolo8n_onnx.py --input clip.mp4 --output annotated.mp4
+```
+
+### Inference endpoint
+
+| Example | Model | Task | Notes |
+|---|---|---|---|
+| `serve_yolo8n_onnx.py` | YOLOv8n | HTTP detection endpoint | requires `pip install flask` |
+
+```bash
+# Terminal 1 — start the server
+python examples/serve_yolo8n_onnx.py
+
+# Terminal 2 — send a test request (downloads the sample image if needed)
+python examples/serve_yolo8n_onnx.py --call
+
+# Or with curl
+curl -s -X POST http://localhost:5000/detect \
+     -H "Content-Type: application/octet-stream" \
+     --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
 ```
