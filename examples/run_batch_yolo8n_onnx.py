@@ -69,7 +69,7 @@ def _export_dynamic_model(dst: Path) -> None:
 
 
 def build_pipeline(model_path: Path, batch_size: int, timeout: float,
-                   serialize: bool = True) -> Pipeline:
+                   serialize: bool = False) -> Pipeline:
     return Pipeline([
         Decode(),
         Resize((640, 640)),

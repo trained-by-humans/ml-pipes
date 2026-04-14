@@ -239,10 +239,11 @@ class Infer:
         dtype: str | None = None,
         # Runtime-facing output tensor metadata aligned with exported graph output order.
         output_layouts: tuple[str, ...] | None = None,
-        # Serialize session.run() calls to prevent CPU oversubscription when
-        # multiple batch leaders are in flight concurrently.  Disable to
-        # experiment or when using a GPU provider that doesn't contend on CPU.
-        serialize: bool = True,
+        # Serialize session.run() calls with a lock.  Off by default because
+        # runtimes like ONNX Runtime manage their own internal thread pool and
+        # handle concurrent calls efficiently.  Enable if profiling shows that
+        # concurrent calls are oversubscribing CPU cores on your hardware.
+        serialize: bool = False,
     ):
         path = Path(model_path)
         if not path.is_file():
