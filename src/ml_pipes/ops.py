@@ -1058,16 +1058,13 @@ class Batch:
 
     Example::
 
-        batch  = Batch(size=4, timeout=0.05)
-        unbatch = UnBatch()
-
         pipeline = Pipeline([
             ...,
-            batch,
+            Batch(size=4, timeout=0.05),
             Collate(),
             Infer("model.onnx"),
             Distribute(),
-            unbatch,
+            UnBatch(),
             ...,
         ])
     """
