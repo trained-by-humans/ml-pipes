@@ -14,29 +14,108 @@ class PipelineValidationError(ValueError):
 class Pipeline:
     def __init__(self, operators: Iterable[Callable[..., Any] | ContextOp], validate_on_init: bool = False):
         self.operators = list(operators)
+        self._scan_batch_pairs()
         if validate_on_init:
             self.validate()
 
     def __call__(self, value: Any) -> Any:
         current = value
         context = Context()
-        for operator in self.operators:
-            if isinstance(operator, ContextOp):
-                current, context = operator.apply(current, context)
-            else:
-                args = self._build_call_args(operator, current)
-                current = operator(*args)
+        i = 0
+        while i < len(self.operators):
+            operator = self.operators[i]
+
+            if i in self._batch_to_unbatch:
+                inputs, is_leader = operator.gate.enter(current)
+                if not is_leader:
+                    # Waiter: result already distributed — skip batch region.
+                    current = inputs
+                    i = self._batch_to_unbatch[i] + 1
+                    continue
+                # Leader: run batch region, propagate any exception to waiters.
+                current = inputs
+                unbatch_idx = self._batch_to_unbatch[i]
+                try:
+                    for j in range(i + 1, unbatch_idx + 1):
+                        current, context = self._step(j, current, context)
+                except Exception as exc:
+                    operator.gate.distribute_exception(exc)
+                    raise
+                i = unbatch_idx + 1
+                continue
+
+            current, context = self._step(i, current, context)
+            i += 1
+
         return current
 
+    def _step(self, i: int, current: Any, context: Context) -> tuple[Any, Context]:
+        """Execute a single operator, handling UnBatch and ContextOp specially."""
+        operator = self.operators[i]
+
+        if i in self._unbatch_to_batch:
+            gate = self.operators[self._unbatch_to_batch[i]].gate
+            return gate.distribute(current), context
+
+        if isinstance(operator, ContextOp):
+            return operator.apply(current, context)
+
+        args = self._build_call_args(operator, current)
+        return operator(*args), context
+
+    def _scan_batch_pairs(self) -> None:
+        """Build index maps for Batch/UnBatch pairs (no validation, called at init)."""
+        from .ops import Batch, UnBatch  # local import avoids circular dependency
+
+        stack: list[int] = []
+        self._batch_to_unbatch: dict[int, int] = {}
+        self._unbatch_to_batch: dict[int, int] = {}
+        for i, op in enumerate(self.operators):
+            if isinstance(op, Batch):
+                stack.append(i)
+            elif isinstance(op, UnBatch) and stack:
+                batch_idx = stack.pop()
+                self._batch_to_unbatch[batch_idx] = i
+                self._unbatch_to_batch[i] = batch_idx
+
+    def _validate_batch_pairs(self) -> None:
+        from .ops import Batch, UnBatch
+
+        stack: list[int] = []
+        for i, op in enumerate(self.operators):
+            if isinstance(op, Batch):
+                if stack:
+                    raise PipelineValidationError(
+                        "Nested Batch regions are not supported"
+                    )
+                stack.append(i)
+            elif isinstance(op, UnBatch):
+                if not stack:
+                    raise PipelineValidationError(
+                        f"UnBatch at position {i} has no matching Batch"
+                    )
+                stack.pop()
+        if stack:
+            raise PipelineValidationError(
+                f"Batch at position {stack[0]} has no matching UnBatch"
+            )
+
     def validate(self) -> None:
+        from .ops import Batch, UnBatch
+
         if not self.operators:
             return
+
+        self._validate_batch_pairs()
 
         previous_output_type: Any | None = None
         previous_name: str | None = None
         stored_annotations: dict[str, Any] = {}
 
         for operator in self.operators:
+            if isinstance(operator, (Batch, UnBatch)):
+                # Coordination markers — no type contract to validate.
+                continue
             if isinstance(operator, ContextOp) or hasattr(operator, "resolve_contract"):
                 _, output_type = operator.resolve_contract(
                     previous_output_type,

@@ -2,9 +2,12 @@ from .context import Context, Recall, Store
 from .core import Pipeline, PipelineValidationError
 from .ops import (
     ArgMax,
+    Batch,
     Cast,
+    Collate,
     ConvertBoxFormat,
     Decode,
+    Distribute,
     DrawBoxes,
     FilterBy,
     Gather,
@@ -30,6 +33,7 @@ from .ops import (
     ToDetections,
     ToSegmentations,
     Transpose,
+    UnBatch,
 )
 from .types import (
     Detections,
@@ -43,11 +47,14 @@ from .types import (
 
 __all__ = [
     "ArgMax",
+    "Batch",
     "Cast",
+    "Collate",
     "ConvertBoxFormat",
     "Context",
     "Decode",
     "Detections",
+    "Distribute",
     "DrawBoxes",
     "Extract",
     "FilterBy",
@@ -83,4 +90,5 @@ __all__ = [
     "ToDetections",
     "ToSegmentations",
     "Transpose",
+    "UnBatch",
 ]
