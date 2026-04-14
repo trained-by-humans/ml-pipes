@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import is_dataclass, replace
 from pathlib import Path
@@ -249,6 +250,7 @@ class Infer:
             str(path),
             providers=list(providers),
         )
+        self._lock = threading.Lock()
         self.input_name = input_name or self.session.get_inputs()[0].name
         self.input_layout = input_layout
         self.model_dtype = np.dtype(dtype) if dtype is not None else None
@@ -265,7 +267,8 @@ class Infer:
         if self.model_dtype is not None and actual_dtype != self.model_dtype:
             raise ValueError(f"Infer expects model dtype {self.model_dtype}, got {actual_dtype}")
 
-        outputs = self.session.run(None, {self.input_name: tensor_payload.array})
+        with self._lock:
+            outputs = self.session.run(None, {self.input_name: tensor_payload.array})
 
         if self.output_layouts is None:
             output_layouts = tuple("UNKNOWN" for _ in outputs)
