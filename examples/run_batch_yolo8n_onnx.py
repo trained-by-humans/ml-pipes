@@ -55,20 +55,17 @@ ASSETS_DIR = Path(".example_assets")
 
 
 def build_pipeline(model_path: Path, batch_size: int, timeout: float) -> Pipeline:
-    batch = Batch(size=batch_size, timeout=timeout)
-    unbatch = UnBatch()
-
     return Pipeline([
         Decode(),
         Resize((640, 640)),
         Store("resize_transform", index=1),
         Pick(0),
         Normalize(),
-        batch,
+        Batch(size=batch_size, timeout=timeout),
         Collate(),
         Infer(model_path),
         Distribute(),
-        unbatch,
+        UnBatch(),
         Extract("output0", as_="preds"),
         Squeeze("preds"),
         Transpose("preds"),

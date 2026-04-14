@@ -37,9 +37,7 @@ class _FailBatchOp:
 
 
 def _make_pipeline(size: int, timeout: float, batch_op) -> Pipeline:
-    batch = Batch(size=size, timeout=timeout)
-    unbatch = UnBatch()
-    return Pipeline([batch, batch_op, unbatch])
+    return Pipeline([Batch(size=size, timeout=timeout), batch_op, UnBatch()])
 
 
 def _run_threads(pipeline: Pipeline, inputs: list, timeout: float = 2.0) -> list:
