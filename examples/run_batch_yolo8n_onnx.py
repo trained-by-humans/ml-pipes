@@ -7,7 +7,10 @@ from __future__ import annotations
 # leader and runs Collate → Infer → Distribute as a single batched call.
 # The other threads wait and resume with their individual result after UnBatch.
 #
-# Usage (downloads the sample COCO image and runs it 8 times by default):
+# The model is exported from Ultralytics with dynamic=True so ONNX Runtime
+# accepts any batch size.  Requires: pip install ultralytics
+#
+# Usage (runs the sample COCO image 8 times by default):
 #   python run_batch_yolo8n_onnx.py
 #
 # Run with explicit images:
@@ -49,9 +52,20 @@ from ml_pipes import (
 from common import COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
 
 
-MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
-MODEL_NAME = "yolov8n.onnx"
+MODEL_NAME = "yolov8n_dynamic.onnx"
 ASSETS_DIR = Path(".example_assets")
+
+
+def _export_dynamic_model(dst: Path) -> None:
+    """Export YOLOv8n with a dynamic batch axis using Ultralytics."""
+    from ultralytics import YOLO
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    model = YOLO("yolov8n.pt")
+    exported = model.export(format="onnx", dynamic=True, imgsz=640, simplify=False)
+    Path(exported).rename(dst)
+    # Remove the .pt weights file downloaded alongside the export.
+    Path("yolov8n.pt").unlink(missing_ok=True)
 
 
 def build_pipeline(model_path: Path, batch_size: int, timeout: float) -> Pipeline:
@@ -122,8 +136,9 @@ def main() -> int:
     assets_dir = args.assets_dir
     model_path = assets_dir / MODEL_NAME
 
-    print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
-    download_if_missing(MODEL_URL, model_path)
+    if not model_path.exists():
+        print(f"Exporting YOLOv8n (dynamic batch) → {model_path}", file=sys.stderr)
+        _export_dynamic_model(model_path)
 
     if args.images is not None:
         image_paths = args.images
