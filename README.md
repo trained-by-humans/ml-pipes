@@ -86,10 +86,40 @@ receives `(Detections, ImagePayload)` and returns the annotated image for
 
 Most inference SDKs are built around inheritance: a `Detector` base class with
 a `YoloDetector` subclass, a `Segmentor` base class with a `MaskRCNNSegmentor`
-subclass. This feels natural at first, but it couples the pipeline logic to a
+subclass. 
+```python
+# inference/models/yolov8_object_detection.py
+from inference.core.models.object_detection_base import ObjectDetectionBaseOnnxRoboflowInferenceModel
+
+class YOLOv8ObjectDetection(ObjectDetectionBaseOnnxRoboflowInferenceModel): 
+    ... # Yolov8 specific logic
+```
+
+This feels natural at first, but it couples the pipeline logic to a
 specific model family. Adding a new model means subclassing; changing
-postprocessing means overriding methods; reusing a preprocessing step across
-model families means fighting the hierarchy.
+postprocessing means overriding methods; Eventually you end up with a
+class hierarchy that is too complex to reason about.
+
+```python
+class ObjectDetectionBaseOnnxRoboflowInferenceModel(OnnxRoboflowInferenceModel):
+    ... # object Detection via onnx runtime logic
+    
+class OnnxRoboflowInferenceModel(RoboflowInferenceModel):
+    ... # common onnx runtime logic
+    
+class RoboflowInferenceModel(Model):
+    ... # common inference logic
+    
+class Model(BaseInference):
+    ... # ??
+
+class BaseInference:
+    ... # ???
+```
+
+To understand what happens to the data you trace through
+multiple layers of the class hierarchy. The interesting computation — what
+actually happens to the tensors — is scattered.
 
 **ml-pipes takes the opposite approach: composition.**
 
@@ -99,48 +129,75 @@ models produce different outputs — but at some level of abstraction they all
 produce boxes, scores, class indices, and optionally masks. The right operators
 applied in the right order produce the right result regardless of model family.
 
-```
-image file
-  → decode → resize → normalize             # preprocessing, model-agnostic
-  → infer                                   # the only model-specific step
-  → select → squeeze → transpose            # adapt raw output to registry
-  → slice → argmax → gather_scores          # extract semantic tensors
-  → convert_box_format → nms                # detection-specific logic
-  → recall transform → project_boxes        # postprocessing, model-agnostic
-  → to_detections                           # output type
+```python
+# YOLOv8n
+Pipeline([
+    Decode(), Resize((640, 640)), Store("resize_transform", index=1), Pick(0), Normalize(),
+    Infer("yolov8n.onnx"),
+    Extract("output0", as_="preds"),          
+    Squeeze("preds"), Transpose("preds"),     
+    Slice("preds", slice(None, 4), as_="boxes"),
+    Slice("preds", slice(4, None), as_="scores"),
+    ArgMax("scores", as_="classes"),          
+    GatherScores("scores", "classes"),        
+    ConvertBoxFormat(from_="cxcywh"), NMS(), Recall("resize_transform"), ProjectBoxes(), ToDetections(),
+])
+
+# RF-DETR Nano — only the section between Infer and NMS changes
+Pipeline([
+    Decode(), ...                                               # same preprocessing pipeline as above
+    Infer("detr_nano.onnx"),                                    # different postprocessing
+    Extract("pred_boxes", "logits", as_=("boxes", "logits")),   #
+    Squeeze("boxes"), Squeeze("logits"),                        # ← model-specific
+    Softmax("logits"),                                          #
+    ArgMax("logits", as_="classes"),                            #
+    GatherScores("logits", "classes", as_="scores"),            #
+    Scale("boxes", by=(640, 640, 640, 640)),                    #
+    ConvertBoxFormat(from_="cxcywh"), ...                       # same postprocessing pipeline as above
+                           
+])
 ```
 
 The same operators appear in every detection pipeline. Switching from YOLOv8
-to RF-DETR changes three lines (a `Scale` for normalized boxes and different
+to RF-DETR changes few lines (a `Scale` for normalized boxes and different
 softmax/argmax handling) — the rest is identical.
 
 ### Why function-style coding is natural for inference
 
 A neural network is, fundamentally, a function: it maps an input tensor to
-output tensors. The entire inference pipeline — decode, resize, normalize,
-infer, postprocess — is also a function: it maps an image to a structured
+output tensors: 
+```python
+import torch.nn as nn
+
+# A network is a function: input tensor → output tensor.
+# nn.Sequential makes the transformation sequence the primary artifact.
+model = nn.Sequential(
+    nn.Conv2d(3, 32, 3, padding=1),
+    nn.ReLU(),
+    nn.MaxPool2d(2),
+    nn.Flatten(),
+    nn.Linear(32 * 112 * 112, 10),
+)
+```
+
+The entire inference pipeline — decode, resize, normalize, infer, postprocess — is also a function: it maps an image to a structured
 prediction. Every step in between is a function too. The problem is shaped like
 function composition from top to bottom, so the code should be too.
 
-Object-oriented inheritance fights this shape. A `Detector` class with a
-`predict` method hides the transformation sequence inside method calls and
-inherited overrides. To understand what happens to the data you trace through
-multiple layers of the class hierarchy. The interesting computation — what
-actually happens to the tensors — is scattered.
-
-A pipeline list makes the data transformation the primary artifact. Reading the
+A pipeline makes the data transformation the primary artifact. Reading the
 pipeline top to bottom tells you exactly what happens to the data, in order,
 without indirection. There is no hidden state between steps: each operator
 receives a value, returns a value, and has no memory of previous calls. This
 mirrors how you reason about inference — "resize the image, normalize it, run
-the model, squeeze the batch dimension, threshold by confidence" — and it means
+the model, ..." — and it means
 that reasoning is directly visible in the code rather than distributed across a
 class hierarchy.
 
-This also means the pipeline is inspectable and debuggable at every boundary.
-Inserting a `print` function or a logging step at any position in the list
-shows you the exact value flowing through at that point. There are no private
-fields to dig into, no method override chain to follow.
+> [!IMPORTANT]
+> This also means the pipeline is inspectable and debuggable at every boundary.
+> Inserting a `print` function or a logging step at any position in the list
+> shows you the exact value flowing through at that point. There are no private
+> fields to dig into, no method override chain to follow.
 
 ## Comparison with other approaches
 
