@@ -49,6 +49,52 @@ changing the operators between `Infer` and `ToDetections` — preprocessing and
 projection operators are shared and unchanged. See
 [Building a pipeline for a custom model](#building-a-pipeline-for-a-custom-model).
 
+## Saving an annotated image
+
+To also write a rendered result, store the decoded frame before the resize step
+and recall it after detection. Two operators are added; the rest is unchanged.
+
+```python
+from ml_pipes import (
+    ArgMax, ConvertBoxFormat, Decode, DrawBoxes, GatherScores, Infer,
+    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
+    Resize, Extract, SaveImage, Slice, Squeeze, Store, ToDetections, Transpose,
+)
+
+pipeline = Pipeline([
+    Decode(),
+    Store("source_image"),              # save before resize
+    Resize((640, 640)),
+    Store("resize_transform", index=1),
+    Pick(0),
+    Normalize(),
+    Infer("yolov8n.onnx"),
+    Extract("output0", as_="preds"),
+    Squeeze("preds"),
+    Transpose("preds"),
+    Slice("preds", slice(None, 4), as_="boxes"),
+    Slice("preds", slice(4, None), as_="scores"),
+    ArgMax("scores", as_="classes"),
+    GatherScores("scores", "classes"),
+    ConvertBoxFormat(from_="cxcywh"),
+    NMS(),
+    Recall("resize_transform"),
+    ProjectBoxes(),
+    ToDetections(),
+    Recall("source_image"),             # pair detections with saved image
+    DrawBoxes(),
+    SaveImage("annotated.jpg"),
+])
+
+pipeline("image.jpg")
+```
+
+`Store("source_image")` saves the `ImagePayload` into the pipeline's side-channel
+context before `Resize` changes the frame dimensions. `Recall("source_image")`
+injects it back as a second argument once detection is complete, so `DrawBoxes`
+receives `(Detections, ImagePayload)` and returns the annotated image for
+`SaveImage` to write.
+
 ## Design principle
 
 Most inference SDKs are built around inheritance: a `Detector` base class with
