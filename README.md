@@ -596,6 +596,9 @@ class YoloDetector:
 
     def __call__(self, image_path: str) -> Detections:
         return self._pipeline(image_path)
+
+detector = YoloDetector("yolov8n.onnx", conf_threshold=0.3)
+detections = detector("image.jpg")
 ```
 
 ### Chaining pipelines
