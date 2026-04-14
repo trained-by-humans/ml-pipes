@@ -49,10 +49,11 @@ changing the operators between `Infer` and `ToDetections` — preprocessing and
 projection operators are shared and unchanged. See
 [Building a pipeline for a custom model](#building-a-pipeline-for-a-custom-model).
 
-## Saving an annotated image
+## Sample Usage
 
-To also write a rendered result, store the decoded frame before the resize step
-and recall it after detection. Two operators are added; the rest is unchanged.
+### Annotating an Image
+
+You can easily extend the pipeline to implement a use-case like annotating an image:
 
 ```python
 from ml_pipes import (
@@ -63,23 +64,9 @@ from ml_pipes import (
 
 pipeline = Pipeline([
     Decode(),
-    Store("source_image"),              # save before resize
+    Store("source_image"),              # save original image
     Resize((640, 640)),
-    Store("resize_transform", index=1),
-    Pick(0),
-    Normalize(),
-    Infer("yolov8n.onnx"),
-    Extract("output0", as_="preds"),
-    Squeeze("preds"),
-    Transpose("preds"),
-    Slice("preds", slice(None, 4), as_="boxes"),
-    Slice("preds", slice(4, None), as_="scores"),
-    ArgMax("scores", as_="classes"),
-    GatherScores("scores", "classes"),
-    ConvertBoxFormat(from_="cxcywh"),
-    NMS(),
-    Recall("resize_transform"),
-    ProjectBoxes(),
+    ...                                 # usual inference pipeline
     ToDetections(),
     Recall("source_image"),             # pair detections with saved image
     DrawBoxes(),
@@ -154,37 +141,6 @@ This also means the pipeline is inspectable and debuggable at every boundary.
 Inserting a `print` function or a logging step at any position in the list
 shows you the exact value flowing through at that point. There are no private
 fields to dig into, no method override chain to follow.
-
-## Advantages
-
-**Portability across model families.**
-A new model is a new pipeline, not a new class. YOLOv8, YOLO11, RF-DETR,
-Mask R-CNN, and future models all run through the same operator library.
-
-**Explicit, readable pipelines.**
-The pipeline list is a complete description of what happens to the data.
-There are no hidden method overrides, no inherited behaviour to trace. Reading
-the pipeline list tells you everything.
-
-**Reusability without abstraction overhead.**
-`Normalize`, `ConvertBoxFormat`, `ProjectBoxes` are used across every model.
-They are not tied to any base class. There is no cost to reuse them — just add
-them to a pipeline.
-
-**Model-specific logic stays at the boundary.**
-When a model has quirky output (e.g. RF-DETR's normalized boxes), the
-adaptation is a single operator or plain callable in the pipeline. It doesn't
-pollute shared infrastructure.
-
-**Testability.**
-Each operator is a plain Python object. Testing `NMS` means calling
-`NMS()(registry)` with a hand-crafted `TensorRegistry`. No mocking, no
-subclass setup.
-
-**Optional early validation.**
-`Pipeline(validate_on_init=True)` checks type contracts at construction time
-using Python type annotations, catching operator mismatches before any data
-flows through.
 
 ## Comparison with other approaches
 
@@ -308,21 +264,23 @@ and projection operators are identical and unchanged.
 
 ### Summary
 
-| | Ultralytics | Raw ONNX Runtime | ml-pipes |
-|---|---|---|---|
-| Model scope | YOLO family | Any ONNX | Any ONNX |
-| Pipeline visibility | Opaque | Fully explicit | Fully explicit |
-| Operator reuse across models | Not applicable | Manual copy-paste | Shared operator library |
-| Custom postprocessing | Subclass or post-hoc | Full freedom | Insert any callable |
-| Testability | Integration tests only | Unit tests with boilerplate | Unit tests on individual operators |
-| Brevity | High | Low | Medium |
-| ONNX-native | Export step required | Yes | Yes |
+|                       | Ultralytics                         | Raw ONNX Runtime            | ml-pipes                                        |
+|-----------------------|-------------------------------------|-----------------------------|-------------------------------------------------|
+| Model scope           | YOLO family                         | Any (ONNX) Model            | **Any Model/Runtime**                           |
+| Runtime compatibility | **Yes** (Export required)           | N/A                         | **Yes**                                         |
+| Pipeline visibility   | Opaque                              | **Fully explicit**          | **Fully explicit**                              |
+| Custom processing     | Subclass or post-hoc                | **Full freedom**            | **Any Callable with minimal to no boilerplate** |
+| Reusability           | **Reusable within the same family** | Manual copy-paste           | **Shared operator library**                     |
+| Testability           | Integration tests only              | Unit tests with boilerplate | **Unit + Integration with minimal boilerplate** |
+| Validation            | N/A                                 | No                          | **Build time** (`validate_on_init=True`)        |
+| Brevity               | **High**                            | Low                         | **Medium**                                      | |
 
-Ultralytics is the right tool when you are building exclusively with YOLO models
-and want the smallest possible surface area. Raw ONNX Runtime is the right tool
-for zero-dependency constraints or highly unusual models. ml-pipes sits in
-between: the explicit control of raw ONNX with a reusable operator library that
-eliminates the repeated boilerplate.
+> [!TIP]
+> - Ultralytics is the right tool when you are building exclusively with YOLO models
+and want the smallest possible surface area.  
+> - Raw ONNX Runtime is the right tool for zero-dependency constraints or highly unusual models.   
+> - ml-pipes sits in between: the explicit control of raw ONNX with a reusable operator library that eliminates the repeated boilerplate.  
+
 
 ## Building a pipeline for a custom model
 
@@ -433,7 +391,7 @@ ProjectMasks("masks", mask_threshold=0.5),
 ToSegmentations(),
 ```
 
-### Complete example
+### Finally: the pipeline
 
 ```python
 from ml_pipes import (
