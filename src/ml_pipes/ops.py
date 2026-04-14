@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import threading
@@ -238,6 +239,10 @@ class Infer:
         dtype: str | None = None,
         # Runtime-facing output tensor metadata aligned with exported graph output order.
         output_layouts: tuple[str, ...] | None = None,
+        # Serialize session.run() calls to prevent CPU oversubscription when
+        # multiple batch leaders are in flight concurrently.  Disable to
+        # experiment or when using a GPU provider that doesn't contend on CPU.
+        serialize: bool = True,
     ):
         path = Path(model_path)
         if not path.is_file():
@@ -250,7 +255,7 @@ class Infer:
             str(path),
             providers=list(providers),
         )
-        self._lock = threading.Lock()
+        self._lock = threading.Lock() if serialize else contextlib.nullcontext()
         self.input_name = input_name or self.session.get_inputs()[0].name
         self.input_layout = input_layout
         self.model_dtype = np.dtype(dtype) if dtype is not None else None
