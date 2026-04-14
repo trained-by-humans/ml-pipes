@@ -12,6 +12,9 @@ from ml_pipes import Decode, Detections, DrawBoxes, ImagePayload, Pipeline, Save
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
 COCO_IMAGE_NAME = "coco_000000039769.jpg"
 
+SAMPLE_VIDEO_URL = "https://raw.githubusercontent.com/opencv/opencv/master/samples/data/vtest.avi"
+SAMPLE_VIDEO_NAME = "vtest.avi"
+
 COCO_CLASSES = [
     "person",
     "bicycle",
