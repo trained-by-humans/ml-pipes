@@ -1,6 +1,6 @@
 import pytest
 
-from ml_pipes import Context, Pipeline, PipelineValidationError, Recall, Select, Store
+from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store
 
 
 class IntToString:
@@ -136,7 +136,7 @@ def test_pipeline_can_store_select_and_recall_values():
         [
             IntToPair(),
             Store("saved_text", index=1),
-            Select(0),
+            Pick(0),
             IntToString(),
             Recall("saved_text"),
             StringPairConsumer(),
@@ -151,7 +151,7 @@ def test_pipeline_validate_accepts_store_select_and_recall():
         [
             IntToPair(),
             Store("saved_text", index=1),
-            Select(0),
+            Pick(0),
             IntToString(),
             Recall("saved_text"),
             StringPairConsumer(),
@@ -165,4 +165,19 @@ def test_pipeline_validate_rejects_recall_before_store():
     pipeline = Pipeline([IntToString(), Recall("missing_value"), StringPairConsumer()])
 
     with pytest.raises(PipelineValidationError, match="was not stored"):
+        pipeline.validate()
+
+
+def test_pipeline_validate_propagates_element_type_through_pick():
+    # Pick(0) on tuple[int, str] should produce int, which IntToString accepts.
+    pipeline = Pipeline([IntToPair(), Pick(0), IntToString()])
+
+    pipeline.validate()
+
+
+def test_pipeline_validate_rejects_wrong_type_downstream_of_pick():
+    # Pick(0) on tuple[int, str] produces int; StringToFloat expects str — mismatch.
+    pipeline = Pipeline([IntToPair(), Pick(0), StringToFloat()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
