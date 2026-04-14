@@ -811,9 +811,10 @@ class ProjectRoIMasks:
 
         canvas = np.zeros((len(boxes), orig_h, orig_w), dtype=bool)
         for i, (box, mask) in enumerate(zip(boxes, masks)):
-            x1, y1, x2, y2 = box.astype(int)
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(orig_w, x2), min(orig_h, y2)
+            x1 = max(0, int(np.floor(box[0])))
+            y1 = max(0, int(np.floor(box[1])))
+            x2 = min(orig_w, int(np.ceil(box[2])))
+            y2 = min(orig_h, int(np.ceil(box[3])))
             if x2 <= x1 or y2 <= y1:
                 continue
             resized = cv2.resize(mask.astype(np.float32), (x2 - x1, y2 - y1), interpolation=cv2.INTER_LINEAR)

@@ -19,6 +19,7 @@ from ml_pipes.ops import (
     Normalize,
     ProjectBoxes,
     ProjectMasks,
+    ProjectRoIMasks,
     ReconstructMasks,
     Resize,
     SaveImage,
@@ -541,3 +542,35 @@ def test_log_detections_prints_json_and_returns_input():
     assert '"model": "model.onnx"' in output
     assert '"image": "image.jpg"' in output
     assert '"annotated_image": "image_model.jpg"' in output
+
+
+# ---------------------------------------------------------------------------
+# ProjectRoIMasks
+# ---------------------------------------------------------------------------
+
+def test_project_roi_masks_embeds_mask_into_canvas():
+    transform = ResizeTransform(scale=(1.0, 1.0), pad=(0.0, 0.0), original_shape=(8, 8), resized_shape=(8, 8))
+    registry = TensorRegistry()
+    registry["boxes"] = np.array([[2.0, 2.0, 6.0, 6.0]], dtype=np.float32)
+    registry["masks"] = np.ones((1, 4, 4), dtype=np.float32)
+
+    result = ProjectRoIMasks(mask_threshold=0.5)(registry, transform)
+
+    canvas = result["masks"]
+    assert canvas.shape == (1, 8, 8)
+    assert np.all(canvas[0, 2:6, 2:6])
+    assert not np.any(canvas[0, :2, :])
+
+
+def test_project_roi_masks_preserves_fractional_box():
+    # A box like [1.1, 1.1, 1.9, 1.9] truncated with astype(int) collapses to
+    # width=0, height=0 and the mask is silently dropped.  floor/ceil must be
+    # used so the ROI expands to [1, 1, 2, 2] and the mask is preserved.
+    transform = ResizeTransform(scale=(1.0, 1.0), pad=(0.0, 0.0), original_shape=(4, 4), resized_shape=(4, 4))
+    registry = TensorRegistry()
+    registry["boxes"] = np.array([[1.1, 1.1, 1.9, 1.9]], dtype=np.float32)
+    registry["masks"] = np.ones((1, 1, 1), dtype=np.float32)
+
+    result = ProjectRoIMasks(mask_threshold=0.5)(registry, transform)
+
+    assert np.any(result["masks"][0]), "mask was silently dropped due to truncation"
