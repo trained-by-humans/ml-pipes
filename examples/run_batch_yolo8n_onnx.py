@@ -68,7 +68,8 @@ def _export_dynamic_model(dst: Path) -> None:
     Path("yolov8n.pt").unlink(missing_ok=True)
 
 
-def build_pipeline(model_path: Path, batch_size: int, timeout: float) -> Pipeline:
+def build_pipeline(model_path: Path, batch_size: int, timeout: float,
+                   serialize: bool = True) -> Pipeline:
     return Pipeline([
         Decode(),
         Resize((640, 640)),
@@ -77,7 +78,7 @@ def build_pipeline(model_path: Path, batch_size: int, timeout: float) -> Pipelin
         Normalize(),
         Batch(size=batch_size, timeout=timeout),
         Collate(),
-        Infer(model_path),
+        Infer(model_path, serialize=serialize),
         Distribute(),
         UnBatch(),
         Extract("output0", as_="preds"),
@@ -128,6 +129,11 @@ def parse_args() -> argparse.Namespace:
         help="Seconds to wait before running a partial batch (default: 0.05).",
     )
     parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    parser.add_argument(
+        "--no-serialize",
+        action="store_true",
+        help="Disable the inference lock (allows concurrent session.run() calls).",
+    )
     return parser.parse_args()
 
 
@@ -149,7 +155,8 @@ def main() -> int:
         # Repeat the sample image to fill the thread pool and demonstrate batching.
         image_paths = [sample] * args.workers
 
-    pipeline = build_pipeline(model_path, args.batch_size, args.timeout)
+    pipeline = build_pipeline(model_path, args.batch_size, args.timeout,
+                              serialize=not args.no_serialize)
 
     print(
         f"\nRunning {len(image_paths)} images"

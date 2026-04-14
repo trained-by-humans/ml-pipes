@@ -34,6 +34,9 @@ from run_batch_yolo8n_onnx import ASSETS_DIR, MODEL_NAME, _export_dynamic_model,
 # (batch_size, workers) pairs to sweep.
 CONFIGS: list[tuple[int, int]] = [
     (1, 1),
+    (1, 4),
+    (2, 4),
+    (4, 4),
     (1, 8),
     (2, 8),
     (4, 8),
@@ -54,9 +57,10 @@ def _run_once(pipeline, image_paths: list[Path]) -> float:
 
 
 def _measure(model_path: Path, batch_size: int, workers: int,
-             image_paths: list[Path], repeats: int) -> float:
+             image_paths: list[Path], repeats: int, serialize: bool) -> float:
     """Build a fresh pipeline for the config and return median wall time."""
-    pipeline = build_pipeline(model_path, batch_size=batch_size, timeout=0.05)
+    pipeline = build_pipeline(model_path, batch_size=batch_size, timeout=0.05,
+                              serialize=serialize)
     samples: list[float] = []
     for _ in range(repeats):
         samples.append(_run_once(pipeline, image_paths))
@@ -78,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--images",
         type=int,
-        default=8,
+        default=16,
         metavar="N",
         help="Number of images per run (default: 8).",
     )
@@ -90,6 +94,11 @@ def parse_args() -> argparse.Namespace:
         help="Repetitions per config — median is reported (default: 3).",
     )
     parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    parser.add_argument(
+        "--no-serialize",
+        action="store_true",
+        help="Disable the inference lock (allows concurrent session.run() calls).",
+    )
     return parser.parse_args()
 
 
@@ -106,10 +115,12 @@ def main() -> int:
     download_if_missing(COCO_IMAGE_URL, sample)
     image_paths = [sample] * args.images
 
+    serialize = not args.no_serialize
     print(
         f"Benchmarking {len(CONFIGS)} configs"
         f" | {args.images} images/run"
-        f" | {args.repeats} repeats (median reported)",
+        f" | {args.repeats} repeats (median reported)"
+        f" | serialize={'on' if serialize else 'off'}",
         file=sys.stderr,
     )
     print(file=sys.stderr)
@@ -120,9 +131,9 @@ def main() -> int:
     results: list[tuple[int, int, float]] = []  # (batch, workers, wall_s)
 
     for batch_size, workers in CONFIGS:
-        n = args.images
         print(f"  running batch={batch_size} workers={workers} ...", end="  ", flush=True, file=sys.stderr)
-        wall = _measure(model_path, batch_size, workers, image_paths, args.repeats)
+        wall = _measure(model_path, batch_size, workers, image_paths, args.repeats,
+                        serialize=serialize)
         results.append((batch_size, workers, wall))
         print(f"{wall:.3f}s", file=sys.stderr)
 
