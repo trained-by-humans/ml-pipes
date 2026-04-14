@@ -11,7 +11,10 @@ from __future__ import annotations
 # Run a test call (downloads the sample COCO image if needed):
 #   python serve_yolo8n_onnx.py --call
 #
-# Or with curl (uses the sample image downloaded by --call):
+# Or send a specific image:
+#   python serve_yolo8n_onnx.py --call --input photo.jpg
+#
+# Or with curl:
 #   curl -s -X POST http://localhost:5000/detect \
 #        -H "Content-Type: application/octet-stream" \
 #        --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
@@ -122,6 +125,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Send a test request to the running server and print the response.",
     )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Image to send with --call. Defaults to the sample COCO image.",
+    )
     parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
     return parser.parse_args()
 
@@ -131,9 +140,12 @@ def main() -> int:
     assets_dir = args.assets_dir
 
     if args.call:
-        image_path = assets_dir / COCO_IMAGE_NAME
-        print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
-        download_if_missing(COCO_IMAGE_URL, image_path)
+        if args.input is not None:
+            image_path = args.input
+        else:
+            image_path = assets_dir / COCO_IMAGE_NAME
+            print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
+            download_if_missing(COCO_IMAGE_URL, image_path)
         run_call(image_path)
         return 0
 
