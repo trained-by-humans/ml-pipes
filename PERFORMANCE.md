@@ -11,16 +11,17 @@ To optimize performance, you need to understand the three key metrics:
 **Throughput** — how many images the system processes per second across all threads.
 This is what you optimize when running a service under load.
 
-**Latency** — how long a single request takes end to end. 
+**Latency** — how long a single request takes end to end. This is what you optimize when
+running a realtime/streaming service.
 
 **Hardware utilization** — whether the compute units (CPU cores, GPU stream processors)
-are idle between inference calls. The goal is to keep inference running continuously
+are idle between inference calls. The goal is to maximize the hardware by keeping inference running continuously
 with no gaps.
 
 > [!TIP]
-Maximizing performance is often a trade-off; For example batching improves throughput but increases latency because a request must wait for other requests to join the batch:
-> Low latency favors small or no batches and few workers; 
-> High throughput favors concurrency and (on GPU) larger batches.
+> Maximizing performance is often a trade-off; for example batching improves throughput but increases latency because a request must wait for other requests to join the batch:
+> - Low latency favors small or no batches and few workers;
+> - High throughput favors concurrency and (on GPU) larger batches.
 
 Now that you understand the base operation and key metrics, let's see how we can optimize them:
 
@@ -49,21 +50,23 @@ Thread 3        ──[preprocess]──[infer]──[postprocess]──▶
 
 **Performance impact**
 
-Concurrency is the cornerstone of every performance improvement in this guide. Batching
-only helps if multiple images arrive at the inference boundary simultaneously — that
-requires concurrent preprocessing. Serialization only has meaning when there are
-multiple concurrent inference calls to manage. Without concurrency, each technique
-either has no effect or reverts to the sequential baseline.
+Concurrency is the foundation for keeping the pipeline busy. Batching only helps if
+multiple images arrive at the inference boundary at the same time — that requires
+concurrent preprocessing. Serialization only has meaning when there are multiple
+concurrent inference calls to manage.
+
+Without concurrency, even if batching is enabled, inputs still arrive one by one
+(e.g., image loading and decoding are I/O-bound), so batches will be small or rely
+entirely on timeout.
 
 With concurrent requests, the hardware is kept continuously fed — while one request is
 being inferred, others are being preprocessed, so there are no idle gaps. On GPU, this
 overlap is especially effective: the accelerator runs inference while the CPU handles
-the next batch's preprocessing entirely in parallel.
+the next batch's preprocessing in parallel.
 
 **When to use**
 
-Always — for both CPU and GPU deployments. The right number of workers is directly tied
-to batch size; see the Batching section for the sizing guidance.
+Always — for both CPU and GPU deployments.
 
 **In the pipeline**
 
@@ -81,7 +84,7 @@ with ThreadPoolExecutor(max_workers=8) as pool:
 
 **Caveat**
 
-**Memory footprint.** Each worker thread holds its own state and handle its own share of data: the
+**Memory footprint.** Each worker thread holds its own state and handles its own share of data: the
 decoded image, resized tensor, normalized tensor, and any context values stored along
 the way. Running N workers means N instances of that data live in memory simultaneously.
 Size your worker count with available memory in mind, not just CPU headroom.
@@ -95,51 +98,58 @@ under concurrent load with no error — each thread overwrites the other's data.
 Multiple inputs are stacked into a single tensor and sent through the model in one call.
 
 ```
-[preprocess] ─┐
-[preprocess] ─┼─ [data1 ,data2, ...] ─ [Collate] ─ [Infer  N=4] ─ [Distribute] ─┬─ [postprocess] ──▶
+[preprocess] ─┐                                                                 ┌─ [postprocess] ──▶
+[preprocess] ─┼─ [data1 ,data2, ...] ─ [Collate] ─ [Infer  N=4] ─ [Distribute] ─┼─ [postprocess] ──▶
 [preprocess] ─┤                                                                 ├─ [postprocess] ──▶
-[preprocess] ─┘                                                                 ├─ [postprocess] ──▶
-                                                                                └─ [postprocess] ──▶
+[preprocess] ─┘                                                                 └─ [postprocess] ──▶
 ```
 
 **Performance impact**
 
-On **GPU**, batching is the primary throughput lever. Tensor cores are most efficient
-when given large operands, and memory bandwidth is amortized across more samples.
-The larger the batch, the better the hardware utilization — up to the model's memory
-limit.
+On **GPU**, batching is the primary throughput lever. Larger batches generally improve
+hardware utilization up to memory limits.
 
-On **CPU**, batching is typically counter-productive. Inference time tends to grow
-super-linearly with batch size due to cache pressure and memory bandwidth limits.
-Concurrency is the more effective lever on CPU.
+On **CPU**, batching often provides limited or negative gains. Running multiple
+independent inferences concurrently typically achieves better throughput because it
+preserves parallelism across cores. Batching reduces that parallelism and may increase
+memory pressure.
+
+Batching and concurrency are competing strategies:
+
+* concurrency increases parallelism across requests
+* batching reduces parallelism but increases work per call
+
+The optimal balance depends on hardware and workload.
 
 **When to use**
 
 | Device | Recommendation                            |
-|--------|-------------------------------------------|
+| ------ | ----------------------------------------- |
 | GPU    | Use batching. Start small and profile up. |
 | CPU    | Prefer concurrency over batching.         |
 
 Batching adds a hard latency floor: a request must wait until `size` requests have
 arrived (or `timeout` fires) before inference starts. Set `timeout` to bound worst-case
-wait time for partial batches. 
+wait time for partial batches.
+
+Batching also increases latency variability: under low load, requests may wait for
+batch formation, increasing tail latency.
 
 For batching to be effective, you need enough requests and workers to keep the inference stage
 continuously fed. While one batch is being inferred, the next batch must already be
-preprocessing. The minimum to guarantee this is:
+preprocessing. In general:
 
 ```
-workers < batch_size -> Batches will be never full, the batch always timeouts.
-workers == batch_size -> Work become almost sequential, the gain is limited.
-workers >= batch_size × 2 -> Not only preprocess is parallel, but always the batches will be ready in parallel.
+workers < batch_size  -> batches are often partial (timeout-driven)
+workers ≈ batch_size  -> batching works but overlap is limited
+workers > batch_size  -> better overlap and more consistent full batches
 ```
 
-With fewer workers, inference finishes before the next batch is ready and the hardware
-idles — negating the benefit of batching entirely.
+Exact behavior depends on preprocessing cost, inference time, and timeout.
 
 **In the pipeline**
 
-Add `Batch`/`UnBatch` markers around the inference region. Depends on your operation, add `Collate` to stack individual
+Add `Batch`/`UnBatch` markers around the inference region. Depending on your operation, add `Collate` to stack individual
 tensors into one; `Distribute` splits the output back.
 
 ```python
@@ -163,6 +173,11 @@ with ThreadPoolExecutor(max_workers=8) as pool:
     results = list(pool.map(pipeline, image_paths))
 ```
 
+**Note**
+
+* **Batch / UnBatch** handle synchronization (control flow)
+* **Collate / Distribute** handle data transformation
+
 ### Serialization
 
 A lock around the inference call ensures only one execution runs at a time.
@@ -176,7 +191,7 @@ Thread 3       ──[preprocess]───────────|infer|──�
 **Performance impact**
 
 Serialization is a concurrency management tool — it only exists because multiple threads
-are running simultaneously. With `serialize=True`, each call gets exclusive access 
+are running simultaneously. With `serialize=True`, each call gets exclusive access
 to the hardware, but the hardware sits idle between calls while threads hand off
 the lock. With `serialize=False`, concurrent calls share resources, keeping the
 hardware busy at the cost of some contention.
@@ -205,18 +220,29 @@ Extract("output0", as_="preds"),
 
 ### How it all works internally
 
-**Concurrency is free** because `Pipeline.__call__` creates a fresh `Context` on every
-invocation. There is no shared mutable state between calls — threads never touch each
-other's data.
+**Concurrency is available by design** because `Pipeline.__call__` creates a fresh `Context` on every
+invocation. There is no shared mutable state between calls — threads do not touch each
+other's data. Increasing concurrency, however, still increases memory usage and system
+load, so it should be tuned based on available resources.
 
 **Batching is built into the pipeline execution loop.** `Pipeline._scan_batch_pairs()`
 maps each `Batch` index to its matching `UnBatch` index at construction time. At
 runtime, the first thread to fill the batch becomes the *leader* and runs the batch
 region (everything between `Batch` and `UnBatch`). All other threads (*waiters*) block
-on a `threading.Event` and skip the region entirely. The leader distributes results
-through that event before continuing. Two concurrent batches can run simultaneously
-because each leader's state is isolated in `threading.local`.
+on a synchronization primitive and skip the region entirely. The leader distributes results
+before continuing.
 
-**Serialization is a context manager swap.** `Infer` holds either a `threading.Lock`
-(when `serialize=True`) or a `contextlib.nullcontext` (when `serialize=False`). The
-call site is identical in both cases — only the lock object differs.
+Multiple batches can execute concurrently, each isolated from the others.
+
+**Serialization is a context manager swap.** `Infer` holds either a synchronization
+primitive (when `serialize=True`) or a no-op context (when `serialize=False`). The
+call site is identical in both cases — only the behavior differs.
+
+### Additional note on runtimes
+
+Some inference runtimes use internal parallelism (e.g., multiple threads per inference call).
+When combined with pipeline-level concurrency, this can lead to resource contention or
+diminishing returns at higher worker counts.
+
+If you observe scaling limits, consider that performance is influenced not only by the
+pipeline but also by how the underlying runtime schedules work internally.
