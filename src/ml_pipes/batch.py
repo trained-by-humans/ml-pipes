@@ -4,45 +4,70 @@ import threading
 from typing import Any
 
 
-# Sentinel placed in an entry's result slot to signal that it has been promoted
-# to batch leader by the timeout path.
-_LEADER = object()
-
-
 class _Entry:
-    __slots__ = ("value", "event", "result")
+    __slots__ = ("value", "event", "result", "exception")
 
     def __init__(self, value: Any) -> None:
         self.value = value
-        self.event: threading.Event = threading.Event()
-        self.result: list = []  # [value] | [_LEADER, batch] | [BaseException]
+        self.event: threading.Event = threading.Event()  # fired exactly once by distribute / distribute_exception
+        self.result: Any = None                          # set by distribute()
+        self.exception: BaseException | None = None      # set by distribute_exception()
 
 
-class _BatchGate:
+class LeaderBatch:
+    """Returned by BatchGate.enter() for the thread elected as batch leader.
+
+    The leader receives the raw per-sample inputs and is responsible for
+    running the batch region and calling distribute().
+    """
+    __slots__ = ("inputs",)
+
+    def __init__(self, inputs: list[Any]) -> None:
+        self.inputs = inputs
+
+
+class FollowerResult:
+    """Returned by BatchGate.enter() for a waiter thread.
+
+    The leader has already run the batch region and distributed results.
+    This thread's per-sample result is ready to consume.
+    """
+    __slots__ = ("result",)
+
+    def __init__(self, result: Any) -> None:
+        self.result = result
+
+
+class BatchGate:
     """
     Coordination primitive for the Batch/UnBatch operator pair.
 
-    Multiple threads call enter() concurrently.  When enough samples have
-    accumulated (up to *size*) or *timeout* seconds have elapsed since the
-    first sample arrived, one thread is elected leader.
+    All threads enter a lobby and wait on _lobby_cond. When enough samples
+    accumulate (up to *size*) or *timeout* seconds elapse, all threads are
+    woken together. One wins the race to drain _pending and becomes the
+    leader; the rest become followers and wait on their per-entry event for
+    their result.
 
-    Leader path:  enter() returns (list_of_inputs, True).
+    _lobby_cond is shared across all threads because only one lobby is active
+    at a time. Per-entry events are used for result delivery so that concurrent
+    batches cannot trigger each other's followers.
+
+    Leader path:  enter() returns LeaderBatch.
                   The pipeline runs the batch region and calls distribute().
-    Waiter path:  enter() blocks until distribute() fires the thread's event,
-                  then returns (per_sample_result, False).
+    Follower path: enter() blocks on entry.event until the leader fires it,
+                  then returns FollowerResult.
 
     Exception path: if the batch region raises, the leader calls
                     distribute_exception() before re-raising so that all
-                    waiting threads receive the exception instead of blocking
+                    followers receive the exception instead of blocking
                     forever.
     """
 
     def __init__(self, size: int, timeout: float) -> None:
         self._size = size
         self._timeout = timeout
-        self._lock = threading.Lock()
+        self._lobby_cond = threading.Condition()
         self._pending: list[_Entry] = []
-        self._timer: threading.Timer | None = None
         # Per-leader-thread state so concurrent batches don't interfere.
         self._local = threading.local()
 
@@ -50,51 +75,52 @@ class _BatchGate:
     # Public interface
     # ------------------------------------------------------------------
 
-    def enter(self, value: Any) -> tuple[Any, bool]:
+    def enter(self, value: Any) -> LeaderBatch | FollowerResult:
         """
         Register *value* for the next batch.
 
-        Returns ``(list_of_inputs, True)``  for the leader thread.
-        Returns ``(per_sample_result, False)`` for waiter threads (blocks).
+        Returns ``LeaderBatch``    for the thread that wins the drain race.
+        Returns ``FollowerResult`` for all other threads (blocks until the
+                                    leader distributes results).
+        Raises the batch-region exception for followers when the leader fails.
         """
         entry = _Entry(value)
 
-        with self._lock:
-            idx = len(self._pending)
+        # Phase 1 — batch formation: wait in the lobby for a full batch or timeout.
+        with self._lobby_cond:
             self._pending.append(entry)
 
             if len(self._pending) == self._size:
-                batch = self._take_pending()
+                # Full batch — wake all lobby waiters.
+                self._lobby_cond.notify_all()
+            else:
+                # Partial batch — wait for either a full batch or timeout.
+                self._lobby_cond.wait(timeout=self._timeout)
+                # Cascade: wake any remaining lobby waiters so everyone races together.
+                self._lobby_cond.notify_all()
+
+            # Race to drain _pending — only the thread whose entry is still
+            # in _pending wins.  A woken loser whose entry was already collected
+            # by another leader must not drain entries belonging to the next batch.
+            if entry in self._pending:
+                batch = self._pending[:]
+                self._pending.clear()
                 self._local.batch = batch
-                self._local.leader_idx = idx  # = size - 1
-                return [e.value for e in batch], True
+                self._local.leader_idx = batch.index(entry)
+                return LeaderBatch([e.value for e in batch])
 
-            if idx == 0:
-                # First arrival — start the timeout clock.
-                self._timer = threading.Timer(self._timeout, self._on_timeout)
-                self._timer.daemon = True
-                self._timer.start()
-
-        # ---- waiter path ----
+        # Phase 2 — batch operation: wait for the leader to fire our entry's event.
         entry.event.wait()
 
-        if entry.result[0] is _LEADER:
-            # Timeout promoted this thread to leader.
-            batch = entry.result[1]
-            self._local.batch = batch
-            self._local.leader_idx = 0
-            return [e.value for e in batch], True
-
-        if isinstance(entry.result[0], BaseException):
-            raise entry.result[0]
-
-        return entry.result[0], False
+        if entry.exception is not None:
+            raise entry.exception
+        return FollowerResult(entry.result)
 
     def distribute(self, results: list[Any]) -> Any:
         """
         Called by the pipeline (leader thread) at the UnBatch position.
 
-        Writes each result to its waiter's slot and fires their events.
+        Writes each follower's result and fires their event.
         Returns the leader's own result.
         """
         batch: list[_Entry] = self._local.batch
@@ -112,14 +138,14 @@ class _BatchGate:
         for i, (entry, result) in enumerate(zip(batch, results)):
             if i == leader_idx:
                 continue  # leader is not waiting — skip
-            entry.result.append(result)
+            entry.result = result
             entry.event.set()
 
         return results[leader_idx]
 
     def distribute_exception(self, exc: BaseException) -> None:
         """
-        Propagate *exc* to all waiters so they unblock and raise instead of
+        Propagate *exc* to all followers so they unblock and raise instead of
         hanging.  Safe to call even if distribute() already cleaned up.
         """
         batch: list[_Entry] | None = getattr(self._local, "batch", None)
@@ -136,32 +162,5 @@ class _BatchGate:
         for i, entry in enumerate(batch):
             if i == leader_idx:
                 continue
-            entry.result.append(exc)
+            entry.exception = exc
             entry.event.set()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _take_pending(self) -> list[_Entry]:
-        """Drain _pending and cancel any running timer.  Must hold self._lock."""
-        batch = self._pending[:]
-        self._pending.clear()
-        if self._timer is not None:
-            self._timer.cancel()
-            self._timer = None
-        return batch
-
-    def _on_timeout(self) -> None:
-        """Timer callback: promote the oldest waiter to leader."""
-        with self._lock:
-            if not self._pending:
-                # Race: batch was already collected by a full-batch leader.
-                return
-            batch = self._take_pending()
-
-        # Promote the first waiter.  Its event.wait() will return and it will
-        # check for the _LEADER sentinel in its result slot.
-        leader_entry = batch[0]
-        leader_entry.result.extend([_LEADER, batch])
-        leader_entry.event.set()
