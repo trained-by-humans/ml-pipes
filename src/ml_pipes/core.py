@@ -41,21 +41,22 @@ class Pipeline:
         return operator(*args), context
 
     def _step_into_batch(self, current: Any, context: Context, i: int) -> tuple[Any, Context, int]:
+        from .batch import LeaderBatch
         from .ops import UnBatch
 
         gate = self.operators[i].gate
         # Rendezvous: block until a full batch is ready or timeout fires.
-        inputs, is_leader = gate.enter(current)
+        outcome = gate.enter(current)
         i += 1  # move past the Batch operator itself
 
         # Waiter: Skip the batch region entirely — the leader will process and return the result
-        if not is_leader:
+        if not isinstance(outcome, LeaderBatch):
             while not isinstance(self.operators[i], UnBatch):
                 i += 1
-            return inputs, context, i + 1  # move past the UnBatch operator itself
+            return outcome.result, context, i + 1  # move past the UnBatch operator itself
 
         # Leader: Run every operator in the batch region on behalf of all waiting threads.
-        current = inputs
+        current = outcome.inputs
         try:
             while not isinstance(self.operators[i], UnBatch):
                 current, context = self._step(i, current, context)

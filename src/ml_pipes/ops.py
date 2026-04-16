@@ -12,7 +12,7 @@ from typing import TextIO
 
 import numpy as np
 
-from .batch import _BatchGate
+from .batch import BatchGate
 from .types import ResizeTransform
 from .types import (
     Detections,
@@ -1079,7 +1079,7 @@ class Batch:
     """
 
     def __init__(self, size: int, timeout: float = 0.05) -> None:
-        self.gate = _BatchGate(size, timeout)
+        self.gate = BatchGate(size, timeout)
 
 
 class UnBatch:
