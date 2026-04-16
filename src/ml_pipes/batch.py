@@ -42,15 +42,15 @@ class BatchGate:
     """
     Coordination primitive for the Batch/UnBatch operator pair.
 
-    All threads enter a lobby and wait on _lobby_cond. When enough samples
-    accumulate (up to *size*) or *timeout* seconds elapse, all threads are
-    woken together. One wins the race to drain _pending and becomes the
-    leader; the rest become followers and wait on their per-entry event for
-    their result.
+    All threads enter a lobby and wait on a per-batch Condition. When enough
+    samples accumulate (up to *size*) or *timeout* seconds elapse, all threads
+    in that batch are woken together. One wins the race to drain _pending and
+    becomes the leader; the rest become followers and wait on their per-entry
+    event for their result.
 
-    _lobby_cond is shared across all threads because only one lobby is active
-    at a time. Per-entry events are used for result delivery so that concurrent
-    batches cannot trigger each other's followers.
+    A new Condition is created for each batch (by the first arriving thread),
+    so notify_all() cannot bleed across batch generations and wake threads
+    that belong to the next batch.
 
     Leader path:  enter() returns LeaderBatch.
                   The pipeline runs the batch region and calls distribute().
@@ -66,8 +66,9 @@ class BatchGate:
     def __init__(self, size: int, timeout: float) -> None:
         self._size = size
         self._timeout = timeout
-        self._lobby_cond = threading.Condition()
+        self._lock = threading.Lock()
         self._pending: list[_Entry] = []
+        self._batch_cond: threading.Condition | None = None  # per-batch, recreated each cycle
         # Per-leader-thread state so concurrent batches don't interfere.
         self._local = threading.local()
 
@@ -87,24 +88,32 @@ class BatchGate:
         entry = _Entry(value)
 
         # Phase 1 — batch formation: wait in the lobby for a full batch or timeout.
-        with self._lobby_cond:
+        with self._lock:
+            if not self._pending:
+                # First arrival for this batch — create a fresh condition so that
+                # notify_all() cannot bleed into a concurrent or future batch.
+                self._batch_cond = threading.Condition(self._lock)
+
+            # Keep a local reference to this batch condition
+            cond = self._batch_cond
             self._pending.append(entry)
 
             if len(self._pending) == self._size:
                 # Full batch — wake all lobby waiters.
-                self._lobby_cond.notify_all()
+                cond.notify_all()
             else:
                 # Partial batch — wait for either a full batch or timeout.
-                self._lobby_cond.wait(timeout=self._timeout)
-                # Cascade: wake any remaining lobby waiters so everyone races together.
-                self._lobby_cond.notify_all()
+                cond.wait(timeout=self._timeout)
+                # Cascade: wake any remaining batch members so everyone races together.
+                cond.notify_all()
 
             # Race to drain _pending — only the thread whose entry is still
-            # in _pending wins.  A woken loser whose entry was already collected
-            # by another leader must not drain entries belonging to the next batch.
+            # present wins.  A woken follower whose entry was already collected
+            # must not drain entries that belong to the next batch.
             if entry in self._pending:
                 batch = self._pending[:]
                 self._pending.clear()
+                self._batch_cond = None  # release the condition for this batch cycle
                 self._local.batch = batch
                 self._local.leader_idx = batch.index(entry)
                 return LeaderBatch([e.value for e in batch])
