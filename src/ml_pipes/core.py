@@ -24,6 +24,10 @@ class Pipeline:
         if validate_on_init:
             self.validate()
 
+    def __rshift__(self, other: Pipeline) -> Pipeline:
+        """Flatten two pipelines into one: a >> b."""
+        return Pipeline([*self.operators, *other.operators])
+
     def __call__(self, value: Any) -> Any:
         from .ops import Batch  # local import avoids circular dependency
         current = value
@@ -353,3 +357,8 @@ class Embed:
 def embed(pipeline: Pipeline) -> Embed:
     """Embed *pipeline* as an isolated step inside another pipeline."""
     return Embed(pipeline)
+
+
+def inline(base: Pipeline, other: Pipeline) -> Pipeline:
+    """Flatten *other* into *base*, returning a new pipeline with shared context."""
+    return base >> other
