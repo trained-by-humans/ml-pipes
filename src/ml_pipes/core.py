@@ -18,11 +18,41 @@ class TypeContract:
     output_type: Any
 
 
+class Inline:
+    """
+    Marker that expands a pipeline's operators into the parent at construction time.
+
+    Example::
+
+        preprocess = Pipeline([Resize(), Normalize()])
+
+        full = Pipeline([
+            Decode(),
+            Inline(preprocess),
+            Infer(...),
+        ])
+        # full.operators == [Decode(), Resize(), Normalize(), Infer(...)]
+    """
+
+    def __init__(self, pipeline: Pipeline) -> None:
+        self.pipeline = pipeline
+
+
 class Pipeline:
     def __init__(self, operators: Iterable[Callable[..., Any] | ContextOp], validate_on_init: bool = False):
-        self.operators = list(operators)
+        self.operators = self._flatten(list(operators))
         if validate_on_init:
             self.validate()
+
+    @staticmethod
+    def _flatten(operators: list) -> list:
+        flat = []
+        for op in operators:
+            if isinstance(op, Inline):
+                flat.extend(op.pipeline.operators)
+            else:
+                flat.append(op)
+        return flat
 
     def __rshift__(self, other: Pipeline) -> Pipeline:
         """Flatten two pipelines into one: a >> b."""
@@ -359,6 +389,6 @@ def embed(pipeline: Pipeline) -> Embed:
     return Embed(pipeline)
 
 
-def inline(base: Pipeline, other: Pipeline) -> Pipeline:
-    """Flatten *other* into *base*, returning a new pipeline with shared context."""
-    return base >> other
+def inline(pipeline: Pipeline) -> Inline:
+    """Inline *pipeline* as a flattening marker inside a pipeline definition."""
+    return Inline(pipeline)
