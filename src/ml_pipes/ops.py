@@ -1159,3 +1159,4 @@ class Distribute:
             )
             result.append(RuntimeOutputs(tensors=sample_tensors, names=outputs.names))
         return result
+
