@@ -49,7 +49,7 @@ def test_inline_is_equivalent_to_rshift():
     b = Pipeline([StringToFloat()])
 
     via_rshift = a >> b
-    via_inline = inline(a, b)
+    via_inline = Pipeline([inline(a), inline(b)])
 
     assert [type(op) for op in via_rshift.operators] == [type(op) for op in via_inline.operators]
 
