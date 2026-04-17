@@ -1,6 +1,6 @@
 import pytest
 
-from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store
+from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store, TypeContract
 
 
 class IntToString:
@@ -173,6 +173,40 @@ def test_pipeline_validate_propagates_element_type_through_pick():
     pipeline = Pipeline([IntToPair(), Pick(0), IntToString()])
 
     pipeline.validate()
+
+
+def test_resolve_type_contract_returns_input_and_output_types():
+    pipeline = Pipeline([IntToString(), StringToFloat()])
+
+    contract = pipeline.resolve_type_contract()
+
+    assert contract.input_type is int
+    assert contract.output_type is float
+
+
+def test_resolve_type_contract_returns_type_contract_instance():
+    pipeline = Pipeline([IntToString()])
+
+    assert isinstance(pipeline.resolve_type_contract(), TypeContract)
+
+
+def test_resolve_type_contract_raises_on_empty_pipeline():
+    with pytest.raises(PipelineValidationError):
+        Pipeline([]).resolve_type_contract()
+
+
+def test_resolve_type_contract_raises_on_type_mismatch():
+    pipeline = Pipeline([IntToString(), BoolToBytes()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.resolve_type_contract()
+
+
+def test_validate_delegates_to_resolve_type_contract():
+    pipeline = Pipeline([IntToString(), BoolToBytes()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.validate()
 
 
 def test_pipeline_validate_rejects_wrong_type_downstream_of_pick():

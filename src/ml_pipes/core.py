@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import dataclass
 from types import UnionType
 from typing import Any, Callable, Iterable, get_args, get_origin, get_type_hints
 
@@ -9,6 +10,12 @@ from .context import Context, ContextOp
 
 class PipelineValidationError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class TypeContract:
+    input_type: Any
+    output_type: Any
 
 
 class Pipeline:
@@ -93,14 +100,15 @@ class Pipeline:
                 f"Batch at position {stack[0]} has no matching UnBatch"
             )
 
-    def validate(self) -> None:
+    def resolve_type_contract(self) -> TypeContract:
         from .ops import Batch, UnBatch
 
         if not self.operators:
-            return
+            raise PipelineValidationError("Cannot resolve type contract of an empty pipeline")
 
         self._validate_batch_pairs()
 
+        first_input_type: Any | None = None
         previous_output_type: Any | None = None
         previous_name: str | None = None
         stored_annotations: dict[str, Any] = {}
@@ -111,13 +119,15 @@ class Pipeline:
                 # Enter batch region: swap to an isolated annotation scope.
                 outer_stored_annotations = stored_annotations
                 stored_annotations = {}
+                continue
             elif isinstance(operator, UnBatch):
                 # Exit batch region: discard the isolated scope, restore the outer one.
                 stored_annotations = outer_stored_annotations  # type: ignore[assignment]
                 outer_stored_annotations = None
+                continue
 
             if isinstance(operator, ContextOp) or hasattr(operator, "resolve_contract"):
-                _, output_type = operator.resolve_contract(
+                input_types, output_type = operator.resolve_contract(
                     previous_output_type,
                     stored_annotations,
                     self._expand_output_annotation,
@@ -136,8 +146,17 @@ class Pipeline:
                         f"{self._format_parameter_annotations(input_types)}"
                     )
 
+            if first_input_type is None:
+                first_input_type = input_types[0] if len(input_types) == 1 else input_types
             previous_output_type = output_type
             previous_name = operator.__class__.__name__
+
+        return TypeContract(input_type=first_input_type, output_type=previous_output_type)
+
+    def validate(self) -> None:
+        if not self.operators:
+            return
+        self.resolve_type_contract()
 
     @staticmethod
     def _resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, ...], Any]:
@@ -282,3 +301,55 @@ class Pipeline:
         if inspect.isfunction(operator) or inspect.ismethod(operator):
             return operator
         return getattr(operator, "__call__")
+
+
+class Embed:
+    """
+    Embed a pipeline as a single isolated step inside an outer pipeline.
+
+    The inner pipeline always starts with a fresh context (that is how
+    Pipeline.__call__ works), so inner Store/Recall values are naturally
+    invisible outside and outer context values are invisible inside.
+
+    Example::
+
+        preprocess = Pipeline([Decode(), Resize(), Normalize()])
+        infer      = Pipeline([Infer("model.onnx"), Extract("output0")])
+
+        full = Pipeline([
+            embed(preprocess),
+            embed(infer),
+            NMS(...),
+        ])
+    """
+
+    def __init__(self, pipeline: Pipeline) -> None:
+        self.pipeline = pipeline
+
+    def __call__(self, value: Any) -> Any:
+        return self.pipeline(value)
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        type_contract = self.pipeline.resolve_type_contract()
+
+        if current_output is not None and not Pipeline._is_annotation_compatible(
+            current_output, (type_contract.input_type,)
+        ):
+            raise validation_error_type(
+                f"Pipeline contract mismatch: incoming type "
+                f"{Pipeline._format_annotation(current_output)} is incompatible with "
+                f"embed() input {Pipeline._format_annotation(type_contract.input_type)}"
+            )
+
+        return (type_contract.input_type,), type_contract.output_type
+
+
+def embed(pipeline: Pipeline) -> Embed:
+    """Embed *pipeline* as an isolated step inside another pipeline."""
+    return Embed(pipeline)
