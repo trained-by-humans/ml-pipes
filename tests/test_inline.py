@@ -89,6 +89,17 @@ def test_nested_inline_fully_expands():
     assert all(not isinstance(op, Inline) for op in outer.operators)
 
 
+def test_inline_snapshots_operators_at_build_time():
+    # Mutating the source pipeline after Inline expansion must not affect the result.
+    op_a, op_b = IntToString(), StringToFloat()
+    source = Pipeline([op_a])
+    outer = Pipeline([Inline(source), FloatToInt()])
+
+    source.extend([op_b])  # mutate source after composition
+
+    assert op_b not in outer.operators
+
+
 def test_inline_validate_catches_type_mismatch():
     outer = Pipeline([Inline(Pipeline([IntToString()])), FloatToInt()])
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
