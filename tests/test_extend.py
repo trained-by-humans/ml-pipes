@@ -31,9 +31,8 @@ class Doubled:
 
 def test_extend_returns_same_pipeline_object():
     p = Pipeline([IntToString()])
-    returned = p.extend([StringToFloat()])
 
-    assert returned is p
+    assert p.extend([StringToFloat()]) is p
 
 
 def test_extend_mutates_operator_list_in_place():

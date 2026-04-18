@@ -99,8 +99,12 @@ def test_embed_holds_reference_to_inner_pipeline():
 # --- >> operator ---
 
 def test_rshift_returns_new_pipeline():
-    result = Pipeline([IntToString()]) >> Pipeline([StringToFloat()])
-    assert isinstance(result, Pipeline)
+    a = Pipeline([IntToString()])
+    b = Pipeline([StringToFloat()])
+    c = a >> b
+
+    assert c is not a
+    assert c is not b
 
 
 def test_rshift_appends_embed_operator():
@@ -124,6 +128,19 @@ def test_rshift_does_not_mutate_right_pipeline():
     b = Pipeline([StringToFloat()])
     _ = Pipeline([IntToString()]) >> b
     assert len(b.operators) == 1
+
+
+def test_rshift_holds_live_reference_to_right_pipeline():
+    # Mutating the right pipeline after >> must be reflected in the composed pipeline —
+    # Embed is a standalone block, not a snapshot.
+    extra = FloatToInt()
+    b = Pipeline([StringToFloat()])
+    composed = Pipeline([IntToString()]) >> b
+
+    b.extend([extra])  # mutate b after composition
+
+    assert composed.operators[-1].pipeline is b
+    assert extra in composed.operators[-1].pipeline.operators
 
 
 def test_rshift_chains_produce_nested_embeds():

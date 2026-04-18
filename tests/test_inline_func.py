@@ -36,8 +36,12 @@ def test_inline_holds_reference_to_inner_pipeline():
 # --- + ---
 
 def test_add_returns_new_pipeline():
-    result = Pipeline([IntToString()]) + Pipeline([StringToFloat()])
-    assert isinstance(result, Pipeline)
+    a = Pipeline([IntToString()])
+    b = Pipeline([StringToFloat()])
+    c = a + b
+
+    assert c is not a
+    assert c is not b
 
 
 def test_add_merges_operator_lists():
