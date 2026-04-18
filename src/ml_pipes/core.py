@@ -55,7 +55,11 @@ class Pipeline:
         return flat
 
     def __rshift__(self, other: Pipeline) -> Pipeline:
-        """Flatten two pipelines into one: a >> b."""
+        """Feed self into other as an isolated step: a >> b."""
+        return Pipeline([*self.operators, Embed(other)])
+
+    def __add__(self, other: Pipeline) -> Pipeline:
+        """Combine two pipelines into one flat pipeline with shared context: a + b."""
         return Pipeline([*self.operators, *other.operators])
 
     def __call__(self, value: Any) -> Any:
@@ -390,5 +394,5 @@ def embed(pipeline: Pipeline) -> Embed:
 
 
 def inline(pipeline: Pipeline) -> Inline:
-    """Inline *pipeline* as a flattening marker inside a pipeline definition."""
+    """Inline *pipeline* as a flattening marker inside a pipeline definition (a + b equivalent)."""
     return Inline(pipeline)
