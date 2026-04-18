@@ -107,15 +107,17 @@ def test_rshift_returns_new_pipeline():
     assert c is not b
 
 
-def test_rshift_appends_embed_operator():
+def test_rshift_produces_two_embed_operators():
     a = Pipeline([IntToString()])
     b = Pipeline([StringToFloat()])
 
     combined = a >> b
 
     assert len(combined.operators) == 2
-    assert isinstance(combined.operators[-1], Embed)
-    assert combined.operators[-1].pipeline is b
+    assert isinstance(combined.operators[0], Embed)
+    assert isinstance(combined.operators[1], Embed)
+    assert combined.operators[0].pipeline is a
+    assert combined.operators[1].pipeline is b
 
 
 def test_rshift_does_not_mutate_left_pipeline():
@@ -130,9 +132,18 @@ def test_rshift_does_not_mutate_right_pipeline():
     assert len(b.operators) == 1
 
 
+def test_rshift_holds_live_reference_to_left_pipeline():
+    extra = IntToString()
+    a = Pipeline([IntToString()])
+    composed = a >> Pipeline([StringToFloat()])
+
+    a.extend([extra])  # mutate a after composition
+
+    assert composed.operators[0].pipeline is a
+    assert extra in composed.operators[0].pipeline.operators
+
+
 def test_rshift_holds_live_reference_to_right_pipeline():
-    # Mutating the right pipeline after >> must be reflected in the composed pipeline —
-    # Embed is a standalone block, not a snapshot.
     extra = FloatToInt()
     b = Pipeline([StringToFloat()])
     composed = Pipeline([IntToString()]) >> b
@@ -143,15 +154,16 @@ def test_rshift_holds_live_reference_to_right_pipeline():
     assert extra in composed.operators[-1].pipeline.operators
 
 
-def test_rshift_chains_produce_nested_embeds():
+def test_rshift_chains_are_flat():
     a = Pipeline([IntToString()])
     b = Pipeline([StringToFloat()])
     c = Pipeline([FloatToInt()])
 
     combined = a >> b >> c
 
-    # a >> b >> c == (a >> b) >> c
-    # operators: [IntToString, Embed(b), Embed(c)]
+    # a >> b >> c == (a >> b) >> c — flat list of three Embed operators
     assert len(combined.operators) == 3
-    assert isinstance(combined.operators[1], Embed)
-    assert isinstance(combined.operators[2], Embed)
+    assert all(isinstance(op, Embed) for op in combined.operators)
+    assert combined.operators[0].pipeline is a
+    assert combined.operators[1].pipeline is b
+    assert combined.operators[2].pipeline is c
