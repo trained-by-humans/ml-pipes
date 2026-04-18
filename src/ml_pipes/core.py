@@ -18,26 +18,6 @@ class TypeContract:
     output_type: Any
 
 
-class Inline:
-    """
-    Marker that expands a pipeline's operators into the parent at construction time.
-
-    Example::
-
-        preprocess = Pipeline([Resize(), Normalize()])
-
-        full = Pipeline([
-            Decode(),
-            Inline(preprocess),
-            Infer(...),
-        ])
-        # full.operators == [Decode(), Resize(), Normalize(), Infer(...)]
-    """
-
-    def __init__(self, pipeline: Pipeline) -> None:
-        self.pipeline = pipeline
-
-
 class Pipeline:
     def __init__(self, operators: Iterable[Callable[..., Any] | ContextOp], validate_on_init: bool = False):
         self.operators = self._flatten(list(operators))
@@ -341,6 +321,31 @@ class Pipeline:
         return getattr(operator, "__call__")
 
 
+class Inline:
+    """
+    Marker that expands a pipeline's operators into the parent at construction time.
+
+    Example::
+
+        preprocess = Pipeline([Resize(), Normalize()])
+
+        full = Pipeline([
+            Decode(),
+            Inline(preprocess),
+            Infer(...),
+        ])
+        # full.operators == [Decode(), Resize(), Normalize(), Infer(...)]
+    """
+
+    def __init__(self, pipeline: Pipeline) -> None:
+        self.pipeline = pipeline
+
+
+def inline(pipeline: Pipeline) -> Inline:
+    """Inline *pipeline* as a flattening marker inside a pipeline definition (a + b equivalent)."""
+    return Inline(pipeline)
+
+
 class Embed:
     """
     Embed a pipeline as a single isolated step inside an outer pipeline.
@@ -392,7 +397,3 @@ def embed(pipeline: Pipeline) -> Embed:
     """Embed *pipeline* as an isolated step inside another pipeline."""
     return Embed(pipeline)
 
-
-def inline(pipeline: Pipeline) -> Inline:
-    """Inline *pipeline* as a flattening marker inside a pipeline definition (a + b equivalent)."""
-    return Inline(pipeline)
