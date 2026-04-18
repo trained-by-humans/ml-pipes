@@ -29,10 +29,15 @@ class Pipeline:
         flat = []
         for op in operators:
             if isinstance(op, Inline):
-                flat.extend(op.pipeline.operators)
+                flat += Pipeline._flatten(op.pipeline.operators)
             else:
                 flat.append(op)
         return flat
+
+    def extend(self, operators: Iterable[Callable[..., Any] | ContextOp]) -> Pipeline:
+        """Append *operators* to this pipeline in place and return self."""
+        self.operators.extend(self._flatten(list(operators)))
+        return self
 
     def __rshift__(self, other: Pipeline) -> Pipeline:
         """Feed self into other as an isolated step: a >> b."""

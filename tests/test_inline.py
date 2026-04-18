@@ -80,6 +80,15 @@ def test_inline_validate_treats_expanded_operators_as_flat_chain():
     outer.validate()
 
 
+def test_nested_inline_fully_expands():
+    a, b = IntToString(), StringToFloat()
+    inner = Pipeline([Inline(Pipeline([a])), b])
+    outer = Pipeline([Inline(inner)])
+
+    assert outer.operators == [a, b]
+    assert all(not isinstance(op, Inline) for op in outer.operators)
+
+
 def test_inline_validate_catches_type_mismatch():
     outer = Pipeline([Inline(Pipeline([IntToString()])), FloatToInt()])
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
