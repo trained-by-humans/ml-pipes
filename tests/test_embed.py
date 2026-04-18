@@ -1,9 +1,8 @@
 """
-Unit tests for the Embed operator in isolation.
-Calls __call__ and resolve_contract directly — no outer Pipeline.
+Unit tests for the Embed operator and >> operator.
+a >> b feeds a into b as an isolated step.
 
-Context isolation and composed pipeline behaviour are covered in
-test_composition_scenarios.py.
+Context isolation behaviour is covered in test_composition_scenarios.py.
 """
 import pytest
 from typing import Any
@@ -31,21 +30,17 @@ class Doubled:
         return value * 2
 
 
-# --- __call__ ---
+# --- Embed.__call__ ---
 
 def test_embed_call_returns_inner_pipeline_result():
-    op = embed(Pipeline([IntToString(), StringToFloat()]))
-
-    assert op(42) == 42.0
+    assert embed(Pipeline([IntToString(), StringToFloat()]))(42) == 42.0
 
 
 def test_embed_call_passes_value_through_full_inner_chain():
-    op = embed(Pipeline([Doubled(), Doubled()]))
-
-    assert op(3) == 12
+    assert embed(Pipeline([Doubled(), Doubled()]))(3) == 12
 
 
-# --- resolve_contract ---
+# --- Embed.resolve_contract ---
 
 def test_resolve_contract_returns_inner_input_and_output_types():
     op = embed(Pipeline([IntToString()]))
@@ -59,13 +54,13 @@ def test_resolve_contract_returns_inner_input_and_output_types():
 def test_resolve_contract_with_no_upstream_type_does_not_raise():
     op = embed(Pipeline([IntToString()]))
 
-    input_types, output_type = op.resolve_contract(None, {}, None, PipelineValidationError)
+    _, output_type = op.resolve_contract(None, {}, None, PipelineValidationError)
 
     assert output_type is str
 
 
 def test_resolve_contract_raises_on_incompatible_upstream_type():
-    op = embed(Pipeline([IntToString()]))  # expects int
+    op = embed(Pipeline([IntToString()]))
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         op.resolve_contract(float, {}, None, PipelineValidationError)
@@ -74,8 +69,7 @@ def test_resolve_contract_raises_on_incompatible_upstream_type():
 def test_resolve_contract_accepts_subclass_of_expected_input():
     op = embed(Pipeline([IntToString()]))
 
-    # bool is a subclass of int — compatible
-    input_types, output_type = op.resolve_contract(bool, {}, None, PipelineValidationError)
+    _, output_type = op.resolve_contract(bool, {}, None, PipelineValidationError)
 
     assert output_type is str
 
@@ -99,5 +93,48 @@ def test_embed_and_Embed_produce_same_instance_type():
 
 def test_embed_holds_reference_to_inner_pipeline():
     inner = Pipeline([IntToString()])
-
     assert embed(inner).pipeline is inner
+
+
+# --- >> operator ---
+
+def test_rshift_returns_new_pipeline():
+    result = Pipeline([IntToString()]) >> Pipeline([StringToFloat()])
+    assert isinstance(result, Pipeline)
+
+
+def test_rshift_appends_embed_operator():
+    a = Pipeline([IntToString()])
+    b = Pipeline([StringToFloat()])
+
+    combined = a >> b
+
+    assert len(combined.operators) == 2
+    assert isinstance(combined.operators[-1], Embed)
+    assert combined.operators[-1].pipeline is b
+
+
+def test_rshift_does_not_mutate_left_pipeline():
+    a = Pipeline([IntToString()])
+    _ = a >> Pipeline([StringToFloat()])
+    assert len(a.operators) == 1
+
+
+def test_rshift_does_not_mutate_right_pipeline():
+    b = Pipeline([StringToFloat()])
+    _ = Pipeline([IntToString()]) >> b
+    assert len(b.operators) == 1
+
+
+def test_rshift_chains_produce_nested_embeds():
+    a = Pipeline([IntToString()])
+    b = Pipeline([StringToFloat()])
+    c = Pipeline([FloatToInt()])
+
+    combined = a >> b >> c
+
+    # a >> b >> c == (a >> b) >> c
+    # operators: [IntToString, Embed(b), Embed(c)]
+    assert len(combined.operators) == 3
+    assert isinstance(combined.operators[1], Embed)
+    assert isinstance(combined.operators[2], Embed)

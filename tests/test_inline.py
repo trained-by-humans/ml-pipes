@@ -1,6 +1,13 @@
+"""
+Unit tests for the Inline marker and Pipeline._flatten.
+Verifies construction-time expansion only — operator list shape,
+immutability, operator identity.
+
+Runtime and context-sharing behaviour are covered in test_composition_scenarios.py.
+"""
 import pytest
 
-from ml_pipes import Pipeline, PipelineValidationError, Inline, Store, Recall
+from ml_pipes import Pipeline, PipelineValidationError, Inline, inline
 
 
 class IntToString:
@@ -18,82 +25,62 @@ class FloatToInt:
         return int(value)
 
 
-class Doubled:
-    def __call__(self, value: int) -> int:
-        return value * 2
+# --- expansion ---
+
+def test_inline_marker_is_gone_after_construction():
+    outer = Pipeline([Inline(Pipeline([IntToString()]))])
+    assert all(not isinstance(op, Inline) for op in outer.operators)
 
 
-# --- construction ---
-
-def test_inline_expands_operators_at_construction():
+def test_inline_expands_to_correct_operator_count():
     inner = Pipeline([IntToString(), StringToFloat()])
     outer = Pipeline([Inline(inner), FloatToInt()])
-
     assert len(outer.operators) == 3
-    assert all(not isinstance(op, Inline) for op in outer.operators)
 
 
 def test_inline_operators_are_same_objects_as_inner():
     a, b = IntToString(), StringToFloat()
-    inner = Pipeline([a, b])
-    outer = Pipeline([Inline(inner)])
-
+    outer = Pipeline([Inline(Pipeline([a, b]))])
     assert outer.operators[0] is a
     assert outer.operators[1] is b
 
 
 def test_inline_does_not_mutate_inner_pipeline():
     inner = Pipeline([IntToString()])
-    _ = Pipeline([Inline(inner), StringToFloat()])
-
+    _ = Pipeline([Inline(inner)])
     assert len(inner.operators) == 1
 
 
-def test_multiple_inline_markers_all_expand():
-    a = Pipeline([IntToString()])
-    b = Pipeline([StringToFloat()])
-    outer = Pipeline([Inline(a), Inline(b), FloatToInt()])
-
+def test_multiple_inlines_all_expand():
+    outer = Pipeline([Inline(Pipeline([IntToString()])), Inline(Pipeline([StringToFloat()])), FloatToInt()])
     assert len(outer.operators) == 3
 
 
-# --- execution ---
-
-def test_inline_runs_operators_in_order():
-    inner = Pipeline([IntToString(), StringToFloat()])
-    outer = Pipeline([Inline(inner), FloatToInt()])
-
-    assert outer(42) == 42
+def test_inline_preserves_operator_order():
+    a, b, c = IntToString(), StringToFloat(), FloatToInt()
+    outer = Pipeline([Inline(Pipeline([a, b])), c])
+    assert outer.operators == [a, b, c]
 
 
-def test_inline_shares_context_with_outer_pipeline():
-    inner = Pipeline([Recall("x")])
-    outer = Pipeline([Store("x"), Inline(inner)])
+# --- construction ---
 
-    result = outer(7)
-    assert result == (7, 7)
+def test_inline_function_returns_inline_instance():
+    assert isinstance(inline(Pipeline([IntToString()])), Inline)
 
 
-def test_inline_store_in_inner_visible_to_outer():
-    inner = Pipeline([Store("x")])
-    outer = Pipeline([Inline(inner), Recall("x")])
-
-    result = outer(5)
-    assert result == (5, 5)
+def test_inline_holds_reference_to_inner_pipeline():
+    inner = Pipeline([IntToString()])
+    assert Inline(inner).pipeline is inner
 
 
 # --- validation ---
 
 def test_inline_validate_treats_expanded_operators_as_flat_chain():
-    inner = Pipeline([IntToString()])
-    outer = Pipeline([Inline(inner), StringToFloat()])
-
+    outer = Pipeline([Inline(Pipeline([IntToString()])), StringToFloat()])
     outer.validate()
 
 
 def test_inline_validate_catches_type_mismatch():
-    inner = Pipeline([IntToString()])
-    outer = Pipeline([Inline(inner), FloatToInt()])
-
+    outer = Pipeline([Inline(Pipeline([IntToString()])), FloatToInt()])
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         outer.validate()
