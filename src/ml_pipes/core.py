@@ -40,8 +40,14 @@ class Pipeline:
         return self
 
     def __rshift__(self, other: Pipeline) -> Pipeline:
-        """Feed self into other as an isolated step: a >> b."""
-        return Pipeline([*self.operators, Embed(other)])
+        """Join two pipelines as isolated blocks: a >> b.
+
+        If self is already a flat join chain (all Embed operators), extend it
+        rather than wrapping it, so a >> b >> c stays flat: [Embed(a), Embed(b), Embed(c)].
+        """
+        if self.operators and all(isinstance(op, Embed) for op in self.operators):
+            return Pipeline([*self.operators, Embed(other)])
+        return Pipeline([Embed(self), Embed(other)])
 
     def __add__(self, other: Pipeline) -> Pipeline:
         """Combine two pipelines into one flat pipeline with shared context: a + b."""
