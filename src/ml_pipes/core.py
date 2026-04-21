@@ -18,25 +18,104 @@ class Pipeline:
             self.validate()
 
     def __call__(self, value: Any) -> Any:
+        from .ops import Batch  # local import avoids circular dependency
         current = value
         context = Context()
-        for operator in self.operators:
-            if isinstance(operator, ContextOp):
-                current, context = operator.apply(current, context)
+        i = 0
+        while i < len(self.operators):
+            operator = self.operators[i]
+            if isinstance(operator, Batch):
+                current, context, i = self._step_into_batch(current, context, i)
             else:
-                args = self._build_call_args(operator, current)
-                current = operator(*args)
+                current, context = self._step(i, current, context)
+                i += 1
         return current
 
+    def _step(self, i: int, current: Any, context: Context) -> tuple[Any, Context]:
+        operator = self.operators[i]
+
+        if isinstance(operator, ContextOp):
+            return operator.apply(current, context)
+
+        args = self._build_call_args(operator, current)
+        return operator(*args), context
+
+    def _step_into_batch(self, current: Any, context: Context, i: int) -> tuple[Any, Context, int]:
+        from .batch import LeaderBatch
+        from .ops import UnBatch
+
+        gate = self.operators[i].gate
+        # Rendezvous: block until a full batch is ready or timeout fires.
+        outcome = gate.enter(current)
+        i += 1  # move past the Batch operator itself
+
+        # Waiter: Skip the batch region entirely — the leader will process and return the result
+        if not isinstance(outcome, LeaderBatch):
+            while not isinstance(self.operators[i], UnBatch):
+                i += 1
+            return outcome.result, context, i + 1  # move past the UnBatch operator itself
+
+        # Leader: Run every operator in the batch region on behalf of all waiting threads.
+        # The region gets a fresh isolated context — keys stored inside are invisible outside.
+        current = outcome.inputs
+        batch_context = Context()
+        try:
+            while not isinstance(self.operators[i], UnBatch):
+                current, batch_context = self._step(i, current, batch_context)
+                i += 1
+            # Hand each waiter its individual result and collect the leader's own.
+            current = gate.distribute(current)
+        except Exception as exc:
+            # Unblock all waiters with the exception so they don't hang.
+            gate.distribute_exception(exc)
+            raise
+        return current, context, i + 1  # resume after UnBatch with the original outer context
+
+    def _validate_batch_pairs(self) -> None:
+        from .ops import Batch, UnBatch
+
+        stack: list[int] = []
+        for i, op in enumerate(self.operators):
+            if isinstance(op, Batch):
+                if stack:
+                    raise PipelineValidationError(
+                        "Nested Batch regions are not supported"
+                    )
+                stack.append(i)
+            elif isinstance(op, UnBatch):
+                if not stack:
+                    raise PipelineValidationError(
+                        f"UnBatch at position {i} has no matching Batch"
+                    )
+                stack.pop()
+        if stack:
+            raise PipelineValidationError(
+                f"Batch at position {stack[0]} has no matching UnBatch"
+            )
+
     def validate(self) -> None:
+        from .ops import Batch, UnBatch
+
         if not self.operators:
             return
+
+        self._validate_batch_pairs()
 
         previous_output_type: Any | None = None
         previous_name: str | None = None
         stored_annotations: dict[str, Any] = {}
+        outer_stored_annotations: dict[str, Any] | None = None
 
         for operator in self.operators:
+            if isinstance(operator, Batch):
+                # Enter batch region: swap to an isolated annotation scope.
+                outer_stored_annotations = stored_annotations
+                stored_annotations = {}
+            elif isinstance(operator, UnBatch):
+                # Exit batch region: discard the isolated scope, restore the outer one.
+                stored_annotations = outer_stored_annotations  # type: ignore[assignment]
+                outer_stored_annotations = None
+
             if isinstance(operator, ContextOp) or hasattr(operator, "resolve_contract"):
                 _, output_type = operator.resolve_contract(
                     previous_output_type,
