@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
+import threading
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import is_dataclass, replace
 from pathlib import Path
@@ -10,6 +12,7 @@ from typing import TextIO
 
 import numpy as np
 
+from .batch import BatchGate
 from .types import ResizeTransform
 from .types import (
     Detections,
@@ -236,6 +239,11 @@ class Infer:
         dtype: str | None = None,
         # Runtime-facing output tensor metadata aligned with exported graph output order.
         output_layouts: tuple[str, ...] | None = None,
+        # Serialize session.run() calls with a lock.  Off by default because
+        # runtimes like ONNX Runtime manage their own internal thread pool and
+        # handle concurrent calls efficiently.  Enable if profiling shows that
+        # concurrent calls are oversubscribing CPU cores on your hardware.
+        serialize: bool = False,
     ):
         path = Path(model_path)
         if not path.is_file():
@@ -248,6 +256,7 @@ class Infer:
             str(path),
             providers=list(providers),
         )
+        self._lock = threading.Lock() if serialize else contextlib.nullcontext()
         self.input_name = input_name or self.session.get_inputs()[0].name
         self.input_layout = input_layout
         self.model_dtype = np.dtype(dtype) if dtype is not None else None
@@ -264,7 +273,8 @@ class Infer:
         if self.model_dtype is not None and actual_dtype != self.model_dtype:
             raise ValueError(f"Infer expects model dtype {self.model_dtype}, got {actual_dtype}")
 
-        outputs = self.session.run(None, {self.input_name: tensor_payload.array})
+        with self._lock:
+            outputs = self.session.run(None, {self.input_name: tensor_payload.array})
 
         if self.output_layouts is None:
             output_layouts = tuple("UNKNOWN" for _ in outputs)
@@ -1038,3 +1048,114 @@ class Pick:
         parts = get_args(current_output)
         selected = tuple(parts[i] if i < len(parts) else Any for i in self.indices)
         return (Any,), selected[0] if len(selected) == 1 else selected
+
+
+# ---------------------------------------------------------------------------
+# Batch coordination
+# ---------------------------------------------------------------------------
+
+class Batch:
+    """
+    Batch coordination entry point.
+
+    Multiple threads calling the same pipeline instance block here until
+    *size* samples have arrived or *timeout* seconds have elapsed since the
+    first arrival.  One thread is elected leader and continues through the
+    batch region; the rest wait for their individual results.
+
+    Pipeline handles the leader/waiter split; this operator owns the gate.
+
+    Example::
+
+        pipeline = Pipeline([
+            ...,
+            Batch(size=4, timeout=0.05),
+            Collate(),
+            Infer("model.onnx"),
+            Distribute(),
+            UnBatch(),
+            ...,
+        ])
+    """
+
+    def __init__(self, size: int, timeout: float = 0.05) -> None:
+        self.gate = BatchGate(size, timeout)
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # Batch collects individual samples into a list for the batch region.
+        out = list[current_output] if current_output is not None else list[Any]
+        return (Any,), out
+
+
+class UnBatch:
+    """
+    Batch coordination exit point.
+
+    Stateless marker.  Pipeline detects this operator, calls
+    ``gate.distribute()`` on the matching Batch's gate, and routes each
+    thread's individual result to the remaining operators.
+    """
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # UnBatch unwraps list[T] back to T for the per-sample operators that follow.
+        if current_output is not None and get_origin(current_output) is list:
+            args = get_args(current_output)
+            return (Any,), args[0] if args else Any
+        return (Any,), Any
+
+
+class Collate:
+    """
+    Stack a list of ``TensorPayload`` objects into a single batched tensor.
+
+    Input:  ``list[TensorPayload]`` — each with shape ``(1, C, H, W)`` or
+            ``(C, H, W)``.
+    Output: ``TensorPayload`` with shape ``(N, C, H, W)``.
+    """
+
+    def __call__(self, tensors: list[TensorPayload]) -> TensorPayload:
+        if not tensors:
+            raise ValueError("Collate received an empty list")
+        arrays = [t.array for t in tensors]
+        if arrays[0].ndim == 4 and arrays[0].shape[0] == 1:
+            # Each has a batch dim of 1 — concatenate along it.
+            batched = np.concatenate(arrays, axis=0)
+        else:
+            batched = np.stack(arrays, axis=0)
+        return TensorPayload(array=batched, layout=tensors[0].layout, dtype=tensors[0].dtype)
+
+
+class Distribute:
+    """
+    Split a batched ``RuntimeOutputs`` back into a list of per-sample outputs.
+
+    Input:  ``RuntimeOutputs`` — each tensor has shape ``(N, ...)``.
+    Output: ``list[RuntimeOutputs]`` of length N, each with shape ``(1, ...)``.
+    """
+
+    def __call__(self, outputs: RuntimeOutputs) -> list[RuntimeOutputs]:
+        n = outputs.tensors[0].array.shape[0]
+        result = []
+        for i in range(n):
+            sample_tensors = tuple(
+                TensorPayload(
+                    array=t.array[i : i + 1],
+                    layout=t.layout,
+                    dtype=t.dtype,
+                )
+                for t in outputs.tensors
+            )
+            result.append(RuntimeOutputs(tensors=sample_tensors, names=outputs.names))
+        return result
