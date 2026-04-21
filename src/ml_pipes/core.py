@@ -92,8 +92,6 @@ class Pipeline:
             )
 
     def validate(self) -> None:
-        from .ops import Batch, UnBatch
-
         if not self.operators:
             return
 
@@ -104,9 +102,6 @@ class Pipeline:
         stored_annotations: dict[str, Any] = {}
 
         for operator in self.operators:
-            if isinstance(operator, (Batch, UnBatch)):
-                # Coordination markers — no type contract to validate.
-                continue
             if isinstance(operator, ContextOp) or hasattr(operator, "resolve_contract"):
                 _, output_type = operator.resolve_contract(
                     previous_output_type,
