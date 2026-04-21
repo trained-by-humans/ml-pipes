@@ -11,6 +11,7 @@ from ml_pipes import (
     PipelineValidationError,
     UnBatch,
 )
+from ml_pipes.context import Recall, Store
 from ml_pipes.types import RuntimeOutputs, TensorPayload
 
 
@@ -207,3 +208,68 @@ def test_validate_raises_on_nested_batch():
 def test_validate_accepts_matched_batch_unbatch_pair():
     pipeline = Pipeline([Batch(size=2), UnBatch()])
     pipeline.validate()  # must not raise
+
+
+def test_validate_accepts_context_ops_inside_batch_region():
+    # Store/Recall inside the batch region use an isolated scope — valid.
+    pipeline = Pipeline([Batch(size=2), Store("x"), Recall("x"), UnBatch()])
+    pipeline.validate()  # must not raise
+
+
+def test_validate_recall_inside_batch_region_cannot_see_outer_store():
+    # A key stored outside the batch region must not be visible inside it.
+    pipeline = Pipeline([Store("x"), Batch(size=2), Recall("x"), UnBatch()])
+    with pytest.raises(PipelineValidationError, match="Recall.*not stored"):
+        pipeline.validate()
+
+
+def test_validate_store_inside_batch_region_invisible_after_unbatch():
+    # A key stored inside the batch region must not be visible after UnBatch.
+    pipeline = Pipeline([Batch(size=2), Store("x"), UnBatch(), Recall("x")])
+    with pytest.raises(PipelineValidationError, match="Recall.*not stored"):
+        pipeline.validate()
+
+
+# ---------------------------------------------------------------------------
+# Runtime context isolation
+# ---------------------------------------------------------------------------
+
+class _StoreAndReturn:
+    """Stores the input under 'inner' and returns it unchanged."""
+    def __call__(self, values: list) -> list:
+        return values  # context ops are separate pipeline steps; this just passes through
+
+
+def test_batch_region_context_is_isolated_from_outer():
+    # A Store before Batch must not affect context inside, and a Store inside
+    # must not be visible after UnBatch.  We verify the latter by confirming
+    # that a Recall after UnBatch raises KeyError (missing key) at runtime.
+    inner_store = Store("inner_key")
+
+    class _PassThrough:
+        def __call__(self, v: list) -> list:
+            return v
+
+    pipeline = Pipeline([
+        Batch(size=1, timeout=0.05),
+        inner_store,
+        _PassThrough(),
+        UnBatch(),
+    ])
+
+    # Run single-threaded (timeout fires immediately with batch of 1).
+    # The pipeline should complete without error — Store inside is fine.
+    result = pipeline([42])
+    assert result == [42]
+
+    # Now place a Recall after UnBatch and confirm it raises at runtime
+    # because 'inner_key' was stored in the isolated batch context.
+    pipeline_with_recall = Pipeline([
+        Batch(size=1, timeout=0.05),
+        inner_store,
+        _PassThrough(),
+        UnBatch(),
+        Recall("inner_key"),
+    ])
+    with pytest.raises(KeyError, match="inner_key"):
+        pipeline_with_recall([42])
