@@ -1081,6 +1081,17 @@ class Batch:
     def __init__(self, size: int, timeout: float = 0.05) -> None:
         self.gate = BatchGate(size, timeout)
 
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # Batch collects individual samples into a list for the batch region.
+        out = list[current_output] if current_output is not None else list[Any]
+        return (Any,), out
+
 
 class UnBatch:
     """
@@ -1090,6 +1101,19 @@ class UnBatch:
     ``gate.distribute()`` on the matching Batch's gate, and routes each
     thread's individual result to the remaining operators.
     """
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # UnBatch unwraps list[T] back to T for the per-sample operators that follow.
+        if current_output is not None and get_origin(current_output) is list:
+            args = get_args(current_output)
+            return (Any,), args[0] if args else Any
+        return (Any,), Any
 
 
 class Collate:
