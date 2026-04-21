@@ -207,3 +207,10 @@ def test_validate_raises_on_nested_batch():
 def test_validate_accepts_matched_batch_unbatch_pair():
     pipeline = Pipeline([Batch(size=2), UnBatch()])
     pipeline.validate()  # must not raise
+
+
+def test_validate_raises_on_context_op_inside_batch_region():
+    from ml_pipes.context import Store
+    pipeline = Pipeline([Batch(size=2), Store("x"), UnBatch()])
+    with pytest.raises(PipelineValidationError, match="inside a Batch region"):
+        pipeline.validate()

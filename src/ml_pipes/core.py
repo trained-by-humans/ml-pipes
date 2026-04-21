@@ -86,6 +86,12 @@ class Pipeline:
                         f"UnBatch at position {i} has no matching Batch"
                     )
                 stack.pop()
+            elif stack and isinstance(op, ContextOp):
+                raise PipelineValidationError(
+                    f"{op.__class__.__name__} at position {i} is inside a Batch region — "
+                    "context ops are not supported there because only the leader thread runs "
+                    "the batch region; follower threads would resume with stale context"
+                )
         if stack:
             raise PipelineValidationError(
                 f"Batch at position {stack[0]} has no matching UnBatch"
