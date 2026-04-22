@@ -7,26 +7,15 @@ from pathlib import Path
 import cv2
 
 from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, download_if_missing
+from run_yolo8n_onnx import MODEL_NAME, MODEL_URL, yolo8n_inference_pipeline
 from ml_pipes import (
-    ArgMax,
-    ConvertBoxFormat,
     DrawBoxes,
-    GatherScores,
     ImagePayload,
-    Infer,
-    NMS,
-    Normalize,
     Pick,
     Pipeline,
-    ProjectBoxes,
     Recall,
-    Resize,
-    Extract,
-    Slice,
-    Squeeze,
     Store,
-    ToDetections,
-    Transpose,
+    Embed,
 )
 
 # Sequential frame-by-frame inference on a video file with YOLOv8n.
@@ -36,37 +25,19 @@ from ml_pipes import (
 # compare against batched inference.
 #
 # Usage:
-#   python run_video_yolo8n_onnx.py --input clip.mp4
-#   python run_video_yolo8n_onnx.py --input clip.mp4 --output annotated.mp4
+#   python run_yolo8n_video.py --input clip.mp4
+#   python run_yolo8n_video.py --input clip.mp4 --output annotated.mp4
 
-MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
-MODEL_NAME = "yolov8n.onnx"
 ASSETS_DIR = Path(".example_assets")
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_video_annotation_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
         Store("source_frame"),
-        Resize((640, 640)),
-        Store("resize_transform", index=1),
-        Pick(0),
-        Normalize(),
-        Infer(model_path),
-        Extract("output0", as_="preds"),
-        Squeeze("preds"),
-        Transpose("preds"),
-        Slice("preds", slice(None, 4), as_="boxes"),
-        Slice("preds", slice(4, None), as_="scores"),
-        ArgMax("scores", as_="classes"),
-        GatherScores("scores", "classes"),
-        ConvertBoxFormat(from_="cxcywh"),
-        NMS(),
-        Recall("resize_transform"),
-        ProjectBoxes(),
-        ToDetections(),
+        Embed(yolo8n_inference_pipeline(model_path)),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
-        Pick(0),
+        Pick(0)
     ])
 
 
@@ -118,7 +89,7 @@ def main() -> int:
         (width, height),
     )
 
-    pipeline = build_pipeline(model_path)
+    pipeline = build_video_annotation_pipeline(model_path)
 
     frame_idx = 0
     while True:

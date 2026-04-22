@@ -632,31 +632,31 @@ python examples/run_maskrcnn_onnx.py
 
 | Example | Model | Task | Notes |
 |---|---|---|---|
-| `run_webcam_yolo8n_onnx.py` | YOLOv8n | live detection | reads from the default camera; press Q to quit |
-| `run_video_yolo8n_onnx.py` | YOLOv8n | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
+| `run_yolo8n_webcam.py` | YOLOv8n | live detection | reads from the default camera; press Q to quit |
+| `run_yolo8n_video.py` | YOLOv8n | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
 
 ```bash
 # Live webcam — press Q to quit
-python examples/run_webcam_yolo8n_onnx.py
+python examples/run_yolo8n_webcam.py
 
 # Video file — uses bundled sample, or pass --input clip.mp4
-python examples/run_video_yolo8n_onnx.py
-python examples/run_video_yolo8n_onnx.py --input clip.mp4 --output annotated.mp4
+python examples/run_yolo8n_video.py
+python examples/run_yolo8n_video.py --input clip.mp4 --output annotated.mp4
 ```
 
 ### Inference endpoint
 
-| Example | Model | Task | Notes |
-|---|---|---|---|
-| `serve_yolo8n_onnx.py` | YOLOv8n | HTTP detection endpoint | requires `pip install flask` |
+| Example                  | Model | Task | Notes |
+|--------------------------|---|---|---|
+| `run_yolo8n_endpoint.py` | YOLOv8n | HTTP detection endpoint | requires `pip install flask` |
 
 ```bash
 # Terminal 1 — start the server
-python examples/serve_yolo8n_onnx.py
+python examples/run_yolo8n_endpoint.py
 
 # Terminal 2 — send a test request (uses bundled sample, or pass --input clip.mp4)
-python examples/serve_yolo8n_onnx.py --call
-python examples/serve_yolo8n_onnx.py --call --input photo.jpg
+python examples/run_yolo8n_endpoint.py --call
+python examples/run_yolo8n_endpoint.py --call --input photo.jpg
 
 # Or with curl
 curl -s -X POST http://localhost:5000/detect \
