@@ -15,17 +15,21 @@ for every pipeline call. It is **opt-in and zero-overhead** when not configured
 
 ## How it works
 
-Each `pipeline(value)` call builds an `InvocationTrace` entirely on the call
-stack — no locks, no shared state. Each operator step appends a `StepSpan` with
-its wall-time duration. After the pipeline returns its result to the caller, it
-hands the finished trace to the registered collector via `on_trace(trace)`.
+Each `pipeline(value)` call builds an `InvocationTrace` entirely on the
+calling thread — each operator step appends a `StepSpan` with its wall-time
+duration to that thread's own trace object. After the pipeline returns its
+result to the caller, it hands the finished trace to the collector via
+`on_trace(trace)`.
 
-This means:
+Because tracing is confined to the calling thread:
 
-- **No contention during execution.** The trace object is local to each call.
-  Concurrent threads each build their own trace independently.
-- **One collector callback per pipeline call**, not one per operator. Whatever
-  locking or I/O the collector does, it happens after the result is delivered.
+- **No locking needed in the pipeline.** The trace is never shared between
+  threads during execution, so there is nothing to protect. If the collector
+  writes to shared state (a file, a metrics sink, a list), that is the only
+  place a lock is needed — and it runs after the result is already returned.
+- **One complete trace per invocation.** The collector receives a fully-formed
+  `InvocationTrace` covering the entire call, so every invocation can be
+  attributed, correlated, and measured in isolation.
 - **Errors are traced too.** If an operator raises, its `StepSpan` has
   `error=True` and the trace is still delivered to the collector via the
   `on_trace` callback.
@@ -55,6 +59,39 @@ Output:
   total                            48.12ms
 ```
 
+> [!CAUTION]
+> The first run is always slower and will skew measurements — ONNX Runtime
+> JIT-compiles the graph on first use and the OS cold-starts file I/O. Run a
+> dedicated warm-up call before starting the measurement window.
+
+> [!TIP]
+> Use `AggregateCollector` over several runs to get stable average latency
+> per operator rather than relying on a single invocation.
+
+## Configuration
+
+`TracingConfig` groups all tracing options in one place:
+
+```python
+from ml_pipes import TracingConfig, PrintCollector
+
+TracingConfig(
+    collector=PrintCollector(),       # required — any TraceCollector implementation
+    operator_labels=["resize", "infer", "nms"],  # override default "{i}:ClassName" labels
+    capture_shapes=True,              # record input/output shapes on each StepSpan
+)
+```
+
+All options are also available directly on `set_tracing()`:
+
+```python
+pipeline.set_tracing(
+    PrintCollector(),
+    operator_labels=["resize", "infer", "nms"],
+    capture_shapes=True,
+)
+```
+
 ## Attaching and detaching at runtime
 
 `set_tracing()` lets you enable, reconfigure, or disable tracing on an existing
@@ -73,15 +110,6 @@ pipeline.set_tracing(None)
 pipeline("image.jpg")   # no overhead, no trace produced
 ```
 
-With shape capture and custom operator labels:
-
-```python
-pipeline.set_tracing(
-    PrintCollector(),
-    capture_shapes=True,
-    operator_labels=["resize", "normalize", "infer", "nms", "to_detections"],
-)
-```
 
 ## Built-in collectors
 
@@ -92,6 +120,40 @@ Prints each trace to stdout. Good for development and one-off debugging.
 ```python
 from ml_pipes import PrintCollector
 pipeline.set_tracing(PrintCollector())
+```
+
+Output:
+
+```
+  0:Resize                            0.28ms  (  0.5%)
+  1:Normalize                         2.22ms  (  4.6%)
+  2:Infer                            39.19ms  ( 81.4%)
+  3:NMS                               0.21ms  (  0.4%)
+  4:ToDetections                      0.02ms  (  0.0%)
+  total                              48.12ms
+```
+
+Error spans are marked with `!`:
+
+```
+  0:Resize                            0.28ms  (  9.4%)
+  1:Infer                             2.70ms  ( 90.3%) !
+  total                               2.98ms
+```
+
+For batch pipelines the batch region is printed as a nested child trace:
+
+```
+  0:Resize                            0.20ms  (  0.5%)
+  1:Batch[wait]                       0.50ms  (  1.3%)
+  1:Batch                            34.70ms  ( 90.1%)
+    ↳ child trace [batch_size=8]:
+        2:_collate                    0.10ms  (  0.3%)
+        3:Infer                      34.50ms  ( 99.4%)
+        4:_distribute                 0.10ms  (  0.3%)
+        total                        34.70ms
+  5:NMS                               2.00ms  (  5.2%)
+  total                              38.50ms
 ```
 
 ### `AggregateCollector`
@@ -137,57 +199,6 @@ agg.operator_fractions()         # dict[label, float]  — fraction of avg pipel
 agg.reset()                      # clear all accumulated state
 ```
 
-## Writing a custom collector
-
-Subclass `TraceCollector` and implement `on_trace`. The collector receives a
-complete `InvocationTrace` after every pipeline call.
-
-```python
-from ml_pipes import TraceCollector, InvocationTrace
-
-class SlowCallAlert(TraceCollector):
-    def __init__(self, threshold_ms: float) -> None:
-        self._threshold_s = threshold_ms / 1000
-
-    def on_trace(self, trace: InvocationTrace) -> None:
-        slow = [s for s in trace.spans if s.duration_s > self._threshold_s]
-        if slow:
-            labels = ", ".join(s.label for s in slow)
-            print(f"[SLOW] {trace.total_duration_s*1000:.1f}ms total — slow steps: {labels}")
-
-pipeline.set_tracing(SlowCallAlert(threshold_ms=50.0))
-```
-
-## Batch pipelines
-
-Batch regions produce a nested child `InvocationTrace` attached to the
-`Batch` span. Every invocation — whether it was the batch leader or a follower
-— receives the same `Batch` span with the same child trace, so every trace is
-structurally complete and self-contained.
-
-```
-InvocationTrace:
-  StepSpan("0:Resize",         0.2ms)
-  StepSpan("1:Batch[wait]",   18.2ms)   ← this thread's wait for the batch to form
-  StepSpan("1:Batch",         34.7ms)   ← leader's region, shared with all followers
-    ↳ child InvocationTrace [batch_size=8]:
-        StepSpan("2:Collate",    0.1ms)
-        StepSpan("3:Infer",     34.5ms)
-        StepSpan("4:Distribute", 0.1ms)
-  StepSpan("5:NMS",            0.2ms)
-```
-
-`Batch[wait]` captures each thread's own gate wait time — the leader's wait is
-short (just accumulation time), while a follower's wait includes the full region
-execution. `batch_size` on the child trace lets an aggregator normalise region
-latency per sample.
-
-> [!TIP]
-> The warm-up run is always slower — ONNX Runtime JIT-compiles the graph on
-> first use and the OS cold-starts file I/O. Use `AggregateCollector` over
-> several runs and discard the first call, or run a dedicated warm-up before
-> starting the measurement window.
-
 ## OpenTelemetry export
 
 An optional bridge to OpenTelemetry is available in
@@ -214,6 +225,53 @@ pipeline("image.jpg")
 Each pipeline call becomes a root OTel span with one child span per operator.
 Batch regions produce nested child spans. The bridge is not imported by
 `ml_pipes` itself — there is no implicit dependency on the OTel SDK.
+
+> New to OpenTelemetry? See the [Getting started guide](https://opentelemetry.io/docs/getting-started/).
+
+## Writing a custom collector
+
+Subclass `TraceCollector` and implement `on_trace`. The collector receives a
+complete `InvocationTrace` after every pipeline call.
+
+```python
+from ml_pipes import TraceCollector, InvocationTrace
+
+class SlowCallAlert(TraceCollector):
+    def __init__(self, threshold_ms: float) -> None:
+        self._threshold_s = threshold_ms / 1000
+
+    def on_trace(self, trace: InvocationTrace) -> None:
+        slow = [s for s in trace.spans if s.duration_s > self._threshold_s]
+        if slow:
+            labels = ", ".join(s.label for s in slow)
+            print(f"[SLOW] {trace.total_duration_s*1000:.1f}ms total — slow steps: {labels}")
+
+pipeline.set_tracing(SlowCallAlert(threshold_ms=50.0))
+```
+
+## Tracing in batch regions
+
+Batch regions produce a nested child `InvocationTrace` attached to the
+`Batch` span. Every invocation — whether it was the batch leader or a follower
+— receives the same `Batch` span with the same child trace, so every trace is
+structurally complete and self-contained.
+
+```
+InvocationTrace:
+  StepSpan("0:Resize",         0.2ms)
+  StepSpan("1:Batch[wait]",   18.2ms)   ← this thread's wait for the batch to form
+  StepSpan("1:Batch",         34.7ms)   ← leader's region, shared with all followers
+    ↳ child InvocationTrace [batch_size=8]:
+        StepSpan("2:Collate",    0.1ms)
+        StepSpan("3:Infer",     34.5ms)
+        StepSpan("4:Distribute", 0.1ms)
+  StepSpan("5:NMS",            0.2ms)
+```
+
+`Batch[wait]` captures each thread's own gate wait time — the leader's wait is
+short (just accumulation time), while a follower's wait includes the full region
+execution. `batch_size` on the child trace lets an aggregator normalise region
+latency per sample.
 
 ## See also
 
