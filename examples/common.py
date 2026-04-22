@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ml_pipes import Decode, Detections, DrawBoxes, ImagePayload, Pipeline, SaveImage, Segmentations
+from ml_pipes import Decode, Detections, DrawBoxes, ImagePayload, LoadFile, Pipeline, SaveImage, Segmentations
 
 
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
@@ -114,7 +114,7 @@ def render_and_save_detections(
     output_path: Path,
     class_names: list[str] | None = None,
 ) -> None:
-    source_image = Decode()(image_path)
+    source_image = Decode()(LoadFile()(image_path))
     Pipeline(
         [
             lambda value: (value, source_image),
@@ -131,7 +131,7 @@ def render_and_save_segmentations(
     class_names: list[str] | None = None,
     alpha: float = 0.45,
 ) -> None:
-    source_image = Decode()(image_path)
+    source_image = Decode()(LoadFile()(image_path))
     image = source_image.array.copy()
     for mask, class_id in zip(segmentations.masks, segmentations.classes, strict=True):
         color = np.asarray(_class_color(int(class_id)), dtype=np.float32)

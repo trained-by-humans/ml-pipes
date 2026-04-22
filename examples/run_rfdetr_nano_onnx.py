@@ -8,6 +8,7 @@ from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
     Decode,
+    LoadFile,
     GatherScores,
     Infer,
     LogDetections,
@@ -46,6 +47,7 @@ INPUT_SIZE = (640, 640)
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
+            LoadFile(),
             Decode(),
             Resize(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
             Store("resize_transform", index=1),

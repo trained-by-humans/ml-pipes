@@ -25,14 +25,11 @@ import sys
 import urllib.request
 from pathlib import Path
 
-import cv2
-import numpy as np
-
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
+    Decode,
     GatherScores,
-    ImagePayload,
     Infer,
     NMS,
     Normalize,
@@ -57,13 +54,13 @@ from common import (
 
 MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
 MODEL_NAME = "yolov8n.onnx"
-ASSETS_DIR = Path(".example_assets")
 HOST = "localhost"
 PORT = 5000
 
 
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
+        Decode(),
         Resize((640, 640)),
         Store("resize_transform", index=1),
         Pick(0),
@@ -85,19 +82,22 @@ def build_pipeline(model_path: Path) -> Pipeline:
 
 
 def run_server(model_path: Path) -> None:
-    from flask import Flask, jsonify, request
+    try:
+        from flask import Flask, jsonify, request
+    except ImportError:
+        print("Flask is required: pip install flask", file=sys.stderr)
+        raise SystemExit(1)
 
     pipeline = build_pipeline(model_path)
     app = Flask(__name__)
 
     @app.post("/detect")
     def detect():
-        image_bytes = np.frombuffer(request.get_data(force=True), dtype=np.uint8)
-        frame = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
-        if frame is None:
+        try:
+            image_payload = request.get_data()
+            result = pipeline(image_payload)
+        except ValueError:
             return {"error": "could not decode image"}, 400
-        source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
-        result = pipeline(source)
         return jsonify({
             "boxes": result.boxes,
             "scores": result.scores,
@@ -112,8 +112,10 @@ def run_call(image_path: Path) -> None:
     url = f"http://{HOST}:{PORT}/detect"
     with open(image_path, "rb") as f:
         data = f.read()
-    req = urllib.request.Request(url, data=data, method="POST",
-                                  headers={"Content-Type": "application/octet-stream"})
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/octet-stream"},
+    )
     with urllib.request.urlopen(req) as resp:
         print(json.dumps(json.loads(resp.read()), indent=2))
 
@@ -131,7 +133,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Image to send with --call. Defaults to the sample COCO image.",
     )
-    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    parser.add_argument("--assets-dir", type=Path, default=Path(".example_assets"))
     return parser.parse_args()
 
 
@@ -140,10 +142,8 @@ def main() -> int:
     assets_dir = args.assets_dir
 
     if args.call:
-        if args.input is not None:
-            image_path = args.input
-        else:
-            image_path = assets_dir / COCO_IMAGE_NAME
+        image_path = args.input or assets_dir / COCO_IMAGE_NAME
+        if args.input is None:
             print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
             download_if_missing(COCO_IMAGE_URL, image_path)
         run_call(image_path)
