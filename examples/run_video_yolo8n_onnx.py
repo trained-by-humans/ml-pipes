@@ -46,6 +46,7 @@ ASSETS_DIR = Path(".example_assets")
 
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
+        Store("source_frame"),
         Resize((640, 640)),
         Store("resize_transform", index=1),
         Pick(0),
@@ -63,6 +64,9 @@ def build_pipeline(model_path: Path) -> Pipeline:
         Recall("resize_transform"),
         ProjectBoxes(),
         ToDetections(),
+        Recall("source_frame", index=0),
+        DrawBoxes(class_names=COCO_CLASSES),
+        Pick(0),
     ])
 
 
@@ -115,7 +119,6 @@ def main() -> int:
     )
 
     pipeline = build_pipeline(model_path)
-    draw = DrawBoxes(class_names=COCO_CLASSES)
 
     frame_idx = 0
     while True:
@@ -124,8 +127,7 @@ def main() -> int:
             break
 
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
-        detections = pipeline(source)
-        annotated, _ = draw(source, detections)
+        annotated = pipeline(source)
         writer.write(annotated.array)
 
         frame_idx += 1
