@@ -1,21 +1,12 @@
 from __future__ import annotations
 
-# Sequential frame-by-frame inference on a video file with YOLOv8n.
-#
-# Reads every frame from a video, runs detection, and writes an annotated
-# output video.  This is the single-frame sequential baseline we will later
-# compare against batched inference.
-#
-# Usage:
-#   python run_video_yolo8n_onnx.py --input clip.mp4
-#   python run_video_yolo8n_onnx.py --input clip.mp4 --output annotated.mp4
-
 import argparse
 import sys
 from pathlib import Path
 
 import cv2
 
+from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, download_if_missing
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
@@ -37,8 +28,16 @@ from ml_pipes import (
     ToDetections,
     Transpose,
 )
-from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, download_if_missing
 
+# Sequential frame-by-frame inference on a video file with YOLOv8n.
+#
+# Reads every frame from a video, runs detection, and writes an annotated
+# output video.  This is the single-frame sequential baseline we will later
+# compare against batched inference.
+#
+# Usage:
+#   python run_video_yolo8n_onnx.py --input clip.mp4
+#   python run_video_yolo8n_onnx.py --input clip.mp4 --output annotated.mp4
 
 MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
 MODEL_NAME = "yolov8n.onnx"
@@ -77,7 +76,8 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Input video file. Defaults to the bundled sample video (downloaded on first run).",
     )
-    parser.add_argument("--output", type=Path, default=None, help="Output annotated video. Defaults to <input>_annotated.mp4.")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="Output annotated video. Defaults to <input>_annotated.mp4.")
     parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
     return parser.parse_args()
 
@@ -101,10 +101,10 @@ def main() -> int:
         print(f"Error: could not open video: {input_path}", file=sys.stderr)
         return 1
 
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(
@@ -125,7 +125,7 @@ def main() -> int:
 
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
         detections = pipeline(source)
-        annotated = draw(detections, source)
+        annotated, _ = draw(source, detections)
         writer.write(annotated.array)
 
         frame_idx += 1
