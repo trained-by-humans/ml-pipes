@@ -6,12 +6,17 @@ from pathlib import Path
 
 import numpy as np
 
+from common import (
+    COCO_CLASSES,
+    COCO_IMAGE_NAME,
+    COCO_IMAGE_URL,
+    build_output_path,
+    decode,
+    download_if_missing,
+    visualize_and_store,
+)
 from ml_pipes import (
-    Decode,
-    LoadFile,
     Infer,
-    LogDetections,
-    MapToObjects,
     Normalize,
     Pick,
     Pipeline,
@@ -25,15 +30,6 @@ from ml_pipes import (
     TensorRegistry,
     ToSegmentations,
 )
-from common import (
-    COCO_CLASSES,
-    COCO_IMAGE_NAME,
-    COCO_IMAGE_URL,
-    build_output_path,
-    download_if_missing,
-    render_and_save_segmentations,
-)
-
 
 MODEL_URL = (
     "https://github.com/onnx/models/raw/main/validated/vision/object_detection_segmentation"
@@ -57,11 +53,9 @@ def _filter_detections(registry: TensorRegistry) -> TensorRegistry:
     return registry
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_inference_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            LoadFile(),
-            Decode(),
             Resize((800, 800)),
             Store("resize_transform", index=1),
             Pick(0),
@@ -76,17 +70,18 @@ def build_pipeline(model_path: Path) -> Pipeline:
             Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             _filter_detections,
             Recall("resize_transform"),
-            ProjectBoxes(),                        # model space → original image space
-            Squeeze("masks", axis=1),              # (N, 1, 28, 28) → (N, 28, 28)
+            ProjectBoxes(),  # model space → original image space
+            Squeeze("masks", axis=1),  # (N, 1, 28, 28) → (N, 28, 28)
             Recall("resize_transform"),
-            ProjectRoIMasks(),                      # 28×28 RoI masks → full-image binary masks
-            ToSegmentations(),
+            ProjectRoIMasks(),  # 28×28 RoI masks → full-image binary masks
+            ToSegmentations()
         ]
     )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a Mask R-CNN int8 ONNX instance segmentation demo on a COCO image.")
+    parser = argparse.ArgumentParser(
+        description="Run a Mask R-CNN int8 ONNX instance segmentation demo on a COCO image.")
     parser.add_argument(
         "--assets-dir",
         type=Path,
@@ -115,31 +110,9 @@ def main() -> int:
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(COCO_IMAGE_URL, image_path)
 
-    pipeline = build_pipeline(model_path)
-    result = pipeline(image_path)
-    render_and_save_segmentations(
-        image_path=image_path,
-        segmentations=result,
-        output_path=output_path,
-        class_names=COCO_CLASSES,
-    )
-    Pipeline(
-        [
-            MapToObjects(
-                fields={
-                    "box": "boxes",
-                    "score": "scores",
-                    "class_id": "classes",
-                    "mask_pixels": lambda value: [int(np.asarray(mask, dtype=np.uint8).sum()) for mask in value.masks],
-                },
-            ),
-            LogDetections(
-                model_path=model_path,
-                image_path=image_path,
-                annotated_image_path=output_path,
-            ),
-        ]
-    )(result)
+    infer_pipe = build_inference_pipeline(model_path)
+    pipeline = decode() + infer_pipe + visualize_and_store(output_path, COCO_CLASSES)
+    pipeline(image_path)
     return 0
 
 

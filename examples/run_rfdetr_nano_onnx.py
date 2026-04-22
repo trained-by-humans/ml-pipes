@@ -4,15 +4,19 @@ import argparse
 import sys
 from pathlib import Path
 
+from common import (
+    COCO_IMAGE_NAME,
+    COCO_IMAGE_URL,
+    build_output_path,
+    decode,
+    download_if_missing,
+    visualize_detections_and_store,
+)
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
-    Decode,
-    LoadFile,
     GatherScores,
     Infer,
-    LogDetections,
-    MapToObjects,
     NMS,
     Normalize,
     Pick,
@@ -27,14 +31,6 @@ from ml_pipes import (
     Store,
     ToDetections,
 )
-from common import (
-    COCO_IMAGE_NAME,
-    COCO_IMAGE_URL,
-    build_output_path,
-    download_if_missing,
-    render_and_save_detections,
-)
-
 
 MODEL_URL = "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model.onnx"
 MODEL_NAME = "rfdetr_nano.onnx"
@@ -44,23 +40,22 @@ MODEL_NAME = "rfdetr_nano.onnx"
 INPUT_SIZE = (640, 640)
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_inference_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            LoadFile(),
-            Decode(),
             Resize(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
             Store("resize_transform", index=1),
             Pick(0),
             Normalize(),
             Infer(model_path, dtype="float32"),
             Extract("pred_boxes", "logits", as_=("boxes", "logits")),
-            Squeeze("boxes"),                                   # (1, N, 4) → (N, 4)
-            Squeeze("logits"),                                  # (1, N, C) → (N, C)
+            Squeeze("boxes"),  # (1, N, 4) → (N, 4)
+            Squeeze("logits"),  # (1, N, C) → (N, C)
             Softmax("logits"),
             ArgMax("logits", as_="classes"),
             GatherScores("logits", "classes", as_="scores"),
-            Scale("boxes", by=(INPUT_SIZE[1], INPUT_SIZE[0], INPUT_SIZE[1], INPUT_SIZE[0])),  # normalized cxcywh → pixel cxcywh
+            Scale("boxes", by=(INPUT_SIZE[1], INPUT_SIZE[0], INPUT_SIZE[1], INPUT_SIZE[0])),
+            # normalized cxcywh → pixel cxcywh
             ConvertBoxFormat(from_="cxcywh"),
             NMS(conf_threshold=0.25, iou_threshold=1.0, max_detections=20),
             Recall("resize_transform"),
@@ -100,29 +95,9 @@ def main() -> int:
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(COCO_IMAGE_URL, image_path)
 
-    pipeline = build_pipeline(model_path)
-    result = pipeline(image_path)
-    render_and_save_detections(
-        image_path=image_path,
-        detections=result,
-        output_path=output_path,
-    )
-    Pipeline(
-        [
-            MapToObjects(
-                fields={
-                    "box": "boxes",
-                    "score": "scores",
-                    "class_id": "classes",
-                }
-            ),
-            LogDetections(
-                model_path=model_path,
-                image_path=image_path,
-                annotated_image_path=output_path,
-            ),
-        ]
-    )(result)
+    infer_pipe = build_inference_pipeline(model_path)
+    pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path)
+    pipeline(image_path)
     return 0
 
 

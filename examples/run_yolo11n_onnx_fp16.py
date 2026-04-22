@@ -4,16 +4,21 @@ import argparse
 import sys
 from pathlib import Path
 
+from common import (
+    COCO_CLASSES,
+    COCO_IMAGE_NAME,
+    COCO_IMAGE_URL,
+    build_output_path,
+    decode,
+    download_if_missing,
+    visualize_detections_and_store,
+)
 from ml_pipes import (
     ArgMax,
     Cast,
     ConvertBoxFormat,
-    Decode,
-    LoadFile,
     GatherScores,
     Infer,
-    LogDetections,
-    MapToObjects,
     NMS,
     Normalize,
     Pick,
@@ -28,25 +33,14 @@ from ml_pipes import (
     ToDetections,
     Transpose,
 )
-from common import (
-    COCO_CLASSES,
-    COCO_IMAGE_NAME,
-    COCO_IMAGE_URL,
-    build_output_path,
-    download_if_missing,
-    render_and_save_detections,
-)
-
 
 MODEL_URL = "https://huggingface.co/webnn/yolo11n/resolve/main/onnx/yolo11n_fp16.onnx"
 MODEL_NAME = "yolo11n_fp16.onnx"
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_inference_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
-            LoadFile(),
-            Decode(),
             Resize(
                 target_size=(640, 640),
                 mode="letterbox",
@@ -107,30 +101,9 @@ def main() -> int:
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(COCO_IMAGE_URL, image_path)
 
-    pipeline = build_pipeline(model_path)
-    result = pipeline(image_path)
-    render_and_save_detections(
-        image_path=image_path,
-        detections=result,
-        output_path=output_path,
-        class_names=COCO_CLASSES,
-    )
-    Pipeline(
-        [
-            MapToObjects(
-                fields={
-                    "box": "boxes",
-                    "score": "scores",
-                    "class_id": "classes",
-                },
-            ),
-            LogDetections(
-                model_path=model_path,
-                image_path=image_path,
-                annotated_image_path=output_path,
-            ),
-        ]
-    )(result)
+    infer_pipe = build_inference_pipeline(model_path)
+    pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
+    pipeline(image_path)
     return 0
 
 
