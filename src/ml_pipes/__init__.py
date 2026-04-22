@@ -1,5 +1,7 @@
 from .context import Context, Recall, Store
 from .core import Pipeline, PipelineValidationError, Embed, embed, Inline, inline, TypeContract
+from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
+from .collectors import AggregateCollector, PrintCollector
 from .ops import (
     ArgMax,
     Batch,
@@ -49,6 +51,12 @@ from .types import (
 
 __all__ = [
     "ArgMax",
+    "AggregateCollector",
+    "InvocationTrace",
+    "PrintCollector",
+    "StepSpan",
+    "TraceCollector",
+    "TracingConfig",
     "Batch",
     "Cast",
     "Collate",
