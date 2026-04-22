@@ -11,26 +11,12 @@ from common import (
     COCO_IMAGE_URL,
     download_if_missing,
 )
+from run_yolo8n_onnx import MODEL_NAME, MODEL_URL, yolo8n_inference_pipeline
 from ml_pipes import (
-    ArgMax,
-    ConvertBoxFormat,
     Decode,
-    GatherScores,
+    Embed,
     MapToObjects,
-    Infer,
-    NMS,
-    Normalize,
-    Pick,
     Pipeline,
-    ProjectBoxes,
-    Recall,
-    Resize,
-    Extract,
-    Slice,
-    Squeeze,
-    Store,
-    ToDetections,
-    Transpose,
 )
 
 # Minimal YOLOv8n inference endpoint.
@@ -39,21 +25,19 @@ from ml_pipes import (
 #   pip install flask
 #
 # Start the server:
-#   python serve_yolo8n_onnx.py
+#   python run_yolo8n_endpoint.py
 #
 # Run a test call (downloads the sample COCO image if needed):
-#   python serve_yolo8n_onnx.py --call
+#   python run_yolo8n_endpoint.py --call
 #
 # Or send a specific image:
-#   python serve_yolo8n_onnx.py --call --input photo.jpg
+#   python run_yolo8n_endpoint.py --call --input photo.jpg
 #
 # Or with curl:
 #   curl -s -X POST http://localhost:5000/detect \
 #        -H "Content-Type: application/octet-stream" \
 #        --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
 
-MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
-MODEL_NAME = "yolov8n.onnx"
 HOST = "localhost"
 PORT = 5000
 
@@ -61,23 +45,7 @@ PORT = 5000
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
         Decode(),
-        Resize((640, 640)),
-        Store("resize_transform", index=1),
-        Pick(0),
-        Normalize(),
-        Infer(model_path),
-        Extract("output0", as_="preds"),
-        Squeeze("preds"),
-        Transpose("preds"),
-        Slice("preds", slice(None, 4), as_="boxes"),
-        Slice("preds", slice(4, None), as_="scores"),
-        ArgMax("scores", as_="classes"),
-        GatherScores("scores", "classes"),
-        ConvertBoxFormat(from_="cxcywh"),
-        NMS(),
-        Recall("resize_transform"),
-        ProjectBoxes(),
-        ToDetections(),
+        Embed(yolo8n_inference_pipeline(model_path)),
         MapToObjects(fields={"box": "boxes", "score": "scores", "class_id": "classes"}),
     ])
 

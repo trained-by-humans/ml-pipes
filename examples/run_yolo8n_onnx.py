@@ -37,7 +37,7 @@ MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx
 MODEL_NAME = "yolov8n.onnx"
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline:
+def yolo8n_inference_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
             Resize((640, 640)),
@@ -74,7 +74,7 @@ def main() -> int:
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(COCO_IMAGE_URL, image_path)
 
-    infer_pipe = build_inference_pipeline(model_path)
+    infer_pipe = yolo8n_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
     pipeline(image_path)
     return 0
