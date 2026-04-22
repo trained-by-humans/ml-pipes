@@ -69,8 +69,5 @@ class Detections:
 
 
 @dataclass(frozen=True)
-class Segmentations:
-    boxes: list[list[float]]
-    scores: list[float]
-    classes: list[int]
+class Segmentations(Detections):
     masks: list[np.ndarray]

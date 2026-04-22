@@ -95,14 +95,18 @@ class Store(ContextOp):
 
 
 class Recall(ContextOp):
-    def __init__(self, name: str):
+    def __init__(self, name: str, index: int | None = None):
         self.name = name
+        self.index = index
 
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
         stored = context.load(self.name)
-        if isinstance(current, tuple):
-            return current + (stored,), context
-        return (current, stored), context
+        current_tuple = current if isinstance(current, tuple) else (current,)
+        if self.index is None:
+            result = current_tuple + (stored,)
+        else:
+            result = current_tuple[:self.index] + (stored,) + current_tuple[self.index:]
+        return result, context
 
     def resolve_contract(
         self,
@@ -115,8 +119,9 @@ class Recall(ContextOp):
             raise validation_error_type(f"Recall({self.name!r}) references a value that was not stored")
 
         stored_annotation = stored_annotations[self.name]
-        if current_output is None:
-            return (Any,), (Any, stored_annotation)
-
-        current_parts = expand_output_annotation(current_output)
-        return (Any,), current_parts + (stored_annotation,)
+        current_parts = expand_output_annotation(current_output) if current_output is not None else (Any,)
+        if self.index is None:
+            result_parts = current_parts + (stored_annotation,)
+        else:
+            result_parts = current_parts[:self.index] + (stored_annotation,) + current_parts[self.index:]
+        return (Any,), result_parts
