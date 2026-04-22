@@ -43,6 +43,7 @@ ASSETS_DIR = Path(".example_assets")
 
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
+        Store("source_frame"),
         Resize((640, 640)),
         Store("resize_transform", index=1),
         Pick(0),
@@ -60,6 +61,9 @@ def build_pipeline(model_path: Path) -> Pipeline:
         Recall("resize_transform"),
         ProjectBoxes(),
         ToDetections(),
+        Recall("source_frame", index=0),
+        DrawBoxes(class_names=COCO_CLASSES),
+        Pick(0),
     ])
 
 
@@ -69,7 +73,6 @@ def main() -> int:
     download_if_missing(MODEL_URL, model_path)
 
     pipeline = build_pipeline(model_path)
-    draw = DrawBoxes(class_names=COCO_CLASSES)
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -84,8 +87,7 @@ def main() -> int:
             break
 
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
-        detections = pipeline(source)
-        annotated, _ = draw(source, detections)
+        annotated = pipeline(source)
 
         cv2.imshow("YOLOv8n — Webcam", annotated.array)
         if cv2.waitKey(1) & 0xFF == ord("q"):
