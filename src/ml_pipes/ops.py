@@ -28,19 +28,23 @@ from .types import (
 # Image / preprocessing
 # ---------------------------------------------------------------------------
 
-class Decode:
-    def __call__(self, image_path: str | Path) -> ImagePayload:
+class LoadFile:
+    def __call__(self, image_path: str | Path) -> bytes:
         path = Path(image_path)
         if not path.is_file():
             raise FileNotFoundError(f"Image not found: {path}")
+        return path.read_bytes()
 
+
+class Decode:
+    def __call__(self, data: bytes) -> ImagePayload:
         import cv2
 
-        image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        image_bytes = np.frombuffer(data, dtype=np.uint8)
+        image = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
         if image is None:
-            raise ValueError(f"Failed to decode image: {path}")
-        payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
-        return payload
+            raise ValueError("Failed to decode image bytes")
+        return ImagePayload(array=image, color_space="BGR", layout="HWC")
 
 
 class Resize:

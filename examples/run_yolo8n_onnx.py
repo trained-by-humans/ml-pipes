@@ -8,6 +8,7 @@ from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
     Decode,
+    LoadFile,
     GatherScores,
     Infer,
     LogDetections,
@@ -43,6 +44,7 @@ MODEL_NAME = "yolov8n.onnx"
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
+            LoadFile(),
             Decode(),
             Resize((640, 640)),
             Store("resize_transform", index=1),
