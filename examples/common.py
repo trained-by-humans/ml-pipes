@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import shutil
 import urllib.request
 from pathlib import Path
@@ -128,6 +129,23 @@ def visualize_detections_and_store(output_path: Path, class_names: list[str] | N
         DrawBoxes(class_names=class_names),
         SaveImage(output_path, at=0),
     ])
+
+
+def parse_input_and_output_args(description: str) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=Path(".example_assets"),
+        help="Directory used to cache the downloaded public model and image.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Where to save the annotated image. Defaults to the input image name with the model name as suffix.",
+    )
+    return parser.parse_args()
 
 
 def build_output_path(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from common import (
     build_output_path,
     decode,
     download_if_missing,
+    parse_input_and_output_args,
     visualize_detections_and_store,
 )
 from ml_pipes import (
@@ -61,25 +61,8 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
     )
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a public YOLOv8n ONNX demo on a COCO image.")
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=Path(".example_assets"),
-        help="Directory used to cache the downloaded public model and image.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Where to save the annotated image. Defaults to the input image name with the model name as suffix.",
-    )
-    return parser.parse_args()
-
-
 def main() -> int:
-    args = parse_args()
+    args = parse_input_and_output_args("Run a public YOLOv8n ONNX demo on a COCO image.")
     assets_dir = args.assets_dir
     model_path = assets_dir / MODEL_NAME
     image_path = assets_dir / COCO_IMAGE_NAME
