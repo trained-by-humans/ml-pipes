@@ -1151,7 +1151,7 @@ class Distribute:
         for i in range(n):
             sample_tensors = tuple(
                 TensorPayload(
-                    array=t.array[i : i + 1],
+                    array=t.array[i : i + 1].copy(),
                     layout=t.layout,
                     dtype=t.dtype,
                 )

@@ -183,6 +183,31 @@ def test_distribute_splits_batch_dim_into_per_sample_outputs():
         assert sample.names == ("preds",)
 
 
+def test_distribute_samples_do_not_share_memory_with_batch():
+    batched = np.arange(8, dtype=np.float32).reshape(2, 4)
+    outputs = RuntimeOutputs(
+        tensors=(TensorPayload(array=batched, layout="UNKNOWN", dtype="float32"),),
+        names=("preds",),
+    )
+    result = Distribute()(outputs)
+
+    assert not np.shares_memory(result[0].tensors[0].array, batched)
+    assert not np.shares_memory(result[1].tensors[0].array, batched)
+
+
+def test_distribute_mutating_one_sample_does_not_affect_another():
+    batched = np.ones((2, 4), dtype=np.float32)
+    outputs = RuntimeOutputs(
+        tensors=(TensorPayload(array=batched, layout="UNKNOWN", dtype="float32"),),
+        names=("preds",),
+    )
+    result = Distribute()(outputs)
+
+    result[0].tensors[0].array[:] = 99.0
+
+    assert np.all(result[1].tensors[0].array == 1.0)
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
