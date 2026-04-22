@@ -1,30 +1,12 @@
 from __future__ import annotations
 
-# Batched YOLOv8n detection across multiple images using concurrent threads.
-#
-# Batch and UnBatch delimit a batch region in the pipeline.  When enough
-# threads have reached Batch (or the timeout fires), one thread becomes the
-# leader and runs Collate → Infer → Distribute as a single batched call.
-# The other threads wait and resume with their individual result after UnBatch.
-#
-# The model is exported from Ultralytics with dynamic=True so ONNX Runtime
-# accepts any batch size.  Requires: pip install ultralytics
-#
-# Usage (runs the sample COCO image 8 times by default):
-#   python run_batch_yolo8n_onnx.py
-#
-# Run with explicit images:
-#   python run_batch_yolo8n_onnx.py --images img1.jpg img2.jpg img3.jpg img4.jpg
-#
-# Tune batch size and thread-pool size:
-#   python run_batch_yolo8n_onnx.py --batch-size 4 --workers 8
-
 import argparse
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from common import COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
 from ml_pipes import (
     ArgMax,
     Batch,
@@ -50,8 +32,25 @@ from ml_pipes import (
     Transpose,
     UnBatch,
 )
-from common import COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
 
+# Batched YOLOv8n detection across multiple images using concurrent threads.
+#
+# Batch and UnBatch delimit a batch region in the pipeline.  When enough
+# threads have reached Batch (or the timeout fires), one thread becomes the
+# leader and runs Collate → Infer → Distribute as a single batched call.
+# The other threads wait and resume with their individual result after UnBatch.
+#
+# The model is exported from Ultralytics with dynamic=True so ONNX Runtime
+# accepts any batch size.  Requires: pip install ultralytics
+#
+# Usage (runs the sample COCO image 8 times by default):
+#   python run_batch_yolo8n_onnx.py
+#
+# Run with explicit images:
+#   python run_batch_yolo8n_onnx.py --images img1.jpg img2.jpg img3.jpg img4.jpg
+#
+# Tune batch size and thread-pool size:
+#   python run_batch_yolo8n_onnx.py --batch-size 4 --workers 8
 
 MODEL_NAME = "yolov8n_dynamic.onnx"
 ASSETS_DIR = Path(".example_assets")

@@ -1,30 +1,16 @@
 from __future__ import annotations
 
-# Minimal YOLOv8n inference endpoint.
-#
-# Requires Flask:
-#   pip install flask
-#
-# Start the server:
-#   python serve_yolo8n_onnx.py
-#
-# Run a test call (downloads the sample COCO image if needed):
-#   python serve_yolo8n_onnx.py --call
-#
-# Or send a specific image:
-#   python serve_yolo8n_onnx.py --call --input photo.jpg
-#
-# Or with curl:
-#   curl -s -X POST http://localhost:5000/detect \
-#        -H "Content-Type: application/octet-stream" \
-#        --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
-
 import argparse
 import json
 import sys
 import urllib.request
 from pathlib import Path
 
+from common import (
+    COCO_IMAGE_NAME,
+    COCO_IMAGE_URL,
+    download_if_missing,
+)
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
@@ -46,12 +32,25 @@ from ml_pipes import (
     ToDetections,
     Transpose,
 )
-from common import (
-    COCO_IMAGE_NAME,
-    COCO_IMAGE_URL,
-    download_if_missing,
-)
 
+# Minimal YOLOv8n inference endpoint.
+#
+# Requires Flask:
+#   pip install flask
+#
+# Start the server:
+#   python serve_yolo8n_onnx.py
+#
+# Run a test call (downloads the sample COCO image if needed):
+#   python serve_yolo8n_onnx.py --call
+#
+# Or send a specific image:
+#   python serve_yolo8n_onnx.py --call --input photo.jpg
+#
+# Or with curl:
+#   curl -s -X POST http://localhost:5000/detect \
+#        -H "Content-Type: application/octet-stream" \
+#        --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
 
 MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
 MODEL_NAME = "yolov8n.onnx"

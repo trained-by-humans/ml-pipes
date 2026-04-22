@@ -4,10 +4,7 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-import numpy as np
-
-from ml_pipes import Decode, Detections, DrawBoxes, ImagePayload, LoadFile, Pipeline, SaveImage, Segmentations
-
+from ml_pipes import Decode, DrawBoxes, DrawMasks, LoadFile, Pipeline, Recall, SaveImage, Store
 
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
 COCO_IMAGE_NAME = "coco_000000039769.jpg"
@@ -108,65 +105,35 @@ def download_if_missing(url: str, destination: Path) -> None:
         shutil.copyfileobj(response, target)
 
 
-def render_and_save_detections(
-    image_path: Path,
-    detections: object,
-    output_path: Path,
-    class_names: list[str] | None = None,
-) -> None:
-    source_image = Decode()(LoadFile()(image_path))
-    Pipeline(
-        [
-            lambda value: (value, source_image),
-            DrawBoxes(class_names=class_names),
-            SaveImage(output_path),
-        ]
-    )(detections)
+def decode() -> Pipeline:
+    return Pipeline([
+        LoadFile(),
+        Decode(),
+        Store("source_image"),
+    ])
 
 
-def render_and_save_segmentations(
-    image_path: Path,
-    segmentations: Segmentations,
-    output_path: Path,
-    class_names: list[str] | None = None,
-    alpha: float = 0.45,
-) -> None:
-    source_image = Decode()(LoadFile()(image_path))
-    image = source_image.array.copy()
-    for mask, class_id in zip(segmentations.masks, segmentations.classes, strict=True):
-        color = np.asarray(_class_color(int(class_id)), dtype=np.float32)
-        mask_bool = np.asarray(mask, dtype=bool)
-        if mask_bool.ndim != 2:
-            raise ValueError(f"Expected 2D segmentation mask, got shape {mask_bool.shape}")
-        if np.any(mask_bool):
-            blended = (1.0 - alpha) * image[mask_bool].astype(np.float32) + alpha * color
-            image[mask_bool] = blended.astype(np.uint8)
-
-    detections = Detections(
-        boxes=segmentations.boxes,
-        scores=segmentations.scores,
-        classes=segmentations.classes,
-    )
-    boxed = DrawBoxes(class_names=class_names)(
-        detections,
-        ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout),
-    )
-    SaveImage(output_path)(boxed)
+def visualize_and_store(output_path: Path, class_names: list[str] | None = None) -> Pipeline:
+    return Pipeline([
+        Recall("source_image", index=0),
+        DrawMasks(class_names=class_names),
+        DrawBoxes(class_names=class_names),
+        SaveImage(output_path, at=0),
+    ])
 
 
-def _class_color(class_id: int) -> tuple[int, int, int]:
-    # Deterministic BGR color palette from class id.
-    return (
-        int((37 * class_id + 17) % 255),
-        int((91 * class_id + 53) % 255),
-        int((17 * class_id + 191) % 255),
-    )
+def visualize_detections_and_store(output_path: Path, class_names: list[str] | None = None) -> Pipeline:
+    return Pipeline([
+        Recall("source_image", index=0),
+        DrawBoxes(class_names=class_names),
+        SaveImage(output_path, at=0),
+    ])
 
 
 def build_output_path(
-    assets_dir: Path,
-    image_name: str | Path,
-    model_name: str | Path,
+        assets_dir: Path,
+        image_name: str | Path,
+        model_name: str | Path,
 ) -> Path:
     image_path = Path(image_name)
     model_path = Path(model_name)

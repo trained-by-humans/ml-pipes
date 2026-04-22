@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+import argparse
+import itertools
+import statistics
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
+from pathlib import Path
+
+from common import COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
+from run_batch_yolo8n_onnx import ASSETS_DIR, MODEL_NAME, _export_dynamic_model, build_pipeline
+
+
 # Throughput benchmark for the Batch/UnBatch pipeline.
 #
 # Each dimension (batch_size, workers, lock) accepts one or more values;
@@ -17,17 +29,6 @@ from __future__ import annotations
 #   --images      N               images per run          (default: 16)
 #   --repeats     N               runs per config, median (default: 3)
 #   --assets-dir  PATH
-
-import argparse
-import itertools
-import statistics
-import sys
-import time
-from concurrent.futures import ThreadPoolExecutor, wait
-from pathlib import Path
-
-from common import COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
-from run_batch_yolo8n_onnx import ASSETS_DIR, MODEL_NAME, _export_dynamic_model, build_pipeline
 
 
 def _run_once(pipeline, image_paths: list[Path], workers: int) -> float:
@@ -131,16 +132,16 @@ def main() -> int:
     # --- table ---
     header = (f"  {'batch':>5}  {'workers':>7}  {'lock':>4}"
               f"  {'ms/image':>8}  {'wall':>12}  {'vs serial':>9}")
-    sep    = (f"  {'─'*5}  {'─'*7}  {'─'*4}"
-              f"  {'─'*8}  {'─'*12}  {'─'*9}")
+    sep = (f"  {'─' * 5}  {'─' * 7}  {'─' * 4}"
+           f"  {'─' * 8}  {'─' * 12}  {'─' * 9}")
 
     print(header)
     print(sep)
     for batch_size, workers, lock, wall in results:
-        ms_per   = wall / args.images * 1000
-        speedup  = baseline_wall / wall
-        is_base  = (batch_size == 1 and workers == 1 and lock == "on")
-        marker   = " <-- baseline" if is_base else ""
+        ms_per = wall / args.images * 1000
+        speedup = baseline_wall / wall
+        is_base = (batch_size == 1 and workers == 1 and lock == "on")
+        marker = " <-- baseline" if is_base else ""
         print(
             f"  {batch_size:>5}  {workers:>7}  {lock:>4}"
             f"  {ms_per:>8.1f}  {wall:>10.3f} s  {speedup:>8.2f} x{marker}"

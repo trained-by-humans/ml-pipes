@@ -1,18 +1,11 @@
 from __future__ import annotations
 
-# Minimal live webcam inference with YOLOv8n.
-#
-# Reads frames from the default camera, runs detection on each frame, and
-# displays the result in a window.  Press Q to quit.
-#
-# The pipeline starts at Resize rather than Decode because cv2.VideoCapture
-# already gives us a decoded BGR array — there is no file path to read.
-
 import sys
 from pathlib import Path
 
 import cv2
 
+from common import COCO_CLASSES, download_if_missing
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
@@ -34,8 +27,14 @@ from ml_pipes import (
     ToDetections,
     Transpose,
 )
-from common import COCO_CLASSES, download_if_missing
 
+# Minimal live webcam inference with YOLOv8n.
+#
+# Reads frames from the default camera, runs detection on each frame, and
+# displays the result in a window.  Press Q to quit.
+#
+# The pipeline starts at Resize rather than Decode because cv2.VideoCapture
+# already gives us a decoded BGR array — there is no file path to read.
 
 MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
 MODEL_NAME = "yolov8n.onnx"
@@ -86,7 +85,7 @@ def main() -> int:
 
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
         detections = pipeline(source)
-        annotated = draw(detections, source)
+        annotated, _ = draw(source, detections)
 
         cv2.imshow("YOLOv8n — Webcam", annotated.array)
         if cv2.waitKey(1) & 0xFF == ord("q"):
