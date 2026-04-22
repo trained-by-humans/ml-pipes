@@ -40,6 +40,24 @@ class TraceCollector(ABC):
     def on_trace(self, trace: InvocationTrace) -> None: ...
 
 
+class _NoOpSpanList:
+    """Accepts appends and discards them — used by _NoOpTrace."""
+    def append(self, _: Any) -> None:
+        pass
+
+
+class _NoOpTrace:
+    """Stands in for InvocationTrace when no collector is attached.
+
+    All mutations are accepted and silently discarded so _step and
+    _step_into_batch need no if-guards — there is one code path.
+    """
+    def __init__(self, batch_size: int | None = None) -> None:
+        self.spans: Any = _NoOpSpanList()
+        self.total_duration_s: float = 0.0
+        self.batch_size = batch_size
+
+
 def _extract_shape(value: Any) -> tuple | None:
     if hasattr(value, "array") and hasattr(value.array, "shape"):
         return tuple(value.array.shape)
