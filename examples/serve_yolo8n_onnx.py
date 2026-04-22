@@ -30,6 +30,7 @@ from ml_pipes import (
     ConvertBoxFormat,
     Decode,
     GatherScores,
+    MapToObjects,
     Infer,
     NMS,
     Normalize,
@@ -78,6 +79,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
         Recall("resize_transform"),
         ProjectBoxes(),
         ToDetections(),
+        MapToObjects(fields={"box": "boxes", "score": "scores", "class_id": "classes"}),
     ])
 
 
@@ -94,15 +96,10 @@ def run_server(model_path: Path) -> None:
     @app.post("/detect")
     def detect():
         try:
-            image_payload = request.get_data()
-            result = pipeline(image_payload)
+            result = pipeline(request.get_data())
         except ValueError:
             return {"error": "could not decode image"}, 400
-        return jsonify({
-            "boxes": result.boxes,
-            "scores": result.scores,
-            "classes": result.classes,
-        })
+        return jsonify(result)
 
     print(f"Serving on http://{HOST}:{PORT}", file=sys.stderr)
     app.run(host=HOST, port=PORT)
