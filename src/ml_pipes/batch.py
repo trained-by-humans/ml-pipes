@@ -5,13 +5,14 @@ from typing import Any
 
 
 class _Entry:
-    __slots__ = ("value", "event", "result", "exception")
+    __slots__ = ("value", "event", "result", "exception", "batch_span")
 
     def __init__(self, value: Any) -> None:
         self.value = value
         self.event: threading.Event = threading.Event()  # fired exactly once by distribute / distribute_exception
         self.result: Any = None                          # set by distribute()
         self.exception: BaseException | None = None      # set by distribute_exception()
+        self.batch_span: Any = None                      # StepSpan | None, written by leader before event.set()
 
 
 class LeaderBatch:
@@ -32,10 +33,11 @@ class FollowerResult:
     The leader has already run the batch region and distributed results.
     This thread's per-sample result is ready to consume.
     """
-    __slots__ = ("result",)
+    __slots__ = ("result", "batch_span")
 
-    def __init__(self, result: Any) -> None:
+    def __init__(self, result: Any, batch_span: Any = None) -> None:
         self.result = result
+        self.batch_span = batch_span  # StepSpan | None, copied from leader via _Entry
 
 
 class BatchGate:
@@ -123,13 +125,13 @@ class BatchGate:
 
         if entry.exception is not None:
             raise entry.exception
-        return FollowerResult(entry.result)
+        return FollowerResult(entry.result, batch_span=entry.batch_span)
 
-    def distribute(self, results: list[Any]) -> Any:
+    def distribute(self, results: list[Any], batch_span: Any = None) -> Any:
         """
         Called by the pipeline (leader thread) at the UnBatch position.
 
-        Writes each follower's result and fires their event.
+        Writes each follower's result (and optional batch_span) and fires their event.
         Returns the leader's own result.
         """
         batch: list[_Entry] = self._local.batch
@@ -148,6 +150,7 @@ class BatchGate:
             if i == leader_idx:
                 continue  # leader is not waiting — skip
             entry.result = result
+            entry.batch_span = batch_span  # written before event.set() — happens-before guarantee
             entry.event.set()
 
         return results[leader_idx]
