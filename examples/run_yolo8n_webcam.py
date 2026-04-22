@@ -6,26 +6,15 @@ from pathlib import Path
 import cv2
 
 from common import COCO_CLASSES, download_if_missing
+from run_yolo8n_onnx import MODEL_NAME, MODEL_URL, yolo8n_inference_pipeline
 from ml_pipes import (
-    ArgMax,
-    ConvertBoxFormat,
     DrawBoxes,
-    GatherScores,
     ImagePayload,
-    Infer,
-    NMS,
-    Normalize,
     Pick,
     Pipeline,
-    ProjectBoxes,
     Recall,
-    Resize,
-    Extract,
-    Slice,
-    Squeeze,
     Store,
-    ToDetections,
-    Transpose,
+    Embed,
 )
 
 # Minimal live webcam inference with YOLOv8n.
@@ -36,34 +25,16 @@ from ml_pipes import (
 # The pipeline starts at Resize rather than Decode because cv2.VideoCapture
 # already gives us a decoded BGR array — there is no file path to read.
 
-MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
-MODEL_NAME = "yolov8n.onnx"
 ASSETS_DIR = Path(".example_assets")
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_webcam_annotation_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
         Store("source_frame"),
-        Resize((640, 640)),
-        Store("resize_transform", index=1),
-        Pick(0),
-        Normalize(),
-        Infer(model_path),
-        Extract("output0", as_="preds"),
-        Squeeze("preds"),
-        Transpose("preds"),
-        Slice("preds", slice(None, 4), as_="boxes"),
-        Slice("preds", slice(4, None), as_="scores"),
-        ArgMax("scores", as_="classes"),
-        GatherScores("scores", "classes"),
-        ConvertBoxFormat(from_="cxcywh"),
-        NMS(),
-        Recall("resize_transform"),
-        ProjectBoxes(),
-        ToDetections(),
+        Embed(yolo8n_inference_pipeline(model_path)),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
-        Pick(0),
+        Pick(0)
     ])
 
 
@@ -72,7 +43,7 @@ def main() -> int:
     print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
     download_if_missing(MODEL_URL, model_path)
 
-    pipeline = build_pipeline(model_path)
+    pipeline = build_webcam_annotation_pipeline(model_path)
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
