@@ -8,6 +8,7 @@ import numpy as np
 
 from ml_pipes import (
     Decode,
+    LoadFile,
     Infer,
     LogDetections,
     MapToObjects,
@@ -59,6 +60,7 @@ def _filter_detections(registry: TensorRegistry) -> TensorRegistry:
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
+            LoadFile(),
             Decode(),
             Resize((800, 800)),
             Store("resize_transform", index=1),

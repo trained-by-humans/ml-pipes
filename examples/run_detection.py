@@ -7,6 +7,7 @@ from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
     Decode,
+    LoadFile,
     GatherScores,
     Infer,
     NMS,
@@ -33,6 +34,7 @@ def main() -> int:
     model_path, image_path = sys.argv[1], sys.argv[2]
     pipeline = Pipeline(
         [
+            LoadFile(),
             Decode(),
             Resize((640, 640)),
             Store("resize_transform", index=1),

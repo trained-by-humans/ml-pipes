@@ -32,6 +32,7 @@ from ml_pipes import (
     ConvertBoxFormat,
     Decode,
     Distribute,
+    LoadFile,
     GatherScores,
     Infer,
     NMS,
@@ -71,6 +72,7 @@ def _export_dynamic_model(dst: Path) -> None:
 def build_pipeline(model_path: Path, batch_size: int, timeout: float,
                    serialize: bool = False) -> Pipeline:
     return Pipeline([
+        LoadFile(),
         Decode(),
         Resize((640, 640)),
         Store("resize_transform", index=1),

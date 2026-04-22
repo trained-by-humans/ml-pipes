@@ -9,6 +9,7 @@ from ml_pipes import (
     Cast,
     ConvertBoxFormat,
     Decode,
+    LoadFile,
     GatherScores,
     Infer,
     LogDetections,
@@ -44,6 +45,7 @@ MODEL_NAME = "yolo11n_fp16.onnx"
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
+            LoadFile(),
             Decode(),
             Resize(
                 target_size=(640, 640),
