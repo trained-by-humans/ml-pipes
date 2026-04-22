@@ -1,5 +1,5 @@
 from .context import Context, Recall, Store
-from .core import Pipeline, PipelineValidationError
+from .core import Pipeline, PipelineValidationError, Embed, embed, Inline, inline, TypeContract
 from .ops import (
     ArgMax,
     Batch,
@@ -67,8 +67,13 @@ __all__ = [
     "NMS",
     "Normalize",
     "Pick",
+    "embed",
+    "Embed",
+    "Inline",
+    "inline",
     "Pipeline",
     "PipelineValidationError",
+    "TypeContract",
     "ProjectBoxes",
     "ProjectMasks",
     "ProjectRoIMasks",
