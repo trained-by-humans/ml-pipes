@@ -475,12 +475,13 @@ def test_draw_boxes_draws_on_source_image():
         classes=[1],
     )
 
-    result = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(detections, source)
+    result, returned_detections = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(source, detections)
 
     assert result.array.shape == image.shape
     assert result.color_space == "BGR"
     assert result.layout == "HWC"
     assert np.any(result.array != 0)
+    assert returned_detections is detections
 
 
 # ---------------------------------------------------------------------------

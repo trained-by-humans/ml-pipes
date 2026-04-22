@@ -900,18 +900,15 @@ class DrawBoxes:
         self.thickness = thickness
         self.font_scale = font_scale
 
-    def __call__(self, detections: Detections, source_image: ImagePayload) -> ImagePayload:
+    def __call__(self, source_image: ImagePayload, detections: Detections) -> tuple[ImagePayload, Detections]:
         import cv2
 
         if source_image is None:
             raise ValueError("source_image missing from context; cannot draw detections")
 
         image = source_image.array.copy()
-        boxes = detections.boxes
-        scores = detections.scores
-        classes = detections.classes
 
-        for box, score, class_id in zip(boxes, scores, classes, strict=True):
+        for box, score, class_id in zip(detections.boxes, detections.scores, detections.classes, strict=True):
             x1, y1, x2, y2 = [int(round(coord)) for coord in box]
             cv2.rectangle(image, (x1, y1), (x2, y2), self.color, self.thickness)
 
@@ -928,7 +925,7 @@ class DrawBoxes:
                 cv2.LINE_AA,
             )
 
-        return ImagePayload(array=image, color_space="BGR", layout="HWC")
+        return ImagePayload(array=image, color_space="BGR", layout="HWC"), detections
 
     def _format_label(self, class_id: int, score: float) -> str:
         if self.class_names is not None and 0 <= class_id < len(self.class_names):
@@ -938,13 +935,48 @@ class DrawBoxes:
         return f"{name} {score:.2f}"
 
 
-class SaveImage:
-    def __init__(self, output_path: str | Path):
-        self.output_path = Path(output_path)
+class DrawMasks:
+    def __init__(
+        self,
+        class_names: list[str] | tuple[str, ...] | None = None,
+        alpha: float = 0.45,
+    ):
+        self.class_names = tuple(class_names) if class_names is not None else None
+        self.alpha = alpha
 
-    def __call__(self, image_payload: ImagePayload) -> ImagePayload:
+    def __call__(self, source_image: ImagePayload, segmentations: Segmentations) -> tuple[ImagePayload, Segmentations]:
+        if source_image is None:
+            raise ValueError("source_image missing from context; cannot draw masks")
+
+        image = source_image.array.copy()
+        for mask, class_id in zip(segmentations.masks, segmentations.classes, strict=True):
+            color = np.asarray(self._class_color(int(class_id)), dtype=np.float32)
+            mask_bool = np.asarray(mask, dtype=bool)
+            if mask_bool.ndim != 2:
+                raise ValueError(f"Expected 2D segmentation mask, got shape {mask_bool.shape}")
+            if np.any(mask_bool):
+                blended = (1.0 - self.alpha) * image[mask_bool].astype(np.float32) + self.alpha * color
+                image[mask_bool] = blended.astype(np.uint8)
+
+        return ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout), segmentations
+
+    def _class_color(self, class_id: int) -> tuple[int, int, int]:
+        return (
+            int((37 * class_id + 17) % 255),
+            int((91 * class_id + 53) % 255),
+            int((17 * class_id + 191) % 255),
+        )
+
+
+class SaveImage:
+    def __init__(self, output_path: str | Path, at: int | None = None):
+        self.output_path = Path(output_path)
+        self.at = at
+
+    def __call__(self, payload: Any) -> Any:
         import cv2
 
+        image_payload = payload[self.at] if self.at is not None else payload
         if image_payload.layout != "HWC":
             raise ValueError(f"SaveImage expects HWC image layout, got {image_payload.layout}")
 
@@ -952,17 +984,20 @@ class SaveImage:
         written = cv2.imwrite(str(self.output_path), image_payload.array)
         if not written:
             raise ValueError(f"Failed to write image: {self.output_path}")
-        return image_payload
+        return payload
 
 
 class MapToObjects:
     def __init__(
         self,
         fields: dict[str, str | Callable[[object], Sequence[object]]],
+        at: int | None = None,
     ):
         self.fields = fields
+        self.at = at
 
-    def __call__(self, prediction_arrays: object) -> list[dict[str, object]]:
+    def __call__(self, payload: object) -> Any:
+        prediction_arrays = payload[self.at] if self.at is not None else payload
         columns: dict[str, Sequence[object]] = {}
         for field_name, source in self.fields.items():
             if isinstance(source, str):
@@ -981,6 +1016,8 @@ class MapToObjects:
         for row in rows:
             record = dict(zip(field_names, row, strict=True))
             records.append(record)
+        if self.at is not None:
+            return payload[:self.at] + (records,) + payload[self.at + 1:]
         return records
 
 
@@ -992,14 +1029,17 @@ class LogDetections:
         annotated_image_path: str | Path,
         indent: int = 2,
         stream: TextIO | None = None,
+        at: int | None = None,
     ):
         self.model_path = Path(model_path)
         self.image_path = Path(image_path)
         self.annotated_image_path = Path(annotated_image_path)
         self.indent = indent
         self.stream = stream or sys.stdout
+        self.at = at
 
-    def __call__(self, prediction_objects: list[dict[str, object]]) -> list[dict[str, object]]:
+    def __call__(self, payload: Any) -> Any:
+        prediction_objects = payload[self.at] if self.at is not None else payload
         print(
             json.dumps(
                 {
@@ -1012,7 +1052,7 @@ class LogDetections:
             ),
             file=self.stream,
         )
-        return prediction_objects
+        return payload
 
 
 # ---------------------------------------------------------------------------
