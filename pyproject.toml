@@ -18,6 +18,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+otel = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
