@@ -124,6 +124,7 @@ class BatchGate:
         entry.event.wait()
 
         if entry.exception is not None:
+            self._local.error_batch_span = entry.batch_span  # readable by _step_into_batch before re-raise
             raise entry.exception
         return FollowerResult(entry.result, batch_span=entry.batch_span)
 
@@ -155,7 +156,7 @@ class BatchGate:
 
         return results[leader_idx]
 
-    def distribute_exception(self, exc: BaseException) -> None:
+    def distribute_exception(self, exc: BaseException, batch_span: Any = None) -> None:
         """
         Propagate *exc* to all followers so they unblock and raise instead of
         hanging.  Safe to call even if distribute() already cleaned up.
@@ -175,4 +176,12 @@ class BatchGate:
             if i == leader_idx:
                 continue
             entry.exception = exc
+            entry.batch_span = batch_span  # written before event.set() — happens-before guarantee
             entry.event.set()
+
+    def pop_error_batch_span(self) -> Any:
+        """Return and clear the batch_span stored during a follower error path, or None."""
+        span = getattr(self._local, "error_batch_span", None)
+        if span is not None:
+            del self._local.error_batch_span
+        return span

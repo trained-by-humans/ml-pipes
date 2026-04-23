@@ -288,15 +288,15 @@ def test_batch_follower_wait_span_present_on_leader_error():
     t1.join(); t2.join()
 
     assert all(isinstance(e, ValueError) for e in errors)
-    # Every trace must have a wait span — including followers whose gate.enter() raised.
+    # Every trace must have both a wait span and a batch region span.
     for trace in cap.traces:
-        wait_spans = [s for s in trace.spans if "[wait]" in s.label]
-        assert len(wait_spans) == 1
-    # The follower's wait span is flagged as an error (leader's is not).
-    error_wait_spans = [
-        s for t in cap.traces for s in t.spans if "[wait]" in s.label and s.error
-    ]
-    assert len(error_wait_spans) == 1
+        assert any("[wait]" in s.label for s in trace.spans)
+        batch_spans = [s for s in trace.spans if "[wait]" not in s.label and "Batch" in s.label]
+        assert len(batch_spans) == 1
+        assert batch_spans[0].error
+        # The failing child span is recorded inside the child trace.
+        assert batch_spans[0].child_trace is not None
+        assert any(s.error for s in batch_spans[0].child_trace.spans)
 
 
 # ---------------------------------------------------------------------------
