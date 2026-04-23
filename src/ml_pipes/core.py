@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import inspect
+import logging
+import time
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any, Callable, Iterable, get_args, get_origin, get_type_hints
 
+_log = logging.getLogger(__name__)
+
 from .context import Context, ContextOp
+from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape
 
 
 class PipelineValidationError(ValueError):
@@ -19,10 +24,25 @@ class TypeContract:
 
 
 class Pipeline:
-    def __init__(self, operators: Iterable[Callable[..., Any] | ContextOp], validate_on_init: bool = False):
+    def __init__(
+        self,
+        operators: Iterable[Callable[..., Any] | ContextOp],
+        validate_on_init: bool = False,
+        tracing: TracingConfig | None = None,
+    ):
         self.operators = self._flatten(list(operators))
+        self._tracing_config = tracing
         if validate_on_init:
             self.validate()
+
+    def set_tracing(
+        self,
+        collector: TraceCollector | None,
+        operator_labels: list[str] | None = None,
+        capture_shapes: bool = False,
+    ) -> None:
+        """Attach or replace tracing. Pass collector=None to disable."""
+        self._tracing_config = TracingConfig(collector, operator_labels, capture_shapes) if collector is not None else None
 
     @staticmethod
     def _flatten(operators: list) -> list:
@@ -54,57 +74,127 @@ class Pipeline:
         return Pipeline([*self.operators, *other.operators])
 
     def __call__(self, value: Any) -> Any:
+        return self._execute(value, trace=None)
+
+    def _execute(self, value: Any, trace: InvocationTrace | None) -> Any:
         from .ops import Batch  # local import avoids circular dependency
+        cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
         current = value
         context = Context()
         i = 0
-        while i < len(self.operators):
-            operator = self.operators[i]
-            if isinstance(operator, Batch):
-                current, context, i = self._step_into_batch(current, context, i)
-            else:
-                current, context = self._step(i, current, context)
-                i += 1
+        collecting = trace is None and cfg is not None
+        if trace is None:
+            trace = InvocationTrace() if collecting else _NoOpTrace()
+        t_start = time.perf_counter()
+        try:
+            while i < len(self.operators):
+                operator = self.operators[i]
+                if isinstance(operator, Batch):
+                    current, context, i = self._step_into_batch(current, context, i, trace, cfg)
+                else:
+                    current, context = self._step(i, current, context, trace, cfg)
+                    i += 1
+        finally:
+            if collecting:
+                trace.total_duration_s = time.perf_counter() - t_start
+                try:
+                    cfg.collector.on_trace(trace)
+                except Exception:
+                    _log.exception("TraceCollector.on_trace raised; trace dropped")
         return current
 
-    def _step(self, i: int, current: Any, context: Context) -> tuple[Any, Context]:
+    def _label_for(self, i: int, cfg: TracingConfig | None) -> str:
+        if cfg and cfg.operator_labels and i < len(cfg.operator_labels):
+            return cfg.operator_labels[i]
+        op = self.operators[i]
+        name = op.__name__ if inspect.isfunction(op) or inspect.ismethod(op) else type(op).__name__
+        return f"{i}:{name}"
+
+    def _step(self, i: int, current: Any, context: Context, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context]:
         operator = self.operators[i]
+        label = self._label_for(i, cfg)
+        capture = cfg.capture_shapes if cfg else False
+        t = time.perf_counter()
+        try:
+            if isinstance(operator, ContextOp):
+                result, ctx_out = operator.apply(current, context)
+            else:
+                args = self._build_call_args(operator, current)
+                result = operator(*args)
+                ctx_out = context
+        except Exception:
+            trace.spans.append(StepSpan(label, t, time.perf_counter() - t, error=True))
+            raise
+        trace.spans.append(StepSpan(
+            label, t, time.perf_counter() - t,
+            input_shape=_extract_shape(current) if capture else None,
+            output_shape=_extract_shape(result) if capture else None,
+        ))
+        return result, ctx_out
 
-        if isinstance(operator, ContextOp):
-            return operator.apply(current, context)
-
-        args = self._build_call_args(operator, current)
-        return operator(*args), context
-
-    def _step_into_batch(self, current: Any, context: Context, i: int) -> tuple[Any, Context, int]:
+    def _step_into_batch(self, current: Any, context: Context, i: int, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context, int]:
         from .batch import LeaderBatch
         from .ops import UnBatch
 
         gate = self.operators[i].gate
-        # Rendezvous: block until a full batch is ready or timeout fires.
+        batch_label = self._label_for(i, cfg)
+
+        # Span 1: gate wait — each thread records its own lobby accumulation time
+        t_gate_enter = time.perf_counter()
         outcome = gate.enter(current)
+        gate_blocked_duration = time.perf_counter() - t_gate_enter
         i += 1  # move past the Batch operator itself
 
-        # Waiter: Skip the batch region entirely — the leader will process and return the result
+        # Follower: skip region, receive leader's batch span (or error) via gate
         if not isinstance(outcome, LeaderBatch):
             while not isinstance(self.operators[i], UnBatch):
                 i += 1
-            return outcome.result, context, i + 1  # move past the UnBatch operator itself
+            # gate_blocked_duration includes lobby wait + batch execution for followers.
+            # Subtract the batch region duration to isolate the lobby accumulation time,
+            # making it comparable to the leader's wait.
+            batch_region_duration = outcome.batch_span.duration_s if outcome.batch_span is not None else 0.0
+            lobby_wait_duration = gate_blocked_duration - batch_region_duration
+            trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, lobby_wait_duration))
+            if outcome.batch_span is not None:
+                trace.spans.append(outcome.batch_span)
+            if outcome.exception is not None:
+                raise outcome.exception
+            return outcome.result, context, i + 1
 
-        # Leader: Run every operator in the batch region on behalf of all waiting threads.
-        # The region gets a fresh isolated context — keys stored inside are invisible outside.
+        trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, gate_blocked_duration))
+
+        # Leader: run region operators into a child trace
         current = outcome.inputs
+        batch_size = len(current) if hasattr(current, "__len__") else None
+        collecting = isinstance(trace, InvocationTrace)
+        child_trace = InvocationTrace(batch_size=batch_size) if collecting else _NoOpTrace(batch_size=batch_size)
         batch_context = Context()
+
+        t_region = time.perf_counter()
         try:
             while not isinstance(self.operators[i], UnBatch):
-                current, batch_context = self._step(i, current, batch_context)
+                current, batch_context = self._step(i, current, batch_context, child_trace, cfg)
                 i += 1
-            # Hand each waiter its individual result and collect the leader's own.
-            current = gate.distribute(current)
         except Exception as exc:
-            # Unblock all waiters with the exception so they don't hang.
-            gate.distribute_exception(exc)
+            child_trace.total_duration_s = time.perf_counter() - t_region
+            batch_span = StepSpan(
+                batch_label, t_region, child_trace.total_duration_s,
+                error=True, child_trace=child_trace if collecting else None,
+            )
+            trace.spans.append(batch_span)
+            gate.distribute_exception(exc, batch_span=batch_span if collecting else None)
             raise
+
+        child_trace.total_duration_s = time.perf_counter() - t_region
+
+        # Span 2: batch region — leader appends, then passes to followers via gate
+        batch_span = StepSpan(
+            batch_label, t_region, child_trace.total_duration_s,
+            child_trace=child_trace if collecting else None,
+        )
+        trace.spans.append(batch_span)
+
+        current = gate.distribute(current, batch_span=batch_span if collecting else None)
         return current, context, i + 1  # resume after UnBatch with the original outer context
 
     def _validate_batch_pairs(self) -> None:

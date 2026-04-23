@@ -5,13 +5,14 @@ from typing import Any
 
 
 class _Entry:
-    __slots__ = ("value", "event", "result", "exception")
+    __slots__ = ("value", "event", "result", "exception", "batch_span")
 
     def __init__(self, value: Any) -> None:
         self.value = value
         self.event: threading.Event = threading.Event()  # fired exactly once by distribute / distribute_exception
         self.result: Any = None                          # set by distribute()
         self.exception: BaseException | None = None      # set by distribute_exception()
+        self.batch_span: Any = None                      # StepSpan | None, written by leader before event.set()
 
 
 class LeaderBatch:
@@ -30,12 +31,15 @@ class FollowerResult:
     """Returned by BatchGate.enter() for a waiter thread.
 
     The leader has already run the batch region and distributed results.
-    This thread's per-sample result is ready to consume.
+    This thread's per-sample result is ready to consume. If the leader
+    failed, exception is set and result is None.
     """
-    __slots__ = ("result",)
+    __slots__ = ("result", "batch_span", "exception")
 
-    def __init__(self, result: Any) -> None:
+    def __init__(self, result: Any, batch_span: Any = None, exception: BaseException | None = None) -> None:
         self.result = result
+        self.batch_span = batch_span  # StepSpan | None, copied from leader via _Entry
+        self.exception = exception
 
 
 class BatchGate:
@@ -121,15 +125,13 @@ class BatchGate:
         # Phase 2 — batch operation: wait for the leader to fire our entry's event.
         entry.event.wait()
 
-        if entry.exception is not None:
-            raise entry.exception
-        return FollowerResult(entry.result)
+        return FollowerResult(entry.result, batch_span=entry.batch_span, exception=entry.exception)
 
-    def distribute(self, results: list[Any]) -> Any:
+    def distribute(self, results: list[Any], batch_span: Any = None) -> Any:
         """
         Called by the pipeline (leader thread) at the UnBatch position.
 
-        Writes each follower's result and fires their event.
+        Writes each follower's result (and optional batch_span) and fires their event.
         Returns the leader's own result.
         """
         batch: list[_Entry] = self._local.batch
@@ -148,11 +150,12 @@ class BatchGate:
             if i == leader_idx:
                 continue  # leader is not waiting — skip
             entry.result = result
+            entry.batch_span = batch_span  # written before event.set() — happens-before guarantee
             entry.event.set()
 
         return results[leader_idx]
 
-    def distribute_exception(self, exc: BaseException) -> None:
+    def distribute_exception(self, exc: BaseException, batch_span: Any = None) -> None:
         """
         Propagate *exc* to all followers so they unblock and raise instead of
         hanging.  Safe to call even if distribute() already cleaned up.
@@ -172,4 +175,6 @@ class BatchGate:
             if i == leader_idx:
                 continue
             entry.exception = exc
+            entry.batch_span = batch_span  # written before event.set() — happens-before guarantee
             entry.event.set()
+
