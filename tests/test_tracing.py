@@ -103,6 +103,28 @@ def test_set_tracing_window():
     assert len(cap.traces) == 1
 
 
+def test_set_tracing_mid_call_does_not_crash():
+    import time
+
+    def _slow(x: int) -> int:
+        time.sleep(0.02)
+        return x
+
+    p, cap = _make_pipeline([_double, _slow, _add_one])
+
+    def disable_mid_call():
+        time.sleep(0.01)
+        p.set_tracing(None)
+
+    t = threading.Thread(target=disable_mid_call)
+    t.start()
+    result = p(3)
+    t.join()
+
+    assert result == 7
+    assert len(cap.traces) == 1
+
+
 def test_span_fractions_bounded():
     p, cap = _make_pipeline([_double, _add_one])
     p(3)
