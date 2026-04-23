@@ -81,6 +81,15 @@ def test_error_span_flagged():
     assert spans[1].error
 
 
+def test_collector_error_does_not_crash_pipeline():
+    class _BrokenCollector(TraceCollector):
+        def on_trace(self, trace: InvocationTrace) -> None:
+            raise RuntimeError("collector is broken")
+
+    p = Pipeline([_double], tracing=TracingConfig(collector=_BrokenCollector()))
+    assert p(3) == 6
+
+
 def test_error_trace_delivered_to_collector():
     p, cap = _make_pipeline([_double, _failing])
     with pytest.raises(ValueError):

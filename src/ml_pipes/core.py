@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import time
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any, Callable, Iterable, get_args, get_origin, get_type_hints
+
+_log = logging.getLogger(__name__)
 
 from .context import Context, ContextOp
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape
@@ -94,7 +97,10 @@ class Pipeline:
         finally:
             if collecting:
                 trace.total_duration_s = time.perf_counter() - t_start
-                cfg.collector.on_trace(trace)
+                try:
+                    cfg.collector.on_trace(trace)
+                except Exception:
+                    _log.exception("TraceCollector.on_trace raised; trace dropped")
         return current
 
     def _label_for(self, i: int, cfg: TracingConfig | None) -> str:
