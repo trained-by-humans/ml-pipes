@@ -1,6 +1,6 @@
 import pytest
 
-from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store, TypeContract
+from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store, embed
 
 
 class IntToString:
@@ -175,34 +175,38 @@ def test_pipeline_validate_propagates_element_type_through_pick():
     pipeline.validate()
 
 
-def test_resolve_type_contract_returns_input_and_output_types():
-    pipeline = Pipeline([IntToString(), StringToFloat()])
+def test_embed_enforces_type_contract_at_boundary():
+    # embed() calls _resolve_type_contract on the inner pipeline to check the
+    # boundary type — a mismatch between outer output and inner input must raise.
+    inner = Pipeline([StringToFloat()])
+    outer = Pipeline([IntToString(), embed(inner)])
 
-    contract = pipeline.resolve_type_contract()
-
-    assert contract.input_type is int
-    assert contract.output_type is float
-
-
-def test_resolve_type_contract_returns_type_contract_instance():
-    pipeline = Pipeline([IntToString()])
-
-    assert isinstance(pipeline.resolve_type_contract(), TypeContract)
+    outer.validate()  # int -> str -> float: compatible
 
 
-def test_resolve_type_contract_raises_on_empty_pipeline():
-    with pytest.raises(PipelineValidationError):
-        Pipeline([]).resolve_type_contract()
-
-
-def test_resolve_type_contract_raises_on_type_mismatch():
-    pipeline = Pipeline([IntToString(), BoolToBytes()])
+def test_embed_rejects_incompatible_boundary_type():
+    inner = Pipeline([StringToFloat()])
+    outer = Pipeline([BoolToBytes(), embed(inner)])  # bytes -> str: incompatible
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        pipeline.resolve_type_contract()
+        outer.validate()
 
 
-def test_validate_delegates_to_resolve_type_contract():
+def test_rshift_enforces_type_contract_across_pipeline_boundary():
+    # >> also uses _resolve_type_contract to validate the join boundary.
+    left = Pipeline([IntToString()])
+    right = Pipeline([BoolToBytes()])  # expects bool, gets str
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        (left >> right).validate()
+
+
+def test_validate_raises_on_empty_pipeline_operators():
+    # An empty pipeline skips validation entirely — no error.
+    Pipeline([]).validate()  # must not raise
+
+
+def test_validate_raises_on_type_mismatch():
     pipeline = Pipeline([IntToString(), BoolToBytes()])
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):

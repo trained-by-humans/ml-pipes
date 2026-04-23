@@ -258,25 +258,19 @@ result = detection_pipeline("frame.jpg")
 
 ## Validation
 
-All composition forms are compatible with `validate()` and
-`resolve_type_contract()`.
+All composition forms are compatible with `validate()`.
 
 - `inline` and `+` expand to flat operator lists — the validator sees a single
   unbroken chain with no special handling needed.
-- `embed` and `>>` produce an `Embed` operator whose `resolve_contract` calls
-  `resolve_type_contract()` on the inner pipeline, validates the boundary type,
-  and returns the inner pipeline's output type to the outer validator.
+- `embed` and `>>` produce an `Embed` operator that validates the boundary type
+  against the inner pipeline's contract during the outer pipeline's validation.
 
 Because `>>` and `embed` hold live references, mutating a joined pipeline
 after composition changes the contract of the composed pipeline. Always call
 `validate()` after any such mutation and before the next execution.
 
 ```python
-# Type contract flows end-to-end across all composition forms
+# Type contract is validated end-to-end across all composition forms
 detection = decode_pipeline >> preprocess_pipeline + infer_pipeline
 detection.validate()
-
-contract = detection.resolve_type_contract()
-contract.input_type   # type expected at the pipeline entrance
-contract.output_type  # type produced at the pipeline exit
 ```

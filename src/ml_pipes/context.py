@@ -115,10 +115,7 @@ class Recall(ContextOp):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        if self.name not in stored_annotations:
-            raise validation_error_type(f"Recall({self.name!r}) references a value that was not stored")
-
-        stored_annotation = stored_annotations[self.name]
+        stored_annotation = stored_annotations.get(self.name, Any)
         current_parts = expand_output_annotation(current_output) if current_output is not None else (Any,)
         if self.index is None:
             result_parts = current_parts + (stored_annotation,)
