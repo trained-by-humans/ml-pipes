@@ -144,7 +144,12 @@ class Pipeline:
         try:
             outcome = gate.enter(current)
         except Exception:
-            trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait, error=True))
+            # Follower woke up because the leader failed — record the wait span and
+            # append the leader's error batch_span if it was forwarded via thread-local.
+            trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait))
+            error_span = gate.pop_error_batch_span()
+            if error_span is not None:
+                trace.spans.append(error_span)
             raise
         trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait))
         i += 1  # move past the Batch operator itself
@@ -176,7 +181,7 @@ class Pipeline:
                 error=True, child_trace=child_trace if collecting else None,
             )
             trace.spans.append(batch_span)
-            gate.distribute_exception(exc)
+            gate.distribute_exception(exc, batch_span=batch_span if collecting else None)
             raise
 
         child_trace.total_duration_s = time.perf_counter() - t_region
