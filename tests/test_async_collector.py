@@ -112,3 +112,13 @@ def test_concurrent_stop_idempotent():
     with _ConcurrentCapture() as cap:
         Pipeline([_double], tracing=TracingConfig(collector=cap))(1)
     cap.stop()
+
+
+def test_concurrent_on_trace_after_stop_drops_and_does_not_block(caplog):
+    import logging
+    cap = _ConcurrentCapture()
+    cap.stop()
+    with caplog.at_level(logging.WARNING):
+        cap.on_trace(InvocationTrace())
+    assert len(cap.traces) == 0
+    assert "dropped" in caplog.text

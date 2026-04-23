@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from abc import abstractmethod
@@ -8,6 +9,7 @@ from typing import Any
 from ..tracing import InvocationTrace, TraceCollector
 
 _SENTINEL = object()
+_log = logging.getLogger(__name__)
 
 
 class ConcurrentCollector(TraceCollector):
@@ -34,10 +36,14 @@ class ConcurrentCollector(TraceCollector):
 
     def __init__(self, maxsize: int = 0) -> None:
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=maxsize)
+        self._stopped = False
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
 
     def on_trace(self, trace: InvocationTrace) -> None:
+        if self._stopped:
+            _log.warning("ConcurrentCollector is stopped; trace dropped")
+            return
         self._queue.put(trace)
 
     def flush(self) -> None:
@@ -47,6 +53,7 @@ class ConcurrentCollector(TraceCollector):
     def stop(self) -> None:
         """Flush and shut down the worker thread. Safe to call more than once."""
         if self._worker.is_alive():
+            self._stopped = True
             self._queue.put(_SENTINEL)
             self._worker.join()
 
