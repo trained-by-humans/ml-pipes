@@ -141,7 +141,11 @@ class Pipeline:
 
         # Span 1: gate wait — each thread records its own blocking time
         t_wait = time.perf_counter()
-        outcome = gate.enter(current)
+        try:
+            outcome = gate.enter(current)
+        except Exception:
+            trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait, error=True))
+            raise
         trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait))
         i += 1  # move past the Batch operator itself
 

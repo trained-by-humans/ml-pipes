@@ -265,6 +265,40 @@ def test_batch_follower_wait_longer_than_leader():
     assert max(wait_durations) > min(wait_durations)
 
 
+def test_batch_follower_wait_span_present_on_leader_error():
+    def _failing_batch(x: list[Any]) -> list[Any]:
+        raise ValueError("batch boom")
+
+    cap = _Capture()
+    p = Pipeline(
+        [Batch(size=2, timeout=1.0), _failing_batch, UnBatch(), _add_one],
+        tracing=TracingConfig(collector=cap),
+    )
+    errors = [None, None]
+
+    def run(idx, val):
+        try:
+            p(val)
+        except Exception as e:
+            errors[idx] = e
+
+    t1 = threading.Thread(target=run, args=(0, 1))
+    t2 = threading.Thread(target=run, args=(1, 2))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    assert all(isinstance(e, ValueError) for e in errors)
+    # Every trace must have a wait span — including followers whose gate.enter() raised.
+    for trace in cap.traces:
+        wait_spans = [s for s in trace.spans if "[wait]" in s.label]
+        assert len(wait_spans) == 1
+    # The follower's wait span is flagged as an error (leader's is not).
+    error_wait_spans = [
+        s for t in cap.traces for s in t.spans if "[wait]" in s.label and s.error
+    ]
+    assert len(error_wait_spans) == 1
+
+
 # ---------------------------------------------------------------------------
 # Concurrency
 # ---------------------------------------------------------------------------
