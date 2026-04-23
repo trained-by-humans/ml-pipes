@@ -111,6 +111,65 @@ pipeline("image.jpg")   # no overhead, no trace produced
 ```
 
 
+## Tracing Output
+
+Traces are per operator, ordered by invocation order. Each step is marked with
+the operator's label:
+
+```
+  0:Resize                            0.28ms  (  0.5%)
+  1:Normalize                         2.22ms  (  4.6%)
+  2:Infer                            39.19ms  ( 81.4%)
+  3:NMS                               0.21ms  (  0.4%)
+  4:ToDetections                      0.02ms  (  0.0%)
+  total                              48.12ms
+```
+
+Error spans are marked with `!`:
+
+```
+  0:Resize                            0.28ms  (  9.4%)
+  1:Infer                             2.70ms  ( 90.3%) !
+  total                               2.98ms
+```
+
+
+Batch regions produce a nested child `InvocationTrace` attached to the
+`Batch` span. Every invocation — whether it was the batch leader or a follower
+— receives the same `Batch` span with the same child trace, so every trace is
+structurally complete and self-contained.
+
+```
+  0:Resize                            0.20ms  (  0.5%)
+  1:Batch[wait]                       0.50ms  (  1.3%)
+  1:Batch                            34.70ms  ( 90.1%)
+    ↳ child trace [batch_size=8]:
+        2:_collate                    0.10ms  (  0.3%)
+        3:Infer                      34.50ms  ( 99.4%)
+        4:_distribute                 0.10ms  (  0.3%)
+        total                        34.70ms
+  5:NMS                               2.00ms  (  5.2%)
+  total                              38.50ms
+```
+
+`Batch[wait]` captures each thread's lobby accumulation time — how long it waited
+for enough samples to form a batch. Both leader and follower record only this
+window; the batch region execution time is accounted for separately in the `Batch`
+span. `batch_size` on the child trace lets an aggregator normalize region latency
+per sample.
+
+```
+InvocationTrace:
+  StepSpan("0:Resize",         0.2ms)
+  StepSpan("1:Batch[wait]",    0.5ms)   ← this thread's lobby wait time
+  StepSpan("1:Batch",         34.7ms)   ← leader's region, shared with all followers
+    ↳ child InvocationTrace [batch_size=8]:
+        StepSpan("2:Collate",    0.1ms)
+        StepSpan("3:Infer",     34.5ms)
+        StepSpan("4:Distribute", 0.1ms)
+  StepSpan("5:NMS",            0.2ms)
+```
+
 ## Built-in collectors
 
 ### `PrintCollector`
@@ -131,29 +190,6 @@ Output:
   3:NMS                               0.21ms  (  0.4%)
   4:ToDetections                      0.02ms  (  0.0%)
   total                              48.12ms
-```
-
-Error spans are marked with `!`:
-
-```
-  0:Resize                            0.28ms  (  9.4%)
-  1:Infer                             2.70ms  ( 90.3%) !
-  total                               2.98ms
-```
-
-For batch pipelines the batch region is printed as a nested child trace:
-
-```
-  0:Resize                            0.20ms  (  0.5%)
-  1:Batch[wait]                       0.50ms  (  1.3%)
-  1:Batch                            34.70ms  ( 90.1%)
-    ↳ child trace [batch_size=8]:
-        2:_collate                    0.10ms  (  0.3%)
-        3:Infer                      34.50ms  ( 99.4%)
-        4:_distribute                 0.10ms  (  0.3%)
-        total                        34.70ms
-  5:NMS                               2.00ms  (  5.2%)
-  total                              38.50ms
 ```
 
 ### `AggregateCollector`
@@ -248,31 +284,6 @@ class SlowCallAlert(TraceCollector):
 
 pipeline.set_tracing(SlowCallAlert(threshold_ms=50.0))
 ```
-
-## Tracing in batch regions
-
-Batch regions produce a nested child `InvocationTrace` attached to the
-`Batch` span. Every invocation — whether it was the batch leader or a follower
-— receives the same `Batch` span with the same child trace, so every trace is
-structurally complete and self-contained.
-
-```
-InvocationTrace:
-  StepSpan("0:Resize",         0.2ms)
-  StepSpan("1:Batch[wait]",    0.5ms)   ← this thread's lobby accumulation time
-  StepSpan("1:Batch",         34.7ms)   ← leader's region, shared with all followers
-    ↳ child InvocationTrace [batch_size=8]:
-        StepSpan("2:Collate",    0.1ms)
-        StepSpan("3:Infer",     34.5ms)
-        StepSpan("4:Distribute", 0.1ms)
-  StepSpan("5:NMS",            0.2ms)
-```
-
-`Batch[wait]` captures each thread's lobby accumulation time — how long it waited
-for enough samples to form a batch. Both leader and follower record only this
-window; the batch region execution time is accounted for separately in the `Batch`
-span. `batch_size` on the child trace lets an aggregator normalise region latency
-per sample.
 
 ## See also
 
