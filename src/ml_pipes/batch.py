@@ -31,13 +31,15 @@ class FollowerResult:
     """Returned by BatchGate.enter() for a waiter thread.
 
     The leader has already run the batch region and distributed results.
-    This thread's per-sample result is ready to consume.
+    This thread's per-sample result is ready to consume. If the leader
+    failed, exception is set and result is None.
     """
-    __slots__ = ("result", "batch_span")
+    __slots__ = ("result", "batch_span", "exception")
 
-    def __init__(self, result: Any, batch_span: Any = None) -> None:
+    def __init__(self, result: Any, batch_span: Any = None, exception: BaseException | None = None) -> None:
         self.result = result
         self.batch_span = batch_span  # StepSpan | None, copied from leader via _Entry
+        self.exception = exception
 
 
 class BatchGate:
@@ -123,10 +125,7 @@ class BatchGate:
         # Phase 2 — batch operation: wait for the leader to fire our entry's event.
         entry.event.wait()
 
-        if entry.exception is not None:
-            self._local.error_batch_span = entry.batch_span  # readable by _step_into_batch before re-raise
-            raise entry.exception
-        return FollowerResult(entry.result, batch_span=entry.batch_span)
+        return FollowerResult(entry.result, batch_span=entry.batch_span, exception=entry.exception)
 
     def distribute(self, results: list[Any], batch_span: Any = None) -> Any:
         """
@@ -179,9 +178,3 @@ class BatchGate:
             entry.batch_span = batch_span  # written before event.set() — happens-before guarantee
             entry.event.set()
 
-    def pop_error_batch_span(self) -> Any:
-        """Return and clear the batch_span stored during a follower error path, or None."""
-        span = getattr(self._local, "error_batch_span", None)
-        if span is not None:
-            del self._local.error_batch_span
-        return span

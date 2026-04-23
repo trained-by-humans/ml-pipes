@@ -61,6 +61,8 @@ def _run_tracked(gate: BatchGate, value: int, results: dict, errors: list,
                     batches[v] = batch_key
             results[value] = gate.distribute([v * 2 for v in outcome.inputs])
         else:
+            if outcome.exception is not None:
+                raise outcome.exception
             results[value] = outcome.result
     except Exception as exc:  # noqa: BLE001
         errors.append((value, type(exc).__name__, str(exc)))
@@ -445,14 +447,13 @@ def test_exception_in_batch_does_not_corrupt_next_batch():
 
     # --- batch 1: leader raises (mirrors how _step_into_batch handles exceptions) ---
     def run_failing(v):
-        try:
-            outcome = gate.enter(v)
-            if isinstance(outcome, LeaderBatch):
-                exc = RuntimeError("deliberate failure")
-                gate.distribute_exception(exc)
-                raise exc
-        except RuntimeError as exc:
+        outcome = gate.enter(v)
+        if isinstance(outcome, LeaderBatch):
+            exc = RuntimeError("deliberate failure")
+            gate.distribute_exception(exc)
             errors_b1.append((v, str(exc)))
+        elif outcome.exception is not None:
+            errors_b1.append((v, str(outcome.exception)))
 
     t1 = threading.Thread(target=run_failing, args=(1,))
     t2 = threading.Thread(target=run_failing, args=(2,))
@@ -495,15 +496,13 @@ def test_exception_in_one_concurrent_batch_does_not_affect_other():
 
     def run_a(v):
         batch_a_entered.wait()
-        try:
-            outcome = gate.enter(v)
-            if isinstance(outcome, LeaderBatch):
-                batch_b_start.set()
-                time.sleep(0.05)       # hold A's leader so B overlaps
-                exc = RuntimeError("batch A failed")
-                gate.distribute_exception(exc)
-                raise exc
-        except RuntimeError:
+        outcome = gate.enter(v)
+        if isinstance(outcome, LeaderBatch):
+            batch_b_start.set()
+            time.sleep(0.05)       # hold A's leader so B overlaps
+            gate.distribute_exception(RuntimeError("batch A failed"))
+            exc_values.append(v)
+        elif outcome.exception is not None:
             exc_values.append(v)
 
     def run_b(v):

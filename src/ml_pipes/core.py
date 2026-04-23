@@ -141,25 +141,18 @@ class Pipeline:
 
         # Span 1: gate wait — each thread records its own blocking time
         t_wait = time.perf_counter()
-        try:
-            outcome = gate.enter(current)
-        except Exception:
-            # Follower woke up because the leader failed — record the wait span and
-            # append the leader's error batch_span if it was forwarded via thread-local.
-            trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait))
-            error_span = gate.pop_error_batch_span()
-            if error_span is not None:
-                trace.spans.append(error_span)
-            raise
+        outcome = gate.enter(current)
         trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait))
         i += 1  # move past the Batch operator itself
 
-        # Follower: skip region, receive leader's batch span via gate
+        # Follower: skip region, receive leader's batch span (or error) via gate
         if not isinstance(outcome, LeaderBatch):
             while not isinstance(self.operators[i], UnBatch):
                 i += 1
             if outcome.batch_span is not None:
                 trace.spans.append(outcome.batch_span)
+            if outcome.exception is not None:
+                raise outcome.exception
             return outcome.result, context, i + 1
 
         # Leader: run region operators into a child trace
