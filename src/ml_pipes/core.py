@@ -75,10 +75,11 @@ class Pipeline:
 
     def _execute(self, value: Any, trace: InvocationTrace | None) -> Any:
         from .ops import Batch  # local import avoids circular dependency
+        cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
         current = value
         context = Context()
         i = 0
-        collecting = trace is None and self._tracing_config is not None
+        collecting = trace is None and cfg is not None
         if trace is None:
             trace = InvocationTrace() if collecting else _NoOpTrace()
         t_start = time.perf_counter()
@@ -86,27 +87,27 @@ class Pipeline:
             while i < len(self.operators):
                 operator = self.operators[i]
                 if isinstance(operator, Batch):
-                    current, context, i = self._step_into_batch(current, context, i, trace)
+                    current, context, i = self._step_into_batch(current, context, i, trace, cfg)
                 else:
-                    current, context = self._step(i, current, context, trace)
+                    current, context = self._step(i, current, context, trace, cfg)
                     i += 1
         finally:
             if collecting:
                 trace.total_duration_s = time.perf_counter() - t_start
-                self._tracing_config.collector.on_trace(trace)
+                cfg.collector.on_trace(trace)
         return current
 
-    def _label_for(self, i: int) -> str:
-        if self._tracing_config and self._tracing_config.operator_labels and i < len(self._tracing_config.operator_labels):
-            return self._tracing_config.operator_labels[i]
+    def _label_for(self, i: int, cfg: TracingConfig | None) -> str:
+        if cfg and cfg.operator_labels and i < len(cfg.operator_labels):
+            return cfg.operator_labels[i]
         op = self.operators[i]
         name = op.__name__ if inspect.isfunction(op) or inspect.ismethod(op) else type(op).__name__
         return f"{i}:{name}"
 
-    def _step(self, i: int, current: Any, context: Context, trace: Any) -> tuple[Any, Context]:
+    def _step(self, i: int, current: Any, context: Context, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context]:
         operator = self.operators[i]
-        label = self._label_for(i)
-        capture = self._tracing_config.capture_shapes if self._tracing_config else False
+        label = self._label_for(i, cfg)
+        capture = cfg.capture_shapes if cfg else False
         t = time.perf_counter()
         try:
             if isinstance(operator, ContextOp):
@@ -125,12 +126,12 @@ class Pipeline:
         ))
         return result, ctx_out
 
-    def _step_into_batch(self, current: Any, context: Context, i: int, trace: Any) -> tuple[Any, Context, int]:
+    def _step_into_batch(self, current: Any, context: Context, i: int, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context, int]:
         from .batch import LeaderBatch
         from .ops import UnBatch
 
         gate = self.operators[i].gate
-        batch_label = self._label_for(i)
+        batch_label = self._label_for(i, cfg)
 
         # Span 1: gate wait — each thread records its own blocking time
         t_wait = time.perf_counter()
@@ -156,7 +157,7 @@ class Pipeline:
         t_region = time.perf_counter()
         try:
             while not isinstance(self.operators[i], UnBatch):
-                current, batch_context = self._step(i, current, batch_context, child_trace)
+                current, batch_context = self._step(i, current, batch_context, child_trace, cfg)
                 i += 1
         except Exception as exc:
             child_trace.total_duration_s = time.perf_counter() - t_region
