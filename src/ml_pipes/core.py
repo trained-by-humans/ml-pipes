@@ -139,21 +139,29 @@ class Pipeline:
         gate = self.operators[i].gate
         batch_label = self._label_for(i, cfg)
 
-        # Span 1: gate wait — each thread records its own blocking time
-        t_wait = time.perf_counter()
+        # Span 1: gate wait — each thread records its own lobby accumulation time
+        t_gate_enter = time.perf_counter()
         outcome = gate.enter(current)
-        trace.spans.append(StepSpan(f"{batch_label}[wait]", t_wait, time.perf_counter() - t_wait))
+        gate_blocked_duration = time.perf_counter() - t_gate_enter
         i += 1  # move past the Batch operator itself
 
         # Follower: skip region, receive leader's batch span (or error) via gate
         if not isinstance(outcome, LeaderBatch):
             while not isinstance(self.operators[i], UnBatch):
                 i += 1
+            # gate_blocked_duration includes lobby wait + batch execution for followers.
+            # Subtract the batch region duration to isolate the lobby accumulation time,
+            # making it comparable to the leader's wait.
+            batch_region_duration = outcome.batch_span.duration_s if outcome.batch_span is not None else 0.0
+            lobby_wait_duration = gate_blocked_duration - batch_region_duration
+            trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, lobby_wait_duration))
             if outcome.batch_span is not None:
                 trace.spans.append(outcome.batch_span)
             if outcome.exception is not None:
                 raise outcome.exception
             return outcome.result, context, i + 1
+
+        trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, gate_blocked_duration))
 
         # Leader: run region operators into a child trace
         current = outcome.inputs
