@@ -5,10 +5,11 @@ from __future__ import annotations
 # Never imported by core.py or __init__.py — no implicit dependency.
 from opentelemetry import trace as otel_trace
 
-from ..tracing import InvocationTrace, TraceCollector
+from ..tracing import InvocationTrace
+from .concurrent_collector import ConcurrentCollector
 
 
-class OtelCollector(TraceCollector):
+class OtelCollector(ConcurrentCollector):
     """Bridges ml-pipes InvocationTraces to OpenTelemetry spans.
 
     Wire up a TracerProvider before use::
@@ -19,9 +20,10 @@ class OtelCollector(TraceCollector):
     """
 
     def __init__(self, tracer_name: str = "ml-pipes") -> None:
+        super().__init__()
         self._tracer = otel_trace.get_tracer(tracer_name)
 
-    def on_trace(self, trace: InvocationTrace) -> None:
+    def _collect(self, trace: InvocationTrace) -> None:
         with self._tracer.start_as_current_span("pipeline") as root:
             root.set_attribute("total_duration_ms", trace.total_duration_s * 1000)
             self._emit_spans(trace)

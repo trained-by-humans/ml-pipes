@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from ..tracing import InvocationTrace, TraceCollector
+from ..tracing import InvocationTrace
+from .serial_collector import SerialCollector
 
 
-class PrintCollector(TraceCollector):
+class PrintCollector(SerialCollector):
     """Prints each trace to stdout. Useful for development and debugging."""
 
-    def on_trace(self, trace: InvocationTrace) -> None:
+    def _collect(self, trace: InvocationTrace) -> None:
         self._print_trace(trace, indent=0)
 
     def _print_trace(self, trace: InvocationTrace, indent: int) -> None:

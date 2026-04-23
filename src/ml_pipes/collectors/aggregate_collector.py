@@ -1,21 +1,26 @@
 from __future__ import annotations
 
-from ..tracing import InvocationTrace, TraceCollector
+from ..tracing import InvocationTrace
+from .concurrent_collector import ConcurrentCollector
 
 
-class AggregateCollector(TraceCollector):
+class AggregateCollector(ConcurrentCollector):
     """Accumulates per-operator latency stats across multiple invocations.
+
+    Traces are processed on a background thread — call flush() before reading
+    results to ensure all in-flight traces have been incorporated.
 
     Call ``print_summary()`` to display average ms and % of total per operator.
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._calls: int = 0
         self._total_s: float = 0.0
         self._op_total: dict[str, float] = {}
         self._op_calls: dict[str, int] = {}
 
-    def on_trace(self, trace: InvocationTrace) -> None:
+    def _collect(self, trace: InvocationTrace) -> None:
         self._calls += 1
         self._total_s += trace.total_duration_s
         for span in trace.spans:
