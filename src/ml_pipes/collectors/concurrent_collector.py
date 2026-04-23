@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from abc import abstractmethod
 from typing import Any
 
 from ..tracing import InvocationTrace, TraceCollector
@@ -9,30 +10,29 @@ from ..tracing import InvocationTrace, TraceCollector
 _SENTINEL = object()
 
 
-class AsyncCollector(TraceCollector):
-    """Wraps any TraceCollector and dispatches on_trace calls to a background thread.
+class ConcurrentCollector(TraceCollector):
+    """Base for collectors that process traces on a dedicated background thread.
 
-    The pipeline enqueues the trace and returns immediately; the worker drains
-    the queue and forwards each trace to the inner collector off the hot path.
+    on_trace() enqueues the trace and returns immediately; the worker thread
+    drains the queue and calls _collect() serially off the hot path.
+    Subclasses implement _collect().
 
-    Usage::
+    Lifecycle::
 
-        with AsyncCollector(PrintCollector()) as collector:
+        with MyCollector() as collector:
             pipeline.set_tracing(collector)
-            for frame in stream:
-                pipeline(frame)
+            ...
 
-    Or manage lifecycle manually::
+    Or manually::
 
-        collector = AsyncCollector(PrintCollector())
+        collector = MyCollector()
         pipeline.set_tracing(collector)
         ...
         collector.flush()   # wait for all queued traces to be processed
         collector.stop()    # shut down the worker thread
     """
 
-    def __init__(self, inner: TraceCollector, maxsize: int = 0) -> None:
-        self._inner = inner
+    def __init__(self, maxsize: int = 0) -> None:
         self._queue: queue.Queue[Any] = queue.Queue(maxsize=maxsize)
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
@@ -50,11 +50,14 @@ class AsyncCollector(TraceCollector):
             self._queue.put(_SENTINEL)
             self._worker.join()
 
-    def __enter__(self) -> AsyncCollector:
+    def __enter__(self) -> ConcurrentCollector:
         return self
 
     def __exit__(self, *_: object) -> None:
         self.stop()
+
+    @abstractmethod
+    def _collect(self, trace: InvocationTrace) -> None: ...
 
     def _run(self) -> None:
         while True:
@@ -62,6 +65,6 @@ class AsyncCollector(TraceCollector):
             try:
                 if item is _SENTINEL:
                     return
-                self._inner.on_trace(item)
+                self._collect(item)
             finally:
                 self._queue.task_done()
