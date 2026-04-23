@@ -113,31 +113,17 @@ pipeline("image.jpg")   # no overhead, no trace produced
 
 ## Tracing Output
 
-Traces are per operator, ordered by invocation order. Each step is marked with
-the operator's label:
+Each span shows the operator label, wall-time duration, and share of total. Error spans are marked with `!`:
 
 ```
   0:Resize                            0.28ms  (  0.5%)
   1:Normalize                         2.22ms  (  4.6%)
-  2:Infer                            39.19ms  ( 81.4%)
+  2:Infer                            39.19ms  ( 81.4%) !
   3:NMS                               0.21ms  (  0.4%)
-  4:ToDetections                      0.02ms  (  0.0%)
   total                              48.12ms
 ```
 
-Error spans are marked with `!`:
-
-```
-  0:Resize                            0.28ms  (  9.4%)
-  1:Infer                             2.70ms  ( 90.3%) !
-  total                               2.98ms
-```
-
-
-Batch regions produce a nested child `InvocationTrace` attached to the
-`Batch` span. Every invocation — whether it was the batch leader or a follower
-— receives the same `Batch` span with the same child trace, so every trace is
-structurally complete and self-contained.
+Batch regions produce a nested child trace:
 
 ```
   0:Resize                            0.20ms  (  0.5%)
@@ -157,18 +143,6 @@ for enough samples to form a batch. Both leader and follower record only this
 window; the batch region execution time is accounted for separately in the `Batch`
 span. `batch_size` on the child trace lets an aggregator normalize region latency
 per sample.
-
-```
-InvocationTrace:
-  StepSpan("0:Resize",         0.2ms)
-  StepSpan("1:Batch[wait]",    0.5ms)   ← this thread's lobby wait time
-  StepSpan("1:Batch",         34.7ms)   ← leader's region, shared with all followers
-    ↳ child InvocationTrace [batch_size=8]:
-        StepSpan("2:Collate",    0.1ms)
-        StepSpan("3:Infer",     34.5ms)
-        StepSpan("4:Distribute", 0.1ms)
-  StepSpan("5:NMS",            0.2ms)
-```
 
 ## Built-in collectors
 
