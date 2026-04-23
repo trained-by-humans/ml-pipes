@@ -1,8 +1,8 @@
 # Tracing
 
 ml-pipes includes a built-in tracing system that records per-operator latency
-for every pipeline call. It is **opt-in and zero-overhead** when not configured
-— pipelines without a collector run at exactly the same speed as before.
+for every pipeline call. It is **opt-in** — pipelines without a collector
+skip all collector calls, I/O, and synchronization.
 
 ## Primitives
 
