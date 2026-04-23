@@ -103,15 +103,14 @@ class Pipeline:
         from .ops import Batch, UnBatch
 
         stored_keys: set[str] = set()
-        outer_stored_keys: set[str] | None = None
+        stack: list[set[str]] = []
 
         for i, operator in enumerate(self.operators):
             if isinstance(operator, Batch):
-                outer_stored_keys = stored_keys
+                stack.append(stored_keys)
                 stored_keys = set()
             elif isinstance(operator, UnBatch):
-                stored_keys = outer_stored_keys  # type: ignore[assignment]
-                outer_stored_keys = None
+                stored_keys = stack.pop()
             elif isinstance(operator, Store):
                 stored_keys.add(operator.name)
             elif isinstance(operator, Recall):
@@ -140,18 +139,15 @@ class Pipeline:
         previous_output_type: Any | None = None
         previous_name: str | None = None
         stored_annotations: dict[str, Any] = {}
-        outer_stored_annotations: dict[str, Any] | None = None
+        stack: list[dict[str, Any]] = []
 
         for i, operator in enumerate(self.operators):
             if isinstance(operator, Batch):
-                # Enter batch region: swap to an isolated annotation scope.
-                outer_stored_annotations = stored_annotations
+                stack.append(stored_annotations)
                 stored_annotations = {}
                 continue
             elif isinstance(operator, UnBatch):
-                # Exit batch region: discard the isolated scope, restore the outer one.
-                stored_annotations = outer_stored_annotations  # type: ignore[assignment]
-                outer_stored_annotations = None
+                stored_annotations = stack.pop()
                 continue
 
             if isinstance(operator, ContextOp) or hasattr(operator, "resolve_contract"):
