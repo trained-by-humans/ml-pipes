@@ -259,7 +259,7 @@ structurally complete and self-contained.
 ```
 InvocationTrace:
   StepSpan("0:Resize",         0.2ms)
-  StepSpan("1:Batch[wait]",   18.2ms)   ← this thread's wait for the batch to form
+  StepSpan("1:Batch[wait]",    0.5ms)   ← this thread's lobby accumulation time
   StepSpan("1:Batch",         34.7ms)   ← leader's region, shared with all followers
     ↳ child InvocationTrace [batch_size=8]:
         StepSpan("2:Collate",    0.1ms)
@@ -268,10 +268,11 @@ InvocationTrace:
   StepSpan("5:NMS",            0.2ms)
 ```
 
-`Batch[wait]` captures each thread's own gate wait time — the leader's wait is
-short (just accumulation time), while a follower's wait includes the full region
-execution. `batch_size` on the child trace lets an aggregator normalise region
-latency per sample.
+`Batch[wait]` captures each thread's lobby accumulation time — how long it waited
+for enough samples to form a batch. Both leader and follower record only this
+window; the batch region execution time is accounted for separately in the `Batch`
+span. `batch_size` on the child trace lets an aggregator normalise region latency
+per sample.
 
 ## See also
 
