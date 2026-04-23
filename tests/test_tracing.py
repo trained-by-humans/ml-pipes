@@ -251,18 +251,22 @@ def test_batch_leader_and_follower_span_labels_identical():
     assert label_sets[0] == label_sets[1]
 
 
-def test_batch_follower_wait_longer_than_leader():
+def test_batch_follower_wait_excludes_batch_duration():
     cap = _Capture()
     p = _make_batch_pipeline(cap)
     _run_two_threads(p)
-    wait_durations = [
-        s.duration_s
+    # The follower's raw gate.enter() duration exceeds the batch region duration
+    # (it blocks for lobby + batch). After subtracting batch duration, the
+    # corrected wait should be shorter than the batch span on at least one trace.
+    corrected_waits = [
+        next(s.duration_s for s in t.spans if "[wait]" in s.label)
         for t in cap.traces
-        for s in t.spans
-        if "[wait]" in s.label
     ]
-    assert len(wait_durations) == 2
-    assert max(wait_durations) > min(wait_durations)
+    batch_durations = [
+        next(s.duration_s for s in t.spans if s.child_trace is not None)
+        for t in cap.traces
+    ]
+    assert min(corrected_waits) < max(batch_durations)
 
 
 def test_batch_follower_wait_span_present_on_leader_error():
