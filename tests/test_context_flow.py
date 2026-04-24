@@ -143,25 +143,25 @@ def test_type_mismatch_error_includes_operator_index():
 
 
 # ---------------------------------------------------------------------------
-# validate_on_init and extend() re-validation
+# auto_validate and extend() re-validation
 # ---------------------------------------------------------------------------
 
-def test_validate_on_init_raises_at_construction():
+def test_auto_validate_raises_at_construction():
     with pytest.raises(PipelineValidationError):
-        Pipeline([Recall("x")], validate_on_init=True)
+        Pipeline([Recall("x")], auto_validate=True)
 
 
-def test_extend_revalidates_when_validate_on_init_true():
-    p = Pipeline([IntToString()], validate_on_init=True)
+def test_extend_revalidates_when_auto_validate_true():
+    p = Pipeline([IntToString()], auto_validate=True)
     with pytest.raises(PipelineValidationError):
         p.extend([Recall("x")])
 
 
-def test_extend_does_not_revalidate_when_validate_on_init_false():
+def test_extend_does_not_revalidate_when_auto_validate_false():
     p = Pipeline([IntToString()])
     p.extend([Recall("x")])  # silent — no exception
 
 
 def test_extend_valid_context_flow_does_not_raise():
-    p = Pipeline([Store("x")], validate_on_init=True)
+    p = Pipeline([Store("x")], auto_validate=True)
     p.extend([Recall("x")])  # valid — should not raise
