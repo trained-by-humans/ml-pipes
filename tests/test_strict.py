@@ -109,3 +109,46 @@ def test_strict_with_auto_validate_raises_on_extend():
 
 def test_non_strict_accepts_vague_op():
     Pipeline([VagueOp()]).validate()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Generic container types with Any args are vague
+# ---------------------------------------------------------------------------
+
+class ReturnsListAny:
+    def __call__(self, value: int) -> list[Any]:
+        return [value]
+
+
+class ReturnsTupleWithAny:
+    def __call__(self, value: int) -> tuple[int, Any]:
+        return value, value
+
+
+class AcceptsListAny:
+    def __call__(self, value: list[Any]) -> int:
+        return len(value)
+
+
+class ReturnsListInt:
+    def __call__(self, value: int) -> list[int]:
+        return [value]
+
+
+def test_strict_rejects_list_any_output():
+    with pytest.raises(PipelineValidationError, match="output type is unresolved"):
+        Pipeline([ReturnsListAny()], strict=True).validate()
+
+
+def test_strict_rejects_tuple_with_any_output():
+    with pytest.raises(PipelineValidationError, match="output type is unresolved"):
+        Pipeline([ReturnsTupleWithAny()], strict=True).validate()
+
+
+def test_strict_rejects_list_any_input():
+    with pytest.raises(PipelineValidationError, match="input type is unresolved"):
+        Pipeline([AcceptsListAny()], strict=True).validate()
+
+
+def test_strict_accepts_concrete_generic():
+    Pipeline([ReturnsListInt()], strict=True).validate()  # must not raise
