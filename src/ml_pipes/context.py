@@ -73,7 +73,7 @@ class Store(ContextOp):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        stored_annotations[self.name] = self._extract_annotation(current_output, expand_output_annotation)
+        stored_annotations[self.name] = self._extract_annotation(current_output, expand_output_annotation, validation_error_type)
         return (Any,), Any if current_output is None else current_output
 
     def _extract(self, current: Any) -> Any:
@@ -83,13 +83,18 @@ class Store(ContextOp):
             raise TypeError(f"Store({self.name!r}) cannot index non-tuple value")
         return current[self.index]
 
-    def _extract_annotation(self, annotation: Any | None, expand_output_annotation: Any) -> Any:
+    def _extract_annotation(self, annotation: Any | None, expand_output_annotation: Any, validation_error_type: type[Exception] | None = None) -> Any:
         if annotation is None:
             return Any
         if self.index is None:
             return annotation
         parts = expand_output_annotation(annotation)
         if self.index >= len(parts):
+            if validation_error_type is not None:
+                raise validation_error_type(
+                    f"Store({self.name!r}, index={self.index}) is out of bounds "
+                    f"for {annotation} (length {len(parts)})"
+                )
             return Any
         return parts[self.index]
 

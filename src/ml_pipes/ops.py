@@ -1090,7 +1090,14 @@ class Pick:
         if current_output is None or get_origin(current_output) is not tuple:
             return (Any,), Any
         parts = get_args(current_output)
-        selected = tuple(parts[i] if i < len(parts) else Any for i in self.indices)
+        selected = []
+        for i in self.indices:
+            if i >= len(parts):
+                raise validation_error_type(
+                    f"Pick({i}) is out of bounds for {current_output} (length {len(parts)})"
+                )
+            selected.append(parts[i])
+        selected = tuple(selected)
         return (Any,), selected[0] if len(selected) == 1 else selected
 
 
