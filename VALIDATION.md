@@ -201,6 +201,48 @@ StringToFloat is missing a type annotation for __call__ input
 IntToString is missing a return type annotation for __call__
 ```
 
+## Strict mode
+
+`strict=True` adds a fourth check on top of the normal three. It rejects any
+operator whose resolved input or output type is still `Any` after
+`_resolve_type_contract` has run with the real upstream types.
+
+```python
+pipeline = Pipeline([...], strict=True)
+pipeline.validate()
+```
+
+The check runs on resolved types, not raw annotations. This means an operator
+can declare `Any` in its annotations and still pass strict mode, as long as it
+implements `resolve_contract` to return a concrete type based on what it
+actually receives:
+
+```python
+class LogDetections(ContextOp):
+    def resolve_contract(self, current_output, stored_annotations, expand, error_type):
+        return (Any,), current_output  # accept anything, return what I received
+```
+
+`Store`, `Recall`, `Pick`, `Batch`, and `UnBatch` are exempt from the input
+check — their `(Any,)` input contract is architectural. Their output types are
+still checked.
+
+**Error messages**
+
+Vague input — checked first:
+```
+Strict mode violation at 2:LogOp: input type is unresolved (Any).
+  Fix: annotate the parameter with a concrete type, or implement resolve_contract
+  to accept and thread the upstream type dynamically.
+```
+
+Vague output — only reached when input is concrete:
+```
+Strict mode violation at 2:LogOp: output type is unresolved (Any).
+  Fix: annotate the return type with a concrete type, or implement resolve_contract
+  to return the upstream type (e.g. passthrough: return (Any,), current_output).
+```
+
 ## Composition and live references
 
 `>>` and `embed()` hold live references to the original pipeline objects.

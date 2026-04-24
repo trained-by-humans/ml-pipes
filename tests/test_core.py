@@ -219,3 +219,31 @@ def test_pipeline_validate_rejects_wrong_type_downstream_of_pick():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
+
+
+def test_pick_out_of_bounds_raises_on_concrete_input():
+    pipeline = Pipeline([IntToPair(), Pick(5)])
+
+    with pytest.raises(PipelineValidationError, match="Pick\\(5\\) is out of bounds"):
+        pipeline.validate()
+
+
+def test_pick_out_of_bounds_silent_on_vague_input():
+    # No concrete tuple type upstream — Pick silently returns Any, no error.
+    pipeline = Pipeline([Pick(5)])
+
+    pipeline.validate()  # must not raise
+
+
+def test_store_out_of_bounds_raises_on_concrete_input():
+    pipeline = Pipeline([IntToPair(), Store("x", index=5)])
+
+    with pytest.raises(PipelineValidationError, match="Store\\('x', index=5\\) is out of bounds"):
+        pipeline.validate()
+
+
+def test_store_out_of_bounds_silent_on_vague_input():
+    # No concrete tuple type upstream — Store silently stores Any, no error.
+    pipeline = Pipeline([Store("x", index=5)])
+
+    pipeline.validate()  # must not raise

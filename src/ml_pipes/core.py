@@ -28,11 +28,13 @@ class Pipeline:
         self,
         operators: Iterable[Callable[..., Any] | ContextOp],
         auto_validate: bool = False,
+        strict: bool = False,
         tracing: TracingConfig | None = None,
     ):
         self.operators = self._flatten(list(operators))
         self._tracing_config = tracing
         self._auto_validate = auto_validate
+        self._strict = strict
         if auto_validate:
             self.validate()
 
@@ -74,7 +76,7 @@ class Pipeline:
             return
         self._validate_batch_pairs()
         self._validate_context_interactions()
-        self._resolve_type_contract()
+        self._resolve_type_contract(strict=self._strict)
 
     def _validate_batch_pairs(self) -> None:
         from .ops import Batch, UnBatch
@@ -129,7 +131,7 @@ class Pipeline:
                         f"Validation error inside {self._label_for(i)}: {exc}"
                     ) from exc
 
-    def _resolve_type_contract(self) -> TypeContract:
+    def _resolve_type_contract(self, strict: bool = False) -> TypeContract:
         from .ops import Batch, UnBatch
 
         if not self.operators:
@@ -150,13 +152,19 @@ class Pipeline:
                 stored_annotations = stack.pop()
                 continue
 
-            if isinstance(operator, ContextOp) or hasattr(operator, "resolve_contract"):
+            if hasattr(operator, "resolve_contract"):
                 input_types, output_type = operator.resolve_contract(
                     previous_output_type,
                     stored_annotations,
                     self._expand_output_annotation,
                     PipelineValidationError,
                 )
+                if strict and output_type is Any:
+                    raise PipelineValidationError(
+                        f"Strict mode violation at {self._label_for(i)}: output type is unresolved (Any).\n"
+                        f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
+                        f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
+                    )
             else:
                 input_types, output_type = self._resolve_operator_contract(operator)
                 name = operator.__class__.__name__
@@ -169,6 +177,20 @@ class Pipeline:
                         f"{previous_name} returns {self._format_annotation(previous_output_type)} "
                         f"but {name} expects {self._format_parameter_annotations(input_types)}"
                     )
+
+                if strict:
+                    if any(t is Any for t in input_types):
+                        raise PipelineValidationError(
+                            f"Strict mode violation at {self._label_for(i)}: input type is unresolved (Any).\n"
+                            f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
+                            f"to accept and thread the upstream type dynamically."
+                        )
+                    if output_type is Any:
+                        raise PipelineValidationError(
+                            f"Strict mode violation at {self._label_for(i)}: output type is unresolved (Any).\n"
+                            f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
+                            f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
+                        )
 
             if first_input_type is None:
                 first_input_type = input_types[0] if len(input_types) == 1 else input_types
