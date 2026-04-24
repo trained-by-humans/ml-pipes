@@ -159,7 +159,7 @@ class Pipeline:
                     self._expand_output_annotation,
                     PipelineValidationError,
                 )
-                if strict and output_type is Any:
+                if strict and not self._is_concrete(output_type):
                     raise PipelineValidationError(
                         f"Strict mode violation at {self._label_for(i)}: output type is unresolved (Any).\n"
                         f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
@@ -179,13 +179,13 @@ class Pipeline:
                     )
 
                 if strict:
-                    if any(t is Any for t in input_types):
+                    if any(not self._is_concrete(t) for t in input_types):
                         raise PipelineValidationError(
                             f"Strict mode violation at {self._label_for(i)}: input type is unresolved (Any).\n"
                             f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                             f"to accept and thread the upstream type dynamically."
                         )
-                    if output_type is Any:
+                    if not self._is_concrete(output_type):
                         raise PipelineValidationError(
                             f"Strict mode violation at {self._label_for(i)}: output type is unresolved (Any).\n"
                             f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
@@ -299,6 +299,12 @@ class Pipeline:
             return issubclass(produced, expected)
         except TypeError:
             return False
+
+    @staticmethod
+    def _is_concrete(annotation: Any) -> bool:
+        if annotation is Any:
+            return False
+        return all(Pipeline._is_concrete(arg) for arg in get_args(annotation))
 
     @staticmethod
     def _is_union_annotation(annotation: Any) -> bool:
