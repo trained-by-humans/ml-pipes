@@ -1,6 +1,6 @@
 import pytest
 
-from ml_pipes import Batch, Pipeline, PipelineValidationError, Recall, Store, UnBatch
+from ml_pipes import Batch, Pipeline, PipelineValidationError, Recall, SideEffectOp, Store, UnBatch
 from ml_pipes.context import ContextOp, Context
 from typing import Any
 
@@ -152,3 +152,69 @@ def test_strict_rejects_list_any_input():
 
 def test_strict_accepts_concrete_generic():
     Pipeline([ReturnsListInt()], strict=True).validate()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# SideEffectOp
+# ---------------------------------------------------------------------------
+
+class RecordingEffect(SideEffectOp):
+    def __init__(self):
+        self.calls = []
+
+    def effect(self, payload: Any) -> None:
+        self.calls.append(payload)
+
+
+def test_side_effect_op_rejects_call_override():
+    with pytest.raises(TypeError, match="must not override __call__"):
+        class BadEffect(SideEffectOp):
+            def __call__(self, payload: Any) -> Any:
+                return payload
+
+            def effect(self, payload: Any) -> None:
+                pass
+
+
+def test_side_effect_op_threads_type():
+    # SideEffectOp should pass strict mode and preserve the upstream type.
+    op = RecordingEffect()
+    Pipeline([IntToString(), op, StringToFloat()], strict=True).validate()
+
+
+def test_side_effect_op_returns_input_unchanged():
+    op = RecordingEffect()
+    pipeline = Pipeline([IntToString(), op])
+    result = pipeline(42)
+    assert result == "42"
+    assert op.calls == ["42"]
+
+
+def test_save_image_passes_strict_validation(tmp_path):
+    from ml_pipes import SaveImage
+    from ml_pipes.types import ImagePayload
+    import numpy as np
+
+    class MakeImage:
+        def __call__(self, value: int) -> ImagePayload:
+            return ImagePayload(array=np.zeros((10, 10, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+    op = SaveImage(tmp_path / "out.jpg")
+    Pipeline([MakeImage(), op], strict=True).validate()
+
+
+def test_log_detections_passes_strict_validation(tmp_path):
+    import io
+    from ml_pipes import LogDetections
+
+    class MakeDetections:
+        def __call__(self, value: int) -> list:
+            return []
+
+    op = LogDetections(
+        model_path="model.onnx",
+        image_path="img.jpg",
+        annotated_image_path="ann.jpg",
+        stream=io.StringIO(),
+    )
+    Pipeline([MakeDetections(), op], strict=True).validate()

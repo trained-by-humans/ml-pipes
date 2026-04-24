@@ -223,6 +223,17 @@ class LogDetections(ContextOp):
         return (Any,), current_output  # accept anything, return what I received
 ```
 
+For side-effect operators that accept any input and return it unchanged
+(logging, saving to disk, drawing annotations), subclass `SideEffectOp`
+instead — it provides both the passthrough `__call__` and the correct
+`resolve_contract` in one base class:
+
+```python
+class MyLogger(SideEffectOp):
+    def effect(self, payload: Any) -> None:
+        print(payload)   # side effect only; return value is managed by the base
+```
+
 `Store`, `Recall`, `Pick`, `Batch`, and `UnBatch` are exempt from the input
 check — their `(Any,)` input contract is architectural. Their output types are
 still checked.
