@@ -1,4 +1,5 @@
 import pytest
+from typing import Any
 
 from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store, embed
 
@@ -189,6 +190,51 @@ def test_embed_rejects_incompatible_boundary_type():
     outer = Pipeline([BoolToBytes(), embed(inner)])  # bytes -> str: incompatible
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        outer.validate()
+
+
+class VagueOp:
+    def __call__(self, value: Any) -> Any:
+        return value
+
+
+def test_outer_strict_rejects_embed_with_vague_output():
+    inner = Pipeline([VagueOp()])
+    outer = Pipeline([embed(inner)], strict=True)
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        outer.validate()
+
+
+def test_outer_strict_accepts_embed_with_concrete_output():
+    inner = Pipeline([IntToString()])
+    outer = Pipeline([embed(inner)], strict=True)
+    outer.validate()  # must not raise
+
+
+def test_inner_strict_rejects_vague_op_regardless_of_outer():
+    inner = Pipeline([VagueOp()], strict=True)
+    outer = Pipeline([embed(inner)])
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        outer.validate()
+
+
+def test_embed_validates_batch_pairs_in_inner_pipeline():
+    from ml_pipes import Batch, UnBatch
+
+    inner = Pipeline([Batch(size=2)])  # no matching UnBatch
+    outer = Pipeline([IntToString(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError):
+        outer.validate()
+
+
+def test_embed_validates_context_interactions_in_inner_pipeline():
+    from ml_pipes import Recall
+
+    inner = Pipeline([Recall("x")])  # key never stored
+    outer = Pipeline([IntToString(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError, match="was not stored"):
         outer.validate()
 
 
