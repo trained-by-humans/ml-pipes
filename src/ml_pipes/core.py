@@ -27,13 +27,13 @@ class Pipeline:
     def __init__(
         self,
         operators: Iterable[Callable[..., Any] | ContextOp],
-        validate_on_init: bool = False,
+        auto_validate: bool = False,
         tracing: TracingConfig | None = None,
     ):
         self.operators = self._flatten(list(operators))
         self._tracing_config = tracing
-        self._validate_on_init = validate_on_init
-        if validate_on_init:
+        self._auto_validate = auto_validate
+        if auto_validate:
             self.validate()
 
     def set_tracing(
@@ -48,7 +48,7 @@ class Pipeline:
     def extend(self, operators: Iterable[Callable[..., Any] | ContextOp]) -> Pipeline:
         """Append *operators* to this pipeline in place and return self."""
         self.operators.extend(self._flatten(list(operators)))
-        if self._validate_on_init:
+        if self._auto_validate:
             self.validate()
         return self
 

@@ -329,7 +329,7 @@ and projection operators are identical and unchanged.
 | Custom processing     | Subclass or post-hoc                | **Full freedom**            | **Any Callable with minimal to no boilerplate** |
 | Reusability           | **Reusable within the same family** | Manual copy-paste           | **Shared operator library**                     |
 | Testability           | Integration tests only              | Unit tests with boilerplate | **Unit + Integration with minimal boilerplate** |
-| Validation            | N/A                                 | No                          | **Build time** (`validate_on_init=True`)        |
+| Validation            | N/A                                 | No                          | **Build time** (`auto_validate=True`)        |
 | Brevity               | **High**                            | Low                         | **Medium**                                      | |
 
 > [!TIP]
@@ -553,7 +553,7 @@ Pipeline([
 
 ### Contract validation
 
-Add type annotations to `__call__` and `Pipeline(validate_on_init=True)` will
+Add type annotations to `__call__` and `Pipeline(auto_validate=True)` will
 verify that each operator's input type is compatible with the previous
 operator's output type at construction time:
 

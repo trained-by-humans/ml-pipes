@@ -98,7 +98,7 @@ def test_pipeline_validate_rejects_incompatible_operator_chain():
 
 
 def test_pipeline_can_validate_during_initialization():
-    Pipeline([IntToString(), StringToFloat(), FloatToBool()], validate_on_init=True)
+    Pipeline([IntToString(), StringToFloat(), FloatToBool()], auto_validate=True)
 
 
 def test_pipeline_validate_requires_operator_annotations():
