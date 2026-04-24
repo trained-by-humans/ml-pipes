@@ -71,12 +71,12 @@ class Pipeline:
     def __call__(self, value: Any) -> Any:
         return self._execute(value, trace=None)
 
-    def validate(self) -> None:
+    def validate(self) -> TypeContract | None:
         if not self.operators:
-            return
+            return None
         self._validate_batch_pairs()
         self._validate_context_interactions()
-        self._resolve_type_contract(strict=self._strict)
+        return self._resolve_type_contract(strict=self._strict)
 
     def _validate_batch_pairs(self) -> None:
         from .ops import Batch, UnBatch
@@ -540,11 +540,14 @@ class Embed:
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         try:
-            type_contract = self.pipeline._resolve_type_contract()
+            type_contract = self.pipeline.validate()
         except PipelineValidationError as exc:
             raise validation_error_type(
                 f"Validation error inside Embed: {exc}"
             ) from exc
+
+        if type_contract is None:
+            return (Any,), current_output
 
         if current_output is not None and not Pipeline._is_annotation_compatible(
             current_output, (type_contract.input_type,)
