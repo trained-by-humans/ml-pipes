@@ -59,9 +59,11 @@ class FrameReader:
         stream_fps: float,
         stream_url: str,
         reconnect_delay_s: float = 1.0,
+        stride: int = 1,
     ) -> None:
         self._cap = cap
         self._stream_url = stream_url
+        self._stride = max(1, stride)
         self._frame_interval = 1.0 / stream_fps
         self._reconnect_delay_s = reconnect_delay_s
         self._buf: collections.deque[tuple[float, Any]] = collections.deque()
@@ -74,6 +76,10 @@ class FrameReader:
 
     def _run(self) -> None:
         while not self._stopped:
+            # Grab and discard stride-1 frames, then decode the strided one
+            for _ in range(self._stride - 1):
+                if not self._cap.grab():
+                    break
             ok, frame = self._cap.read()
             if not ok:
                 if self._stopped:
@@ -89,7 +95,8 @@ class FrameReader:
             now = time.perf_counter()
             if self._t_start is None:
                 self._t_start = now
-            pts = self._t_start + self._frame_index * self._frame_interval
+            # PTS advances by stride intervals so timing stays true to stream clock
+            pts = self._t_start + self._frame_index * self._frame_interval * self._stride
             self._frame_index += 1
             with self._lock:
                 self._buf.append((pts, frame))
@@ -126,7 +133,7 @@ class FrameReader:
         self._thread.join()
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int) -> int:
+def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int) -> int:
     model_path = assets_dir / MODEL_NAME
     print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
     download_if_missing(MODEL_URL, model_path)
@@ -145,8 +152,8 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int) ->
 
     stream_fps = cap.get(cv2.CAP_PROP_FPS) or target_fps
     throughput.target_fps = stream_fps
-    reader = FrameReader(cap, stream_fps=stream_fps, stream_url=stream_url)
-    print(f"Streaming with {workers} worker(s) — press Q in the window to quit.", file=sys.stderr)
+    reader = FrameReader(cap, stream_fps=stream_fps, stream_url=stream_url, stride=stride)
+    print(f"Streaming with {workers} worker(s), stride={stride} — press Q in the window to quit.", file=sys.stderr)
 
     # Sliding window of in-flight futures, collected in submission order so
     # display is sequential. The PTS buffer paces read() at stream rate, so
@@ -210,6 +217,12 @@ def parse_args() -> argparse.Namespace:
         default=2,
         help="Number of parallel inference workers.",
     )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Process every Nth frame; intermediate frames are grabbed but not decoded.",
+    )
     return parser.parse_args()
 
 
@@ -220,6 +233,7 @@ def main() -> int:
         assets_dir=args.assets_dir,
         target_fps=args.target_fps,
         workers=args.workers,
+        stride=args.stride,
     )
 
 
