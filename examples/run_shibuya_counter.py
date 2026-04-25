@@ -53,9 +53,17 @@ class FrameReader:
 
     Both block until a frame is available or the stream ends."""
 
-    def __init__(self, cap: cv2.VideoCapture, stream_fps: float) -> None:
+    def __init__(
+        self,
+        cap: cv2.VideoCapture,
+        stream_fps: float,
+        stream_url: str,
+        reconnect_delay_s: float = 1.0,
+    ) -> None:
         self._cap = cap
+        self._stream_url = stream_url
         self._frame_interval = 1.0 / stream_fps
+        self._reconnect_delay_s = reconnect_delay_s
         self._buf: collections.deque[tuple[float, Any]] = collections.deque()
         self._lock = threading.Lock()
         self._stopped = False
@@ -68,8 +76,16 @@ class FrameReader:
         while not self._stopped:
             ok, frame = self._cap.read()
             if not ok:
-                self._stopped = True
-                break
+                if self._stopped:
+                    break
+                print("\nStream lost — reconnecting...", file=sys.stderr)
+                while not self._stopped:
+                    time.sleep(self._reconnect_delay_s)
+                    self._cap.open(self._stream_url)
+                    if self._cap.isOpened():
+                        print("Reconnected.", file=sys.stderr)
+                        break
+                continue
             now = time.perf_counter()
             if self._t_start is None:
                 self._t_start = now
@@ -129,7 +145,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int) ->
 
     stream_fps = cap.get(cv2.CAP_PROP_FPS) or target_fps
     throughput.target_fps = stream_fps
-    reader = FrameReader(cap, stream_fps=stream_fps)
+    reader = FrameReader(cap, stream_fps=stream_fps, stream_url=stream_url)
     print(f"Streaming with {workers} worker(s) — press Q in the window to quit.", file=sys.stderr)
 
     # Sliding window of in-flight futures, collected in submission order so
