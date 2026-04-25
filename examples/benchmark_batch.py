@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 from common import COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
-from run_batch_yolo8n_onnx import ASSETS_DIR, MODEL_NAME, _export_dynamic_model, build_pipeline
+from run_batch_yolo8_onnx import ASSETS_DIR, MODEL_NAME, _export_dynamic_model, build_pipeline
 
 
 # Throughput benchmark for the Batch/UnBatch pipeline.
@@ -88,7 +88,7 @@ def main() -> int:
     model_path = assets_dir / MODEL_NAME
 
     if not model_path.exists():
-        print(f"Exporting YOLOv8n (dynamic batch) → {model_path}", file=sys.stderr)
+        print(f"Exporting YOLOv8n nano (dynamic batch) → {model_path}", file=sys.stderr)
         _export_dynamic_model(model_path)
 
     sample = assets_dir / COCO_IMAGE_NAME

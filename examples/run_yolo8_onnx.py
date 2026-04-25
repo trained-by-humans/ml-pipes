@@ -3,14 +3,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import argparse
+
 from common import (
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
+    add_model_arg,
     build_output_path,
     decode,
     download_if_missing,
-    parse_input_and_output_args,
+    resolve_model_path,
     visualize_detections_and_store,
 )
 from ml_pipes import (
@@ -33,11 +36,19 @@ from ml_pipes import (
     Transpose,
 )
 
-MODEL_URL = "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"
-MODEL_NAME = "yolov8n.onnx"
+# Registry of all supported YOLOv8 variants.
+# n auto-downloads; s/m/l/x must be exported locally:
+#   yolo export model=yolov8{s,m,l,x}.pt format=onnx
+YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
+    "n": ("yolov8n.onnx", "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"),
+    "s": ("yolov8s.onnx", None),
+    "m": ("yolov8m.onnx", None),
+    "l": ("yolov8l.onnx", None),
+    "x": ("yolov8x.onnx", None),
+}
 
 
-def yolo8n_inference_pipeline(model_path: Path) -> Pipeline:
+def yolo8_inference_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
             Resize((640, 640)),
@@ -62,19 +73,26 @@ def yolo8n_inference_pipeline(model_path: Path) -> Pipeline:
 
 
 def main() -> int:
-    args = parse_input_and_output_args("Run a public YOLOv8n ONNX demo on a COCO image.")
-    assets_dir = args.assets_dir
-    model_path = assets_dir / MODEL_NAME
-    image_path = assets_dir / COCO_IMAGE_NAME
-    output_path = args.output or build_output_path(assets_dir, COCO_IMAGE_NAME, MODEL_NAME)
+    parser = argparse.ArgumentParser(description="Run YOLOv8 ONNX detection on a COCO image.")
+    parser.add_argument("--assets-dir", type=Path, default=Path(".example_assets"))
+    parser.add_argument("--input", type=Path, default=None)
+    parser.add_argument("--output", type=Path, default=None)
+    add_model_arg(parser, list(YOLO8_MODELS))
+    args = parser.parse_args()
 
-    print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
-    download_if_missing(MODEL_URL, model_path)
+    assets_dir = args.assets_dir
+    model_name, model_url = YOLO8_MODELS[args.model]
+    model_path = resolve_model_path(assets_dir, model_name, model_url, args.model)
+    if model_path is None:
+        return 1
+
+    image_path = args.input or assets_dir / COCO_IMAGE_NAME
+    output_path = args.output or build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
 
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(COCO_IMAGE_URL, image_path)
 
-    infer_pipe = yolo8n_inference_pipeline(model_path)
+    infer_pipe = yolo8_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
     pipeline(image_path)
     return 0

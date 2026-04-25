@@ -131,6 +131,39 @@ def visualize_detections_and_store(output_path: Path, class_names: list[str] | N
     ])
 
 
+def add_model_arg(parser: argparse.ArgumentParser, choices: list[str], default: str = "n") -> None:
+    parser.add_argument(
+        "--model",
+        choices=choices,
+        default=default,
+        help=f"Model variant ({' → '.join(choices)}).",
+    )
+
+
+def resolve_model_path(
+    assets_dir: Path,
+    model_name: str,
+    model_url: str | None,
+    variant: str,
+) -> Path | None:
+    """Return the model path, downloading it if a URL is provided.
+
+    Returns None and prints an error if the model is missing and has no URL.
+    """
+    model_path = assets_dir / model_name
+    if model_url:
+        download_if_missing(model_url, model_path)
+    elif not model_path.exists():
+        import sys
+        print(
+            f"Model not found at {model_path}. "
+            f"Export with: yolo export model=yolov8{variant}.pt format=onnx",
+            file=sys.stderr,
+        )
+        return None
+    return model_path
+
+
 def parse_input_and_output_args(description: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
