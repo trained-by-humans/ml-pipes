@@ -47,9 +47,11 @@ class FrameReader:
     Each frame is tagged with its presentation time (PTS) derived from the
     stream FPS and frame index — independent of HLS burst jitter.
 
-    On read(), frames whose PTS has already passed are dropped, and the most
-    recent non-expired frame is returned. Future frames stay in the buffer.
-    This gives the inference loop a steady-time view of the stream."""
+    Two consumption modes:
+    - latest(): drops all expired frames, returns the most recent due one (eager).
+    - next(): returns the oldest buffered frame in strict arrival order (lazy).
+
+    Both block until a frame is available or the stream ends."""
 
     def __init__(self, cap: cv2.VideoCapture, stream_fps: float) -> None:
         self._cap = cap
@@ -76,7 +78,8 @@ class FrameReader:
             with self._lock:
                 self._buf.append((pts, frame))
 
-    def read(self) -> tuple[bool, Any]:
+    def latest(self) -> tuple[bool, Any]:
+        """Eager: drop expired frames, return the most recent due frame."""
         while True:
             with self._lock:
                 if not self._buf:
@@ -89,6 +92,17 @@ class FrameReader:
                         _, current = self._buf.popleft()
                     if current is not None:
                         return True, current
+            time.sleep(0.001)
+
+    def next(self) -> tuple[bool, Any]:
+        """Lazy: return the oldest buffered frame in strict arrival order."""
+        while True:
+            with self._lock:
+                if self._buf:
+                    _, frame = self._buf.popleft()
+                    return True, frame
+                if self._stopped:
+                    return False, None
             time.sleep(0.001)
 
     def stop(self) -> None:
@@ -132,7 +146,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int) ->
         while True:
             # Fill the sliding window up to `workers` in-flight tasks
             while not stopped and len(pending) < workers:
-                ok, frame = reader.read()
+                ok, frame = reader.latest()
                 if not ok or frame is None:
                     stopped = True
                     break
