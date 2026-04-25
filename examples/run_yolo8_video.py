@@ -6,8 +6,8 @@ from pathlib import Path
 
 import cv2
 
-from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, download_if_missing
-from run_yolo8n_onnx import MODEL_NAME, MODEL_URL, yolo8n_inference_pipeline
+from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, add_model_arg, download_if_missing, resolve_model_path
+from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
     ImagePayload,
@@ -18,15 +18,15 @@ from ml_pipes import (
     Embed,
 )
 
-# Sequential frame-by-frame inference on a video file with YOLOv8n.
+# Sequential frame-by-frame inference on a video file with YOLOv8.
 #
 # Reads every frame from a video, runs detection, and writes an annotated
 # output video.  This is the single-frame sequential baseline we will later
 # compare against batched inference.
 #
 # Usage:
-#   python run_yolo8n_video.py --input clip.mp4
-#   python run_yolo8n_video.py --input clip.mp4 --output annotated.mp4
+#   python run_yolo8_video.py --input clip.mp4
+#   python run_yolo8_video.py --input clip.mp4 --output annotated.mp4
 
 ASSETS_DIR = Path(".example_assets")
 
@@ -34,7 +34,7 @@ ASSETS_DIR = Path(".example_assets")
 def build_video_annotation_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
         Store("source_frame"),
-        Embed(yolo8n_inference_pipeline(model_path)),
+        Embed(yolo8_inference_pipeline(model_path)),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0)
@@ -43,7 +43,7 @@ def build_video_annotation_pipeline(model_path: Path) -> Pipeline:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Sequential YOLOv8n inference on a video file.",
+        description="Sequential YOLOv8 inference on a video file.",
     )
     parser.add_argument(
         "--input",
@@ -54,12 +54,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=None,
                         help="Output annotated video. Defaults to <input>_annotated.mp4.")
     parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    add_model_arg(parser, list(YOLO8_MODELS))
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    model_path = args.assets_dir / MODEL_NAME
+    model_name, model_url = YOLO8_MODELS[args.model]
+    model_path = resolve_model_path(args.assets_dir, model_name, model_url, args.model)
+    if model_path is None:
+        return 1
 
     input_path = args.input or args.assets_dir / SAMPLE_VIDEO_NAME
     if args.input is None:
@@ -67,9 +71,6 @@ def main() -> int:
         download_if_missing(SAMPLE_VIDEO_URL, input_path)
 
     output_path = args.output or input_path.with_stem(input_path.stem + "_annotated").with_suffix(".mp4")
-
-    print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
-    download_if_missing(MODEL_URL, model_path)
 
     cap = cv2.VideoCapture(str(input_path))
     if not cap.isOpened():

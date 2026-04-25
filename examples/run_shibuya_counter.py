@@ -11,16 +11,8 @@ from pathlib import Path
 
 import cv2
 
-from common import COCO_CLASSES, download_if_missing
-from run_yolo8n_onnx import MODEL_URL as MODEL_URL_N, yolo8n_inference_pipeline
-
-_MODELS: dict[str, tuple[str, str | None]] = {
-    "n": ("yolov8n.onnx", MODEL_URL_N),
-    "s": ("yolov8s.onnx", None),
-    "m": ("yolov8m.onnx", None),
-    "l": ("yolov8l.onnx", None),
-    "x": ("yolov8x.onnx", None),
-}
+from common import COCO_CLASSES, add_model_arg, resolve_model_path
+from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
     Embed,
@@ -43,7 +35,7 @@ def get_stream_url(youtube_url: str) -> str:
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
         Store("source_frame"),
-        Embed(yolo8n_inference_pipeline(model_path)),
+        Embed(yolo8_inference_pipeline(model_path)),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
@@ -142,13 +134,9 @@ class FrameReader:
 
 
 def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str) -> int:
-    model_name, model_url = _MODELS[model]
-    model_path = assets_dir / model_name
-    if model_url:
-        print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
-        download_if_missing(model_url, model_path)
-    elif not model_path.exists():
-        print(f"Model not found at {model_path}. Export with: yolo export model=yolov8{model}.pt format=onnx", file=sys.stderr)
+    model_name, model_url = YOLO8_MODELS[model]
+    model_path = resolve_model_path(assets_dir, model_name, model_url, model)
+    if model_path is None:
         return 1
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
@@ -193,7 +181,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
             # Collect the oldest result in order
             annotated = pending.popleft().result()
-            cv2.imshow("Shibuya Crossing - YOLOv8n", annotated.array)
+            cv2.imshow("Shibuya Crossing - YOLOv8", annotated.array)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 stopped = True
 
@@ -206,7 +194,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Stream Shibuya crossing with live YOLOv8n detections.")
+    parser = argparse.ArgumentParser(description="Stream Shibuya crossing with live YOLOv8 detections.")
     parser.add_argument(
         "--url",
         default="https://www.youtube.com/watch?v=dfVK7ld38Ys",
@@ -236,12 +224,7 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Process every Nth frame; intermediate frames are grabbed but not decoded.",
     )
-    parser.add_argument(
-        "--model",
-        choices=["n", "s", "m", "l", "x"],
-        default="x",
-        help="YOLOv8 variant: n (nano) → s → m → l → x (most accurate, slowest).",
-    )
+    add_model_arg(parser, list(YOLO8_MODELS), default="x")
     return parser.parse_args()
 
 
