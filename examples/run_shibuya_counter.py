@@ -5,6 +5,7 @@ import sys
 import collections
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Any
 from pathlib import Path
 
@@ -81,11 +82,8 @@ class FrameReader:
                 if not self._buf:
                     if self._stopped:
                         return False, None
-                    # Nothing yet — spin briefly
-                    pass
                 else:
                     now = time.perf_counter()
-                    # Drop all expired frames, keep the last one that has passed
                     current: Any = None
                     while self._buf and self._buf[0][0] <= now:
                         _, current = self._buf.popleft()
@@ -98,7 +96,7 @@ class FrameReader:
         self._thread.join()
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float) -> int:
+def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int) -> int:
     model_path = assets_dir / MODEL_NAME
     print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
     download_if_missing(MODEL_URL, model_path)
@@ -116,20 +114,38 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float) -> int:
         return 1
 
     stream_fps = cap.get(cv2.CAP_PROP_FPS) or target_fps
+    throughput.target_fps = stream_fps
     reader = FrameReader(cap, stream_fps=stream_fps)
-    print("Streaming — press Q in the window to quit.", file=sys.stderr)
-    while True:
-        ok, frame = reader.read()
-        if not ok or frame is None:
-            print("Warning: stream ended or reader failed, stopping.", file=sys.stderr)
-            break
+    print(f"Streaming with {workers} worker(s) — press Q in the window to quit.", file=sys.stderr)
 
+    # Sliding window of in-flight futures, collected in submission order so
+    # display is sequential. The PTS buffer paces read() at stream rate, so
+    # workers block on their frame slot rather than bursting.
+    pending: collections.deque[Future] = collections.deque()
+    stopped = False
+
+    def infer(frame: Any) -> Any:
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
-        annotated = pipeline(source)
+        return pipeline(source)
 
-        cv2.imshow("Shibuya Crossing — YOLOv8n", annotated.array)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        while True:
+            # Fill the sliding window up to `workers` in-flight tasks
+            while not stopped and len(pending) < workers:
+                ok, frame = reader.read()
+                if not ok or frame is None:
+                    stopped = True
+                    break
+                pending.append(pool.submit(infer, frame))
+
+            if not pending:
+                break
+
+            # Collect the oldest result in order
+            annotated = pending.popleft().result()
+            cv2.imshow("Shibuya Crossing - YOLOv8n", annotated.array)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                stopped = True
 
     reader.stop()
     cap.release()
@@ -158,12 +174,23 @@ def parse_args() -> argparse.Namespace:
         default=25.0,
         help="Target FPS for throughput reporting.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=2,
+        help="Number of parallel inference workers.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    return run_pipeline(url=args.url, assets_dir=args.assets_dir, target_fps=args.target_fps)
+    return run_pipeline(
+        url=args.url,
+        assets_dir=args.assets_dir,
+        target_fps=args.target_fps,
+        workers=args.workers,
+    )
 
 
 if __name__ == "__main__":
