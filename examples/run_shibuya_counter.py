@@ -12,7 +12,15 @@ from pathlib import Path
 import cv2
 
 from common import COCO_CLASSES, download_if_missing
-from run_yolo8n_onnx import MODEL_NAME, MODEL_URL, yolo8n_inference_pipeline
+from run_yolo8n_onnx import MODEL_URL as MODEL_URL_N, yolo8n_inference_pipeline
+
+_MODELS: dict[str, tuple[str, str | None]] = {
+    "n": ("yolov8n.onnx", MODEL_URL_N),
+    "s": ("yolov8s.onnx", None),
+    "m": ("yolov8m.onnx", None),
+    "l": ("yolov8l.onnx", None),
+    "x": ("yolov8x.onnx", None),
+}
 from ml_pipes import (
     DrawBoxes,
     Embed,
@@ -133,10 +141,15 @@ class FrameReader:
         self._thread.join()
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int) -> int:
-    model_path = assets_dir / MODEL_NAME
-    print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
-    download_if_missing(MODEL_URL, model_path)
+def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str) -> int:
+    model_name, model_url = _MODELS[model]
+    model_path = assets_dir / model_name
+    if model_url:
+        print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
+        download_if_missing(model_url, model_path)
+    elif not model_path.exists():
+        print(f"Model not found at {model_path}. Export with: yolo export model=yolov8{model}.pt format=onnx", file=sys.stderr)
+        return 1
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
     pipeline = build_pipeline(model_path)
@@ -214,7 +227,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--workers",
         type=int,
-        default=2,
+        default=1,
         help="Number of parallel inference workers.",
     )
     parser.add_argument(
@@ -222,6 +235,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Process every Nth frame; intermediate frames are grabbed but not decoded.",
+    )
+    parser.add_argument(
+        "--model",
+        choices=["n", "s", "m", "l", "x"],
+        default="x",
+        help="YOLOv8 variant: n (nano) → s → m → l → x (most accurate, slowest).",
     )
     return parser.parse_args()
 
@@ -234,6 +253,7 @@ def main() -> int:
         target_fps=args.target_fps,
         workers=args.workers,
         stride=args.stride,
+        model=args.model,
     )
 
 
