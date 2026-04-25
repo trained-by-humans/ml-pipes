@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+import collections
+import time
+import threading
+from typing import Any
 from pathlib import Path
 
 import cv2
@@ -37,12 +41,69 @@ def build_pipeline(model_path: Path) -> Pipeline:
     ])
 
 
+class FrameReader:
+    """Reads frames from a VideoCapture on a background thread into a deque.
+    Each frame is tagged with its presentation time (PTS) derived from the
+    stream FPS and frame index — independent of HLS burst jitter.
+
+    On read(), frames whose PTS has already passed are dropped, and the most
+    recent non-expired frame is returned. Future frames stay in the buffer.
+    This gives the inference loop a steady-time view of the stream."""
+
+    def __init__(self, cap: cv2.VideoCapture, stream_fps: float) -> None:
+        self._cap = cap
+        self._frame_interval = 1.0 / stream_fps
+        self._buf: collections.deque[tuple[float, Any]] = collections.deque()
+        self._lock = threading.Lock()
+        self._stopped = False
+        self._t_start: float | None = None
+        self._frame_index = 0
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stopped:
+            ok, frame = self._cap.read()
+            if not ok:
+                self._stopped = True
+                break
+            now = time.perf_counter()
+            if self._t_start is None:
+                self._t_start = now
+            pts = self._t_start + self._frame_index * self._frame_interval
+            self._frame_index += 1
+            with self._lock:
+                self._buf.append((pts, frame))
+
+    def read(self) -> tuple[bool, Any]:
+        while True:
+            with self._lock:
+                if not self._buf:
+                    if self._stopped:
+                        return False, None
+                    # Nothing yet — spin briefly
+                    pass
+                else:
+                    now = time.perf_counter()
+                    # Drop all expired frames, keep the last one that has passed
+                    current: Any = None
+                    while self._buf and self._buf[0][0] <= now:
+                        _, current = self._buf.popleft()
+                    if current is not None:
+                        return True, current
+            time.sleep(0.001)
+
+    def stop(self) -> None:
+        self._stopped = True
+        self._thread.join()
+
+
 def run_pipeline(url: str, assets_dir: Path, target_fps: float) -> int:
     model_path = assets_dir / MODEL_NAME
     print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
     download_if_missing(MODEL_URL, model_path)
 
-    throughput = ThroughputCollector(target_fps=target_fps)
+    throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
     pipeline = build_pipeline(model_path)
     pipeline.set_tracing(throughput)
 
@@ -54,11 +115,13 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float) -> int:
         print("Error: could not open stream.", file=sys.stderr)
         return 1
 
+    stream_fps = cap.get(cv2.CAP_PROP_FPS) or target_fps
+    reader = FrameReader(cap, stream_fps=stream_fps)
     print("Streaming — press Q in the window to quit.", file=sys.stderr)
     while True:
-        ok, frame = cap.read()
+        ok, frame = reader.read()
         if not ok or frame is None:
-            print("Warning: failed to read frame, stopping.", file=sys.stderr)
+            print("Warning: stream ended or reader failed, stopping.", file=sys.stderr)
             break
 
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
@@ -68,6 +131,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float) -> int:
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
+    reader.stop()
     cap.release()
     cv2.destroyAllWindows()
     throughput.flush()
