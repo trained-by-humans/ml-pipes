@@ -110,7 +110,6 @@ class ThroughputCollector(AggregateCollector):
 
     def print_summary(self) -> None:
         print()  # move past the last \r line
-        elapsed = time.perf_counter() - self._t_start if self._t_start else 0.0
         fps = self.fps
         min_fps = self._min_fps if self._min_fps != float("inf") else 0.0
         if self.target_fps is not None:
@@ -118,14 +117,6 @@ class ThroughputCollector(AggregateCollector):
             fps_str = f"{fps:.1f} / {self.target_fps:.1f} target ({coverage:.0f}%)"
         else:
             fps_str = f"{fps:.1f}"
-        print(f"  Frames               : {self._calls}")
         print(f"  FPS Avg.             : {fps_str}")
         print(f"  FPS min / max        : {min_fps:.1f} / {self._max_fps:.1f}")
-        print(f"  Latency Avg.         : {self.avg_pipeline_latency_ms:.2f}ms")
-        print()
-        fracs = self.operator_fractions()
-        avgs = self.avg_operator_latency_ms()
-        print(f"  {'Operator':<35} {'Avg ms':>8}  {'% of total':>10}")
-        print(f"  {'-' * 35} {'-' * 8}  {'-' * 10}")
-        for label in self._op_total:
-            print(f"  {label:<35} {avgs[label]:>8.2f}ms {fracs[label] * 100:>9.1f}%")
+        super().print_summary()
