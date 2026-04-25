@@ -63,12 +63,12 @@ class AggregateCollector(ConcurrentCollector):
         if self._calls == 0:
             print("  (no calls recorded)")
             return
-        print(f"  Calls : {self._calls}")
-        print(f"  Avg pipeline latency : {self.avg_pipeline_latency_ms:.2f}ms")
+        print(f"  Calls                : {self._calls}")
+        print(f"  Latency Avg.         : {self.avg_pipeline_latency_ms:.2f}ms")
         print()
         fracs = self.operator_fractions()
         avgs = self.avg_operator_latency_ms()
-        print(f"  {'Operator':<35} {'Avg ms':>8}  {'% of total':>10}")
-        print(f"  {'-' * 35} {'-' * 8}  {'-' * 10}")
+        print(f"  {'Operator':<35} {'Avg ms':>10} {'% of total':>10}")
+        print(f"  {'-' * 35} {'-' * 10} {'-' * 10}")
         for label in self._op_total:
-            print(f"  {label:<35} {avgs[label]:>8.2f}ms {fracs[label] * 100:>9.1f}%")
+            print(f"  {label:<35} {f'{avgs[label]:.2f}ms':>10} {f'{fracs[label] * 100:.1f}%':>10}")
