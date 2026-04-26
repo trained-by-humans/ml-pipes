@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from common import COCO_CLASSES, add_assets_dir_arg, add_model_arg, resolve_model_path
+from common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
@@ -34,19 +34,19 @@ def get_stream_url(youtube_url: str) -> str:
         return info["url"]
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_pipeline(model_path: Path, conf_threshold: float = 0.25) -> Pipeline:
     return Pipeline([
         Store("source_frame"),
-        Embed(yolo8_inference_pipeline(model_path)),
+        Embed(yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
     ])
 
 
-def build_tiled_infer_fn(model_path: Path, throughput: ThroughputCollector) -> Any:
+def build_tiled_infer_fn(model_path: Path, throughput: ThroughputCollector, conf_threshold: float = 0.25) -> Any:
     """Returns an inference function that tiles the frame before detection."""
-    infer_pipe = yolo8_inference_pipeline(model_path)
+    infer_pipe = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
     infer_pipe.set_tracing(throughput)
     box_annotator = sv.BoxAnnotator()
     label_annotator = sv.LabelAnnotator()
@@ -171,7 +171,7 @@ class FrameReader:
         self._thread.join()
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool) -> int:
+def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool, conf_threshold: float) -> int:
     model_name, model_url = YOLO8_MODELS[model]
     model_path = resolve_model_path(assets_dir, model_name, model_url, model)
     if model_path is None:
@@ -180,9 +180,9 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
 
     if tile:
-        _infer_tiled = build_tiled_infer_fn(model_path, throughput)
+        _infer_tiled = build_tiled_infer_fn(model_path, throughput, conf_threshold)
     else:
-        pipeline = build_pipeline(model_path)
+        pipeline = build_pipeline(model_path, conf_threshold)
         pipeline.set_tracing(throughput)
 
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
@@ -266,6 +266,7 @@ def parse_args() -> argparse.Namespace:
         help="Process every Nth frame; intermediate frames are grabbed but not decoded.",
     )
     add_model_arg(parser, list(YOLO8_MODELS), default="x")
+    add_conf_threshold_arg(parser)
     parser.add_argument(
         "--tile",
         action="store_true",
@@ -283,7 +284,8 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         model=args.model,
-        tile=args.tile if args.tile else True,
+        tile=args.tile,
+        conf_threshold=args.conf_threshold,
     )
 
 
