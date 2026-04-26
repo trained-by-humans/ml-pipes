@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
+from common import add_assets_dir_arg, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
 from ml_pipes import (
     ArgMax,
     Batch,
@@ -128,7 +128,7 @@ def parse_args() -> argparse.Namespace:
         default=0.05,
         help="Seconds to wait before running a partial batch (default: 0.05).",
     )
-    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    add_assets_dir_arg(parser)
     parser.add_argument(
         "--no-serialize",
         action="store_true",

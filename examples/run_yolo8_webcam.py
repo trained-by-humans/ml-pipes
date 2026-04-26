@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 
-from common import ASSETS_DIR, COCO_CLASSES, add_model_arg, resolve_model_path
+from common import COCO_CLASSES, add_assets_dir_arg, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
@@ -38,7 +38,7 @@ def build_webcam_annotation_pipeline(model_path: Path) -> Pipeline:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Live webcam inference with YOLOv8.")
-    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    add_assets_dir_arg(parser)
     add_model_arg(parser, list(YOLO8_MODELS))
     args = parser.parse_args()
 

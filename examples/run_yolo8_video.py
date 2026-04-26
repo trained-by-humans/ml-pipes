@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 
-from common import ASSETS_DIR, COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, add_model_arg, download_if_missing, resolve_model_path
+from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, add_assets_dir_arg, add_model_arg, download_if_missing, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path, default=None,
                         help="Output annotated video. Defaults to <input>_annotated.mp4.")
-    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    add_assets_dir_arg(parser)
     add_model_arg(parser, list(YOLO8_MODELS))
     return parser.parse_args()
 
