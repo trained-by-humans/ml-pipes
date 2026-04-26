@@ -24,6 +24,7 @@ from ml_pipes import (
     Recall,
     Store,
     ThroughputCollector,
+    Detections,
 )
 
 
@@ -34,50 +35,35 @@ def get_stream_url(youtube_url: str) -> str:
         return info["url"]
 
 
-def build_pipeline(model_path: Path, conf_threshold: float = 0.25) -> Pipeline:
-    return Pipeline([
-        Store("source_frame"),
-        Embed(yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)),
-        Recall("source_frame", index=0),
-        DrawBoxes(class_names=COCO_CLASSES),
-        Pick(0),
-    ])
+class InferenceSlicer:
+    """Wraps sv.InferenceSlicer to present the same ImagePayload → Detections
+    contract as a plain inference pipeline."""
 
+    def __init__(self, base: Pipeline) -> None:
+        def _tile_callback(tile_arr: np.ndarray) -> sv.Detections:
+            result: Detections = base(ImagePayload(array=tile_arr, color_space="BGR", layout="HWC"))
+            return sv.Detections(
+                xyxy=np.array(result.boxes, dtype=np.float32),
+                confidence=np.array(result.scores, dtype=np.float32),
+                class_id=np.array(result.classes, dtype=int),
+            )
 
-def build_tiled_infer_fn(model_path: Path, throughput: ThroughputCollector, conf_threshold: float = 0.25) -> Any:
-    """Returns an inference function that tiles the frame before detection."""
-    infer_pipe = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
-    infer_pipe.set_tracing(throughput)
-    box_annotator = sv.BoxAnnotator()
-    label_annotator = sv.LabelAnnotator()
-
-    def _callback(tile: np.ndarray) -> sv.Detections:
-        result = infer_pipe(ImagePayload(array=tile, color_space="BGR", layout="HWC"))
-        return sv.Detections(
-            xyxy=np.array(result.boxes, dtype=np.float32),
-            confidence=np.array(result.scores, dtype=np.float32),
-            class_id=np.array(result.classes, dtype=int),
+        self.slicer = sv.InferenceSlicer(
+            callback=_tile_callback,
+            slice_wh=(640, 640),
+            overlap_wh=(100, 100),
+            overlap_filter=sv.OverlapFilter.NON_MAX_MERGE,
+            iou_threshold=0.5,
+            thread_workers=1,
         )
 
-    slicer = sv.InferenceSlicer(
-        callback=_callback,
-        slice_wh=(640, 640),
-        overlap_wh=(100, 100),
-        overlap_filter=sv.OverlapFilter.NON_MAX_MERGE,
-        iou_threshold=0.5,
-        thread_workers=1,
-    )
-
-    def infer_tiled(frame: np.ndarray) -> np.ndarray:
-        detections = slicer(frame)
-        labels = [
-            f"{COCO_CLASSES[c]} {s:.2f}"
-            for c, s in zip(detections.class_id, detections.confidence)
-        ]
-        annotated = box_annotator.annotate(frame.copy(), detections)
-        return label_annotator.annotate(annotated, detections, labels=labels)
-
-    return infer_tiled
+    def __call__(self, payload: ImagePayload) -> Detections:
+        sv_dets = self.slicer(payload.array)
+        return Detections(
+            boxes=[box.tolist() for box in sv_dets.xyxy],
+            scores=sv_dets.confidence.tolist(),
+            classes=sv_dets.class_id.tolist(),
+        )
 
 
 class FrameReader:
@@ -171,6 +157,19 @@ class FrameReader:
         self._thread.join()
 
 
+def build_pipeline(model_path: Path, conf_threshold: float, tile: bool) -> Pipeline:
+    infer_pipe = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
+    if tile:
+        infer_pipe = Pipeline([InferenceSlicer(infer_pipe)])
+    return Pipeline([
+        Store("source_frame"),
+        Embed(infer_pipe),
+        Recall("source_frame", index=0),
+        DrawBoxes(class_names=COCO_CLASSES),
+        Pick(0),
+    ])
+
+
 def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool, conf_threshold: float) -> int:
     model_name, model_url = YOLO8_MODELS[model]
     model_path = resolve_model_path(assets_dir, model_name, model_url, model)
@@ -178,12 +177,8 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
         return 1
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
-
-    if tile:
-        _infer_tiled = build_tiled_infer_fn(model_path, throughput, conf_threshold)
-    else:
-        pipeline = build_pipeline(model_path, conf_threshold)
-        pipeline.set_tracing(throughput)
+    pipeline = build_pipeline(model_path, conf_threshold, tile)
+    pipeline.set_tracing(throughput)
 
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
     stream_url = get_stream_url(url)
@@ -199,21 +194,14 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     mode = "tiled" if tile else "standard"
     print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
 
-    # Sliding window of in-flight futures, collected in submission order so
-    # display is sequential. The PTS buffer paces read() at stream rate, so
-    # workers block on their frame slot rather than bursting.
     pending: collections.deque[Future] = collections.deque()
     stopped = False
 
     def infer(frame: Any) -> Any:
-        if tile:
-            return _infer_tiled(frame)
-        source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
-        return pipeline(source)
+        return pipeline(ImagePayload(array=frame, color_space="BGR", layout="HWC"))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         while True:
-            # Fill the sliding window up to `workers` in-flight tasks
             while not stopped and len(pending) < workers:
                 ok, frame = reader.latest()
                 if not ok or frame is None:
@@ -224,10 +212,8 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
             if not pending:
                 break
 
-            # Collect the oldest result in order
             result = pending.popleft().result()
-            frame_out = result if tile else result.array
-            cv2.imshow("Shibuya Crossing - YOLOv8", frame_out)
+            cv2.imshow("Shibuya Crossing - YOLOv8", result.array)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 stopped = True
 
