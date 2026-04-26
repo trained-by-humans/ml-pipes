@@ -10,6 +10,8 @@ from typing import Any
 from pathlib import Path
 
 import cv2
+import numpy as np
+import supervision as sv
 
 from common import COCO_CLASSES, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
@@ -40,6 +42,41 @@ def build_pipeline(model_path: Path) -> Pipeline:
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
     ])
+
+
+def build_tiled_infer_fn(model_path: Path) -> Any:
+    """Returns an inference function that tiles the frame before detection."""
+    infer_pipe = yolo8_inference_pipeline(model_path)
+    box_annotator = sv.BoxAnnotator()
+    label_annotator = sv.LabelAnnotator()
+
+    def _callback(tile: np.ndarray) -> sv.Detections:
+        result = infer_pipe(ImagePayload(array=tile, color_space="BGR", layout="HWC"))
+        return sv.Detections(
+            xyxy=np.array(result.boxes, dtype=np.float32),
+            confidence=np.array(result.scores, dtype=np.float32),
+            class_id=np.array(result.classes, dtype=int),
+        )
+
+    slicer = sv.InferenceSlicer(
+        callback=_callback,
+        slice_wh=(640, 640),
+        overlap_wh=(100, 100),
+        overlap_filter=sv.OverlapFilter.NON_MAX_MERGE,
+        iou_threshold=0.5,
+        thread_workers=1,
+    )
+
+    def infer_tiled(frame: np.ndarray) -> np.ndarray:
+        detections = slicer(frame)
+        labels = [
+            f"{COCO_CLASSES[c]} {s:.2f}"
+            for c, s in zip(detections.class_id, detections.confidence)
+        ]
+        annotated = box_annotator.annotate(frame.copy(), detections)
+        return label_annotator.annotate(annotated, detections, labels=labels)
+
+    return infer_tiled
 
 
 class FrameReader:
@@ -133,15 +170,19 @@ class FrameReader:
         self._thread.join()
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str) -> int:
+def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool) -> int:
     model_name, model_url = YOLO8_MODELS[model]
     model_path = resolve_model_path(assets_dir, model_name, model_url, model)
     if model_path is None:
         return 1
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
-    pipeline = build_pipeline(model_path)
-    pipeline.set_tracing(throughput)
+
+    if tile:
+        _infer_tiled = build_tiled_infer_fn(model_path)
+    else:
+        pipeline = build_pipeline(model_path)
+        pipeline.set_tracing(throughput)
 
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
     stream_url = get_stream_url(url)
@@ -154,7 +195,8 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     stream_fps = cap.get(cv2.CAP_PROP_FPS) or target_fps
     throughput.target_fps = stream_fps
     reader = FrameReader(cap, stream_fps=stream_fps, stream_url=stream_url, stride=stride)
-    print(f"Streaming with {workers} worker(s), stride={stride} — press Q in the window to quit.", file=sys.stderr)
+    mode = "tiled" if tile else "standard"
+    print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
 
     # Sliding window of in-flight futures, collected in submission order so
     # display is sequential. The PTS buffer paces read() at stream rate, so
@@ -163,6 +205,8 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     stopped = False
 
     def infer(frame: Any) -> Any:
+        if tile:
+            return _infer_tiled(frame)
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
         return pipeline(source)
 
@@ -180,8 +224,9 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
                 break
 
             # Collect the oldest result in order
-            annotated = pending.popleft().result()
-            cv2.imshow("Shibuya Crossing - YOLOv8", annotated.array)
+            result = pending.popleft().result()
+            frame_out = result if tile else result.array
+            cv2.imshow("Shibuya Crossing - YOLOv8", frame_out)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 stopped = True
 
@@ -225,6 +270,11 @@ def parse_args() -> argparse.Namespace:
         help="Process every Nth frame; intermediate frames are grabbed but not decoded.",
     )
     add_model_arg(parser, list(YOLO8_MODELS), default="x")
+    parser.add_argument(
+        "--tile",
+        action="store_true",
+        help="Enable SAHI-style tiling for better small object detection (slower).",
+    )
     return parser.parse_args()
 
 
@@ -237,6 +287,7 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         model=args.model,
+        tile=args.tile,
     )
 
 
