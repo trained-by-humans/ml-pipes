@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 
-from common import COCO_CLASSES, add_model_arg, resolve_model_path
+from common import ASSETS_DIR, COCO_CLASSES, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
@@ -25,9 +25,6 @@ from ml_pipes import (
 #
 # The pipeline starts at Resize rather than Decode because cv2.VideoCapture
 # already gives us a decoded BGR array — there is no file path to read.
-
-ASSETS_DIR = Path(".example_assets")
-
 
 def build_webcam_annotation_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([

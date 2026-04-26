@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from common import COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
+from common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
 from ml_pipes import (
     ArgMax,
     Batch,
@@ -53,7 +53,6 @@ from ml_pipes import (
 #   python run_batch_yolo8_onnx.py --batch-size 4 --workers 8
 
 MODEL_NAME = "yolov8n_dynamic.onnx"
-ASSETS_DIR = Path(".example_assets")
 
 
 def _export_dynamic_model(dst: Path) -> None:

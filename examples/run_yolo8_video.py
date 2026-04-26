@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 
-from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, add_model_arg, download_if_missing, resolve_model_path
+from common import ASSETS_DIR, COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, add_model_arg, download_if_missing, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
@@ -27,9 +27,6 @@ from ml_pipes import (
 # Usage:
 #   python run_yolo8_video.py --input clip.mp4
 #   python run_yolo8_video.py --input clip.mp4 --output annotated.mp4
-
-ASSETS_DIR = Path(".example_assets")
-
 
 def build_video_annotation_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
