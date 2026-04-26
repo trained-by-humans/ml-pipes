@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from common import ASSETS_DIR, COCO_CLASSES, add_model_arg, resolve_model_path
+from common import COCO_CLASSES, add_assets_dir_arg, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
@@ -245,12 +245,7 @@ def parse_args() -> argparse.Namespace:
         default="https://www.youtube.com/watch?v=dfVK7ld38Ys",
         help="YouTube live URL.",
     )
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache the downloaded model.",
-    )
+    add_assets_dir_arg(parser)
     parser.add_argument(
         "--target-fps",
         type=float,

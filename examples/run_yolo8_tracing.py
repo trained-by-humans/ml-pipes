@@ -17,10 +17,10 @@ import sys
 from pathlib import Path
 
 from common import (
-    ASSETS_DIR,
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
+    add_assets_dir_arg,
     add_model_arg,
     build_output_path,
     decode,
@@ -38,7 +38,7 @@ from ml_pipes import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    add_assets_dir_arg(parser)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--runs", type=int, default=5, help="Number of inference runs for aggregate stats.")
     add_model_arg(parser, list(YOLO8_MODELS))

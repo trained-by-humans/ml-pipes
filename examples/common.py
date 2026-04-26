@@ -133,6 +133,15 @@ def visualize_detections_and_store(output_path: Path, class_names: list[str] | N
     ])
 
 
+def add_assets_dir_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
+
+
 def add_model_arg(parser: argparse.ArgumentParser, choices: list[str], default: str = "n") -> None:
     parser.add_argument(
         "--model",
@@ -168,12 +177,7 @@ def resolve_model_path(
 
 def parse_input_and_output_args(description: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache the downloaded public model and image.",
-    )
+    add_assets_dir_arg(parser)
     parser.add_argument(
         "--output",
         type=Path,

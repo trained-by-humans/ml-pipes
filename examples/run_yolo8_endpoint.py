@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 from common import (
-    ASSETS_DIR,
+    add_assets_dir_arg,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
     download_if_missing,
@@ -99,7 +99,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Image to send with --call. Defaults to the sample COCO image.",
     )
-    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
+    add_assets_dir_arg(parser)
     return parser.parse_args()
 
 
