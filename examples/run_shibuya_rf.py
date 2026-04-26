@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from common import COCO_CLASSES, add_model_arg, resolve_model_path
+from common import ASSETS_DIR, COCO_CLASSES, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import ImagePayload, Pipeline
 
@@ -207,7 +207,7 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Shibuya crossing stream with ml_pipes ONNX + Supervision.")
     parser.add_argument("--url", default="https://www.youtube.com/watch?v=dfVK7ld38Ys")
-    parser.add_argument("--assets-dir", type=Path, default=Path(".example_assets"))
+    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--stride", type=int, default=1, help="Process every Nth frame.")
     add_model_arg(parser, list(YOLO8_MODELS), default="x")

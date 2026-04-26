@@ -7,6 +7,8 @@ from pathlib import Path
 
 from ml_pipes import Decode, DrawBoxes, DrawMasks, LoadFile, Pipeline, Recall, SaveImage, Store
 
+ASSETS_DIR = Path(__file__).parent / ".example_assets"
+
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
 COCO_IMAGE_NAME = "coco_000000039769.jpg"
 
@@ -169,7 +171,7 @@ def parse_input_and_output_args(description: str) -> argparse.Namespace:
     parser.add_argument(
         "--assets-dir",
         type=Path,
-        default=Path(".example_assets"),
+        default=ASSETS_DIR,
         help="Directory used to cache the downloaded public model and image.",
     )
     parser.add_argument(

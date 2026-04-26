@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from common import COCO_CLASSES, add_model_arg, resolve_model_path
+from common import ASSETS_DIR, COCO_CLASSES, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     DrawBoxes,
@@ -248,7 +248,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--assets-dir",
         type=Path,
-        default=Path(".example_assets"),
+        default=ASSETS_DIR,
         help="Directory used to cache the downloaded model.",
     )
     parser.add_argument(

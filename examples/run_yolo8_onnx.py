@@ -6,6 +6,7 @@ from pathlib import Path
 import argparse
 
 from common import (
+    ASSETS_DIR,
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
@@ -74,7 +75,7 @@ def yolo8_inference_pipeline(model_path: Path) -> Pipeline:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run YOLOv8 ONNX detection on a COCO image.")
-    parser.add_argument("--assets-dir", type=Path, default=Path(".example_assets"))
+    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR)
     parser.add_argument("--input", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
     add_model_arg(parser, list(YOLO8_MODELS))
