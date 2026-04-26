@@ -116,7 +116,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
     return yolo8_inference_pipeline(model_path)
 
 
-def run(url: str, assets_dir: Path, model: str, workers: int, stride: int) -> int:
+def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile: bool) -> int:
     model_name, model_url = YOLO8_MODELS[model]
     model_path = resolve_model_path(assets_dir, model_name, model_url, model)
     if model_path is None:
@@ -128,6 +128,24 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int) -> in
     label_annotator = sv.LabelAnnotator()
     fps_monitor = sv.FPSMonitor()
 
+    def _detect(frame: np.ndarray) -> sv.Detections:
+        source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
+        result = pipeline(source)
+        return sv.Detections(
+            xyxy=np.array(result.boxes, dtype=np.float32),
+            confidence=np.array(result.scores, dtype=np.float32),
+            class_id=np.array(result.classes, dtype=int),
+        )
+
+    slicer = sv.InferenceSlicer(
+        callback=_detect,
+        slice_wh=(640, 640),
+        overlap_wh=(100, 100),
+        overlap_filter=sv.OverlapFilter.NON_MAX_MERGE,
+        iou_threshold=0.5,
+        thread_workers=1,
+    ) if tile else None
+
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
     stream_url = get_stream_url(url)
 
@@ -138,24 +156,17 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int) -> in
 
     stream_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     reader = FrameReader(cap, stream_fps=stream_fps, stream_url=stream_url, stride=stride)
-    print(f"Streaming with {workers} worker(s), stride={stride} — press Q in the window to quit.", file=sys.stderr)
+    mode = "tiled" if tile else "standard"
+    print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
 
     def infer(frame: Any) -> Any:
-        source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
-        result = pipeline(source)
-
-        detections = sv.Detections(
-            xyxy=np.array(result.boxes, dtype=np.float32),
-            confidence=np.array(result.scores, dtype=np.float32),
-            class_id=np.array(result.classes, dtype=int),
-        )
+        detections = slicer(frame) if tile else _detect(frame)
         labels = [
             f"{COCO_CLASSES[class_id]} {conf:.2f}"
             for class_id, conf in zip(detections.class_id, detections.confidence)
         ]
         annotated = box_annotator.annotate(frame.copy(), detections)
-        annotated = label_annotator.annotate(annotated, detections, labels=labels)
-        return annotated
+        return label_annotator.annotate(annotated, detections, labels=labels)
 
     pending: collections.deque[Future] = collections.deque()
     stopped = False
@@ -200,6 +211,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--stride", type=int, default=1, help="Process every Nth frame.")
     add_model_arg(parser, list(YOLO8_MODELS), default="x")
+    parser.add_argument(
+        "--tile",
+        action="store_true",
+        help="Enable SAHI-style tiling for better small object detection (slower).",
+    )
     return parser.parse_args()
 
 
@@ -211,6 +227,7 @@ def main() -> int:
         model=args.model,
         workers=args.workers,
         stride=args.stride,
+        tile=args.tile,
     )
 
 
