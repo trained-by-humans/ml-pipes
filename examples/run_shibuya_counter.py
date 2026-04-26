@@ -44,9 +44,10 @@ def build_pipeline(model_path: Path) -> Pipeline:
     ])
 
 
-def build_tiled_infer_fn(model_path: Path) -> Any:
+def build_tiled_infer_fn(model_path: Path, throughput: ThroughputCollector) -> Any:
     """Returns an inference function that tiles the frame before detection."""
     infer_pipe = yolo8_inference_pipeline(model_path)
+    infer_pipe.set_tracing(throughput)
     box_annotator = sv.BoxAnnotator()
     label_annotator = sv.LabelAnnotator()
 
@@ -179,7 +180,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
 
     if tile:
-        _infer_tiled = build_tiled_infer_fn(model_path)
+        _infer_tiled = build_tiled_infer_fn(model_path, throughput)
     else:
         pipeline = build_pipeline(model_path)
         pipeline.set_tracing(throughput)
@@ -282,7 +283,7 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         model=args.model,
-        tile=args.tile,
+        tile=args.tile if args.tile else True,
     )
 
 
