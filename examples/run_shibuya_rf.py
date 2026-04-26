@@ -13,9 +13,9 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from common import COCO_CLASSES, add_assets_dir_arg, add_model_arg, resolve_model_path
+from common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
-from ml_pipes import ImagePayload, Pipeline
+from ml_pipes import ImagePayload
 
 # Shibuya crossing live stream using ml_pipes ONNX inference (CoreML-accelerated)
 # with Supervision annotators for rendering.
@@ -112,17 +112,13 @@ class FrameReader:
         self._thread.join()
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
-    return yolo8_inference_pipeline(model_path)
-
-
-def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile: bool) -> int:
+def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile: bool, conf_threshold: float = 0.25) -> int:
     model_name, model_url = YOLO8_MODELS[model]
     model_path = resolve_model_path(assets_dir, model_name, model_url, model)
     if model_path is None:
         return 1
 
-    pipeline = build_pipeline(model_path)
+    pipeline = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
 
     box_annotator = sv.BoxAnnotator()
     label_annotator = sv.LabelAnnotator()
@@ -211,6 +207,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--stride", type=int, default=1, help="Process every Nth frame.")
     add_model_arg(parser, list(YOLO8_MODELS), default="x")
+    add_conf_threshold_arg(parser)
     parser.add_argument(
         "--tile",
         action="store_true",
@@ -228,6 +225,7 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         tile=args.tile,
+        conf_threshold=args.conf_threshold,
     )
 
 

@@ -142,6 +142,15 @@ def add_assets_dir_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_conf_threshold_arg(parser: argparse.ArgumentParser, default: float = 0.25) -> None:
+    parser.add_argument(
+        "--conf-threshold",
+        type=float,
+        default=default,
+        help="Minimum confidence score for detections (default: 0.25).",
+    )
+
+
 def add_model_arg(parser: argparse.ArgumentParser, choices: list[str], default: str = "n") -> None:
     parser.add_argument(
         "--model",
