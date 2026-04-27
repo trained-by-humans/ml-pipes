@@ -87,11 +87,17 @@ def main() -> int:
     if model_path is None:
         return 1
 
-    image_path = args.input or assets_dir / COCO_IMAGE_NAME
-    output_path = args.output or build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
+    if args.input is not None:
+        image_path = args.input
+        if not image_path.exists():
+            print(f"Error: input file not found: {image_path}", file=sys.stderr)
+            return 1
+    else:
+        image_path = assets_dir / COCO_IMAGE_NAME
+        print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
+        download_if_missing(COCO_IMAGE_URL, image_path)
 
-    print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    output_path = args.output or build_output_path(assets_dir, image_path.name, model_name)
 
     infer_pipe = yolo8_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
