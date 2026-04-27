@@ -34,11 +34,13 @@ class PrintCollector(SerialCollector):
                 f"  ({fracs[span.label] * 100:5.1f}%){mark}"
             )
             if span.child_trace is not None:
-                bs = (
-                    f" [batch_size={span.child_trace.batch_size}]"
-                    if span.child_trace.batch_size is not None
-                    else ""
-                )
-                print(f"{prefix}    ↳ child trace{bs}:")
+                ct = span.child_trace
+                if ct.scatter_workers is not None:
+                    annotation = f" [n_items={ct.batch_size}, concurrency={ct.scatter_workers}]"
+                elif ct.batch_size is not None:
+                    annotation = f" [batch_size={ct.batch_size}]"
+                else:
+                    annotation = ""
+                print(f"{prefix}    ↳ child trace{annotation}:")
                 self.print_trace(span.child_trace, indent + 2)
         print(f"{prefix}  {'total':30s} {trace.total_duration_s * 1000:7.2f}ms")
