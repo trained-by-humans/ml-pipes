@@ -90,14 +90,13 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
     stream_url = get_stream_url(url)
 
-    cap = cv2.VideoCapture(stream_url)
-    if not cap.isOpened():
-        print("Error: could not open stream.", file=sys.stderr)
+    try:
+        reader = FrameReader(stream_url, fallback_fps=target_fps, stride=stride)
+    except OSError as e:
+        print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    stream_fps = cap.get(cv2.CAP_PROP_FPS) or target_fps
-    throughput.target_fps = stream_fps
-    reader = FrameReader(cap, stream_fps=stream_fps, stream_url=stream_url, stride=stride)
+    throughput.target_fps = reader.stream_fps
     mode = "tiled" if tile else "standard"
     print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
 
@@ -125,7 +124,6 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
                 stopped = True
 
     reader.stop()
-    cap.release()
     cv2.destroyAllWindows()
     throughput.flush()
     throughput.print_summary()
@@ -161,7 +159,7 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         model=args.model,
-        tile=args.tile,
+        tile=True,
         conf_threshold=args.conf_threshold,
     )
 

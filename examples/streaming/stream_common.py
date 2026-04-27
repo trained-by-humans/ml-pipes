@@ -30,14 +30,17 @@ class FrameReader:
 
     def __init__(
         self,
-        cap: cv2.VideoCapture,
-        stream_fps: float,
         stream_url: str,
+        fallback_fps: float = 25.0,
         reconnect_delay_s: float = 1.0,
         stride: int = 1,
     ) -> None:
-        self._cap = cap
         self._stream_url = stream_url
+        self._cap = cv2.VideoCapture(stream_url)
+        if not self._cap.isOpened():
+            raise OSError(f"Could not open stream: {stream_url}")
+        stream_fps = self._cap.get(cv2.CAP_PROP_FPS) or fallback_fps
+        self.stream_fps = stream_fps
         self._stride = max(1, stride)
         self._frame_interval = 1.0 / stream_fps
         self._reconnect_delay_s = reconnect_delay_s
@@ -106,6 +109,7 @@ class FrameReader:
     def stop(self) -> None:
         self._stopped = True
         self._thread.join()
+        self._cap.release()
 
 
 def add_streaming_args(parser: argparse.ArgumentParser) -> None:
