@@ -1,6 +1,7 @@
 import pytest
+from typing import Any
 
-from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store, TypeContract
+from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store, embed
 
 
 class IntToString:
@@ -98,7 +99,7 @@ def test_pipeline_validate_rejects_incompatible_operator_chain():
 
 
 def test_pipeline_can_validate_during_initialization():
-    Pipeline([IntToString(), StringToFloat(), FloatToBool()], validate_on_init=True)
+    Pipeline([IntToString(), StringToFloat(), FloatToBool()], auto_validate=True)
 
 
 def test_pipeline_validate_requires_operator_annotations():
@@ -175,34 +176,83 @@ def test_pipeline_validate_propagates_element_type_through_pick():
     pipeline.validate()
 
 
-def test_resolve_type_contract_returns_input_and_output_types():
-    pipeline = Pipeline([IntToString(), StringToFloat()])
+def test_embed_enforces_type_contract_at_boundary():
+    # embed() calls _resolve_type_contract on the inner pipeline to check the
+    # boundary type — a mismatch between outer output and inner input must raise.
+    inner = Pipeline([StringToFloat()])
+    outer = Pipeline([IntToString(), embed(inner)])
 
-    contract = pipeline.resolve_type_contract()
-
-    assert contract.input_type is int
-    assert contract.output_type is float
-
-
-def test_resolve_type_contract_returns_type_contract_instance():
-    pipeline = Pipeline([IntToString()])
-
-    assert isinstance(pipeline.resolve_type_contract(), TypeContract)
+    outer.validate()  # int -> str -> float: compatible
 
 
-def test_resolve_type_contract_raises_on_empty_pipeline():
-    with pytest.raises(PipelineValidationError):
-        Pipeline([]).resolve_type_contract()
-
-
-def test_resolve_type_contract_raises_on_type_mismatch():
-    pipeline = Pipeline([IntToString(), BoolToBytes()])
+def test_embed_rejects_incompatible_boundary_type():
+    inner = Pipeline([StringToFloat()])
+    outer = Pipeline([BoolToBytes(), embed(inner)])  # bytes -> str: incompatible
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        pipeline.resolve_type_contract()
+        outer.validate()
 
 
-def test_validate_delegates_to_resolve_type_contract():
+class VagueOp:
+    def __call__(self, value: Any) -> Any:
+        return value
+
+
+def test_outer_strict_rejects_embed_with_vague_output():
+    inner = Pipeline([VagueOp()])
+    outer = Pipeline([embed(inner)], strict=True)
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        outer.validate()
+
+
+def test_outer_strict_accepts_embed_with_concrete_output():
+    inner = Pipeline([IntToString()])
+    outer = Pipeline([embed(inner)], strict=True)
+    outer.validate()  # must not raise
+
+
+def test_inner_strict_rejects_vague_op_regardless_of_outer():
+    inner = Pipeline([VagueOp()], strict=True)
+    outer = Pipeline([embed(inner)])
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        outer.validate()
+
+
+def test_embed_validates_batch_pairs_in_inner_pipeline():
+    from ml_pipes import Batch, UnBatch
+
+    inner = Pipeline([Batch(size=2)])  # no matching UnBatch
+    outer = Pipeline([IntToString(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError):
+        outer.validate()
+
+
+def test_embed_validates_context_interactions_in_inner_pipeline():
+    from ml_pipes import Recall
+
+    inner = Pipeline([Recall("x")])  # key never stored
+    outer = Pipeline([IntToString(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError, match="was not stored"):
+        outer.validate()
+
+
+def test_rshift_enforces_type_contract_across_pipeline_boundary():
+    # >> also uses _resolve_type_contract to validate the join boundary.
+    left = Pipeline([IntToString()])
+    right = Pipeline([BoolToBytes()])  # expects bool, gets str
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        (left >> right).validate()
+
+
+def test_validate_raises_on_empty_pipeline_operators():
+    # An empty pipeline skips validation entirely — no error.
+    Pipeline([]).validate()  # must not raise
+
+
+def test_validate_raises_on_type_mismatch():
     pipeline = Pipeline([IntToString(), BoolToBytes()])
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
@@ -215,3 +265,31 @@ def test_pipeline_validate_rejects_wrong_type_downstream_of_pick():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
+
+
+def test_pick_out_of_bounds_raises_on_concrete_input():
+    pipeline = Pipeline([IntToPair(), Pick(5)])
+
+    with pytest.raises(PipelineValidationError, match="Pick\\(5\\) is out of bounds"):
+        pipeline.validate()
+
+
+def test_pick_out_of_bounds_silent_on_vague_input():
+    # No concrete tuple type upstream — Pick silently returns Any, no error.
+    pipeline = Pipeline([Pick(5)])
+
+    pipeline.validate()  # must not raise
+
+
+def test_store_out_of_bounds_raises_on_concrete_input():
+    pipeline = Pipeline([IntToPair(), Store("x", index=5)])
+
+    with pytest.raises(PipelineValidationError, match="Store\\('x', index=5\\) is out of bounds"):
+        pipeline.validate()
+
+
+def test_store_out_of_bounds_silent_on_vague_input():
+    # No concrete tuple type upstream — Store silently stores Any, no error.
+    pipeline = Pipeline([Store("x", index=5)])
+
+    pipeline.validate()  # must not raise
