@@ -76,7 +76,17 @@ class Pipeline:
         return Pipeline([*self.operators, *other.operators])
 
     def __call__(self, value: Any) -> Any:
-        return self._execute(value)
+        cfg = self._tracing_config
+        trace = InvocationTrace() if cfg is not None else _NoOpTrace()
+        try:
+            result, trace = self._execute(value, trace=trace)
+        finally:
+            if cfg is not None:
+                try:
+                    cfg.collector.on_trace(trace)
+                except Exception:
+                    _log.exception("TraceCollector.on_trace raised; trace dropped")
+        return result
 
     def validate(self) -> TypeContract | None:
         if not self.operators:
@@ -352,13 +362,10 @@ class Pipeline:
             return cls._format_annotation(annotations[0])
         return "(" + ", ".join(cls._format_annotation(annotation) for annotation in annotations) + ")"
 
-    def _execute(self, value: Any, region: tuple[int, int] | None = None, trace: Any = None) -> Any:
+    def _execute(self, value: Any, trace: Any, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
         from .ops import Batch, Scatter  # local import avoids circular dependency
         cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
-        collecting = trace is None and cfg is not None
         start, end = region if region is not None else (0, len(self.operators))
-        if trace is None:
-            trace = InvocationTrace() if collecting else _NoOpTrace()
         context = Context()
         current = value
         t_start = time.perf_counter()
@@ -375,12 +382,7 @@ class Pipeline:
                     i += 1
         finally:
             trace.total_duration_s = time.perf_counter() - t_start
-            if collecting:
-                try:
-                    cfg.collector.on_trace(trace)
-                except Exception:
-                    _log.exception("TraceCollector.on_trace raised; trace dropped")
-        return current
+        return current, trace
 
     def _label_for(self, i: int, custom_labels: list[str] | None = None) -> str:
         if custom_labels and i < len(custom_labels):
@@ -480,8 +482,8 @@ class Pipeline:
         from .ops import Gather, Scatter
 
         gate = self.operators[i].gate
+        collecting = isinstance(trace, InvocationTrace)
         scatter_label = self._label_for(i, cfg.operator_labels if cfg else None)
-        items: list[Any] = current
         region_start = i + 1  # first op after Scatter
 
         # Find the matching Gather by tracking Scatter depth.
@@ -496,18 +498,18 @@ class Pipeline:
             j += 1
         gather_pos = j - 1
 
-        collecting = isinstance(trace, InvocationTrace)
         t_scatter = time.perf_counter()
 
+        items: list[Any] = current
         n_items = len(items)
 
         def run_region(entry: Any) -> None:
-            child_trace = InvocationTrace(batch_size=n_items, scatter_workers=gate.max_concurrency) if collecting else None
+            child_trace = InvocationTrace(batch_size=n_items, scatter_workers=gate.max_concurrency) if collecting else _NoOpTrace()
             try:
-                result = self._execute(entry.value, trace=child_trace, region=(region_start, gather_pos))
-                entry.deposit(result, child_trace)
+                result, child_trace = self._execute(entry.value, child_trace, region=(region_start, gather_pos))
+                entry.deposit(result, child_trace if collecting else None)
             except BaseException as exc:
-                entry.deposit_exception(exc, child_trace)
+                entry.deposit_exception(exc, child_trace if collecting else None)
 
         gate.scatter(items, run_region)
 
@@ -524,6 +526,7 @@ class Pipeline:
             child_trace=child_trace if collecting else None,
         )
         trace.spans.append(scatter_span)
+
         return [e.result for e in entries], context, gather_pos + 1
 
     @staticmethod
