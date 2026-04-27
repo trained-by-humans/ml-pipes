@@ -26,6 +26,7 @@ from ml_pipes import (
     Pick,
     Pipeline,
     Recall,
+    NMM,
     Scatter,
     Stitch,
     Store,
@@ -51,7 +52,8 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile:
             inline(infer_pipe),
             Gather(),
             Recall("tile_rects"),
-            Stitch(iou_threshold=0.5),
+            Stitch(),
+            NMM(iou_threshold=0.5),
         ])
     else:
         detect_pipeline = infer_pipe

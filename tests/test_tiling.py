@@ -8,6 +8,7 @@ from ml_pipes import (
     Detections,
     Gather,
     ImagePayload,
+    NMM,
     Pipeline,
     Pick,
     Recall,
@@ -118,14 +119,14 @@ def test_stitch_single_tile_identity():
     # One tile at origin → boxes unchanged
     rect = TileRect(0, 0, 640, 640)
     det = _dets([[10.0, 20.0, 50.0, 60.0]])
-    result = Stitch(overlap_filter=None)([det], [rect])
+    result = Stitch()([det], [rect])
     assert result.boxes == [[10.0, 20.0, 50.0, 60.0]]
 
 
 def test_stitch_offset_applied():
     rect = TileRect(100, 200, 740, 840)
     det = _dets([[10.0, 20.0, 50.0, 60.0]])
-    result = Stitch(overlap_filter=None)([det], [rect])
+    result = Stitch()([det], [rect])
     assert result.boxes == [[110.0, 220.0, 150.0, 260.0]]
 
 
@@ -134,7 +135,7 @@ def test_stitch_two_tiles_no_overlap_concat():
     r2 = TileRect(320, 0, 640, 320)
     d1 = _dets([[10.0, 10.0, 50.0, 50.0]])
     d2 = _dets([[5.0, 5.0, 30.0, 30.0]])
-    result = Stitch(overlap_filter=None)([d1, d2], [r1, r2])
+    result = Stitch()([d1, d2], [r1, r2])
     assert len(result.boxes) == 2
     assert [10.0, 10.0, 50.0, 50.0] in result.boxes
     assert [325.0, 5.0, 350.0, 30.0] in result.boxes
@@ -143,31 +144,38 @@ def test_stitch_two_tiles_no_overlap_concat():
 def test_stitch_empty_detections():
     r1 = TileRect(0, 0, 640, 640)
     r2 = TileRect(0, 0, 640, 640)
-    result = Stitch(overlap_filter=None)([_dets([]), _dets([])], [r1, r2])
+    result = Stitch()([_dets([]), _dets([])], [r1, r2])
     assert result.boxes == []
     assert result.scores == []
     assert result.classes == []
 
 
-def test_stitch_nms_removes_duplicate():
-    # Same box in two overlapping tiles → NMS should keep one.
+def test_nmm_merges_duplicate():
+    # Same box detected twice → NMM should merge into one weighted box.
+    box = [[10.0, 10.0, 100.0, 100.0]]
+    dets = _dets(box + box, scores=[0.9, 0.8])
+    result = NMM(iou_threshold=0.5)(dets)
+    assert len(result.boxes) == 1
+    assert result.scores == [0.9]  # highest score kept
+
+
+def test_nmm_no_merge_when_no_overlap():
+    dets = _dets([[0.0, 0.0, 50.0, 50.0], [200.0, 0.0, 250.0, 50.0]])
+    result = NMM(iou_threshold=0.5)(dets)
+    assert len(result.boxes) == 2
+
+
+def test_stitch_then_nmm_removes_duplicate():
+    # Same box in two overlapping tiles → Stitch + NMM should keep one.
     r1 = TileRect(0, 0, 640, 640)
     r2 = TileRect(0, 0, 640, 640)
     box = [[10.0, 10.0, 100.0, 100.0]]
     d1 = _dets(box, scores=[0.9])
     d2 = _dets(box, scores=[0.8])
-    result = Stitch(iou_threshold=0.5, overlap_filter="nms")([d1, d2], [r1, r2])
+    stitched = Stitch()([d1, d2], [r1, r2])
+    result = NMM(iou_threshold=0.5)(stitched)
     assert len(result.boxes) == 1
-    assert result.scores == [0.9]  # higher score kept
-
-
-def test_stitch_no_suppression_when_no_overlap():
-    r1 = TileRect(0, 0, 100, 100)
-    r2 = TileRect(200, 0, 300, 100)
-    d1 = _dets([[0.0, 0.0, 50.0, 50.0]])
-    d2 = _dets([[0.0, 0.0, 50.0, 50.0]])  # tile-local, maps to [200..250, 0..50]
-    result = Stitch(iou_threshold=0.5, overlap_filter="nms")([d1, d2], [r1, r2])
-    assert len(result.boxes) == 2
+    assert result.scores == [0.9]
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +196,8 @@ def test_tile_scatter_gather_stitch_pipeline():
         _PassDets(),
         Gather(),
         Recall("tile_rects"),
-        Stitch(overlap_filter=None),
+        Stitch(),
+        NMM(),
     ])
 
     image = _make_image(640, 640)
