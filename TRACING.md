@@ -204,8 +204,7 @@ Output:
 ```python
 agg.total_calls                  # int
 agg.avg_pipeline_latency_ms      # float
-agg.avg_operator_latency_ms()    # dict[label, float]
-agg.operator_fractions()         # dict[label, float]  — fraction of avg pipeline latency
+agg.avg_trace                    # InvocationTrace — averaged trace (mirrors live trace structure)
 agg.reset()                      # clear all accumulated state
 ```
 
