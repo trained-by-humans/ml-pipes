@@ -20,7 +20,18 @@ import supervision as sv
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
-from ml_pipes import ImagePayload
+from ml_pipes import (
+    Gather,
+    ImagePayload,
+    Pick,
+    Pipeline,
+    Recall,
+    Scatter,
+    Stitch,
+    Store,
+    Tile,
+    inline,
+)
 
 
 def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile: bool, conf_threshold: float = 0.25) -> int:
@@ -29,29 +40,34 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile:
     if model_path is None:
         return 1
 
-    pipeline = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
+    infer_pipe = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
+
+    if tile:
+        detect_pipeline = Pipeline([
+            Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
+            Store("tile_rects", index=1),
+            Pick(0),
+            Scatter(max_concurrency=workers),
+            inline(infer_pipe),
+            Gather(),
+            Recall("tile_rects"),
+            Stitch(iou_threshold=0.5),
+        ])
+    else:
+        detect_pipeline = infer_pipe
 
     box_annotator = sv.BoxAnnotator()
     label_annotator = sv.LabelAnnotator()
     fps_monitor = sv.FPSMonitor()
 
-    def _detect(frame: np.ndarray) -> sv.Detections:
+    def _run_detect(frame: np.ndarray) -> sv.Detections:
         source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
-        result = pipeline(source)
+        result = detect_pipeline(source)
         return sv.Detections(
             xyxy=np.array(result.boxes, dtype=np.float32),
             confidence=np.array(result.scores, dtype=np.float32),
             class_id=np.array(result.classes, dtype=int),
         )
-
-    slicer = sv.InferenceSlicer(
-        callback=_detect,
-        slice_wh=(640, 640),
-        overlap_wh=(100, 100),
-        overlap_filter=sv.OverlapFilter.NON_MAX_MERGE,
-        iou_threshold=0.5,
-        thread_workers=1,
-    ) if tile else None
 
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
     stream_url = get_stream_url(url)
@@ -65,7 +81,7 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile:
     print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
 
     def infer(frame: Any) -> Any:
-        detections = slicer(frame) if tile else _detect(frame)
+        detections = _run_detect(frame)
         labels = [
             f"{COCO_CLASSES[class_id]} {conf:.2f}"
             for class_id, conf in zip(detections.class_id, detections.confidence)

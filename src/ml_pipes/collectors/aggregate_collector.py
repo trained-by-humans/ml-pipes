@@ -5,7 +5,7 @@ from .concurrent_collector import ConcurrentCollector
 from .print_collector import PrintCollector
 
 
-def _merge_trace(avg: InvocationTrace, incoming: InvocationTrace, n: int) -> None:
+def _aggregate_traces(avg: InvocationTrace, incoming: InvocationTrace, n: int) -> None:
     """Update *avg* in-place with a new *incoming* trace using an incremental mean.
 
     *n* is the new total call count (already incremented by the caller) so that
@@ -21,12 +21,20 @@ def _merge_trace(avg: InvocationTrace, incoming: InvocationTrace, n: int) -> Non
             continue
         span.duration_s += (inc.duration_s - span.duration_s) / n
         if span.child_trace is not None and inc.child_trace is not None:
-            _merge_trace(span.child_trace, inc.child_trace, n)
+            span.child_trace.batch_size = inc.child_trace.batch_size
+            span.child_trace.scatter_workers = inc.child_trace.scatter_workers
+            _aggregate_traces(span.child_trace, inc.child_trace, n)
 
     existing_labels = {s.label for s in avg.spans}
     for label, inc in incoming_by_label.items():
         if label not in existing_labels:
-            child = InvocationTrace() if inc.child_trace is not None else None
+            child = (
+                InvocationTrace(
+                    batch_size=inc.child_trace.batch_size,
+                    scatter_workers=inc.child_trace.scatter_workers,
+                )
+                if inc.child_trace is not None else None
+            )
             avg.spans.append(StepSpan(
                 label=label,
                 start_time=0.0,
@@ -34,7 +42,7 @@ def _merge_trace(avg: InvocationTrace, incoming: InvocationTrace, n: int) -> Non
                 child_trace=child,
             ))
             if child is not None:
-                _merge_trace(child, inc.child_trace, 1)
+                _aggregate_traces(child, inc.child_trace, 1)
 
 
 class AggregateCollector(ConcurrentCollector):
@@ -54,7 +62,7 @@ class AggregateCollector(ConcurrentCollector):
 
     def _collect(self, trace: InvocationTrace) -> None:
         self._calls += 1
-        _merge_trace(self._avg_trace, trace, self._calls)
+        _aggregate_traces(self._avg_trace, trace, self._calls)
 
     @property
     def total_calls(self) -> int:

@@ -385,7 +385,7 @@ class Slice:
         return registry
 
 
-class Gather:
+class GatherRows:
     """Gathers values: as_ = src[arange(N), indices].
 
     Defaults to in-place (overwrites src) when as_ is not provided.
@@ -1204,6 +1204,68 @@ class UnBatch:
             args = get_args(current_output)
             return (Any,), args[0] if args else Any
         return (Any,), Any
+
+
+class Scatter:
+    """
+    Scatter/Gather entry point.
+
+    One thread passes a ``list[T]`` here; each item is dispatched to a worker
+    thread that runs the scatter region independently with a fresh Context.
+    The original thread blocks at the matching ``Gather`` until all workers
+    have deposited their results, then resumes with ``list[U]``.
+
+    Example::
+
+        pipeline = Pipeline([
+            ...,
+            Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
+            Store("tile_rects", index=1),
+            Pick(0),
+            Scatter(max_concurrency=4),
+            Resize((640, 640)), Normalize(), Infer("model.onnx"), ..., ToDetections(),
+            Gather(),
+            Recall("tile_rects"),
+            Stitch(iou_threshold=0.5),
+        ])
+    """
+
+    def __init__(self, max_concurrency: int = 1) -> None:
+        from .scatter import ScatterGate
+        self.gate = ScatterGate(max_concurrency)
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # Scatter unwraps list[T] → T so the region sees individual items.
+        if current_output is not None and get_origin(current_output) is list:
+            args = get_args(current_output)
+            return (list[Any],), args[0] if args else Any
+        return (list[Any],), Any
+
+
+class Gather:
+    """
+    Scatter/Gather exit point.
+
+    Stateless marker.  Pipeline detects this operator, waits for all scatter
+    workers to deposit, and resumes with ``list[U]``.
+    """
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # Gather wraps T → list[T] for the operators that follow.
+        out = list[current_output] if current_output is not None else list[Any]
+        return (Any,), out
 
 
 class Collate:
