@@ -159,7 +159,7 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         model=args.model,
-        tile=True,
+        tile=args.tile,
         conf_threshold=args.conf_threshold,
     )
 

@@ -22,6 +22,9 @@ class FrameReader:
     Each frame is tagged with its presentation time (PTS) derived from the
     stream FPS and frame index — independent of HLS burst jitter.
 
+    Accepts a URL string (network stream, with reconnect) or an integer
+    device index (webcam, no reconnect).
+
     Two consumption modes:
     - latest(): drops all expired frames, returns the most recent due one (eager).
     - next(): returns the oldest buffered frame in strict arrival order (lazy).
@@ -30,15 +33,15 @@ class FrameReader:
 
     def __init__(
         self,
-        stream_url: str,
+        source: str | int,
         fallback_fps: float = 25.0,
         reconnect_delay_s: float = 1.0,
         stride: int = 1,
     ) -> None:
-        self._stream_url = stream_url
-        self._cap = cv2.VideoCapture(stream_url)
+        self._source = source
+        self._cap = cv2.VideoCapture(source)
         if not self._cap.isOpened():
-            raise OSError(f"Could not open stream: {stream_url}")
+            raise OSError(f"Could not open source: {source}")
         stream_fps = self._cap.get(cv2.CAP_PROP_FPS) or fallback_fps
         self.stream_fps = stream_fps
         self._stride = max(1, stride)
@@ -62,10 +65,14 @@ class FrameReader:
             if not ok:
                 if self._stopped:
                     break
+                # Only attempt reconnect for URL sources, not device indices
+                if isinstance(self._source, int):
+                    self._stopped = True
+                    break
                 print("\nStream lost — reconnecting...", file=sys.stderr)
                 while not self._stopped:
                     time.sleep(self._reconnect_delay_s)
-                    self._cap.open(self._stream_url)
+                    self._cap.open(self._source)
                     if self._cap.isOpened():
                         print("Reconnected.", file=sys.stderr)
                         break
