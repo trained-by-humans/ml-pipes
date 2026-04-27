@@ -4,6 +4,7 @@ import contextlib
 import json
 import sys
 import threading
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import is_dataclass, replace
 from pathlib import Path
@@ -884,6 +885,44 @@ class ToSegmentations:
 
 
 # ---------------------------------------------------------------------------
+# Side-effect base class
+# ---------------------------------------------------------------------------
+
+class SideEffectOp(ABC):
+    """Base for operators that perform a side effect and return their input unchanged.
+
+    Subclasses implement `effect(payload)` instead of `__call__`. The base class
+    owns `__call__` to enforce the passthrough contract — the input is always
+    returned verbatim. `resolve_contract` threads the upstream type through so
+    these operators work transparently in strict pipelines.
+    """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "__call__" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} must not override __call__; implement effect() instead"
+            )
+
+    @abstractmethod
+    def effect(self, payload: Any) -> None:
+        raise NotImplementedError
+
+    def __call__(self, payload: Any) -> Any:
+        self.effect(payload)
+        return payload
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        return (Any,), current_output
+
+
+# ---------------------------------------------------------------------------
 # Visualization / side-effects
 # ---------------------------------------------------------------------------
 
@@ -968,12 +1007,12 @@ class DrawMasks:
         )
 
 
-class SaveImage:
+class SaveImage(SideEffectOp):
     def __init__(self, output_path: str | Path, at: int | None = None):
         self.output_path = Path(output_path)
         self.at = at
 
-    def __call__(self, payload: Any) -> Any:
+    def effect(self, payload: Any) -> None:
         import cv2
 
         image_payload = payload[self.at] if self.at is not None else payload
@@ -984,10 +1023,11 @@ class SaveImage:
         written = cv2.imwrite(str(self.output_path), image_payload.array)
         if not written:
             raise ValueError(f"Failed to write image: {self.output_path}")
-        return payload
 
 
 class MapToObjects:
+    # Intentionally uses `object → Any`: output type depends on runtime `at` indexing
+    # and cannot be resolved without custom resolve_contract. Not a SideEffectOp.
     def __init__(
         self,
         fields: dict[str, str | Callable[[object], Sequence[object]]],
@@ -1021,7 +1061,7 @@ class MapToObjects:
         return records
 
 
-class LogDetections:
+class LogDetections(SideEffectOp):
     def __init__(
         self,
         model_path: str | Path,
@@ -1038,7 +1078,7 @@ class LogDetections:
         self.stream = stream or sys.stdout
         self.at = at
 
-    def __call__(self, payload: Any) -> Any:
+    def effect(self, payload: Any) -> None:
         prediction_objects = payload[self.at] if self.at is not None else payload
         print(
             json.dumps(
@@ -1052,7 +1092,6 @@ class LogDetections:
             ),
             file=self.stream,
         )
-        return payload
 
 
 # ---------------------------------------------------------------------------
@@ -1090,7 +1129,14 @@ class Pick:
         if current_output is None or get_origin(current_output) is not tuple:
             return (Any,), Any
         parts = get_args(current_output)
-        selected = tuple(parts[i] if i < len(parts) else Any for i in self.indices)
+        selected = []
+        for i in self.indices:
+            if i >= len(parts):
+                raise validation_error_type(
+                    f"Pick({i}) is out of bounds for {current_output} (length {len(parts)})"
+                )
+            selected.append(parts[i])
+        selected = tuple(selected)
         return (Any,), selected[0] if len(selected) == 1 else selected
 
 
