@@ -57,7 +57,8 @@ class Tile:
             ...,
             Gather(),
             Recall("tile_rects"),
-            Stitch(iou_threshold=0.5),
+            Stitch(),
+            NMM(),
         ])
     """
 
@@ -85,16 +86,10 @@ class Stitch:
     """Reassemble per-tile Detections into a single global Detections.
 
     Remaps each tile's box coordinates from tile-local space back to the
-    original image coordinate system, concatenates all detections, then
-    optionally applies cross-tile NMS (``overlap_filter="nms"``) or
-    non-maximum merge (``overlap_filter="nmm"``).
+    original image coordinate system and concatenates all detections.
 
-    Pass ``overlap_filter=None`` for a plain concat with no deduplication.
+    Apply NMS() or NMM() after Stitch to deduplicate cross-tile detections.
     """
-
-    def __init__(self, iou_threshold: float = 0.5, overlap_filter: str | None = "nmm") -> None:
-        self.iou_threshold = iou_threshold
-        self.overlap_filter = overlap_filter
 
     def __call__(
         self,
@@ -114,65 +109,4 @@ class Stitch:
             all_scores.extend(dets.scores)
             all_classes.extend(dets.classes)
 
-        if not all_boxes or self.overlap_filter is None:
-            return Detections(boxes=all_boxes, scores=all_scores, classes=all_classes)
-
-        boxes_arr = np.array(all_boxes, dtype=np.float32)
-        scores_arr = np.array(all_scores, dtype=np.float32)
-        classes_arr = np.array(all_classes, dtype=np.int32)
-
-        kept = self._filter(boxes_arr, scores_arr, classes_arr)
-        return Detections(
-            boxes=[all_boxes[i] for i in kept],
-            scores=[all_scores[i] for i in kept],
-            classes=[all_classes[i] for i in kept],
-        )
-
-    def _filter(
-        self,
-        boxes: np.ndarray,
-        scores: np.ndarray,
-        classes: np.ndarray,
-    ) -> list[int]:
-        kept: list[int] = []
-        for class_id in np.unique(classes):
-            idx = np.where(classes == class_id)[0]
-            ordered = idx[np.argsort(scores[idx])[::-1]]
-            if self.overlap_filter == "nms":
-                ordered = self._nms(boxes, scores, ordered)
-            else:
-                ordered = self._nmm(boxes, scores, ordered)
-            kept.extend(ordered.tolist())
-        return kept
-
-    def _nms(self, boxes: np.ndarray, scores: np.ndarray, ordered: np.ndarray) -> np.ndarray:
-        keep: list[int] = []
-        while ordered.size > 0:
-            current = int(ordered[0])
-            keep.append(current)
-            if ordered.size == 1:
-                break
-            remaining = ordered[1:]
-            ious = _compute_iou(boxes[current], boxes[remaining])
-            ordered = remaining[ious < self.iou_threshold]
-        return np.asarray(keep, dtype=np.int32)
-
-    def _nmm(self, boxes: np.ndarray, scores: np.ndarray, ordered: np.ndarray) -> np.ndarray:
-        # Non-maximum merge: suppress lower-score boxes that overlap with a
-        # higher-score box (same as NMS), but keep the highest-score box per group.
-        # This implementation is equivalent to NMS for the purpose of deduplication.
-        return self._nms(boxes, scores, ordered)
-
-
-def _compute_iou(box: np.ndarray, boxes: np.ndarray) -> np.ndarray:
-    if boxes.size == 0:
-        return np.zeros((0,), dtype=np.float32)
-    x1 = np.maximum(box[0], boxes[:, 0])
-    y1 = np.maximum(box[1], boxes[:, 1])
-    x2 = np.minimum(box[2], boxes[:, 2])
-    y2 = np.minimum(box[3], boxes[:, 3])
-    inter = np.clip(x2 - x1, 0.0, None) * np.clip(y2 - y1, 0.0, None)
-    box_area = max((box[2] - box[0]) * (box[3] - box[1]), 0.0)
-    boxes_area = np.clip(boxes[:, 2] - boxes[:, 0], 0.0, None) * np.clip(boxes[:, 3] - boxes[:, 1], 0.0, None)
-    union = np.clip(box_area + boxes_area - inter, 1e-9, None)
-    return inter / union
+        return Detections(boxes=all_boxes, scores=all_scores, classes=all_classes)
