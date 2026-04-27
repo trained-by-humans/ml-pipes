@@ -7,6 +7,8 @@ from pathlib import Path
 
 from ml_pipes import Decode, DrawBoxes, DrawMasks, LoadFile, Pipeline, Recall, SaveImage, Store
 
+ASSETS_DIR = Path(__file__).parent / ".example_assets"
+
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
 COCO_IMAGE_NAME = "coco_000000039769.jpg"
 
@@ -131,14 +133,60 @@ def visualize_detections_and_store(output_path: Path, class_names: list[str] | N
     ])
 
 
-def parse_input_and_output_args(description: str) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=description)
+def add_assets_dir_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--assets-dir",
         type=Path,
-        default=Path(".example_assets"),
-        help="Directory used to cache the downloaded public model and image.",
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
     )
+
+
+def add_conf_threshold_arg(parser: argparse.ArgumentParser, default: float = 0.25) -> None:
+    parser.add_argument(
+        "--conf-threshold",
+        type=float,
+        default=default,
+        help="Minimum confidence score for detections (default: 0.25).",
+    )
+
+
+def add_model_arg(parser: argparse.ArgumentParser, choices: list[str], default: str = "n") -> None:
+    parser.add_argument(
+        "--model",
+        choices=choices,
+        default=default,
+        help=f"Model variant ({' → '.join(choices)}).",
+    )
+
+
+def resolve_model_path(
+    assets_dir: Path,
+    model_name: str,
+    model_url: str | None,
+    variant: str,
+) -> Path | None:
+    """Return the model path, downloading it if a URL is provided.
+
+    Returns None and prints an error if the model is missing and has no URL.
+    """
+    model_path = assets_dir / model_name
+    if model_url:
+        download_if_missing(model_url, model_path)
+    elif not model_path.exists():
+        import sys
+        print(
+            f"Model not found at {model_path}. "
+            f"Export with: yolo export model=yolov8{variant}.pt format=onnx",
+            file=sys.stderr,
+        )
+        return None
+    return model_path
+
+
+def parse_input_and_output_args(description: str) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=description)
+    add_assets_dir_arg(parser)
     parser.add_argument(
         "--output",
         type=Path,

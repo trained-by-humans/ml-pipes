@@ -261,6 +261,6 @@ pipeline.set_tracing(SlowCallAlert(threshold_ms=50.0))
 
 ## See also
 
-- `examples/run_yolo8n_tracing.py` — full end-to-end tracing example with
-  both `PrintCollector` and `AggregateCollector` on the YOLOv8n pipeline
+- `examples/run_yolo8_tracing.py` — full end-to-end tracing example with
+  both `PrintCollector` and `AggregateCollector` on the YOLOv8 pipeline
 - `PERFORMANCE.md` — throughput and batching guidance

@@ -31,6 +31,7 @@ pip-wheel-metadata/
 .example_assets/
 examples/.example_assets/
 *.onnx
+*.pt
 *.jpg
 *.png
 *.mp4

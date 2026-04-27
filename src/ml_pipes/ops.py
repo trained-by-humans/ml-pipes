@@ -235,7 +235,7 @@ class Infer:
         self,
         model_path: str | Path,
         # Runtime-facing execution provider config.
-        providers: tuple[str, ...] = ("CPUExecutionProvider",),
+        providers: tuple[str, ...] = ("CoreMLExecutionProvider", "CPUExecutionProvider"),
         # Runtime-facing input binding. Input names come from the exported graph.
         input_name: str | None = None,
         # Runtime-facing input tensor contract.
