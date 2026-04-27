@@ -615,14 +615,14 @@ All examples auto-download their model and sample assets into
 | Example | Model | Task | Notable pipeline features |
 |---|---|---|---|
 | `run_detection.py` | any YOLOv8-compatible | detection | generic, bring your own model |
-| `run_yolo8n_onnx.py` | YOLOv8n | detection | baseline YOLO pipeline |
+| `run_yolo8_onnx.py` | YOLOv8 | detection | baseline YOLO pipeline |
 | `run_yolo11n_onnx_fp16.py` | YOLO11n FP16 | detection | `Cast` for FP16, letterbox resize |
 | `run_rfdetr_nano_onnx.py` | RF-DETR nano | detection | `Scale` for normalized boxes, softmax logits |
 | `run_yolo11n_seg_onnx.py` | YOLO11n-seg | instance segmentation | prototype masks, `ReconstructMasks` + `FilterBy` |
 | `run_maskrcnn_onnx.py` | Mask R-CNN int8 | instance segmentation | CNN family, NMS baked in, 28×28 RoI masks, BGR mean subtraction |
 
 ```bash
-python examples/run_yolo8n_onnx.py
+python examples/run_yolo8_onnx.py
 python examples/run_yolo11n_seg_onnx.py
 python examples/run_rfdetr_nano_onnx.py
 python examples/run_maskrcnn_onnx.py
@@ -632,31 +632,31 @@ python examples/run_maskrcnn_onnx.py
 
 | Example | Model | Task | Notes |
 |---|---|---|---|
-| `run_yolo8n_webcam.py` | YOLOv8n | live detection | reads from the default camera; press Q to quit |
-| `run_yolo8n_video.py` | YOLOv8n | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
+| `run_yolo8_webcam.py` | YOLOv8 | live detection | reads from the default camera; press Q to quit |
+| `run_yolo8_video.py` | YOLOv8 | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
 
 ```bash
 # Live webcam — press Q to quit
-python examples/run_yolo8n_webcam.py
+python examples/run_yolo8_webcam.py
 
 # Video file — uses bundled sample, or pass --input clip.mp4
-python examples/run_yolo8n_video.py
-python examples/run_yolo8n_video.py --input clip.mp4 --output annotated.mp4
+python examples/run_yolo8_video.py
+python examples/run_yolo8_video.py --input clip.mp4 --output annotated.mp4
 ```
 
 ### Inference endpoint
 
 | Example                  | Model | Task | Notes |
 |--------------------------|---|---|---|
-| `run_yolo8n_endpoint.py` | YOLOv8n | HTTP detection endpoint | requires `pip install flask` |
+| `run_yolo8_endpoint.py` | YOLOv8 | HTTP detection endpoint | requires `pip install flask` |
 
 ```bash
 # Terminal 1 — start the server
-python examples/run_yolo8n_endpoint.py
+python examples/run_yolo8_endpoint.py
 
 # Terminal 2 — send a test request (uses bundled sample, or pass --input clip.mp4)
-python examples/run_yolo8n_endpoint.py --call
-python examples/run_yolo8n_endpoint.py --call --input photo.jpg
+python examples/run_yolo8_endpoint.py --call
+python examples/run_yolo8_endpoint.py --call --input photo.jpg
 
 # Or with curl
 curl -s -X POST http://localhost:5000/detect \

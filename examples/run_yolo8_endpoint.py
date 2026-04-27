@@ -7,11 +7,13 @@ import urllib.request
 from pathlib import Path
 
 from common import (
+    add_assets_dir_arg,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
     download_if_missing,
+    resolve_model_path,
 )
-from run_yolo8n_onnx import MODEL_NAME, MODEL_URL, yolo8n_inference_pipeline
+from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     Decode,
     Embed,
@@ -19,19 +21,19 @@ from ml_pipes import (
     Pipeline,
 )
 
-# Minimal YOLOv8n inference endpoint.
+# Minimal YOLOv8 inference endpoint.
 #
 # Requires Flask:
 #   pip install flask
 #
 # Start the server:
-#   python run_yolo8n_endpoint.py
+#   python run_yolo8_endpoint.py
 #
 # Run a test call (downloads the sample COCO image if needed):
-#   python run_yolo8n_endpoint.py --call
+#   python run_yolo8_endpoint.py --call
 #
 # Or send a specific image:
-#   python run_yolo8n_endpoint.py --call --input photo.jpg
+#   python run_yolo8_endpoint.py --call --input photo.jpg
 #
 # Or with curl:
 #   curl -s -X POST http://localhost:5000/detect \
@@ -45,7 +47,7 @@ PORT = 5000
 def build_pipeline(model_path: Path) -> Pipeline:
     return Pipeline([
         Decode(),
-        Embed(yolo8n_inference_pipeline(model_path)),
+        Embed(yolo8_inference_pipeline(model_path)),
         MapToObjects(fields={"box": "boxes", "score": "scores", "class_id": "classes"}),
     ])
 
@@ -85,7 +87,7 @@ def run_call(image_path: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="YOLOv8n inference endpoint.")
+    parser = argparse.ArgumentParser(description="YOLOv8 inference endpoint.")
     parser.add_argument(
         "--call",
         action="store_true",
@@ -97,7 +99,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Image to send with --call. Defaults to the sample COCO image.",
     )
-    parser.add_argument("--assets-dir", type=Path, default=Path(".example_assets"))
+    add_assets_dir_arg(parser)
     return parser.parse_args()
 
 
@@ -113,9 +115,10 @@ def main() -> int:
         run_call(image_path)
         return 0
 
-    model_path = assets_dir / MODEL_NAME
-    print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
-    download_if_missing(MODEL_URL, model_path)
+    model_name, model_url = YOLO8_MODELS["n"]
+    model_path = resolve_model_path(assets_dir, model_name, model_url, "n")
+    if model_path is None:
+        return 1
     run_server(model_path)
     return 0
 
