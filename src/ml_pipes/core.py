@@ -413,9 +413,20 @@ class Pipeline:
         ))
         return result, ctx_out
 
+    def _find_region_end(self, start: int, opening_op: type, closing_op: type) -> int:
+        """Return the index of the closing op that matches the opener at *start*."""
+        depth = 1
+        j = start
+        while j < len(self.operators) and depth > 0:
+            op = self.operators[j]
+            if isinstance(op, opening_op): depth += 1
+            elif isinstance(op, closing_op): depth -= 1
+            j += 1
+        return j - 1
+
     def _step_into_batch(self, current: Any, context: Context, i: int, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context, int]:
         from .batch import LeaderBatch
-        from .ops import UnBatch
+        from .ops import Batch, UnBatch
 
         gate = self.operators[i].gate
         batch_label = self._label_for(i, cfg.operator_labels if cfg else None)
@@ -428,36 +439,32 @@ class Pipeline:
 
         # Follower: skip region, receive leader's batch span (or error) via gate
         if not isinstance(outcome, LeaderBatch):
-            while not isinstance(self.operators[i], UnBatch):
-                i += 1
             # gate_blocked_duration includes lobby wait + batch execution for followers.
-            # Subtract the batch region duration to isolate the lobby accumulation time,
-            # making it comparable to the leader's wait.
+            # Subtract the batch region duration to isolate the lobby accumulation time.
             batch_region_duration = outcome.batch_span.duration_s if outcome.batch_span is not None else 0.0
             lobby_wait_duration = gate_blocked_duration - batch_region_duration
             trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, lobby_wait_duration))
+
             if outcome.batch_span is not None:
                 trace.spans.append(outcome.batch_span)
             if outcome.exception is not None:
                 raise outcome.exception
+
+            i = self._find_region_end(i, Batch, UnBatch)
             return outcome.result, context, i + 1
 
-        trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, gate_blocked_duration))
-
         # Leader: run region operators into a child trace
+        trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, gate_blocked_duration))
         current = outcome.inputs
         batch_size = len(current) if hasattr(current, "__len__") else None
         collecting = isinstance(trace, InvocationTrace)
         child_trace = InvocationTrace(batch_size=batch_size) if collecting else _NoOpTrace(batch_size=batch_size)
-        batch_context = Context()
 
+        unbatch_pos = self._find_region_end(i, Batch, UnBatch)
         t_region = time.perf_counter()
         try:
-            while not isinstance(self.operators[i], UnBatch):
-                current, batch_context = self._step(i, current, batch_context, child_trace, cfg)
-                i += 1
+            current, child_trace = self._execute(current, trace=child_trace, region=(i, unbatch_pos))
         except Exception as exc:
-            child_trace.total_duration_s = time.perf_counter() - t_region
             batch_span = StepSpan(
                 batch_label, t_region, child_trace.total_duration_s,
                 error=True, child_trace=child_trace if collecting else None,
@@ -465,8 +472,6 @@ class Pipeline:
             trace.spans.append(batch_span)
             gate.distribute_exception(exc, batch_span=batch_span if collecting else None)
             raise
-
-        child_trace.total_duration_s = time.perf_counter() - t_region
 
         # Span 2: batch region — leader appends, then passes to followers via gate
         batch_span = StepSpan(
@@ -476,7 +481,7 @@ class Pipeline:
         trace.spans.append(batch_span)
 
         current = gate.distribute(current, batch_span=batch_span if collecting else None)
-        return current, context, i + 1  # resume after UnBatch with the original outer context
+        return current, context, unbatch_pos + 1  # resume after UnBatch with the original outer context
 
     def _step_into_scatter(self, current: Any, context: Context, i: int, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context, int]:
         from .ops import Gather, Scatter
@@ -486,17 +491,7 @@ class Pipeline:
         scatter_label = self._label_for(i, cfg.operator_labels if cfg else None)
         region_start = i + 1  # first op after Scatter
 
-        # Find the matching Gather by tracking Scatter depth.
-        depth = 1
-        j = region_start
-        while j < len(self.operators) and depth > 0:
-            op = self.operators[j]
-            if isinstance(op, Scatter):
-                depth += 1
-            elif isinstance(op, Gather):
-                depth -= 1
-            j += 1
-        gather_pos = j - 1
+        gather_pos = self._find_region_end(region_start, Scatter, Gather)
 
         t_scatter = time.perf_counter()
 
