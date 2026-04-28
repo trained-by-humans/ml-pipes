@@ -35,7 +35,7 @@ def build_video_annotation_pipeline(model_path: Path) -> Pipeline:
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0)
-    ])
+    ], auto_validate=True)
 
 
 def parse_args() -> argparse.Namespace:

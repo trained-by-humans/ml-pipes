@@ -66,7 +66,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
                 output_color_space="BGR",
                 add_batch_dim=False,
             ),
-            Infer(model_path, input_layout="CHW", dtype="float32"),
+            Infer(model_path, input_layout="CHW", dtype="float32", providers=("CPUExecutionProvider",)),
             Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             _filter_detections,
             Recall("resize_transform"),
@@ -75,7 +75,8 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
             Recall("resize_transform"),
             ProjectRoIMasks(),  # 28×28 RoI masks → full-image binary masks
             ToSegmentations()
-        ]
+        ],
+        auto_validate=True,
     )
 
 
@@ -94,6 +95,7 @@ def main() -> int:
 
     infer_pipe = build_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_and_store(output_path, COCO_CLASSES)
+    pipeline.validate()
     pipeline(image_path)
     return 0
 

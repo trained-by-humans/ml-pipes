@@ -205,6 +205,9 @@ class Cast:
         self.dtype = np.dtype(dtype)
         self.field = field
 
+    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
+        return (Any,), current_output  # cast changes precision, not the payload type
+
     def __call__(self, value: object) -> object:
         if self.field is not None:
             selected = getattr(value, self.field)
