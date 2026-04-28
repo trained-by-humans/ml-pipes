@@ -1,37 +1,31 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .context import Context
-    from .tracing import TracingConfig
+    from .tracing import InvocationTrace, TracingConfig, _NoOpTrace
 
 
 class RegionOpener:
     """Base class for region-opening operators (Batch, Scatter, ...).
 
-    Subclasses must set `closing_type` to their matching closer class and
-    implement `execute_region` with the region-specific execution logic.
-
-    `_step_into_region` in Pipeline calls `execute_region(pipeline, current,
-    context, i, trace, cfg)` where *i* is the index of this opener in
-    `pipeline.operators`.  The implementation is responsible for finding the
-    matching closer, running the region, and returning
-    `(result, context, next_i)` where *next_i* is the index to resume from
-    after the closer.
+    Subclasses set `closing_type` to their matching closer class and implement
+    `execute_region`.  `_step_into_region` in Pipeline pre-computes `label` and
+    `region`, then calls `execute_region` and wraps the result into the
+    `(result, context, next_i)` triple it needs.
     """
 
     closing_type: type
 
-    def execute_region(
+    def run_region(
         self,
-        pipeline: Any,
         current: Any,
-        context: "Context",
-        i: int,
-        trace: Any,
+        label: str,
+        execute_region: Callable,
+        trace: "InvocationTrace | _NoOpTrace",
         cfg: "TracingConfig | None",
-    ) -> tuple[Any, "Context", int]:
+    ) -> Any:
         raise NotImplementedError
 
 

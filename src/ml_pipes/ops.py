@@ -1209,6 +1209,29 @@ class Pick:
 # Batch coordination
 # ---------------------------------------------------------------------------
 
+class UnBatch(RegionCloser):
+    """
+    Batch coordination exit point.
+
+    Stateless marker.  Pipeline detects this operator, calls
+    ``gate.distribute()`` on the matching Batch's gate, and routes each
+    thread's individual result to the remaining operators.
+    """
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # UnBatch unwraps list[T] back to T for the per-sample operators that follow.
+        if current_output is not None and get_origin(current_output) is list:
+            args = get_args(current_output)
+            return (Any,), args[0] if args else Any
+        return (Any,), Any
+
+
 class Batch(RegionOpener):
     """
     Batch coordination entry point.
@@ -1233,37 +1256,41 @@ class Batch(RegionOpener):
         ])
     """
 
-    closing_type: type  # assigned to UnBatch after class definition below
+    closing_type = UnBatch
 
     def __init__(self, size: int, timeout: float = 0.05) -> None:
         self.gate = BatchGate(size, timeout)
 
-    def execute_region(self, pipeline: Any, current: Any, context: Any, i: int, trace: Any, cfg: Any) -> tuple[Any, Any, int]:
+    def run_region(
+        self,
+        current: Any,
+        label: str,
+        execute_region: Callable,
+        trace: Any,
+        cfg: Any,
+    ) -> Any:
         import time
         from .batch import LeaderBatch
         from .tracing import InvocationTrace, StepSpan
         from .core import _NoOpTrace
 
         gate = self.gate
-        batch_label = pipeline._label_for(i, cfg.operator_labels if cfg else None)
-        unbatch_pos = pipeline._find_region_end(i + 1, Batch, UnBatch)
 
         t_gate_enter = time.perf_counter()
         outcome = gate.enter(current)
         gate_blocked_duration = time.perf_counter() - t_gate_enter
-        i += 1
 
         if not isinstance(outcome, LeaderBatch):
             batch_region_duration = outcome.batch_span.duration_s if outcome.batch_span is not None else 0.0
             lobby_wait_duration = gate_blocked_duration - batch_region_duration
-            trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, lobby_wait_duration))
+            trace.spans.append(StepSpan(f"{label}[wait]", t_gate_enter, lobby_wait_duration))
             if outcome.batch_span is not None:
                 trace.spans.append(outcome.batch_span)
             if outcome.exception is not None:
                 raise outcome.exception
-            return outcome.result, context, unbatch_pos + 1
+            return outcome.result
 
-        trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, gate_blocked_duration))
+        trace.spans.append(StepSpan(f"{label}[wait]", t_gate_enter, gate_blocked_duration))
         current = outcome.inputs
         batch_size = len(current) if hasattr(current, "__len__") else None
         collecting = isinstance(trace, InvocationTrace)
@@ -1271,17 +1298,16 @@ class Batch(RegionOpener):
 
         t_region = time.perf_counter()
         try:
-            current, child_trace = pipeline._execute(current, trace=child_trace, region=(i, unbatch_pos))
+            current, child_trace = execute_region(current, child_trace)
         except Exception as exc:
-            batch_span = StepSpan(batch_label, t_region, child_trace.total_duration_s, error=True, child_trace=child_trace if collecting else None)
-            trace.spans.append(batch_span)
-            gate.distribute_exception(exc, batch_span=batch_span if collecting else None)
+            error_span = StepSpan(label, t_region, child_trace.total_duration_s, error=True, child_trace=child_trace if collecting else None)
+            trace.spans.append(error_span)
+            gate.distribute_exception(exc, batch_span=error_span if collecting else None)
             raise
 
-        batch_span = StepSpan(batch_label, t_region, child_trace.total_duration_s, child_trace=child_trace if collecting else None)
+        batch_span = StepSpan(label, t_region, child_trace.total_duration_s, child_trace=child_trace if collecting else None)
         trace.spans.append(batch_span)
-        current = gate.distribute(current, batch_span=batch_span if collecting else None)
-        return current, context, unbatch_pos + 1
+        return gate.distribute(current, batch_span=batch_span if collecting else None)
 
     def resolve_contract(
         self,
@@ -1295,13 +1321,16 @@ class Batch(RegionOpener):
         return (Any,), out
 
 
-class UnBatch(RegionCloser):
-    """
-    Batch coordination exit point.
+# ---------------------------------------------------------------------------
+# Scatter / Gather
+# ---------------------------------------------------------------------------
 
-    Stateless marker.  Pipeline detects this operator, calls
-    ``gate.distribute()`` on the matching Batch's gate, and routes each
-    thread's individual result to the remaining operators.
+class Gather(RegionCloser):
+    """
+    Scatter/Gather exit point.
+
+    Stateless marker.  Pipeline detects this operator, waits for all scatter
+    workers to deposit, and resumes with ``list[U]``.
     """
 
     def resolve_contract(
@@ -1311,11 +1340,9 @@ class UnBatch(RegionCloser):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
-        # UnBatch unwraps list[T] back to T for the per-sample operators that follow.
-        if current_output is not None and get_origin(current_output) is list:
-            args = get_args(current_output)
-            return (Any,), args[0] if args else Any
-        return (Any,), Any
+        # Gather wraps T → list[T] for the operators that follow.
+        out = list[current_output] if current_output is not None else list[Any]
+        return (Any,), out
 
 
 class Scatter(RegionOpener):
@@ -1342,50 +1369,50 @@ class Scatter(RegionOpener):
         ])
     """
 
-    closing_type: type  # assigned to Gather after class definition below
+    closing_type = Gather
 
     def __init__(self, max_concurrency: int = 1) -> None:
         from .scatter import ScatterGate
         self.gate = ScatterGate(max_concurrency)
 
-    def execute_region(self, pipeline: Any, current: Any, context: Any, i: int, trace: Any, cfg: Any) -> tuple[Any, Any, int]:
-        import time
+    def run_region(
+        self,
+        current: Any,
+        label: str,
+        execute_region: Callable,
+        trace: Any,
+        cfg: Any,
+    ) -> Any:
         from .tracing import InvocationTrace, StepSpan
         from .core import _NoOpTrace
         from .tracing import merge_traces
 
         gate = self.gate
         collecting = isinstance(trace, InvocationTrace)
-        scatter_label = pipeline._label_for(i, cfg.operator_labels if cfg else None)
-        region_start = i + 1
-
-        gather_pos = pipeline._find_region_end(region_start, Scatter, Gather)
-
-        t_scatter = time.perf_counter()
         items: list[Any] = current
         n_items = len(items)
 
         def run_region(entry: Any) -> None:
             child_trace = InvocationTrace(batch_size=n_items, workers=gate.max_concurrency) if collecting else _NoOpTrace()
             try:
-                result, child_trace = pipeline._execute(entry.value, child_trace, region=(region_start, gather_pos))
+                result, child_trace = execute_region(entry.value, child_trace)
                 entry.deposit(result, child_trace if collecting else None)
             except BaseException as exc:
                 entry.deposit_exception(exc, child_trace if collecting else None)
 
+        import time
         gate.scatter(items, run_region)
-
+        t_gather = time.perf_counter()
         try:
             entries = gate.gather()
         except BaseException:
-            trace.spans.append(StepSpan(scatter_label, t_scatter, time.perf_counter() - t_scatter, error=True))
+            trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, error=True))
             raise
 
         child_traces = [e.child_trace for e in entries if e.child_trace is not None]
         child_trace = merge_traces(child_traces) if child_traces else None
-        trace.spans.append(StepSpan(scatter_label, t_scatter, time.perf_counter() - t_scatter, child_trace=child_trace if collecting else None))
-
-        return [e.result for e in entries], context, gather_pos + 1
+        trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, child_trace=child_trace if collecting else None))
+        return [e.result for e in entries]
 
     def resolve_contract(
         self,
@@ -1399,30 +1426,6 @@ class Scatter(RegionOpener):
             args = get_args(current_output)
             return (list[Any],), args[0] if args else Any
         return (list[Any],), Any
-
-
-class Gather(RegionCloser):
-    """
-    Scatter/Gather exit point.
-
-    Stateless marker.  Pipeline detects this operator, waits for all scatter
-    workers to deposit, and resumes with ``list[U]``.
-    """
-
-    def resolve_contract(
-        self,
-        current_output: Any | None,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[Any, Any]:
-        # Gather wraps T → list[T] for the operators that follow.
-        out = list[current_output] if current_output is not None else list[Any]
-        return (Any,), out
-
-
-Batch.closing_type = UnBatch
-Scatter.closing_type = Gather
 
 
 class Collate:

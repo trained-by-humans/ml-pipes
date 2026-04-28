@@ -361,7 +361,8 @@ class Pipeline:
             while i < end:
                 operator = self.operators[i]
                 if isinstance(operator, RegionOpener):
-                    current, context, i = self._step_into_region(operator, current, context, i, trace, cfg)
+                    current, context = self._step_into_region(i, current, context, trace, cfg)
+                    i = self._find_region_end(i + 1, type(operator), operator.closing_type) + 1
                 else:
                     current, context = self._step(i, current, context, trace, cfg)
                     i += 1
@@ -369,8 +370,16 @@ class Pipeline:
             trace.total_duration_s = time.perf_counter() - t_start
         return current, trace
 
-    def _step_into_region(self, operator: Any, current: Any, context: Any, i: int, trace: Any, cfg: Any) -> tuple[Any, Any, int]:
-        return operator.execute_region(self, current, context, i, trace, cfg)
+    def _step_into_region(self, i: int, current: Any, context: Context, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context]:
+        operator = self.operators[i]
+        label = self._label_for(i, cfg.operator_labels if cfg else None)
+        region_start = i + 1
+        region_end = self._find_region_end(region_start, type(operator), operator.closing_type)
+        # Bounded executor: the operator can only run operators within its own region.
+        def execute_region(value: Any, child_trace: Any) -> Any:
+            return self._execute(value, trace=child_trace, region=(region_start, region_end))
+        result = operator.run_region(current, label, execute_region, trace, cfg)
+        return result, context
 
     def _label_for(self, i: int, custom_labels: list[str] | None = None) -> str:
         if custom_labels and i < len(custom_labels):
