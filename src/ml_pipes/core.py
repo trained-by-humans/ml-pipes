@@ -9,8 +9,9 @@ from typing import Any, Callable, Iterable, get_args, get_origin, get_type_hints
 
 _log = logging.getLogger(__name__)
 
-from .context import Context, ContextOp
-from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, merge_traces
+from .context import Context, ContextOp, Store, Recall
+from .region import RegionCloser, RegionOpener
+from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape
 
 
 class PipelineValidationError(ValueError):
@@ -98,8 +99,6 @@ class Pipeline:
         return self._resolve_type_contract(strict=self._strict)
 
     def _validate_regions(self) -> None:
-        from .region import RegionCloser, RegionOpener
-
         # Regions cannot interleave — each closer must match the top opener.
         # Same-type nesting (Batch inside Batch, Scatter inside Scatter) is forbidden.
         stack: list[tuple[RegionOpener, int]] = []  # (opener, open_position)
@@ -131,9 +130,6 @@ class Pipeline:
             )
 
     def _validate_context_interactions(self) -> None:
-        from .context import Store, Recall
-        from .region import RegionCloser, RegionOpener
-
         stored_keys: set[str] = set()
         stack: list[set[str]] = []
 
@@ -162,8 +158,6 @@ class Pipeline:
                     ) from exc
 
     def _resolve_type_contract(self, strict: bool = False) -> TypeContract:
-        from .region import RegionOpener, RegionCloser
-
         if not self.operators:
             raise PipelineValidationError("Cannot resolve type contract of an empty pipeline")
 
@@ -346,7 +340,6 @@ class Pipeline:
         return "(" + ", ".join(cls._format_annotation(annotation) for annotation in annotations) + ")"
 
     def _execute(self, value: Any, trace: Any, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
-        from .region import RegionOpener
         cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
         start, end = region if region is not None else (0, len(self.operators))
         context = Context()
