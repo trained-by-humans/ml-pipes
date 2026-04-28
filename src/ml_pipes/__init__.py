@@ -43,6 +43,7 @@ from .ops import (
     Transpose,
     UnBatch,
 )
+from .region import RegionCloser, RegionOpener
 from .tiling import Stitch, Tile, TileRect
 from .types import (
     Detections,
@@ -101,6 +102,8 @@ __all__ = [
     "ProjectRoIMasks",
     "ReconstructMasks",
     "Recall",
+    "RegionCloser",
+    "RegionOpener",
     "Resize",
     "ResizeTransform",
     "RuntimeOutputs",
