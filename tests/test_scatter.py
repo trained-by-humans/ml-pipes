@@ -140,7 +140,7 @@ def test_validate_unmatched_scatter():
 
 
 def test_validate_unmatched_gather():
-    with pytest.raises(PipelineValidationError, match="no matching Scatter"):
+    with pytest.raises(PipelineValidationError, match="no matching opener"):
         Pipeline([_Double(), Gather()]).validate()
 
 

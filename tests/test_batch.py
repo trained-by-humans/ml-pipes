@@ -220,7 +220,7 @@ def test_validate_raises_on_unmatched_batch():
 
 def test_validate_raises_on_unmatched_unbatch():
     pipeline = Pipeline([UnBatch()])
-    with pytest.raises(PipelineValidationError, match="no matching Batch"):
+    with pytest.raises(PipelineValidationError, match="no matching opener"):
         pipeline.validate()
 
 
