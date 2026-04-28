@@ -35,8 +35,8 @@ class PrintCollector(SerialCollector):
             )
             if span.child_trace is not None:
                 ct = span.child_trace
-                if ct.scatter_workers is not None:
-                    annotation = f" [n_items={ct.batch_size}, concurrency={ct.scatter_workers}]"
+                if ct.workers is not None:
+                    annotation = f" [n_items={ct.batch_size}, concurrency={ct.workers}]"
                 elif ct.batch_size is not None:
                     annotation = f" [batch_size={ct.batch_size}]"
                 else:

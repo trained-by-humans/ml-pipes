@@ -430,6 +430,7 @@ class Pipeline:
 
         gate = self.operators[i].gate
         batch_label = self._label_for(i, cfg.operator_labels if cfg else None)
+        unbatch_pos = self._find_region_end(i + 1, Batch, UnBatch)  # computed once, before i advances
 
         # Span 1: gate wait — each thread records its own lobby accumulation time
         t_gate_enter = time.perf_counter()
@@ -450,8 +451,7 @@ class Pipeline:
             if outcome.exception is not None:
                 raise outcome.exception
 
-            i = self._find_region_end(i, Batch, UnBatch)
-            return outcome.result, context, i + 1
+            return outcome.result, context, unbatch_pos + 1
 
         # Leader: run region operators into a child trace
         trace.spans.append(StepSpan(f"{batch_label}[wait]", t_gate_enter, gate_blocked_duration))
@@ -460,7 +460,6 @@ class Pipeline:
         collecting = isinstance(trace, InvocationTrace)
         child_trace = InvocationTrace(batch_size=batch_size) if collecting else _NoOpTrace(batch_size=batch_size)
 
-        unbatch_pos = self._find_region_end(i, Batch, UnBatch)
         t_region = time.perf_counter()
         try:
             current, child_trace = self._execute(current, trace=child_trace, region=(i, unbatch_pos))
@@ -499,7 +498,7 @@ class Pipeline:
         n_items = len(items)
 
         def run_region(entry: Any) -> None:
-            child_trace = InvocationTrace(batch_size=n_items, scatter_workers=gate.max_concurrency) if collecting else _NoOpTrace()
+            child_trace = InvocationTrace(batch_size=n_items, workers=gate.max_concurrency) if collecting else _NoOpTrace()
             try:
                 result, child_trace = self._execute(entry.value, child_trace, region=(region_start, gather_pos))
                 entry.deposit(result, child_trace if collecting else None)

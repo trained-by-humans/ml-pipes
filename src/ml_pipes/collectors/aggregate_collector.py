@@ -22,7 +22,7 @@ def _aggregate_traces(avg: InvocationTrace, incoming: InvocationTrace, n: int) -
         span.duration_s += (inc.duration_s - span.duration_s) / n
         if span.child_trace is not None and inc.child_trace is not None:
             span.child_trace.batch_size = inc.child_trace.batch_size
-            span.child_trace.scatter_workers = inc.child_trace.scatter_workers
+            span.child_trace.workers = inc.child_trace.workers
             _aggregate_traces(span.child_trace, inc.child_trace, n)
 
     existing_labels = {s.label for s in avg.spans}
@@ -31,7 +31,7 @@ def _aggregate_traces(avg: InvocationTrace, incoming: InvocationTrace, n: int) -
             child = (
                 InvocationTrace(
                     batch_size=inc.child_trace.batch_size,
-                    scatter_workers=inc.child_trace.scatter_workers,
+                    workers=inc.child_trace.workers,
                 )
                 if inc.child_trace is not None else None
             )
