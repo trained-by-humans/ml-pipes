@@ -180,6 +180,7 @@ class Pipeline:
             elif isinstance(operator, RegionCloser):
                 stored_annotations = stack.pop()
 
+            # Resolve
             if hasattr(operator, "resolve_contract"):
                 input_types, output_type = operator.resolve_contract(
                     previous_output_type,
@@ -187,38 +188,33 @@ class Pipeline:
                     self._expand_output_annotation,
                     PipelineValidationError,
                 )
-                if strict and not self._is_concrete(output_type):
+                has_contract = True
+            else:
+                input_types, output_type = self._resolve_operator_contract(operator)
+                has_contract = False
+
+            # Check compatibility and strictness
+            if previous_output_type is not None:
+                if not self._is_annotation_compatible(previous_output_type, input_types):
+                    raise PipelineValidationError(
+                        f"Pipeline contract mismatch at {self._label_for(i)}: "
+                        f"{previous_name} returns {self._format_annotation(previous_output_type)} "
+                        f"but {operator.__class__.__name__} expects {self._format_parameter_annotations(input_types)}"
+                    )
+
+            if strict:
+                if not has_contract and any(not self._is_concrete(t) for t in input_types):
+                    raise PipelineValidationError(
+                        f"Strict mode violation at {self._label_for(i)}: input type is unresolved (Any).\n"
+                        f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
+                        f"to accept and thread the upstream type dynamically."
+                    )
+                if not self._is_concrete(output_type):
                     raise PipelineValidationError(
                         f"Strict mode violation at {self._label_for(i)}: output type is unresolved (Any).\n"
                         f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
                         f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
                     )
-            else:
-                input_types, output_type = self._resolve_operator_contract(operator)
-                name = operator.__class__.__name__
-
-                if previous_output_type is not None and not self._is_annotation_compatible(
-                    previous_output_type, input_types
-                ):
-                    raise PipelineValidationError(
-                        f"Pipeline contract mismatch at {self._label_for(i)}: "
-                        f"{previous_name} returns {self._format_annotation(previous_output_type)} "
-                        f"but {name} expects {self._format_parameter_annotations(input_types)}"
-                    )
-
-                if strict:
-                    if any(not self._is_concrete(t) for t in input_types):
-                        raise PipelineValidationError(
-                            f"Strict mode violation at {self._label_for(i)}: input type is unresolved (Any).\n"
-                            f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
-                            f"to accept and thread the upstream type dynamically."
-                        )
-                    if not self._is_concrete(output_type):
-                        raise PipelineValidationError(
-                            f"Strict mode violation at {self._label_for(i)}: output type is unresolved (Any).\n"
-                            f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
-                            f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
-                        )
 
             if first_input_type is None:
                 first_input_type = input_types[0] if len(input_types) == 1 else input_types
