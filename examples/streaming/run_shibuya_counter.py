@@ -53,14 +53,14 @@ def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers:
             Recall("source_frame", index=0),
             DrawBoxes(class_names=COCO_CLASSES),
             Pick(0),
-        ])
+        ], auto_validate=True)
     return Pipeline([
         Store("source_frame"),
         Embed(infer_pipe),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
-    ])
+    ], auto_validate=True)
 
 
 def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool, conf_threshold: float) -> int:
@@ -145,7 +145,7 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         model=args.model,
-        tile=True,
+        tile=args.tile,
         conf_threshold=args.conf_threshold,
     )
 

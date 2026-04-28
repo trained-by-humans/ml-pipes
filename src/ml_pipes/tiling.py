@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from .types import Detections, ImagePayload
+from .types import Detections, ImagePayload
 
 
 @dataclass(frozen=True)

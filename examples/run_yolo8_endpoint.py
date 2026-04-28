@@ -49,7 +49,7 @@ def build_pipeline(model_path: Path) -> Pipeline:
         Decode(),
         Embed(yolo8_inference_pipeline(model_path)),
         MapToObjects(fields={"box": "boxes", "score": "scores", "class_id": "classes"}),
-    ])
+    ], auto_validate=True)
 
 
 def run_server(model_path: Path) -> None:

@@ -94,7 +94,7 @@ def build_pipeline(model_path: Path, batch_size: int, timeout: float,
         Recall("resize_transform"),
         ProjectBoxes(),
         ToDetections(),
-    ])
+    ], auto_validate=True)
 
 
 def parse_args() -> argparse.Namespace:
