@@ -21,7 +21,7 @@ class InvocationTrace:
     spans: list[StepSpan] = field(default_factory=list)
     total_duration_s: float = 0.0
     batch_size: int | None = None
-    scatter_workers: int | None = None
+    workers: int | None = None
 
     def span_fractions(self) -> dict[str, float]:
         if self.total_duration_s == 0.0:
@@ -82,7 +82,7 @@ def merge_traces(traces: list[InvocationTrace]) -> InvocationTrace:
         spans=spans,
         total_duration_s=sum(t.total_duration_s for t in traces) / n,
         batch_size=traces[0].batch_size,
-        scatter_workers=traces[0].scatter_workers,
+        workers=traces[0].workers,
     )
 
 
