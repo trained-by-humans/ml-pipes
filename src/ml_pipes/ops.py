@@ -385,7 +385,7 @@ class Slice:
         return registry
 
 
-class Gather:
+class GatherRows:
     """Gathers values: as_ = src[arange(N), indices].
 
     Defaults to in-place (overwrites src) when as_ is not provided.
@@ -668,6 +668,70 @@ class NMS:
         )
         union = np.clip(box_area + boxes_area - intersection, a_min=1e-9, a_max=None)
         return intersection / union
+
+
+class NMM:
+    """Non-Maximum Merge on a Detections object.
+
+    Like NMS, boxes that overlap above *iou_threshold* are grouped together.
+    Unlike NMS, the surviving box is the score-weighted average of all boxes
+    in the group rather than the highest-score box unchanged.  This produces
+    a more accurate centroid when the same object is detected from multiple
+    overlapping tiles.
+
+    Operates on ``Detections`` (boxes/scores/classes lists), not TensorRegistry.
+    Pair with ``Stitch()`` for tiled inference::
+
+        Stitch(),
+        NMM(iou_threshold=0.5),
+    """
+
+    def __init__(self, iou_threshold: float = 0.5) -> None:
+        self.iou_threshold = iou_threshold
+
+    def __call__(self, detections: "Detections") -> "Detections":
+        from .types import Detections
+
+        if not detections.boxes:
+            return detections
+
+        boxes = np.array(detections.boxes, dtype=np.float32)
+        scores = np.array(detections.scores, dtype=np.float32)
+        classes = np.array(detections.classes, dtype=np.int32)
+
+        merged_boxes: list[list[float]] = []
+        merged_scores: list[float] = []
+        merged_classes: list[int] = []
+
+        for class_id in np.unique(classes):
+            idx = np.where(classes == class_id)[0]
+            ordered = idx[np.argsort(scores[idx])[::-1]]
+            consumed = np.zeros(len(ordered), dtype=bool)
+
+            for i, current in enumerate(ordered):
+                if consumed[i]:
+                    continue
+                remaining_mask = ~consumed
+                remaining_mask[i] = False
+                remaining = ordered[remaining_mask]
+                if remaining.size > 0:
+                    ious = NMS._compute_iou(boxes[current], boxes[remaining])
+                    overlap_pos = np.where(ious >= self.iou_threshold)[0]
+                    group = np.array([current, *remaining[overlap_pos]])
+                    for pos in overlap_pos:
+                        consumed[np.where(ordered == remaining[pos])[0]] = True
+                else:
+                    group = np.array([current])
+
+                group_boxes = boxes[group]
+                group_scores = scores[group]
+                weights = group_scores / group_scores.sum()
+                merged_box = (group_boxes * weights[:, None]).sum(axis=0).tolist()
+                merged_boxes.append(merged_box)
+                merged_scores.append(float(group_scores[0]))  # highest score
+                merged_classes.append(int(class_id))
+
+        return Detections(boxes=merged_boxes, scores=merged_scores, classes=merged_classes)
 
 
 class FilterBy:
@@ -1204,6 +1268,68 @@ class UnBatch:
             args = get_args(current_output)
             return (Any,), args[0] if args else Any
         return (Any,), Any
+
+
+class Scatter:
+    """
+    Scatter/Gather entry point.
+
+    One thread passes a ``list[T]`` here; each item is dispatched to a worker
+    thread that runs the scatter region independently with a fresh Context.
+    The original thread blocks at the matching ``Gather`` until all workers
+    have deposited their results, then resumes with ``list[U]``.
+
+    Example::
+
+        pipeline = Pipeline([
+            ...,
+            Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
+            Store("tile_rects", index=1),
+            Pick(0),
+            Scatter(max_concurrency=4),
+            Resize((640, 640)), Normalize(), Infer("model.onnx"), ..., ToDetections(),
+            Gather(),
+            Recall("tile_rects"),
+            Stitch(iou_threshold=0.5),
+        ])
+    """
+
+    def __init__(self, max_concurrency: int = 1) -> None:
+        from .scatter import ScatterGate
+        self.gate = ScatterGate(max_concurrency)
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # Scatter unwraps list[T] → T so the region sees individual items.
+        if current_output is not None and get_origin(current_output) is list:
+            args = get_args(current_output)
+            return (list[Any],), args[0] if args else Any
+        return (list[Any],), Any
+
+
+class Gather:
+    """
+    Scatter/Gather exit point.
+
+    Stateless marker.  Pipeline detects this operator, waits for all scatter
+    workers to deposit, and resumes with ``list[U]``.
+    """
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        # Gather wraps T → list[T] for the operators that follow.
+        out = list[current_output] if current_output is not None else list[Any]
+        return (Any,), out
 
 
 class Collate:

@@ -21,6 +21,7 @@ class InvocationTrace:
     spans: list[StepSpan] = field(default_factory=list)
     total_duration_s: float = 0.0
     batch_size: int | None = None
+    workers: int | None = None
 
     def span_fractions(self) -> dict[str, float]:
         if self.total_duration_s == 0.0:
@@ -56,6 +57,33 @@ class _NoOpTrace:
         self.spans: Any = _NoOpSpanList()
         self.total_duration_s: float = 0.0
         self.batch_size = batch_size
+
+
+def merge_traces(traces: list[InvocationTrace]) -> InvocationTrace:
+    """Return a new InvocationTrace whose per-span durations are the mean across *traces*."""
+    if not traces:
+        return InvocationTrace()
+    n = len(traces)
+    # Collect all span labels in first-seen order.
+    seen: dict[str, list[StepSpan]] = {}
+    for t in traces:
+        for s in t.spans:
+            seen.setdefault(s.label, []).append(s)
+    spans = [
+        StepSpan(
+            label=label,
+            start_time=0.0,
+            duration_s=sum(s.duration_s for s in group) / n,
+            child_trace=merge_traces([s.child_trace for s in group if s.child_trace is not None]) if any(s.child_trace for s in group) else None,
+        )
+        for label, group in seen.items()
+    ]
+    return InvocationTrace(
+        spans=spans,
+        total_duration_s=sum(t.total_duration_s for t in traces) / n,
+        batch_size=traces[0].batch_size,
+        workers=traces[0].workers,
+    )
 
 
 def _extract_shape(value: Any) -> tuple | None:

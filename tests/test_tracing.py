@@ -97,6 +97,19 @@ def test_error_trace_delivered_to_collector():
     assert len(cap.traces) == 1
 
 
+def test_error_trace_contains_completed_and_error_spans():
+    p, cap = _make_pipeline([_double, _failing, _add_one])
+    with pytest.raises(ValueError):
+        p(1)
+    trace = cap.traces[0]
+    # _double completed successfully before the error
+    assert any(s.label.endswith("_double") and not s.error for s in trace.spans)
+    # _failing is flagged as an error span
+    assert any(s.label.endswith("_failing") and s.error for s in trace.spans)
+    # _add_one never ran — should not appear
+    assert not any(s.label.endswith("_add_one") for s in trace.spans)
+
+
 def test_set_tracing_window():
     p = Pipeline([_double])
     cap = _Capture()
