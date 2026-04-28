@@ -103,7 +103,7 @@ Slice("preds", slice(None, 4), as_="boxes")         # creates "boxes", "preds" u
 | Operator | Notes |
 |---|---|
 | `Slice(src, at, as_)` | Slices along the last axis: `Slice("preds", slice(None, 4), as_="boxes")` |
-| `Gather(src, indices, as_)` | Indexes into a tensor along axis 0 |
+| `GatherRows(src, indices, as_)` | Indexes into a tensor along axis 0 |
 | `FilterBy(src, indices, as_)` | Filters rows using an index array stored in the registry: `FilterBy("mask_coeffs", "kept")` |
 
 ### Math
@@ -127,6 +127,7 @@ Slice("preds", slice(None, 4), as_="boxes")         # creates "boxes", "preds" u
 | Operator | Notes |
 |---|---|
 | `NMS(boxes, scores, classes, conf_threshold, iou_threshold, max_detections, kept_as)` | Non-maximum suppression. Set `kept_as` to store kept indices for downstream `FilterBy` calls. |
+| `NMM(iou_threshold)` | Non-maximum merge. Groups overlapping detections per class and replaces each group with a single score-weighted average box. Unlike `NMS`, no detection is discarded — overlapping boxes are merged into one. |
 
 ### Segmentation
 
@@ -159,6 +160,75 @@ them through every operator in between. See the
 | `Store(name, index)` | Saves the current value (or `current[index]`) into context. The flowing value is unchanged. |
 | `Recall(name)` | Appends a stored value to the flowing value, producing a tuple. Idempotent. |
 | `Pick(index)` | Selects one element from a tuple, discarding the others. |
+
+---
+
+## Parallelism operators
+
+Parallelism operators let a single pipeline call fan out work across multiple
+threads and collect the results. They come in matched pairs: `Scatter` marks
+the start of a parallel region; `Gather` marks the end.
+
+The input to `Scatter` must be a `list`. Each item is dispatched to a worker
+thread that runs the enclosed region independently with a fresh `Context`.
+The original thread blocks at `Gather` until all workers finish, then resumes
+with `list[results]` in submission order.
+
+```
+                 ┌─ worker 0: [region ops] ─┐
+list[T] ─ Scatter┼─ worker 1: [region ops] ─┼─ Gather ─ list[U]
+                 └─ worker 2: [region ops] ─┘
+```
+
+| Operator | Notes |
+|---|---|
+| `Scatter(max_concurrency)` | Fans `list[T]` out to worker threads. `max_concurrency` bounds the thread pool size; defaults to `1` (sequential). |
+| `Gather()` | Collects worker results back into `list[U]`. Must follow a matching `Scatter`. |
+
+**Constraints:**
+- Scatter/Gather cannot be nested inside another Scatter region.
+- A Batch/UnBatch region inside a Scatter region is valid.
+- If any worker raises, the exception propagates on the original thread after all workers complete.
+
+**Example — tiled inference:**
+
+```python
+pipeline = Pipeline([
+    Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
+    Store("tile_rects", index=1),
+    Pick(0),
+    Scatter(max_concurrency=4),
+    Decode(),
+    Resize((640, 640)),
+    Normalize(),
+    Infer("model.onnx"),
+    ...
+    ToDetections(),
+    Gather(),
+    Recall("tile_rects"),
+    Stitch(),
+    NMM(iou_threshold=0.5),
+])
+```
+
+---
+
+## Tiling operators
+
+Tiling operators split an image into overlapping crops for inference and
+reassemble the per-tile detections back into the original image coordinate
+space. They are designed to work together with `Scatter`/`Gather` to
+run inference on each tile in parallel.
+
+| Operator | Notes |
+|---|---|
+| `Tile(slice_wh, overlap_wh)` | Splits `ImagePayload` into overlapping crops. Returns `(list[ImagePayload], list[TileRect])`. `slice_wh` is `(width, height)` of each tile; `overlap_wh` is the overlap in pixels (default `(0, 0)`). |
+| `Stitch()` | Remaps each tile's `Detections` boxes from tile coordinates to original image coordinates and concatenates all tiles. Returns `Detections`. Accepts `(list[Detections], list[TileRect])`. |
+| `TileRect` | Frozen dataclass `(x1, y1, x2, y2)` describing a crop window in the original image. Produced by `Tile` and consumed by `Stitch`. |
+
+`Stitch` performs pure coordinate remapping and concatenation — it does not
+deduplicate cross-tile detections. Follow it with `NMM` (or `NMS`) to merge
+overlapping boxes that span tile boundaries.
 
 ---
 

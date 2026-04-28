@@ -26,4 +26,4 @@ def test_concurrent_on_trace_no_lost_increments():
             t.join()
 
     assert agg.total_calls == n
-    assert len(agg.avg_operator_latency_ms()) == 1
+    assert len(agg.avg_trace.spans) == 1

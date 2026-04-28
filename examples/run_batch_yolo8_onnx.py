@@ -21,6 +21,7 @@ from ml_pipes import (
     Normalize,
     Pick,
     Pipeline,
+    PrintCollector,
     ProjectBoxes,
     Recall,
     Resize,
@@ -78,7 +79,7 @@ def build_pipeline(model_path: Path, batch_size: int, timeout: float,
         Normalize(),
         Batch(size=batch_size, timeout=timeout),
         Collate(),
-        Infer(model_path, serialize=serialize),
+        Infer(model_path, serialize=serialize, providers=["CPUExecutionProvider"]),
         Distribute(),
         UnBatch(),
         Extract("output0", as_="preds"),
@@ -157,6 +158,7 @@ def main() -> int:
 
     pipeline = build_pipeline(model_path, args.batch_size, args.timeout,
                               serialize=not args.no_serialize)
+    pipeline.set_tracing(PrintCollector())
 
     print(
         f"\nRunning {len(image_paths)} images"

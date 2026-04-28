@@ -14,8 +14,6 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.streaming"
 
 import cv2
-import numpy as np
-import supervision as sv
 
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
@@ -23,51 +21,39 @@ from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes import (
     DrawBoxes,
     Embed,
+    Gather,
     ImagePayload,
     Pick,
     Pipeline,
     Recall,
+    NMM,
+    Scatter,
+    Stitch,
     Store,
+    Tile,
     ThroughputCollector,
-    Detections,
+    inline,
 )
 
 
-class InferenceSlicer:
-    """Wraps sv.InferenceSlicer to present the same ImagePayload → Detections
-    contract as a plain inference pipeline."""
-
-    def __init__(self, base: Pipeline) -> None:
-        def _tile_callback(tile_arr: np.ndarray) -> sv.Detections:
-            result: Detections = base(ImagePayload(array=tile_arr, color_space="BGR", layout="HWC"))
-            return sv.Detections(
-                xyxy=np.array(result.boxes, dtype=np.float32),
-                confidence=np.array(result.scores, dtype=np.float32),
-                class_id=np.array(result.classes, dtype=int),
-            )
-
-        self.slicer = sv.InferenceSlicer(
-            callback=_tile_callback,
-            slice_wh=(640, 640),
-            overlap_wh=(100, 100),
-            overlap_filter=sv.OverlapFilter.NON_MAX_MERGE,
-            iou_threshold=0.5,
-            thread_workers=1,
-        )
-
-    def __call__(self, payload: ImagePayload) -> Detections:
-        sv_dets = self.slicer(payload.array)
-        return Detections(
-            boxes=[box.tolist() for box in sv_dets.xyxy],
-            scores=sv_dets.confidence.tolist(),
-            classes=sv_dets.class_id.tolist(),
-        )
-
-
-def build_pipeline(model_path: Path, conf_threshold: float, tile: bool) -> Pipeline:
+def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers: int = 1) -> Pipeline:
     infer_pipe = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
     if tile:
-        infer_pipe = Pipeline([InferenceSlicer(infer_pipe)])
+        return Pipeline([
+            Store("source_frame"),
+            Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
+            Store("tile_rects", index=1),
+            Pick(0),
+            Scatter(max_concurrency=6),
+            inline(infer_pipe),
+            Gather(),
+            Recall("tile_rects"),
+            Stitch(),
+            NMM(iou_threshold=0.5),
+            Recall("source_frame", index=0),
+            DrawBoxes(class_names=COCO_CLASSES),
+            Pick(0),
+        ])
     return Pipeline([
         Store("source_frame"),
         Embed(infer_pipe),
@@ -84,7 +70,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
         return 1
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
-    pipeline = build_pipeline(model_path, conf_threshold, tile)
+    pipeline = build_pipeline(model_path, conf_threshold, tile, workers=workers)
     pipeline.set_tracing(throughput)
 
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
@@ -159,7 +145,7 @@ def main() -> int:
         workers=args.workers,
         stride=args.stride,
         model=args.model,
-        tile=args.tile,
+        tile=True,
         conf_threshold=args.conf_threshold,
     )
 
