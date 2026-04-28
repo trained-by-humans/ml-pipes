@@ -9,9 +9,10 @@ skip all collector calls, I/O, and synchronization.
 | Name | What it is |
 |---|---|
 | `StepSpan` | One operator step: label, start time, duration, error flag, optional input/output shapes |
-| `InvocationTrace` | One complete pipeline call: ordered list of `StepSpan`s, total duration |
+| `InvocationTrace` | One complete pipeline call: ordered list of `StepSpan`s, total duration, optional `batch_size` and `workers` annotations |
 | `TraceCollector` | Interface with a single `on_trace(trace)` method — implement this to consume traces |
 | `TracingConfig` | Groups collector + optional operator labels + optional shape capture |
+| `merge_traces(traces)` | Averages a list of `InvocationTrace` objects into one, computing mean per-span duration. Recurses into child traces. Used internally to produce an average worker trace for Scatter regions. |
 
 ## How it works
 
@@ -144,6 +145,25 @@ window; the batch region execution time is accounted for separately in the `Batc
 span. `batch_size` on the child trace lets an aggregator normalize region latency
 per sample.
 
+Scatter regions also produce a nested child trace, averaged across all workers:
+
+```
+  0:Tile                              0.80ms  (  1.2%)
+  1:Scatter                          61.30ms  ( 95.1%)
+    ↳ child trace [n_items=9, concurrency=4]:
+        2:Resize                      0.30ms  (  0.5%)
+        3:Normalize                   2.10ms  (  3.4%)
+        4:Infer                      58.50ms  ( 95.4%)
+        5:ToDetections                0.12ms  (  0.2%)
+        total                        61.02ms
+  6:Stitch                            0.40ms  (  0.6%)
+  total                              64.50ms
+```
+
+`n_items` is the number of items dispatched; `concurrency` is the `max_concurrency`
+value. The child trace is the mean latency across all workers, so it represents an
+average worker rather than the slowest or fastest.
+
 ## Built-in collectors
 
 ### `PrintCollector`
@@ -164,6 +184,19 @@ Output:
   3:NMS                               0.21ms  (  0.4%)
   4:ToDetections                      0.02ms  (  0.0%)
   total                              48.12ms
+```
+
+`PrintCollector` also exposes the most recently received trace and lets you
+reprint it at any time:
+
+```python
+collector = PrintCollector()
+pipeline.set_tracing(collector)
+pipeline("image.jpg")
+
+collector.last_trace        # InvocationTrace | None — the last received trace
+collector.print_trace()     # reprint last_trace
+collector.print_trace(some_trace)  # print an arbitrary trace
 ```
 
 ### `AggregateCollector`
@@ -187,16 +220,15 @@ agg.print_summary()
 Output:
 
 ```
-  Calls : 100
-  Avg pipeline latency : 46.53ms
+  Calls                : 100
+  Latency Avg.         : 46.53ms
 
-  Operator                              Avg ms  % of total
-  ----------------------------------- --------  ----------
-  0:Resize                                0.18ms       0.4%
-  1:Normalize                             2.22ms       4.8%
-  2:Infer                                37.71ms      81.0%
-  3:NMS                                   0.21ms       0.5%
-  4:ToDetections                          0.01ms       0.0%
+  0:Resize                           0.18ms  (  0.4%)
+  1:Normalize                        2.22ms  (  4.8%)
+  2:Infer                           37.71ms  ( 81.0%)
+  3:NMS                              0.21ms  (  0.5%)
+  4:ToDetections                     0.01ms  (  0.0%)
+  total                             46.33ms
 ```
 
 `AggregateCollector` also exposes the data programmatically:
@@ -204,7 +236,7 @@ Output:
 ```python
 agg.total_calls                  # int
 agg.avg_pipeline_latency_ms      # float
-agg.avg_trace                    # InvocationTrace — averaged trace (mirrors live trace structure)
+agg.avg_trace                    # InvocationTrace — live averaged trace (mirrors full trace structure including child traces)
 agg.reset()                      # clear all accumulated state
 ```
 
