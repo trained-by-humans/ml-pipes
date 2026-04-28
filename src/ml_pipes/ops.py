@@ -11,10 +11,14 @@ from pathlib import Path
 from typing import Literal, Any, get_args, get_origin
 from typing import TextIO
 
+import time
+
 import numpy as np
 
-from .batch import BatchGate
+from .batch import BatchGate, LeaderBatch
 from .region import RegionCloser, RegionOpener
+from .scatter import ScatterGate
+from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
 from .types import ResizeTransform
 from .types import (
     Detections,
@@ -694,8 +698,6 @@ class NMM:
         self.iou_threshold = iou_threshold
 
     def __call__(self, detections: "Detections") -> "Detections":
-        from .types import Detections
-
         if not detections.boxes:
             return detections
 
@@ -1272,11 +1274,6 @@ class Batch(RegionOpener):
         trace: Any,
         cfg: Any,
     ) -> Any:
-        import time
-        from .batch import LeaderBatch
-        from .tracing import InvocationTrace, StepSpan
-        from .core import _NoOpTrace
-
         gate = self.gate
 
         t_gate_enter = time.perf_counter()
@@ -1375,7 +1372,6 @@ class Scatter(RegionOpener):
     closing_type = Gather
 
     def __init__(self, max_concurrency: int = 1) -> None:
-        from .scatter import ScatterGate
         self.gate = ScatterGate(max_concurrency)
 
     def run_region(
@@ -1386,10 +1382,6 @@ class Scatter(RegionOpener):
         trace: Any,
         cfg: Any,
     ) -> Any:
-        from .tracing import InvocationTrace, StepSpan
-        from .core import _NoOpTrace
-        from .tracing import merge_traces
-
         gate = self.gate
         collecting = isinstance(trace, InvocationTrace)
         items: list[Any] = current
@@ -1403,7 +1395,6 @@ class Scatter(RegionOpener):
             except BaseException as exc:
                 entry.deposit_exception(exc, child_trace if collecting else None)
 
-        import time
         gate.scatter(items, run_region)
         t_gather = time.perf_counter()
         try:
