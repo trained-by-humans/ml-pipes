@@ -37,11 +37,13 @@ class Pipeline:
         auto_validate: bool = False,
         strict: bool = False,
         tracing: TracingConfig | None = None,
+        input_type: Any = None,
     ):
         self.operators = self._flatten(list(operators))
         self._tracing_config = tracing
         self._auto_validate = auto_validate
         self._strict = strict
+        self._input_type = input_type
         if auto_validate:
             self.validate()
 
@@ -160,14 +162,13 @@ class Pipeline:
                     ) from exc
 
     def _resolve_type_contract(self, strict: bool = False) -> TypeContract:
-        from .ops import Batch, UnBatch
         from .region import RegionOpener, RegionCloser
 
         if not self.operators:
             raise PipelineValidationError("Cannot resolve type contract of an empty pipeline")
 
         first_input_type: Any | None = None
-        previous_output_type: Any | None = None
+        previous_output_type: Any | None = self._input_type
         previous_name: str | None = None
         stored_annotations: dict[str, Any] = {}
         stack: list[dict[str, Any]] = []
@@ -176,12 +177,8 @@ class Pipeline:
             if isinstance(operator, RegionOpener):
                 stack.append(stored_annotations)
                 stored_annotations = {}
-                if isinstance(operator, Batch):
-                    continue  # transparent to type contract — region ops are what matter
             elif isinstance(operator, RegionCloser):
                 stored_annotations = stack.pop()
-                if isinstance(operator, UnBatch):
-                    continue
 
             if hasattr(operator, "resolve_contract"):
                 input_types, output_type = operator.resolve_contract(
