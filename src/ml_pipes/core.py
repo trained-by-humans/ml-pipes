@@ -102,24 +102,26 @@ class Pipeline:
         # Same-type nesting (Batch inside Batch, Scatter inside Scatter) is forbidden.
         stack: list[tuple[RegionOpener, int]] = []  # (opener, open_position)
         for i, op in enumerate(self.operators):
-            if isinstance(op, RegionOpener):
-                if stack and type(stack[-1][0]) is type(op):
+            match op:
+                case RegionOpener() if stack and type(stack[-1][0]) is type(op):
                     raise PipelineValidationError(
-                        f"Nested {type(op).__name__} regions are not supported"
+                        f"Directly nested {type(op).__name__} regions are not supported — "
+                        f"a {type(op).__name__} region may not open inside another {type(op).__name__} region"
                     )
-                stack.append((op, i))
-            elif isinstance(op, RegionCloser):
-                if not stack:
+                case RegionOpener():
+                    stack.append((op, i))
+                case RegionCloser() if not stack:
                     raise PipelineValidationError(
                         f"{type(op).__name__} at position {i} has no matching opener"
                     )
-                top_opener, top_pos = stack[-1]
-                if not isinstance(op, top_opener.closing_type):
+                case RegionCloser() if not isinstance(op, stack[-1][0].closing_type):
+                    top_opener, top_pos = stack[-1]
                     raise PipelineValidationError(
                         f"{type(op).__name__} at position {i} closes {type(top_opener).__name__} "
                         f"opened at position {top_pos} — regions cannot interleave"
                     )
-                stack.pop()
+                case RegionCloser():
+                    stack.pop()
 
         for opener, pos in stack:
             raise PipelineValidationError(

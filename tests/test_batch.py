@@ -226,7 +226,7 @@ def test_validate_raises_on_unmatched_unbatch():
 
 def test_validate_raises_on_nested_batch():
     pipeline = Pipeline([Batch(size=4), Batch(size=2), UnBatch(), UnBatch()])
-    with pytest.raises(PipelineValidationError, match="Nested Batch"):
+    with pytest.raises(PipelineValidationError, match="Directly nested Batch"):
         pipeline.validate()
 
 
