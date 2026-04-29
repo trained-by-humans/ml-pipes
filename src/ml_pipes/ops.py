@@ -28,6 +28,7 @@ from .types import (
     TensorPayload,
     TensorRegistry,
 )
+from .validation import is_annotation_compatible
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +216,8 @@ class Cast:
             t = current_output if current_output is not None else Any
             return (t,), t
         tensor_like = TensorPayload | tuple[TensorPayload, ...]
+        if current_output is not None and is_annotation_compatible(current_output, (tensor_like,)):
+            return (current_output,), current_output
         return (tensor_like,), tensor_like
 
     def __call__(self, value: object) -> object:
