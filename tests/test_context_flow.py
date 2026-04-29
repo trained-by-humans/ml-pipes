@@ -4,7 +4,7 @@ extend() re-validation, and Embed attribution.
 """
 import pytest
 
-from ml_pipes import Batch, Pipeline, PipelineValidationError, Recall, Store, UnBatch, embed
+from ml_pipes import Batch, Pick, Pipeline, PipelineValidationError, Recall, Store, UnBatch, embed
 from ml_pipes.context import Recall, Store
 
 
@@ -30,6 +30,16 @@ class Identity:
 class _BatchIdentity:
     def __call__(self, values: list) -> list:
         return values
+
+
+class IntToPair:
+    def __call__(self, value: int) -> tuple[int, str]:
+        return value, str(value)
+
+
+class StringPairConsumer:
+    def __call__(self, left: str, right: str) -> str:
+        return f"{left}|{right}"
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +70,26 @@ def test_batch_region_store_then_recall_passes():
 def test_outer_key_survives_batch_region():
     # Store before batch; Recall after UnBatch — outer key must still be visible.
     Pipeline([Store("x"), Batch(size=2), _BatchIdentity(), UnBatch(), Recall("x")]).validate()
+
+
+def test_store_pick_recall_type_flow_passes():
+    Pipeline([
+        IntToPair(),
+        Store("saved_text", index=1),
+        Pick(0),
+        IntToString(),
+        Recall("saved_text"),
+        StringPairConsumer(),
+    ]).validate()
+
+
+def test_store_index_out_of_bounds_raises_on_concrete_input():
+    with pytest.raises(PipelineValidationError, match="Store\\('x', index=5\\) is out of bounds"):
+        Pipeline([IntToPair(), Store("x", index=5)]).validate()
+
+
+def test_store_index_out_of_bounds_silent_on_vague_input():
+    Pipeline([Store("x", index=5)]).validate()
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +129,11 @@ def test_error_message_shows_none_when_no_keys():
 def test_recall_before_store_raises():
     with pytest.raises(PipelineValidationError):
         Pipeline([Recall("x"), Store("x")]).validate()
+
+
+def test_recall_after_other_ops_before_store_raises():
+    with pytest.raises(PipelineValidationError, match="was not stored"):
+        Pipeline([IntToString(), Recall("missing_value"), StringToFloat()]).validate()
 
 
 def test_batch_recall_without_inner_store_raises():

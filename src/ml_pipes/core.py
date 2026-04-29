@@ -160,6 +160,7 @@ class Pipeline:
             raise PipelineValidationError("Cannot resolve type contract of an empty pipeline")
 
         resolved_input_type: Any = Any
+        prior_ops: list[Any] = []
         previous_output_type: Any | None = None
         previous_name: str | None = None
         stored_annotations: dict[str, Any] = {}
@@ -185,10 +186,9 @@ class Pipeline:
                 input_types, output_type = self._resolve_operator_contract(operator)
                 has_contract = False
 
-            if resolved_input_type is Any:
-                candidate = input_types[0] if len(input_types) == 1 else input_types
-                if self._is_concrete(candidate):
-                    resolved_input_type = candidate
+            candidate = self._collapse_input_types(input_types)
+            projected_input = self._backpropagate_input_type(candidate, prior_ops)
+            resolved_input_type = self._refine_input_constraint(resolved_input_type, projected_input)
 
             # Check compatibility and strictness
             if previous_output_type is not None:
@@ -217,6 +217,7 @@ class Pipeline:
 
             previous_output_type = output_type
             previous_name = operator.__class__.__name__
+            prior_ops.append(operator)
 
         if strict and not self._is_concrete(resolved_input_type):
             raise PipelineValidationError(
@@ -226,6 +227,94 @@ class Pipeline:
             )
 
         return TypeContract(input_type=resolved_input_type, output_type=previous_output_type)
+
+    @staticmethod
+    def _collapse_input_types(input_types: tuple[Any, ...]) -> Any:
+        if len(input_types) == 1:
+            return input_types[0]
+        return tuple[input_types]
+
+    @classmethod
+    def _backpropagate_input_type(cls, candidate: Any, pending_ops: list[Any]) -> Any:
+        inferred = candidate
+        for operator in reversed(pending_ops):
+            inferred = cls._project_input_back_through(operator, inferred)
+        return inferred
+
+    @classmethod
+    def _project_input_back_through(cls, operator: Any, inferred: Any) -> Any:
+        name = type(operator).__name__
+        if name == "Scatter":
+            return list[inferred]
+        if name == "Batch":
+            if get_origin(inferred) is list:
+                args = get_args(inferred)
+                return args[0] if args else Any
+            return Any
+        if isinstance(operator, Store):
+            return inferred
+        if isinstance(operator, ContextOp):
+            return Any
+        if hasattr(operator, "resolve_contract"):
+            probe_annotations: dict[str, Any] = {}
+            input_types, output_type = operator.resolve_contract(
+                inferred,
+                probe_annotations,
+                cls._expand_output_annotation,
+                PipelineValidationError,
+            )
+            collapsed_input = cls._collapse_input_types(input_types)
+            if output_type == inferred and (collapsed_input is Any or collapsed_input == inferred):
+                return inferred
+        return Any
+
+    @classmethod
+    def _refine_input_constraint(cls, current: Any, candidate: Any) -> Any:
+        if cls._is_annotation_more_informative(candidate, current):
+            return candidate
+        return current
+
+    @classmethod
+    def _is_annotation_more_informative(cls, candidate: Any, current: Any) -> bool:
+        if candidate is Any or candidate is None:
+            return False
+        if current is Any or current is None:
+            return True
+        if candidate == current:
+            return False
+
+        if isinstance(candidate, type) and isinstance(current, type):
+            try:
+                return issubclass(candidate, current)
+            except TypeError:
+                return False
+
+        candidate_origin = get_origin(candidate)
+        current_origin = get_origin(current)
+        if candidate_origin != current_origin or candidate_origin is None:
+            return False
+
+        candidate_args = get_args(candidate)
+        current_args = get_args(current)
+        if len(candidate_args) != len(current_args):
+            return False
+
+        changed = False
+        for cand_arg, curr_arg in zip(candidate_args, current_args, strict=True):
+            if curr_arg is Any:
+                if cand_arg is Any:
+                    continue
+                changed = True
+                continue
+            if cand_arg is Any:
+                return False
+            if cand_arg == curr_arg:
+                continue
+            if cls._is_annotation_more_informative(cand_arg, curr_arg):
+                changed = True
+                continue
+            return False
+        return changed
 
     @staticmethod
     def _resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, ...], Any]:

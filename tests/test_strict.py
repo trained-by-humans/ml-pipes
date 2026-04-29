@@ -120,6 +120,15 @@ def test_non_strict_accepts_vague_op():
     Pipeline([VagueOp()]).validate()  # must not raise
 
 
+def test_vague_op_between_typed_ops_is_accepted():
+    Pipeline([IntToString(), VagueOp(), StringToFloat()]).validate()
+
+
+def test_vague_op_between_typed_ops_rejected_in_strict_mode():
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        Pipeline([IntToString(), VagueOp(), StringToFloat()], strict=True).validate()
+
+
 # ---------------------------------------------------------------------------
 # Generic container types with Any args are vague
 # ---------------------------------------------------------------------------
