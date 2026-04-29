@@ -53,7 +53,8 @@ def main() -> int:
             Recall("resize_transform"),
             ProjectBoxes(),
             ToDetections(),
-        ]
+        ],
+        auto_validate=True,
     )
 
     result = pipeline(image_path)

@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
-import numpy as np
-
-if TYPE_CHECKING:
-    from .types import Detections, ImagePayload
+from .types import Detections, ImagePayload
 
 
 @dataclass(frozen=True)
@@ -67,8 +63,6 @@ class Tile:
         self.overlap_wh = overlap_wh
 
     def __call__(self, payload: "ImagePayload") -> "tuple[list[ImagePayload], list[TileRect]]":
-        from .types import ImagePayload
-
         h, w = payload.array.shape[:2]
         rects = _compute_tile_rects(w, h, self.slice_wh, self.overlap_wh)
         tiles = [
@@ -96,8 +90,6 @@ class Stitch:
         detections: "list[Detections]",
         tile_rects: "list[TileRect]",
     ) -> "Detections":
-        from .types import Detections
-
         all_boxes: list[list[float]] = []
         all_scores: list[float] = []
         all_classes: list[int] = []

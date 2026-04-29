@@ -140,12 +140,12 @@ def test_validate_unmatched_scatter():
 
 
 def test_validate_unmatched_gather():
-    with pytest.raises(PipelineValidationError, match="no matching Scatter"):
+    with pytest.raises(PipelineValidationError, match="no matching opener"):
         Pipeline([_Double(), Gather()]).validate()
 
 
 def test_validate_nested_scatter_forbidden():
-    with pytest.raises(PipelineValidationError, match="Nested Scatter"):
+    with pytest.raises(PipelineValidationError, match="Directly nested Scatter"):
         Pipeline([
             Scatter(max_concurrency=1),
             Scatter(max_concurrency=1),
