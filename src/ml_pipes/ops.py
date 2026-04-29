@@ -210,7 +210,11 @@ class Cast:
         self.field = field
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        return (Any,), current_output  # cast changes precision, not the payload type
+        if self.field is not None:
+            # field= mode: receives a dataclass (e.g. RuntimeOutputs), returns the same type
+            t = current_output if current_output is not None else Any
+            return (t,), t
+        return (TensorPayload,), TensorPayload
 
     def __call__(self, value: object) -> object:
         if self.field is not None:

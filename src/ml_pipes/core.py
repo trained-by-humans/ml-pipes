@@ -211,7 +211,7 @@ class Pipeline:
                     )
 
             if first_input_type is None:
-                first_input_type = input_types[0] if len(input_types) == 1 else input_types
+                first_input_type = self._input_type if self._input_type is not None else (input_types[0] if len(input_types) == 1 else input_types)
             previous_output_type = output_type
             previous_name = operator.__class__.__name__
 
