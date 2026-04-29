@@ -26,11 +26,13 @@ class Pipeline:
         self,
         operators: Iterable[Callable[..., Any] | ContextOp],
         auto_validate: bool = False,
+        strict: bool = False,
         tracing: TracingConfig | None = None,
     ):
         self.operators = self._flatten(list(operators))
         self._tracing_config = tracing
         self._auto_validate = auto_validate
+        self._strict = strict
         if auto_validate:
             self.validate()
 
@@ -77,10 +79,10 @@ class Pipeline:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
         return result
 
-    def validate(self, strict: bool = False) -> TypeContract | None:
+    def validate(self) -> TypeContract | None:
         if not self.operators:
             return None
-        return PipelineValidator(self.operators).validate(strict=strict)
+        return PipelineValidator(self.operators).validate(strict=self._strict)
 
     def _execute(self, value: Any, trace: Any, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
         cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
