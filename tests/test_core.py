@@ -1,7 +1,7 @@
 import pytest
 from typing import Any
 
-from ml_pipes import Context, Pick, Pipeline, PipelineValidationError, Recall, Store, embed
+from ml_pipes import Cast, Context, Pick, Pipeline, PipelineValidationError, Recall, Store, embed
 
 
 class IntToString:
@@ -293,3 +293,68 @@ def test_store_out_of_bounds_silent_on_vague_input():
     pipeline = Pipeline([Store("x", index=5)])
 
     pipeline.validate()  # must not raise
+
+
+def test_input_type_preserved_as_public_contract():
+    # input_type is the declared boundary of the pipeline, not a seed for the
+    # first compatibility check. validate() must return it as contract.input_type.
+    inner = Pipeline([IntToString()], input_type=bool)
+    contract = inner.validate()
+
+    assert contract.input_type is bool
+    assert contract.output_type is str
+
+
+def test_input_type_preserved_when_first_operator_accepts_any():
+    # Even when the first operator uses Any, the declared input_type must be kept.
+    inner = Pipeline([VagueOp()], input_type=int)
+    contract = inner.validate()
+
+    assert contract.input_type is int
+
+
+def test_embed_accepts_when_outer_matches_declared_input_type():
+    # outer produces bool; inner declares input_type=bool even though its first
+    # operator annotates int. Embed must accept bool, not reject it as "not int".
+    inner = Pipeline([IntToString()], input_type=bool)
+    outer = Pipeline([FloatToBool(), embed(inner)])  # float -> bool -> (inner) str
+
+    outer.validate()  # must not raise
+
+
+def test_embed_rejects_when_outer_mismatches_declared_input_type():
+    # outer produces bytes; inner declares input_type=bool → mismatch.
+    inner = Pipeline([IntToString()], input_type=bool)
+    outer = Pipeline([BoolToBytes(), embed(inner)])  # bool -> bytes -> bool: incompatible
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        outer.validate()
+
+
+# ---------------------------------------------------------------------------
+# Passthrough resolve_contract must not propagate None as "unknown upstream"
+# ---------------------------------------------------------------------------
+
+def test_cast_does_not_silence_downstream_type_check():
+    # Cast.resolve_contract returns current_output unchanged.
+    # When no input_type is declared, current_output starts as None —
+    # downstream checks must not be silently skipped.
+    # Cast(float32) cannot produce str, so StringToFloat(str) must be caught.
+    pipeline = Pipeline([Cast("float32"), StringToFloat()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.validate()
+
+
+def test_vague_op_between_typed_ops_is_accepted():
+    # Any->Any is compatible with everything — validation passes in non-strict mode.
+    pipeline = Pipeline([IntToString(), VagueOp(), BoolToBytes()])
+
+    pipeline.validate()  # must not raise
+
+
+def test_vague_op_rejected_in_strict_mode():
+    pipeline = Pipeline([IntToString(), VagueOp(), BoolToBytes()], strict=True)
+
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        pipeline.validate()
