@@ -101,6 +101,11 @@ def test_strict_rejects_pipeline_with_no_concrete_input_boundary():
         Pipeline([Store("x"), Recall("x")]).validate(strict=True)
 
 
+def test_strict_skips_only_the_first_deferred_dynamic_boundary():
+    with pytest.raises(PipelineValidationError, match="1:PassthroughOp"):
+        Pipeline([Store("x"), PassthroughOp(), Recall("x")], strict=True).validate()
+
+
 # ---------------------------------------------------------------------------
 # Integration with auto_validate
 # ---------------------------------------------------------------------------
@@ -118,6 +123,18 @@ def test_strict_validate_can_run_after_auto_validated_extend():
 
     with pytest.raises(PipelineValidationError, match="Strict mode violation"):
         pipeline.validate(strict=True)
+
+
+def test_strict_constructor_rejects_invalid_auto_validated_pipeline():
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        Pipeline([VagueOp()], strict=True, auto_validate=True)
+
+
+def test_strict_constructor_rejects_invalid_extend_when_auto_validate_is_enabled():
+    pipeline = Pipeline([IntToString()], strict=True, auto_validate=True)
+
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        pipeline.extend([VagueOutputOp()])
 
 
 def test_non_strict_accepts_vague_op():
