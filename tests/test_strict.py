@@ -52,10 +52,10 @@ def test_strict_skips_store_and_recall():
 
 def test_strict_skips_batch_unbatch():
     class ListIdentity:
-        def __call__(self, values: list) -> list:
+        def __call__(self, values: list[int]) -> list[int]:
             return values
 
-    Pipeline([Batch(size=2), ListIdentity(), UnBatch()], strict=True).validate()
+    Pipeline([Batch(size=2), ListIdentity(), UnBatch()], strict=True, input_type=int).validate()
 
 
 def test_strict_accepts_passthrough_resolve_contract():

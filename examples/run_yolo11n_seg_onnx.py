@@ -70,7 +70,8 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
             Recall("resize_transform"),
             ProjectMasks(),
             ToSegmentations(),
-        ]
+        ],
+        auto_validate=True,
     )
 
 
@@ -89,6 +90,7 @@ def main() -> int:
 
     infer_pipe = build_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_and_store(output_path, COCO_CLASSES)
+    pipeline.validate()
     pipeline(image_path)
     return 0
 

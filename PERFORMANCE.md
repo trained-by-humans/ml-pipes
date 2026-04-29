@@ -318,6 +318,15 @@ the region. The leader distributes results via the gate before continuing.
 **Serialization** is a context manager swap inside `Infer`. The call site is identical
 in both modes — only the behavior of the lock differs.
 
+The gate mechanics map directly:
+
+|           | BatchGate                                            | ScatterGate                                                          |
+|-----------|------------------------------------------------------|----------------------------------------------------------------------|
+| Entry     | N threads call `enter(item)` → one elected leader    | 1 thread calls `scatter(items)` → N workers spawned                  |
+| Region    | Leader runs operators on `list[items]`               | Each worker runs operators on its own item                           |
+| Exit      | Leader calls `distribute(results)` → wakes followers | Workers call `deposit(result)` → wakes original when count reaches N |
+| Continues | Each of N threads with its result                    | Original thread with `list[results]`                                 |
+
 ## Additional note on runtimes
 
 Some inference runtimes use internal parallelism (e.g., multiple threads per inference
