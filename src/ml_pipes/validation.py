@@ -30,12 +30,10 @@ class _BoundarySignature:
 @dataclass
 class _OperatorBoundary:
     operator: Any
-    previous_output_type: Any | None
+    previous_output_type: Any
     context_inputs: dict[str, Any] | None
     dynamic_boundary: _BoundarySignature | None
     static_boundary: _BoundarySignature | None
-    projected_input_type: Any = Any
-    resolved_input_type: Any = Any
 
     @property
     def effective_boundary(self) -> _BoundarySignature:
@@ -48,16 +46,6 @@ class _OperatorBoundary:
     @property
     def output_type(self) -> Any:
         return self.effective_boundary.output_type
-
-    @property
-    def is_leading_deferred_boundary(self) -> bool:
-        return (
-            self.dynamic_boundary is not None
-            and self.previous_output_type is None
-            and self.input_types == (Any,)
-            and not is_concrete(self.output_type)
-        )
-
 
 class PipelineValidator:
     def __init__(self, operators: list[Any]):
@@ -126,8 +114,7 @@ class PipelineValidator:
     def _resolve_type_contract(self, strict: bool = False) -> TypeContract:
         boundaries = self._resolve_operator_boundaries()
         self._validate_downstream_compatibility(boundaries)
-        self._refine_operator_boundaries(boundaries)
-        resolved_input_type = boundaries[0].resolved_input_type
+        resolved_input_type = self._refine_operator_boundaries(boundaries)
 
         if strict:
             self._validate_contracts_strictly(boundaries)
@@ -142,7 +129,7 @@ class PipelineValidator:
 
     def _resolve_operator_boundaries(self) -> list[_OperatorBoundary]:
         boundaries: list[_OperatorBoundary] = []
-        previous_output_type: Any | None = None
+        previous_output_type: Any = Any
         stored_annotations: dict[str, Any] = {}
         stack: list[dict[str, Any]] = []
 
@@ -174,8 +161,6 @@ class PipelineValidator:
 
     def _validate_downstream_compatibility(self, boundaries: list[_OperatorBoundary]) -> None:
         for i, boundary in enumerate(boundaries):
-            if boundary.previous_output_type is None:
-                continue
             if is_annotation_compatible(boundary.previous_output_type, boundary.input_types):
                 continue
 
@@ -188,16 +173,13 @@ class PipelineValidator:
             )
 
     @classmethod
-    def _refine_operator_boundaries(cls, boundaries: list[_OperatorBoundary]) -> None:
+    def _refine_operator_boundaries(cls, boundaries: list[_OperatorBoundary]) -> Any:
         downstream_required_input: Any = Any
         for boundary in reversed(boundaries):
             local_input_type = cls._collapse_boundary_input_types(boundary)
             projected_input = cls._project_input_back_through(boundary, downstream_required_input)
-            resolved_input_type = cls._refine_input_constraint(local_input_type, projected_input)
-
-            boundary.projected_input_type = projected_input
-            boundary.resolved_input_type = resolved_input_type
-            downstream_required_input = resolved_input_type
+            downstream_required_input = cls._refine_input_constraint(local_input_type, projected_input)
+        return downstream_required_input
 
     @staticmethod
     def _collapse_input_types(input_types: tuple[Any, ...]) -> Any:
@@ -375,7 +357,7 @@ class PipelineValidator:
     @staticmethod
     def _resolve_dynamic_boundary(
         operator: Any,
-        previous_output_type: Any | None,
+        previous_output_type: Any,
         stored_annotations: dict[str, Any],
     ) -> _BoundarySignature | None:
         if not hasattr(operator, "resolve_contract"):
@@ -404,9 +386,6 @@ class PipelineValidator:
                     f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                     f"to accept and thread the upstream type dynamically."
                 )
-
-            if boundary.is_leading_deferred_boundary:
-                continue
             if not is_concrete(boundary.output_type):
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
