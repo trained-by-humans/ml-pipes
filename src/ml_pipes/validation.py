@@ -275,31 +275,25 @@ class PipelineValidator:
         # Example: template=`Any`, value=`int`, binding=None -> first placeholder binds to `int`.
         if template is Any and binding is None:
             return value
-
         # Example: template=`Any`, value=`int`, binding=`int` -> placeholder stays bound to `int`.
         if template is Any and binding == value:
             return binding
-
         # Example: template=`Any`, value=`str`, binding=`int` -> conflicting binding, so fail.
         if template is Any:
             return _UNBOUND
-
         # Example: template=`tuple[int, str]`, value=`tuple[int, str]` -> exact structure match.
         if template == value:
             return binding
-
         template_origin = get_origin(template)
         value_origin = get_origin(value)
         # Example: template=`tuple[Any, str]`, value=`list[int, str]` -> different origins, so fail.
         if template_origin is None or template_origin != value_origin:
             return _UNBOUND
-
         template_args = get_args(template)
         value_args = get_args(value)
         # Example: template=`tuple[Any, str]`, value=`tuple[int, str, float]` -> different arity, so fail.
         if len(template_args) != len(value_args):
             return _UNBOUND
-
         return cls._bind_any_placeholder_args(template_args, value_args, binding)
 
     @classmethod
@@ -339,23 +333,19 @@ class PipelineValidator:
         # Example: current=`tuple[int, str]`, candidate=`tuple[int, str]` -> no refinement needed.
         if candidate == current:
             return False
-
         # Example: current=`object`, candidate=`TensorPayload` -> concrete subtype refines broad `object`.
         if current is object:
             return True
-
         if isinstance(candidate, type) and isinstance(current, type):
             try:
                 return issubclass(candidate, current)
             except TypeError:
                 return False
-
         candidate_origin = get_origin(candidate)
         current_origin = get_origin(current)
         # Example: current=`tuple[int, Any]`, candidate=`list[int, str]` -> different container kinds cannot refine.
         if candidate_origin != current_origin or candidate_origin is None:
             return False
-
         candidate_args = get_args(candidate)
         current_args = get_args(current)
         # Example: current=`tuple[int, Any]`, candidate=`tuple[int, str, float]` -> different arity cannot refine.
@@ -422,22 +412,13 @@ class PipelineValidator:
     def _is_explicitly_transitive_boundary(cls, boundary: _OperatorBoundary) -> bool:
         if boundary.dynamic_boundary is None:
             return False
-
         probe_input = cls._build_transitivity_probe_input(boundary)
         if probe_input is Any:
             return False
-
-        probe_annotations = dict(boundary.context_inputs or {})
-        try:
-            _, probe_output = boundary.operator.resolve_contract(
-                probe_input,
-                probe_annotations,
-                expand_output_annotation,
-                None,
-            )
-        except Exception:
+        result = cls._probe_contract(boundary, probe_input)
+        if result is None:
             return False
-
+        _, probe_output = result
         return cls._can_refine_annotation(boundary.output_type, probe_output)
 
     @classmethod
