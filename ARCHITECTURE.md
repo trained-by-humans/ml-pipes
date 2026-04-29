@@ -75,6 +75,41 @@ registry["classes"] = classes_array
 print(registry["boxes"].shape)
 ```
 
+### Regions
+
+A region is a bracketed sub-pipeline that changes how the enclosed steps
+execute. A region is opened by a `RegionOpener` operator and closed by its
+matching `RegionCloser`. The operators between them are the region body.
+
+```python
+Pipeline([
+    Batch(size=4),   # RegionOpener — collects inputs, fires body per batch
+      step_a,
+      step_b,
+    UnBatch(),       # RegionCloser — flattens results back to item stream
+])
+```
+
+The pipeline executor detects the opener, skips straight to its matching
+closer, and delegates the entire body to the opener's `run_region` method.
+The body operators never run directly from `_execute` — they run only when
+`run_region` calls the scoped `execute_region` closure.
+
+Each `RegionOpener` subclass implements its own `run_region` and is
+responsible for all coordination logic (batching, concurrency, fan-out) as
+well as its tracing spans. The rest of the pipeline sees only the final
+result — region mechanics are fully encapsulated.
+
+**Batch** collects `size` items before executing the body once with the full
+batch. Subsequent calls wait at a gate until the batch is ready or a timeout
+fires, then receive the leader's result.
+
+**Scatter** executes the body concurrently for each element of a list, up to
+`max_concurrency` workers at a time, and collects results in order.
+
+Regions cannot interleave, and same-type nesting (e.g. `Batch` inside
+`Batch`) is forbidden. Both constraints are enforced at validation time.
+
 ### Types
 
 The types in `ml_pipes.types` describe the values flowing through the pipeline
