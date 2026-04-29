@@ -50,20 +50,22 @@ def test_strict_skips_store_and_recall():
     Pipeline([IntToString(), Store("x"), Recall("x")]).validate(strict=True)
 
 
-def test_strict_skips_batch_unbatch():
+def test_strict_rejects_leading_batch_region_without_concrete_input():
     class ListIdentity:
         def __call__(self, values: list[int]) -> list[int]:
             return values
 
-    Pipeline([Batch(size=2), ListIdentity(), UnBatch()]).validate(strict=True)
+    with pytest.raises(PipelineValidationError, match="0:Batch"):
+        Pipeline([Batch(size=2), ListIdentity(), UnBatch()]).validate(strict=True)
 
 
 def test_strict_accepts_passthrough_resolve_contract():
     Pipeline([IntToString(), PassthroughOp(), StringToFloat()]).validate(strict=True)
 
 
-def test_strict_accepts_leading_transparent_operator_before_concrete_input():
-    Pipeline([Store("x"), IntToString(), StringToFloat()]).validate(strict=True)
+def test_strict_rejects_leading_transparent_operator_before_concrete_input():
+    with pytest.raises(PipelineValidationError, match="0:Store"):
+        Pipeline([Store("x"), IntToString(), StringToFloat()]).validate(strict=True)
 
 
 # ---------------------------------------------------------------------------
@@ -97,12 +99,12 @@ def test_strict_error_includes_fix_hint():
 
 
 def test_strict_rejects_pipeline_with_no_concrete_input_boundary():
-    with pytest.raises(PipelineValidationError, match="pipeline input type could not be inferred"):
+    with pytest.raises(PipelineValidationError, match="0:Store"):
         Pipeline([Store("x"), Recall("x")]).validate(strict=True)
 
 
-def test_strict_skips_only_the_first_deferred_dynamic_boundary():
-    with pytest.raises(PipelineValidationError, match="1:PassthroughOp"):
+def test_strict_rejects_the_first_deferred_dynamic_boundary_too():
+    with pytest.raises(PipelineValidationError, match="0:Store"):
         Pipeline([Store("x"), PassthroughOp(), Recall("x")], strict=True).validate()
 
 

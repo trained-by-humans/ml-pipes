@@ -216,7 +216,7 @@ class Cast:
             t = current_output if current_output is not None else Any
             return (t,), t
         tensor_like = TensorPayload | tuple[TensorPayload, ...]
-        if current_output is not None and is_annotation_compatible(current_output, (tensor_like,)):
+        if current_output is not Any and is_annotation_compatible(current_output, (tensor_like,)):
             return (current_output,), current_output
         return (tensor_like,), tensor_like
 
@@ -1199,12 +1199,12 @@ class Pick:
 
     def resolve_contract(
         self,
-        current_output: Any | None,
+        current_output: Any,
         stored_annotations: dict[str, Any],
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        if current_output is None or get_origin(current_output) is not tuple:
+        if get_origin(current_output) is not tuple:
             return (Any,), Any
         parts = get_args(current_output)
         selected = []

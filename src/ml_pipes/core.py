@@ -79,10 +79,12 @@ class Pipeline:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
         return result
 
-    def validate(self) -> TypeContract | None:
+    def validate(self, strict: bool | None = None) -> TypeContract | None:
         if not self.operators:
             return None
-        return PipelineValidator(self.operators).validate(strict=self._strict)
+        if strict is None:
+            strict = self._strict
+        return PipelineValidator(self.operators).validate(strict=strict)
 
     def _execute(self, value: Any, trace: Any, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
         cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
