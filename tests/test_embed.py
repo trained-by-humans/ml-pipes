@@ -7,7 +7,7 @@ Context isolation behaviour is covered in test_composition_scenarios.py.
 import pytest
 from typing import Any
 
-from ml_pipes import Pipeline, PipelineValidationError, Embed, embed
+from ml_pipes import Pipeline, PipelineValidationError, Embed, Store, embed
 
 
 class IntToString:
@@ -28,6 +28,16 @@ class FloatToInt:
 class Doubled:
     def __call__(self, value: int) -> int:
         return value * 2
+
+
+class BoolToBytes:
+    def __call__(self, value: bool) -> bytes:
+        return b"1" if value else b"0"
+
+
+class VagueOp:
+    def __call__(self, value: Any) -> Any:
+        return value
 
 
 # --- Embed.__call__ ---
@@ -80,6 +90,72 @@ def test_resolve_contract_propagates_output_type_of_multi_op_inner():
     _, output_type = op.resolve_contract(int, {}, None, PipelineValidationError)
 
     assert output_type is int
+
+
+def test_embed_enforces_type_contract_at_boundary():
+    inner = Pipeline([StringToFloat()])
+    outer = Pipeline([IntToString(), embed(inner)])
+
+    outer.validate()
+
+
+def test_embed_rejects_incompatible_boundary_type():
+    inner = Pipeline([StringToFloat()])
+    outer = Pipeline([BoolToBytes(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        outer.validate()
+
+
+def test_outer_strict_rejects_embed_with_vague_output():
+    inner = Pipeline([VagueOp()])
+    outer = Pipeline([embed(inner)], strict=True)
+
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        outer.validate()
+
+
+def test_outer_strict_accepts_embed_with_concrete_output():
+    inner = Pipeline([IntToString()])
+    outer = Pipeline([embed(inner)], strict=True)
+
+    outer.validate()
+
+
+def test_inner_strict_rejects_vague_op_regardless_of_outer():
+    inner = Pipeline([VagueOp()], strict=True)
+    outer = Pipeline([embed(inner)])
+
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        outer.validate()
+
+
+def test_embed_validates_batch_pairs_in_inner_pipeline():
+    from ml_pipes import Batch
+
+    inner = Pipeline([Batch(size=2)])
+    outer = Pipeline([IntToString(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError):
+        outer.validate()
+
+
+def test_embed_validates_context_interactions_in_inner_pipeline():
+    from ml_pipes import Recall
+
+    inner = Pipeline([Recall("x")])
+    outer = Pipeline([IntToString(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError, match="was not stored"):
+        outer.validate()
+
+
+def test_embed_rejects_when_transparent_prefix_hides_concrete_input():
+    inner = Pipeline([Store("x"), IntToString()])
+    outer = Pipeline([BoolToBytes(), embed(inner)])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        outer.validate()
 
 
 # --- construction ---
@@ -167,3 +243,11 @@ def test_rshift_chains_are_flat():
     assert combined.operators[0].pipeline is a
     assert combined.operators[1].pipeline is b
     assert combined.operators[2].pipeline is c
+
+
+def test_rshift_enforces_type_contract_across_pipeline_boundary():
+    left = Pipeline([IntToString()])
+    right = Pipeline([BoolToBytes()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        (left >> right).validate()
