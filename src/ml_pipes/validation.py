@@ -118,12 +118,6 @@ class PipelineValidator:
 
         if strict:
             self._validate_contracts_strictly(boundaries)
-        if strict and not is_concrete(resolved_input_type):
-            raise PipelineValidationError(
-                "Strict mode violation: pipeline input type could not be inferred.\n"
-                "  Fix: make the first effective operator accept a concrete type, or implement resolve_contract "
-                "to establish a concrete input boundary."
-            )
 
         return TypeContract(input_type=resolved_input_type, output_type=boundaries[-1].output_type)
 
@@ -176,8 +170,11 @@ class PipelineValidator:
     def _refine_operator_boundaries(cls, boundaries: list[_OperatorBoundary]) -> Any:
         downstream_required_input: Any = Any
         for boundary in reversed(boundaries):
+            # Example: static says `object`, dynamic says `tuple[int, Any]` -> start from `tuple[int, Any]`.
             local_input_type = cls._collapse_boundary_input_types(boundary)
+            # Example: downstream needs `tuple[int, str]` -> project that shape backward through this operator.
             projected_input = cls._project_input_back_through(boundary, downstream_required_input)
+            # Example: local says `tuple[int, Any]`, projection says `tuple[int, str]` -> keep `tuple[int, str]`.
             downstream_required_input = cls._refine_input_constraint(local_input_type, projected_input)
         return downstream_required_input
 
@@ -232,17 +229,10 @@ class PipelineValidator:
         if specialized_input is not Any and cls._confirm_contract_projection(boundary, specialized_input, inferred):
             return specialized_input
 
-        probe_annotations = dict(boundary.context_inputs or {})
-        try:
-            input_types, output_type = boundary.operator.resolve_contract(
-                inferred,
-                probe_annotations,
-                expand_output_annotation,
-                None,
-            )
-        except Exception:
+        contract_probe = cls._probe_contract(boundary, inferred)
+        if contract_probe is None:
             return Any
-
+        input_types, output_type = contract_probe
         collapsed_input = cls._collapse_input_types(input_types)
         if output_type == inferred and (collapsed_input is Any or collapsed_input == inferred):
             return inferred
@@ -250,17 +240,28 @@ class PipelineValidator:
 
     @classmethod
     def _confirm_contract_projection(cls, boundary: _OperatorBoundary, candidate_input: Any, inferred: Any) -> bool:
+        contract_probe = cls._probe_contract(boundary, candidate_input)
+        if contract_probe is None:
+            return False
+        _, output_type = contract_probe
+        return output_type == inferred
+
+    @classmethod
+    def _probe_contract(
+        cls,
+        boundary: _OperatorBoundary,
+        probe_input: Any,
+    ) -> tuple[tuple[Any, ...], Any] | None:
         probe_annotations = dict(boundary.context_inputs or {})
         try:
-            _, output_type = boundary.operator.resolve_contract(
-                candidate_input,
+            return boundary.operator.resolve_contract(
+                probe_input,
                 probe_annotations,
                 expand_output_annotation,
                 None,
             )
         except Exception:
-            return False
-        return output_type == inferred
+            return None
 
     @classmethod
     def _specialize_input_from_output_template(cls, input_template: Any, output_template: Any, inferred_output: Any) -> Any:
@@ -271,20 +272,38 @@ class PipelineValidator:
 
     @classmethod
     def _bind_any_placeholder(cls, template: Any, value: Any, binding: Any) -> Any:
+        # Example: template=`Any`, value=`int`, binding=None -> first placeholder binds to `int`.
+        if template is Any and binding is None:
+            return value
+
+        # Example: template=`Any`, value=`int`, binding=`int` -> placeholder stays bound to `int`.
+        if template is Any and binding == value:
+            return binding
+
+        # Example: template=`Any`, value=`str`, binding=`int` -> conflicting binding, so fail.
         if template is Any:
-            if binding is None:
-                return value
-            return binding if binding == value else _UNBOUND
+            return _UNBOUND
+
+        # Example: template=`tuple[int, str]`, value=`tuple[int, str]` -> exact structure match.
         if template == value:
             return binding
+
         template_origin = get_origin(template)
         value_origin = get_origin(value)
+        # Example: template=`tuple[Any, str]`, value=`list[int, str]` -> different origins, so fail.
         if template_origin is None or template_origin != value_origin:
             return _UNBOUND
+
         template_args = get_args(template)
         value_args = get_args(value)
+        # Example: template=`tuple[Any, str]`, value=`tuple[int, str, float]` -> different arity, so fail.
         if len(template_args) != len(value_args):
             return _UNBOUND
+
+        return cls._bind_any_placeholder_args(template_args, value_args, binding)
+
+    @classmethod
+    def _bind_any_placeholder_args(cls, template_args: tuple[Any, ...], value_args: tuple[Any, ...], binding: Any) -> Any:
         for template_arg, value_arg in zip(template_args, value_args, strict=True):
             binding = cls._bind_any_placeholder(template_arg, value_arg, binding)
             if binding is _UNBOUND:
@@ -311,13 +330,17 @@ class PipelineValidator:
 
     @classmethod
     def _can_refine_annotation(cls, current: Any, candidate: Any) -> bool:
+        # Example: current=`tuple[int, Any]`, candidate=`Any` -> vague candidate cannot refine.
         if candidate is Any or candidate is None:
             return False
+        # Example: current=`Any`, candidate=`tuple[int, str]` -> any concrete structure refines `Any`.
         if current is Any or current is None:
             return True
+        # Example: current=`tuple[int, str]`, candidate=`tuple[int, str]` -> no refinement needed.
         if candidate == current:
             return False
 
+        # Example: current=`object`, candidate=`TensorPayload` -> concrete subtype refines broad `object`.
         if current is object:
             return True
 
@@ -329,11 +352,13 @@ class PipelineValidator:
 
         candidate_origin = get_origin(candidate)
         current_origin = get_origin(current)
+        # Example: current=`tuple[int, Any]`, candidate=`list[int, str]` -> different container kinds cannot refine.
         if candidate_origin != current_origin or candidate_origin is None:
             return False
 
         candidate_args = get_args(candidate)
         current_args = get_args(current)
+        # Example: current=`tuple[int, Any]`, candidate=`tuple[int, str, float]` -> different arity cannot refine.
         if len(candidate_args) != len(current_args):
             return False
 
@@ -386,12 +411,58 @@ class PipelineValidator:
                     f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                     f"to accept and thread the upstream type dynamically."
                 )
-            if not is_concrete(boundary.output_type):
+            if not is_concrete(boundary.output_type) and not self._is_explicitly_transitive_boundary(boundary):
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
                     f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
                 )
+
+    @classmethod
+    def _is_explicitly_transitive_boundary(cls, boundary: _OperatorBoundary) -> bool:
+        if boundary.dynamic_boundary is None:
+            return False
+
+        probe_input = cls._build_transitivity_probe_input(boundary)
+        if probe_input is Any:
+            return False
+
+        probe_annotations = dict(boundary.context_inputs or {})
+        try:
+            _, probe_output = boundary.operator.resolve_contract(
+                probe_input,
+                probe_annotations,
+                expand_output_annotation,
+                None,
+            )
+        except Exception:
+            return False
+
+        return cls._can_refine_annotation(boundary.output_type, probe_output)
+
+    @classmethod
+    def _build_transitivity_probe_input(cls, boundary: _OperatorBoundary) -> Any:
+        probe_from_previous = cls._materialize_probe_annotation(boundary.previous_output_type)
+        if probe_from_previous is not Any:
+            return probe_from_previous
+
+        return cls._materialize_probe_annotation(
+            cls._collapse_input_types(boundary.dynamic_boundary.input_types)
+        )
+
+    @classmethod
+    def _materialize_probe_annotation(cls, annotation: Any) -> Any:
+        if annotation is Any or annotation is None or annotation is object:
+            return int
+
+        origin = get_origin(annotation)
+        if origin is None:
+            return annotation
+
+        args = tuple(cls._materialize_probe_annotation(arg) for arg in get_args(annotation))
+        if len(args) == 1:
+            return origin[args[0]]
+        return origin[args]
 
 
 def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, ...], Any]:

@@ -50,22 +50,20 @@ def test_strict_skips_store_and_recall():
     Pipeline([IntToString(), Store("x"), Recall("x")]).validate(strict=True)
 
 
-def test_strict_rejects_leading_batch_region_without_concrete_input():
+def test_strict_skips_leading_batch_region_when_the_chain_stays_transitive():
     class ListIdentity:
         def __call__(self, values: list[int]) -> list[int]:
             return values
 
-    with pytest.raises(PipelineValidationError, match="0:Batch"):
-        Pipeline([Batch(size=2), ListIdentity(), UnBatch()]).validate(strict=True)
+    Pipeline([Batch(size=2), ListIdentity(), UnBatch()]).validate(strict=True)
 
 
 def test_strict_accepts_passthrough_resolve_contract():
     Pipeline([IntToString(), PassthroughOp(), StringToFloat()]).validate(strict=True)
 
 
-def test_strict_rejects_leading_transparent_operator_before_concrete_input():
-    with pytest.raises(PipelineValidationError, match="0:Store"):
-        Pipeline([Store("x"), IntToString(), StringToFloat()]).validate(strict=True)
+def test_strict_accepts_leading_transparent_operator_before_concrete_input():
+    Pipeline([Store("x"), IntToString(), StringToFloat()]).validate(strict=True)
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +96,17 @@ def test_strict_error_includes_fix_hint():
         Pipeline([VagueOp()]).validate(strict=True)
 
 
-def test_strict_rejects_pipeline_with_no_concrete_input_boundary():
-    with pytest.raises(PipelineValidationError, match="0:Store"):
-        Pipeline([Store("x"), Recall("x")]).validate(strict=True)
+def test_strict_accepts_fully_transitive_pipeline_with_no_concrete_input_boundary():
+    Pipeline([Store("x"), Recall("x")]).validate(strict=True)
 
 
-def test_strict_rejects_the_first_deferred_dynamic_boundary_too():
-    with pytest.raises(PipelineValidationError, match="0:Store"):
-        Pipeline([Store("x"), PassthroughOp(), Recall("x")], strict=True).validate()
+def test_strict_skips_transitive_boundaries_and_rejects_first_opaque_vague_operator():
+    with pytest.raises(PipelineValidationError, match="2:VagueOp"):
+        Pipeline([Store("x"), PassthroughOp(), VagueOp()]).validate(strict=True)
+
+
+def test_strict_accepts_fully_transitive_dynamic_chain():
+    Pipeline([Store("x"), PassthroughOp(), Recall("x")], strict=True).validate()
 
 
 # ---------------------------------------------------------------------------
