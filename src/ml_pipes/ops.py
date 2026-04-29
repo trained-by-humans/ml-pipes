@@ -214,7 +214,8 @@ class Cast:
             # field= mode: receives a dataclass (e.g. RuntimeOutputs), returns the same type
             t = current_output if current_output is not None else Any
             return (t,), t
-        return (TensorPayload,), TensorPayload
+        tensor_like = TensorPayload | tuple[TensorPayload, ...]
+        return (tensor_like,), tensor_like
 
     def __call__(self, value: object) -> object:
         if self.field is not None:
@@ -1469,4 +1470,3 @@ class Distribute:
             )
             result.append(RuntimeOutputs(tensors=sample_tensors, names=outputs.names))
         return result
-

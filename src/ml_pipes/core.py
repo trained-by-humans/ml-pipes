@@ -38,13 +38,11 @@ class Pipeline:
         auto_validate: bool = False,
         strict: bool = False,
         tracing: TracingConfig | None = None,
-        input_type: Any = None,
     ):
         self.operators = self._flatten(list(operators))
         self._tracing_config = tracing
         self._auto_validate = auto_validate
         self._strict = strict
-        self._input_type = input_type
         if auto_validate:
             self.validate()
 
@@ -161,8 +159,8 @@ class Pipeline:
         if not self.operators:
             raise PipelineValidationError("Cannot resolve type contract of an empty pipeline")
 
-        first_input_type: Any | None = None
-        previous_output_type: Any | None = self._input_type
+        resolved_input_type: Any = Any
+        previous_output_type: Any | None = None
         previous_name: str | None = None
         stored_annotations: dict[str, Any] = {}
         stack: list[dict[str, Any]] = []
@@ -187,6 +185,11 @@ class Pipeline:
                 input_types, output_type = self._resolve_operator_contract(operator)
                 has_contract = False
 
+            if resolved_input_type is Any:
+                candidate = input_types[0] if len(input_types) == 1 else input_types
+                if self._is_concrete(candidate):
+                    resolved_input_type = candidate
+
             # Check compatibility and strictness
             if previous_output_type is not None:
                 if not self._is_annotation_compatible(previous_output_type, input_types):
@@ -203,19 +206,26 @@ class Pipeline:
                         f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                         f"to accept and thread the upstream type dynamically."
                     )
-                if not self._is_concrete(output_type):
+                if has_contract and resolved_input_type is Any and not self._is_concrete(output_type):
+                    pass  # leading transparent operators may defer the concrete boundary downstream
+                elif not self._is_concrete(output_type):
                     raise PipelineValidationError(
                         f"Strict mode violation at {self._label_for(i)}: output type is unresolved (Any).\n"
                         f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
                         f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
                     )
 
-            if first_input_type is None:
-                first_input_type = self._input_type if self._input_type is not None else (input_types[0] if len(input_types) == 1 else input_types)
             previous_output_type = output_type
             previous_name = operator.__class__.__name__
 
-        return TypeContract(input_type=first_input_type, output_type=previous_output_type)
+        if strict and not self._is_concrete(resolved_input_type):
+            raise PipelineValidationError(
+                "Strict mode violation: pipeline input type could not be inferred.\n"
+                "  Fix: make the first effective operator accept a concrete type, or implement resolve_contract "
+                "to establish a concrete input boundary."
+            )
+
+        return TypeContract(input_type=resolved_input_type, output_type=previous_output_type)
 
     @staticmethod
     def _resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, ...], Any]:
@@ -320,6 +330,8 @@ class Pipeline:
 
     @staticmethod
     def _is_concrete(annotation: Any) -> bool:
+        if annotation is None:
+            return False
         if annotation is Any:
             return False
         return all(Pipeline._is_concrete(arg) for arg in get_args(annotation))
@@ -532,4 +544,3 @@ class Embed:
 def embed(pipeline: Pipeline) -> Embed:
     """Embed *pipeline* as an isolated step inside another pipeline."""
     return Embed(pipeline)
-

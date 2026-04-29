@@ -295,37 +295,24 @@ def test_store_out_of_bounds_silent_on_vague_input():
     pipeline.validate()  # must not raise
 
 
-def test_input_type_preserved_as_public_contract():
-    # input_type is the declared boundary of the pipeline, not a seed for the
-    # first compatibility check. validate() must return it as contract.input_type.
-    inner = Pipeline([IntToString()], input_type=bool)
+def test_resolved_input_type_uses_first_concrete_operator():
+    inner = Pipeline([IntToString()])
     contract = inner.validate()
 
-    assert contract.input_type is bool
+    assert contract.input_type is int
     assert contract.output_type is str
 
 
-def test_input_type_preserved_when_first_operator_accepts_any():
-    # Even when the first operator uses Any, the declared input_type must be kept.
-    inner = Pipeline([VagueOp()], input_type=int)
+def test_resolved_input_type_skips_transparent_leading_ops():
+    inner = Pipeline([Store("x"), IntToString()])
     contract = inner.validate()
 
     assert contract.input_type is int
 
 
-def test_embed_accepts_when_outer_matches_declared_input_type():
-    # outer produces bool; inner declares input_type=bool even though its first
-    # operator annotates int. Embed must accept bool, not reject it as "not int".
-    inner = Pipeline([IntToString()], input_type=bool)
-    outer = Pipeline([FloatToBool(), embed(inner)])  # float -> bool -> (inner) str
-
-    outer.validate()  # must not raise
-
-
-def test_embed_rejects_when_outer_mismatches_declared_input_type():
-    # outer produces bytes; inner declares input_type=bool → mismatch.
-    inner = Pipeline([IntToString()], input_type=bool)
-    outer = Pipeline([BoolToBytes(), embed(inner)])  # bool -> bytes -> bool: incompatible
+def test_embed_rejects_when_transparent_prefix_hides_concrete_input():
+    inner = Pipeline([Store("x"), IntToString()])
+    outer = Pipeline([BoolToBytes(), embed(inner)])  # bytes -> int: incompatible
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         outer.validate()
@@ -336,14 +323,20 @@ def test_embed_rejects_when_outer_mismatches_declared_input_type():
 # ---------------------------------------------------------------------------
 
 def test_cast_does_not_silence_downstream_type_check():
-    # Cast.resolve_contract returns current_output unchanged.
-    # When no input_type is declared, current_output starts as None —
-    # downstream checks must not be silently skipped.
     # Cast(float32) cannot produce str, so StringToFloat(str) must be caught.
     pipeline = Pipeline([Cast("float32"), StringToFloat()])
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
+
+
+def test_cast_establishes_tensorpayload_input_contract():
+    from ml_pipes.types import TensorPayload
+
+    contract = Pipeline([Cast("float32")]).validate()
+
+    assert contract is not None
+    assert contract.input_type == (TensorPayload | tuple[TensorPayload, ...])
 
 
 def test_vague_op_between_typed_ops_is_accepted():
