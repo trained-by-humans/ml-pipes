@@ -109,25 +109,17 @@ def test_embed_rejects_incompatible_boundary_type():
 
 def test_outer_strict_rejects_embed_with_vague_output():
     inner = Pipeline([VagueOp()])
-    outer = Pipeline([embed(inner)], strict=True)
+    outer = Pipeline([embed(inner)])
 
     with pytest.raises(PipelineValidationError, match="Strict mode violation"):
-        outer.validate()
+        outer.validate(strict=True)
 
 
 def test_outer_strict_accepts_embed_with_concrete_output():
     inner = Pipeline([IntToString()])
-    outer = Pipeline([embed(inner)], strict=True)
-
-    outer.validate()
-
-
-def test_inner_strict_rejects_vague_op_regardless_of_outer():
-    inner = Pipeline([VagueOp()], strict=True)
     outer = Pipeline([embed(inner)])
 
-    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
-        outer.validate()
+    outer.validate(strict=True)
 
 
 def test_embed_validates_batch_pairs_in_inner_pipeline():
