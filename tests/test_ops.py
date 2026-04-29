@@ -77,6 +77,23 @@ def test_cast_establishes_tensorpayload_input_contract():
     assert contract.input_type == (TensorPayload | tuple[TensorPayload, ...])
 
 
+class MakeTensor:
+    def __call__(self, value: int) -> TensorPayload:
+        return TensorPayload(array=np.array([value], dtype=np.float32), layout="N", dtype="float32")
+
+
+class AcceptTensor:
+    def __call__(self, value: TensorPayload) -> int:
+        return int(value.array[0])
+
+
+def test_cast_preserves_single_tensor_contract_for_typed_pipeline():
+    contract = Pipeline([MakeTensor(), Cast("float16"), AcceptTensor()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
 # ---------------------------------------------------------------------------
 # Pick
 # ---------------------------------------------------------------------------
