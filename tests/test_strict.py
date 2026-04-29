@@ -55,11 +55,15 @@ def test_strict_skips_batch_unbatch():
         def __call__(self, values: list[int]) -> list[int]:
             return values
 
-    Pipeline([Batch(size=2), ListIdentity(), UnBatch()], strict=True, input_type=int).validate()
+    Pipeline([Batch(size=2), ListIdentity(), UnBatch()], strict=True).validate()
 
 
 def test_strict_accepts_passthrough_resolve_contract():
     Pipeline([IntToString(), PassthroughOp(), StringToFloat()], strict=True).validate()
+
+
+def test_strict_accepts_leading_transparent_operator_before_concrete_input():
+    Pipeline([Store("x"), IntToString(), StringToFloat()], strict=True).validate()
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +94,11 @@ def test_strict_error_includes_operator_label():
 def test_strict_error_includes_fix_hint():
     with pytest.raises(PipelineValidationError, match="resolve_contract"):
         Pipeline([VagueOp()], strict=True).validate()
+
+
+def test_strict_rejects_pipeline_with_no_concrete_input_boundary():
+    with pytest.raises(PipelineValidationError, match="pipeline input type could not be inferred"):
+        Pipeline([Store("x"), Recall("x")], strict=True).validate()
 
 
 # ---------------------------------------------------------------------------
