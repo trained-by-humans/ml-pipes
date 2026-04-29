@@ -106,6 +106,13 @@ def test_pick_out_of_bounds_silent_on_vague_input():
 
     pipeline.validate()  # must not raise
 
+
+def test_pick_establishes_tuple_input_boundary_from_downstream_type():
+    contract = Pipeline([Pick(0), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is tuple
+
 def test_resize_op_can_do_plain_resize_without_padding():
     image = np.zeros((10, 20, 3), dtype=np.uint8)
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")

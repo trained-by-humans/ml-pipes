@@ -156,7 +156,7 @@ def test_outer_key_not_visible_inside_embed():
 
 def test_embed_with_dangling_recall_raises_with_embed_attribution():
     inner = Pipeline([Recall("missing")])
-    with pytest.raises(PipelineValidationError, match=r"inside 0:Embed"):
+    with pytest.raises(PipelineValidationError, match=r"inside Embed"):
         Pipeline([embed(inner)]).validate()
 
 
