@@ -367,16 +367,60 @@ class PipelineValidator:
 
     @classmethod
     def _refine_input_constraint(cls, current: Any, candidate: Any) -> Any:
-        if cls._can_refine_annotation(current, candidate):
-            return candidate
+        merged = cls._merge_annotations(current, candidate)
+        if merged is not _UNBOUND:
+            return merged
         return current
 
     @classmethod
     def _tighten_if_more_concrete(cls, current: Any, candidate: Any) -> Any:
-        refined = cls._refine_input_constraint(current, candidate)
-        if refined is not current:
-            return refined
-        return cls._refine_input_constraint(candidate, current)
+        merged = cls._merge_annotations(current, candidate)
+        if merged is not _UNBOUND:
+            return merged
+        return current
+
+    @classmethod
+    def _merge_annotations(cls, left: Any, right: Any) -> Any:
+        if left is None or left is Any:
+            return right
+        if right is None or right is Any:
+            return left
+        if left == right:
+            return left
+        if left is object:
+            return right
+        if right is object:
+            return left
+        if isinstance(left, type) and isinstance(right, type):
+            try:
+                if issubclass(left, right):
+                    return left
+                if issubclass(right, left):
+                    return right
+            except TypeError:
+                return _UNBOUND
+            return _UNBOUND
+
+        left_origin = get_origin(left)
+        right_origin = get_origin(right)
+        if left_origin != right_origin or left_origin is None:
+            return _UNBOUND
+
+        left_args = get_args(left)
+        right_args = get_args(right)
+        if len(left_args) != len(right_args):
+            return _UNBOUND
+
+        merged_args = []
+        for left_arg, right_arg in zip(left_args, right_args, strict=True):
+            merged_arg = cls._merge_annotations(left_arg, right_arg)
+            if merged_arg is _UNBOUND:
+                return _UNBOUND
+            merged_args.append(merged_arg)
+
+        if len(merged_args) == 1:
+            return left_origin[merged_args[0]]
+        return left_origin[tuple(merged_args)]
 
     @classmethod
     def _can_refine_annotation(cls, current: Any, candidate: Any) -> bool:

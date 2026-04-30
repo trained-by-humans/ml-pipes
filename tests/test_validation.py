@@ -49,6 +49,16 @@ class PairToBool:
         return text == str(number)
 
 
+class PartialOp1:
+    def __call__(self, value: tuple[int, Any]) -> tuple[int, Any]:
+        return value
+
+
+class PartialOp2:
+    def __call__(self, number: Any, text: str) -> bool:
+        return text == str(number)
+
+
 class TripleConsumer:
     def __call__(self, x: int, y: str, z: float) -> str:
         return f"{x}-{y}-{z}"
@@ -247,3 +257,13 @@ def test_validate_prefers_more_concrete_explicit_pipeline_input_type():
 
     assert contract is not None
     assert contract.input_type is bool
+
+
+def test_validate_merges_complementary_partial_constraints():
+    contract = Pipeline([PartialOp1(), PartialOp2()]).validate(
+        pipeline_input_type=tuple[Any, str]
+    )
+
+    assert contract is not None
+    assert contract.input_type == tuple[int, str]
+    assert contract.output_type is bool
