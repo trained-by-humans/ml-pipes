@@ -55,6 +55,7 @@ class _OperatorBoundary:
     def output_type(self) -> Any:
         return self.effective_boundary.output_type
 
+
 class PipelineValidator:
     def __init__(self, operators: list[Any]):
         self.operators = operators
@@ -90,14 +91,14 @@ class PipelineValidator:
         self._validate_downstream_compatibility(boundaries)
 
         entry_input_type = self._collapse_boundary_input_types(boundaries[0])
-        resolved_pipeline_input_type = self._tighten_if_more_concrete(
+        resolved_pipeline_input_type = tighten_if_more_concrete(
             pipeline_input_type,
             entry_input_type,
         )
 
         if inference:
             inferred_input_type = self._run_backward_boundary_resolution_pass(boundaries)
-            resolved_pipeline_input_type = self._tighten_if_more_concrete(
+            resolved_pipeline_input_type = tighten_if_more_concrete(
                 resolved_pipeline_input_type,
                 inferred_input_type,
             )
@@ -168,6 +169,30 @@ class PipelineValidator:
                         f"Keys available at this point: {available if available else '(none)'}"
                     )
 
+    @staticmethod
+    def _resolve_dynamic_boundary(
+        operator: Any,
+        previous_output_type: Any,
+        stored_annotations: dict[str, Any],
+    ) -> _BoundarySignature | None:
+        if not hasattr(operator, "resolve_contract"):
+            return None
+        input_types, output_type = operator.resolve_contract(
+            previous_output_type,
+            stored_annotations,
+            expand_output_annotation,
+            PipelineValidationError,
+        )
+        return _BoundarySignature(input_types=input_types, output_type=output_type)
+
+    @staticmethod
+    def _resolve_static_boundary(operator: Callable[..., Any]) -> _BoundarySignature | None:
+        try:
+            input_types, output_type = resolve_operator_contract(operator)
+        except StaticContractUnavailableError:
+            return None
+        return _BoundarySignature(input_types=input_types, output_type=output_type)
+
     def _run_forward_boundary_resolution_pass(self, pipeline_input_type: Any = Any) -> list[_OperatorBoundary]:
         boundaries: list[_OperatorBoundary] = []
         previous_output_type: Any = pipeline_input_type
@@ -224,7 +249,7 @@ class PipelineValidator:
             # Example: downstream needs `tuple[int, str]` -> project that shape backward through this operator.
             projected_input = cls._project_input_back_through(boundary, downstream_required_input)
             # Example: local says `tuple[int, Any]`, projection says `tuple[int, str]` -> keep `tuple[int, str]`.
-            downstream_required_input = cls._refine_input_constraint(local_input_type, projected_input)
+            downstream_required_input = refine_input_constraint(local_input_type, projected_input)
         return downstream_required_input
 
     @staticmethod
@@ -252,14 +277,14 @@ class PipelineValidator:
             case (input_type, None):
                 return input_type
             case (static_input, dynamic_input):
-                return cls._refine_input_constraint(static_input, dynamic_input)
+                return refine_input_constraint(static_input, dynamic_input)
 
     @classmethod
     def _project_input_back_through(cls, boundary: _OperatorBoundary, inferred: Any) -> Any:
         contract_input = cls._project_contract_input_back_through(boundary, inferred)
         collapsed_input = cls._collapse_boundary_input_types(boundary)
         if contract_input is not Any:
-            return cls._refine_input_constraint(collapsed_input, contract_input)
+            return refine_input_constraint(collapsed_input, contract_input)
         if is_annotation_compatible(boundary.output_type, (inferred,)):
             return collapsed_input
         return Any
@@ -270,7 +295,7 @@ class PipelineValidator:
             return Any
 
         template_input = cls._collapse_input_types(boundary.dynamic_boundary.input_types)
-        specialized_input = cls._specialize_input_from_output_template(
+        specialized_input = specialize_input_from_output_template(
             template_input,
             boundary.dynamic_boundary.output_type,
             inferred,
@@ -283,7 +308,7 @@ class PipelineValidator:
             return Any
         input_types, output_type = contract_probe
         collapsed_input = cls._collapse_input_types(input_types)
-        if output_type == inferred and (collapsed_input is Any or collapsed_input == inferred):
+        if output_type == inferred and collapsed_input == inferred:
             return inferred
         return Any
 
@@ -312,187 +337,6 @@ class PipelineValidator:
         except Exception:
             return None
 
-    @classmethod
-    def _specialize_input_from_output_template(cls, input_template: Any, output_template: Any, inferred_output: Any) -> Any:
-        binding = cls._bind_any_placeholder(output_template, inferred_output, None)
-        if binding is _UNBOUND:
-            return Any
-        return cls._replace_any_placeholder(input_template, binding)
-
-    @classmethod
-    def _bind_any_placeholder(cls, template: Any, value: Any, binding: Any) -> Any:
-        # Example: template=`Any`, value=`int`, binding=None -> first placeholder binds to `int`.
-        if template is Any and binding is None:
-            return value
-        # Example: template=`Any`, value=`int`, binding=`int` -> placeholder stays bound to `int`.
-        if template is Any and binding == value:
-            return binding
-        # Example: template=`Any`, value=`str`, binding=`int` -> conflicting binding, so fail.
-        if template is Any:
-            return _UNBOUND
-        # Example: template=`tuple[int, str]`, value=`tuple[int, str]` -> exact structure match.
-        if template == value:
-            return binding
-        template_origin = get_origin(template)
-        value_origin = get_origin(value)
-        # Example: template=`tuple[Any, str]`, value=`list[int, str]` -> different origins, so fail.
-        if template_origin is None or template_origin != value_origin:
-            return _UNBOUND
-        template_args = get_args(template)
-        value_args = get_args(value)
-        # Example: template=`tuple[Any, str]`, value=`tuple[int, str, float]` -> different arity, so fail.
-        if len(template_args) != len(value_args):
-            return _UNBOUND
-        return cls._bind_any_placeholder_args(template_args, value_args, binding)
-
-    @classmethod
-    def _bind_any_placeholder_args(cls, template_args: tuple[Any, ...], value_args: tuple[Any, ...], binding: Any) -> Any:
-        for template_arg, value_arg in zip(template_args, value_args, strict=True):
-            binding = cls._bind_any_placeholder(template_arg, value_arg, binding)
-            if binding is _UNBOUND:
-                return _UNBOUND
-        return binding
-
-    @classmethod
-    def _replace_any_placeholder(cls, template: Any, binding: Any) -> Any:
-        if template is Any:
-            return Any if binding is None else binding
-        origin = get_origin(template)
-        if origin is None:
-            return template
-        args = tuple(cls._replace_any_placeholder(arg, binding) for arg in get_args(template))
-        if len(args) == 1:
-            return origin[args[0]]
-        return origin[args]
-
-    @classmethod
-    def _refine_input_constraint(cls, current: Any, candidate: Any) -> Any:
-        merged = cls._merge_annotations(current, candidate)
-        if merged is not _UNBOUND:
-            return merged
-        return current
-
-    @classmethod
-    def _tighten_if_more_concrete(cls, current: Any, candidate: Any) -> Any:
-        merged = cls._merge_annotations(current, candidate)
-        if merged is not _UNBOUND:
-            return merged
-        return current
-
-    @classmethod
-    def _merge_annotations(cls, left: Any, right: Any) -> Any:
-        if left is None or left is Any:
-            return right
-        if right is None or right is Any:
-            return left
-        if left == right:
-            return left
-        if left is object:
-            return right
-        if right is object:
-            return left
-        if isinstance(left, type) and isinstance(right, type):
-            try:
-                if issubclass(left, right):
-                    return left
-                if issubclass(right, left):
-                    return right
-            except TypeError:
-                return _UNBOUND
-            return _UNBOUND
-
-        left_origin = get_origin(left)
-        right_origin = get_origin(right)
-        if left_origin != right_origin or left_origin is None:
-            return _UNBOUND
-
-        left_args = get_args(left)
-        right_args = get_args(right)
-        if len(left_args) != len(right_args):
-            return _UNBOUND
-
-        merged_args = []
-        for left_arg, right_arg in zip(left_args, right_args, strict=True):
-            merged_arg = cls._merge_annotations(left_arg, right_arg)
-            if merged_arg is _UNBOUND:
-                return _UNBOUND
-            merged_args.append(merged_arg)
-
-        if len(merged_args) == 1:
-            return left_origin[merged_args[0]]
-        return left_origin[tuple(merged_args)]
-
-    @classmethod
-    def _can_refine_annotation(cls, current: Any, candidate: Any) -> bool:
-        # Example: current=`tuple[int, Any]`, candidate=`Any` -> vague candidate cannot refine.
-        if candidate is Any or candidate is None:
-            return False
-        # Example: current=`Any`, candidate=`tuple[int, str]` -> any concrete structure refines `Any`.
-        if current is Any or current is None:
-            return True
-        # Example: current=`tuple[int, str]`, candidate=`tuple[int, str]` -> no refinement needed.
-        if candidate == current:
-            return False
-        # Example: current=`object`, candidate=`TensorPayload` -> concrete subtype refines broad `object`.
-        if current is object:
-            return True
-        if isinstance(candidate, type) and isinstance(current, type):
-            try:
-                return issubclass(candidate, current)
-            except TypeError:
-                return False
-        candidate_origin = get_origin(candidate)
-        current_origin = get_origin(current)
-        # Example: current=`tuple[int, Any]`, candidate=`list[int, str]` -> different container kinds cannot refine.
-        if candidate_origin != current_origin or candidate_origin is None:
-            return False
-        candidate_args = get_args(candidate)
-        current_args = get_args(current)
-        # Example: current=`tuple[int, Any]`, candidate=`tuple[int, str, float]` -> different arity cannot refine.
-        if len(candidate_args) != len(current_args):
-            return False
-
-        changed = False
-        for cand_arg, curr_arg in zip(candidate_args, current_args, strict=True):
-            if curr_arg is Any:
-                if cand_arg is Any:
-                    continue
-                changed = True
-                continue
-            if cand_arg is Any:
-                return False
-            if cand_arg == curr_arg:
-                continue
-            if cls._can_refine_annotation(curr_arg, cand_arg):
-                changed = True
-                continue
-            return False
-        return changed
-
-    @staticmethod
-    def _resolve_dynamic_boundary(
-        operator: Any,
-        previous_output_type: Any,
-        stored_annotations: dict[str, Any],
-    ) -> _BoundarySignature | None:
-        if not hasattr(operator, "resolve_contract"):
-            return None
-        input_types, output_type = operator.resolve_contract(
-            previous_output_type,
-            stored_annotations,
-            expand_output_annotation,
-            PipelineValidationError,
-        )
-        return _BoundarySignature(input_types=input_types, output_type=output_type)
-
-    @staticmethod
-    def _resolve_static_boundary(operator: Callable[..., Any]) -> _BoundarySignature | None:
-        try:
-            input_types, output_type = resolve_operator_contract(operator)
-        except StaticContractUnavailableError:
-            return None
-        return _BoundarySignature(input_types=input_types, output_type=output_type)
-
     def _validate_contracts_strictly(self, boundaries: list[_OperatorBoundary]) -> None:
         for i, boundary in enumerate(boundaries):
             if boundary.dynamic_boundary is None and any(not is_concrete(t) for t in boundary.input_types):
@@ -519,31 +363,201 @@ class PipelineValidator:
         if result is None:
             return False
         _, probe_output = result
-        return cls._can_refine_annotation(boundary.output_type, probe_output)
+        return can_refine_annotation(boundary.output_type, probe_output)
 
     @classmethod
     def _build_transitivity_probe_input(cls, boundary: _OperatorBoundary) -> Any:
-        probe_from_previous = cls._materialize_probe_annotation(boundary.previous_output_type)
+        probe_from_previous = materialize_probe_annotation(boundary.previous_output_type)
         if probe_from_previous is not Any:
             return probe_from_previous
 
-        return cls._materialize_probe_annotation(
+        return materialize_probe_annotation(
             cls._collapse_input_types(boundary.dynamic_boundary.input_types)
         )
 
-    @classmethod
-    def _materialize_probe_annotation(cls, annotation: Any) -> Any:
-        if annotation is Any or annotation is None or annotation is object:
-            return int
 
-        origin = get_origin(annotation)
-        if origin is None:
-            return annotation
+def specialize_input_from_output_template(input_template: Any, output_template: Any, inferred_output: Any) -> Any:
+    binding = bind_any_placeholder(output_template, inferred_output, None)
+    if binding is _UNBOUND:
+        return Any
+    return replace_any_placeholder(input_template, binding)
 
-        args = tuple(cls._materialize_probe_annotation(arg) for arg in get_args(annotation))
-        if len(args) == 1:
-            return origin[args[0]]
-        return origin[args]
+
+def bind_any_placeholder(template: Any, value: Any, binding: Any) -> Any:
+    # Example: template=`Any`, value=`int`, binding=None -> first placeholder binds to `int`.
+    if template is Any and binding is None:
+        return value
+    # Example: template=`Any`, value=`int`, binding=`int` -> placeholder stays bound to `int`.
+    if template is Any and binding == value:
+        return binding
+    # Example: template=`Any`, value=`str`, binding=`int` -> conflicting binding, so fail.
+    if template is Any:
+        return _UNBOUND
+    # Example: template=`tuple[int, str]`, value=`tuple[int, str]` -> exact structure match.
+    if template == value:
+        return binding
+    template_origin = get_origin(template)
+    value_origin = get_origin(value)
+    # Example: template=`tuple[Any, str]`, value=`list[int, str]` -> different origins, so fail.
+    if template_origin is None or template_origin != value_origin:
+        return _UNBOUND
+    template_args = get_args(template)
+    value_args = get_args(value)
+    # Example: template=`tuple[Any, str]`, value=`tuple[int, str, float]` -> different arity, so fail.
+    if len(template_args) != len(value_args):
+        return _UNBOUND
+    return bind_any_placeholder_args(template_args, value_args, binding)
+
+
+def bind_any_placeholder_args(template_args: tuple[Any, ...], value_args: tuple[Any, ...], binding: Any) -> Any:
+    for template_arg, value_arg in zip(template_args, value_args, strict=True):
+        binding = bind_any_placeholder(template_arg, value_arg, binding)
+        if binding is _UNBOUND:
+            return _UNBOUND
+    return binding
+
+
+def replace_any_placeholder(template: Any, binding: Any) -> Any:
+    if template is Any:
+        return Any if binding is None else binding
+    origin = get_origin(template)
+    if origin is None:
+        return template
+    args = tuple(replace_any_placeholder(arg, binding) for arg in get_args(template))
+    if len(args) == 1:
+        return origin[args[0]]
+    return origin[args]
+
+
+def refine_input_constraint(current: Any, candidate: Any) -> Any:
+    merged = merge_annotations(current, candidate)
+    if merged is not _UNBOUND:
+        return merged
+    return current
+
+
+def tighten_if_more_concrete(current: Any, candidate: Any) -> Any:
+    merged = merge_annotations(current, candidate)
+    if merged is not _UNBOUND:
+        return merged
+    return current
+
+
+def merge_annotations(left: Any, right: Any) -> Any:
+    if left is None or left is Any:
+        return right
+    if right is None or right is Any:
+        return left
+    if left == right:
+        return left
+    if left is object:
+        return right
+    if right is object:
+        return left
+    if isinstance(left, type) and isinstance(right, type):
+        try:
+            if issubclass(left, right):
+                return left
+            if issubclass(right, left):
+                return right
+        except TypeError:
+            return _UNBOUND
+        return _UNBOUND
+
+    left_origin = get_origin(left)
+    right_origin = get_origin(right)
+    if left_origin != right_origin or left_origin is None:
+        return _UNBOUND
+
+    left_args = get_args(left)
+    right_args = get_args(right)
+    if len(left_args) != len(right_args):
+        return _UNBOUND
+
+    merged_args = []
+    for left_arg, right_arg in zip(left_args, right_args, strict=True):
+        merged_arg = merge_annotations(left_arg, right_arg)
+        if merged_arg is _UNBOUND:
+            return _UNBOUND
+        merged_args.append(merged_arg)
+
+    if len(merged_args) == 1:
+        return left_origin[merged_args[0]]
+    return left_origin[tuple(merged_args)]
+
+
+def can_refine_annotation(current: Any, candidate: Any) -> bool:
+    # Example: current=`tuple[int, Any]`, candidate=`Any` -> vague candidate cannot refine.
+    if candidate is Any or candidate is None:
+        return False
+    # Example: current=`Any`, candidate=`tuple[int, str]` -> any concrete structure refines `Any`.
+    if current is Any or current is None:
+        return True
+    # Example: current=`tuple[int, str]`, candidate=`tuple[int, str]` -> no refinement needed.
+    if candidate == current:
+        return False
+    # Example: current=`object`, candidate=`TensorPayload` -> concrete subtype refines broad `object`.
+    if current is object:
+        return True
+    if isinstance(candidate, type) and isinstance(current, type):
+        try:
+            return issubclass(candidate, current)
+        except TypeError:
+            return False
+    candidate_origin = get_origin(candidate)
+    current_origin = get_origin(current)
+    # Example: current=`tuple[int, Any]`, candidate=`list[int, str]` -> different container kinds cannot refine.
+    if candidate_origin != current_origin or candidate_origin is None:
+        return False
+    candidate_args = get_args(candidate)
+    current_args = get_args(current)
+    # Example: current=`tuple[int, Any]`, candidate=`tuple[int, str, float]` -> different arity cannot refine.
+    if len(candidate_args) != len(current_args):
+        return False
+
+    changed = False
+    for cand_arg, curr_arg in zip(candidate_args, current_args, strict=True):
+        if curr_arg is Any:
+            if cand_arg is Any:
+                continue
+            changed = True
+            continue
+        if cand_arg is Any:
+            return False
+        if cand_arg == curr_arg:
+            continue
+        if can_refine_annotation(curr_arg, cand_arg):
+            changed = True
+            continue
+        return False
+    return changed
+
+
+def materialize_probe_annotation(annotation: Any) -> Any:
+    if annotation is Any or annotation is None or annotation is object:
+        return int
+
+    origin = get_origin(annotation)
+    if origin is None:
+        return annotation
+
+    args = tuple(materialize_probe_annotation(arg) for arg in get_args(annotation))
+    if len(args) == 1:
+        return origin[args[0]]
+    return origin[args]
+
+
+def get_signature_target(operator: Callable[..., Any]) -> Any:
+    if inspect.isfunction(operator) or inspect.ismethod(operator):
+        return operator
+    try:
+        return getattr(operator, "__call__")
+    except AttributeError as exc:
+        if _supports_non_call_runtime_entrypoint(operator):
+            raise StaticContractUnavailableError from exc
+        raise PipelineValidationError(
+            f"{operator.__class__.__name__} must define __call__"
+        ) from exc
 
 
 def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, ...], Any]:
@@ -573,6 +587,15 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
             f"{operator.__class__.__name__} is missing a return type annotation for __call__"
         )
     return tuple(input_types), hints["return"]
+
+
+def expand_output_annotation(annotation: Any) -> tuple[Any, ...]:
+    origin = get_origin(annotation)
+    if origin is tuple:
+        return get_args(annotation)
+    if isinstance(annotation, tuple):
+        return annotation
+    return (annotation,)
 
 
 def is_annotation_compatible(produced: Any, expected_inputs: tuple[Any, ...]) -> bool:
@@ -616,15 +639,6 @@ def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
     )
 
 
-def expand_output_annotation(annotation: Any) -> tuple[Any, ...]:
-    origin = get_origin(annotation)
-    if origin is tuple:
-        return get_args(annotation)
-    if isinstance(annotation, tuple):
-        return annotation
-    return (annotation,)
-
-
 def is_concrete_assignable(produced: Any, expected: Any) -> bool:
     if not isinstance(produced, type) or not isinstance(expected, type):
         return False
@@ -653,16 +667,3 @@ def format_parameter_annotations(annotations: tuple[Any, ...]) -> str:
     if len(annotations) == 1:
         return format_annotation(annotations[0])
     return "(" + ", ".join(format_annotation(annotation) for annotation in annotations) + ")"
-
-
-def get_signature_target(operator: Callable[..., Any]) -> Any:
-    if inspect.isfunction(operator) or inspect.ismethod(operator):
-        return operator
-    try:
-        return getattr(operator, "__call__")
-    except AttributeError as exc:
-        if _supports_non_call_runtime_entrypoint(operator):
-            raise StaticContractUnavailableError from exc
-        raise PipelineValidationError(
-            f"{operator.__class__.__name__} must define __call__"
-        ) from exc
