@@ -57,28 +57,51 @@ class PipelineValidator:
         strict: bool = False,
         inference: bool = False,
     ) -> TypeContract:
+        """
+        Validate the pipeline under one of three boundary-tightening modes.
+
+        Mode 1: no declared pipeline input and no backward inference.
+            The pipeline starts at `Any` and can only tighten from the first
+            concrete entry boundary discovered by the forward pass.
+
+        Mode 2: declared pipeline input.
+            The caller provides `pipeline_input_type`, which seeds the forward
+            pass and can tighten the pipeline boundary without a backward pass.
+
+        Mode 3: backward inference.
+            When `inference=True`, a backward pass may tighten the pipeline
+            boundary further if the chain remains transitive enough.
+
+        Strict mode validates operator boundaries, not the final boundary
+        tightening strategy. It therefore runs independently of whether the
+        returned pipeline input came from mode 1, 2, or 3.
+        """
         self._validate_regions()
         self._validate_context_interactions()
         boundaries = self._run_forward_boundary_resolution_pass(pipeline_input_type)
         self._validate_downstream_compatibility(boundaries)
 
-        pipeline_input_type = self._pick_more_concrete_annotation(
+        entry_input_type = self._collapse_boundary_input_types(boundaries[0])
+        resolved_pipeline_input_type = self._tighten_if_more_concrete(
             pipeline_input_type,
-            self._collapse_boundary_input_types(boundaries[0]),
+            entry_input_type,
         )
 
         if inference:
             inferred_input_type = self._run_backward_boundary_resolution_pass(boundaries)
-            pipeline_input_type = self._pick_more_concrete_annotation(
-                pipeline_input_type,
+            resolved_pipeline_input_type = self._tighten_if_more_concrete(
+                resolved_pipeline_input_type,
                 inferred_input_type,
             )
 
         if strict:
+            # Strict mode inspects operator boundaries themselves; it does not
+            # depend on which boundary-tightening mode produced the final
+            # pipeline input type returned to the caller.
             self._validate_contracts_strictly(boundaries)
 
         return TypeContract(
-            input_type=pipeline_input_type,
+            input_type=resolved_pipeline_input_type,
             output_type=boundaries[-1].output_type,
         )
 
@@ -339,7 +362,7 @@ class PipelineValidator:
         return current
 
     @classmethod
-    def _pick_more_concrete_annotation(cls, current: Any, candidate: Any) -> Any:
+    def _tighten_if_more_concrete(cls, current: Any, candidate: Any) -> Any:
         refined = cls._refine_input_constraint(current, candidate)
         if refined is not current:
             return refined

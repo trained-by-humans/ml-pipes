@@ -85,6 +85,19 @@ class Pipeline:
         strict: bool | None = None,
         inference: bool = False,
     ) -> TypeContract | None:
+        """Validate the pipeline and return its boundary contract.
+
+        Boundary tightening has three modes:
+        - Default: start at `Any` and tighten only from the first concrete
+          entry boundary found during the forward pass.
+        - Declared input: pass `pipeline_input_type=...` to tighten the
+          boundary explicitly and seed forward validation from that type.
+        - Inference: pass `inference=True` to allow a backward pass to infer a
+          tighter pipeline input when the operator chain remains transitive.
+
+        Strict mode is orthogonal: it validates operator boundaries, not the
+        final boundary-tightening mode used to compute the returned input type.
+        """
         if not self.operators:
             return None
         if strict is None:
