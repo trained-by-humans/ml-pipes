@@ -168,14 +168,14 @@ def test_resolved_input_type_defaults_to_any_when_no_constraint_is_known():
 
 def test_resolved_input_type_skips_contract_passthrough():
     inner = Pipeline([ContractPassthrough(), IntToString()])
-    contract = inner.validate()
+    contract = inner.validate(inference=True)
 
     assert contract is not None
     assert contract.input_type is int
 
 
 def test_resolved_input_type_preserves_strongest_known_boundary_through_vague_ops():
-    contract = Pipeline([ContractPassthrough(), VagueListOp(), ListIntToStr()]).validate()
+    contract = Pipeline([ContractPassthrough(), VagueListOp(), ListIntToStr()]).validate(inference=True)
 
     assert contract is not None
     assert contract.input_type == list[Any]
@@ -188,7 +188,7 @@ def test_resolved_input_type_backpropagates_through_contract_passthrough():
         IntToString(),
         Gather()
     ])
-    contract = inner.validate()
+    contract = inner.validate(inference=True)
 
     assert contract.input_type == list[int]
 
@@ -201,7 +201,7 @@ def test_resolved_input_type_stops_backpropagating_once_the_boundary_is_concrete
         StringToFloat(),
         Gather()
     ])
-    contract = inner.validate()
+    contract = inner.validate(inference=True)
 
     assert contract.input_type == list[int]
 
@@ -216,6 +216,20 @@ def test_resolved_input_type_stops_backpropagating_at_vague_operator():
         UnBatch(),
         Gather(),
     ])
-    contract = inner.validate()
+    contract = inner.validate(inference=True)
 
     assert contract.input_type == list[Any]
+
+
+def test_validate_does_not_run_backward_inference_by_default():
+    contract = Pipeline([ContractPassthrough(), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is Any
+
+
+def test_validate_prefers_more_concrete_explicit_pipeline_input_type():
+    contract = Pipeline([IntToString()]).validate(pipeline_input_type=bool)
+
+    assert contract is not None
+    assert contract.input_type is bool

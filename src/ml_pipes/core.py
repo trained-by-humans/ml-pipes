@@ -79,12 +79,21 @@ class Pipeline:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
         return result
 
-    def validate(self, strict: bool | None = None) -> TypeContract | None:
+    def validate(
+        self,
+        pipeline_input_type: Any = Any,
+        strict: bool | None = None,
+        inference: bool = False,
+    ) -> TypeContract | None:
         if not self.operators:
             return None
         if strict is None:
             strict = self._strict
-        return PipelineValidator(self.operators).validate(strict=strict)
+        return PipelineValidator(self.operators).validate(
+            pipeline_input_type=pipeline_input_type,
+            strict=strict,
+            inference=inference,
+        )
 
     def _execute(self, value: Any, trace: Any, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
         cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
@@ -255,7 +264,7 @@ class Embed:
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         try:
-            type_contract = self.pipeline.validate()
+            type_contract = self.pipeline.validate(inference=True)
         except PipelineValidationError as exc:
             raise validation_error_type(
                 f"Validation error inside Embed: {exc}"

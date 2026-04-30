@@ -136,7 +136,7 @@ def test_scatter_type_contract_uses_outer_list_input_not_inner_region_input():
         Store("snapshot"),
         Resize((32, 32)),
         Gather(),
-    ]).validate()
+    ]).validate(inference=True)
 
     assert contract is not None
     assert contract.input_type == list[ImagePayload]

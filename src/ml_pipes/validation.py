@@ -51,10 +51,36 @@ class PipelineValidator:
     def __init__(self, operators: list[Any]):
         self.operators = operators
 
-    def validate(self, strict: bool = False) -> TypeContract:
+    def validate(
+        self,
+        pipeline_input_type: Any = Any,
+        strict: bool = False,
+        inference: bool = False,
+    ) -> TypeContract:
         self._validate_regions()
         self._validate_context_interactions()
-        return self._resolve_type_contract(strict=strict)
+        boundaries = self._run_forward_boundary_resolution_pass(pipeline_input_type)
+        self._validate_downstream_compatibility(boundaries)
+
+        pipeline_input_type = self._pick_more_concrete_annotation(
+            pipeline_input_type,
+            self._collapse_boundary_input_types(boundaries[0]),
+        )
+
+        if inference:
+            inferred_input_type = self._run_backward_boundary_resolution_pass(boundaries)
+            pipeline_input_type = self._pick_more_concrete_annotation(
+                pipeline_input_type,
+                inferred_input_type,
+            )
+
+        if strict:
+            self._validate_contracts_strictly(boundaries)
+
+        return TypeContract(
+            input_type=pipeline_input_type,
+            output_type=boundaries[-1].output_type,
+        )
 
     @staticmethod
     def _label_for(i: int, operator: Any) -> str:
@@ -111,19 +137,9 @@ class PipelineValidator:
                         f"Keys available at this point: {available if available else '(none)'}"
                     )
 
-    def _resolve_type_contract(self, strict: bool = False) -> TypeContract:
-        boundaries = self._resolve_operator_boundaries()
-        self._validate_downstream_compatibility(boundaries)
-        resolved_input_type = self._refine_operator_boundaries(boundaries)
-
-        if strict:
-            self._validate_contracts_strictly(boundaries)
-
-        return TypeContract(input_type=resolved_input_type, output_type=boundaries[-1].output_type)
-
-    def _resolve_operator_boundaries(self) -> list[_OperatorBoundary]:
+    def _run_forward_boundary_resolution_pass(self, pipeline_input_type: Any = Any) -> list[_OperatorBoundary]:
         boundaries: list[_OperatorBoundary] = []
-        previous_output_type: Any = Any
+        previous_output_type: Any = pipeline_input_type
         stored_annotations: dict[str, Any] = {}
         stack: list[dict[str, Any]] = []
 
@@ -167,7 +183,7 @@ class PipelineValidator:
             )
 
     @classmethod
-    def _refine_operator_boundaries(cls, boundaries: list[_OperatorBoundary]) -> Any:
+    def _run_backward_boundary_resolution_pass(cls, boundaries: list[_OperatorBoundary]) -> Any:
         downstream_required_input: Any = Any
         for boundary in reversed(boundaries):
             # Example: static says `object`, dynamic says `tuple[int, Any]` -> start from `tuple[int, Any]`.
@@ -321,6 +337,13 @@ class PipelineValidator:
         if cls._can_refine_annotation(current, candidate):
             return candidate
         return current
+
+    @classmethod
+    def _pick_more_concrete_annotation(cls, current: Any, candidate: Any) -> Any:
+        refined = cls._refine_input_constraint(current, candidate)
+        if refined is not current:
+            return refined
+        return cls._refine_input_constraint(candidate, current)
 
     @classmethod
     def _can_refine_annotation(cls, current: Any, candidate: Any) -> bool:
