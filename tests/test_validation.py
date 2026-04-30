@@ -119,6 +119,20 @@ def test_pipeline_validate_requires_operator_annotations():
         pipeline.validate()
 
 
+def test_pipeline_validate_does_not_swallow_non_annotation_static_signature_errors():
+    class BrokenStaticButDynamic:
+        def __call__(self, value: "MissingType") -> int:
+            return 1
+
+        def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+            return (Any,), int
+
+    pipeline = Pipeline([BrokenStaticButDynamic()])
+
+    with pytest.raises(NameError, match="MissingType"):
+        pipeline.validate()
+
+
 def test_pipeline_validate_allows_broader_downstream_input_type():
     pipeline = Pipeline([IntToString(), ObjectConsumer()])
 

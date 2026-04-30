@@ -15,6 +15,14 @@ class PipelineValidationError(ValueError):
     pass
 
 
+class StaticContractUnavailableError(Exception):
+    pass
+
+
+def _supports_non_call_runtime_entrypoint(operator: Any) -> bool:
+    return isinstance(operator, (ContextOp, RegionOpener, RegionCloser))
+
+
 @dataclass(frozen=True)
 class TypeContract:
     input_type: Any
@@ -177,7 +185,9 @@ class PipelineValidator:
             dynamic_boundary = self._resolve_dynamic_boundary(operator, previous_output_type, stored_annotations)
             static_boundary = self._resolve_static_boundary(operator)
             if dynamic_boundary is None and static_boundary is None:
-                resolve_operator_contract(operator)
+                raise PipelineValidationError(
+                    f"{operator.__class__.__name__} must define resolve_contract"
+                )
 
             boundaries.append(
                 _OperatorBoundary(
@@ -435,7 +445,7 @@ class PipelineValidator:
     def _resolve_static_boundary(operator: Callable[..., Any]) -> _BoundarySignature | None:
         try:
             input_types, output_type = resolve_operator_contract(operator)
-        except Exception:
+        except StaticContractUnavailableError:
             return None
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
@@ -604,4 +614,11 @@ def format_parameter_annotations(annotations: tuple[Any, ...]) -> str:
 def get_signature_target(operator: Callable[..., Any]) -> Any:
     if inspect.isfunction(operator) or inspect.ismethod(operator):
         return operator
-    return getattr(operator, "__call__")
+    try:
+        return getattr(operator, "__call__")
+    except AttributeError as exc:
+        if _supports_non_call_runtime_entrypoint(operator):
+            raise StaticContractUnavailableError from exc
+        raise PipelineValidationError(
+            f"{operator.__class__.__name__} must define __call__"
+        ) from exc
