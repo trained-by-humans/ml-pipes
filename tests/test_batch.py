@@ -241,7 +241,7 @@ def test_batch_type_contract_uses_outer_sample_input_not_inner_batch_input():
         def __call__(self, values: list[int]) -> list[int]:
             return values
 
-    contract = Pipeline([Batch(size=2), _ListIdentity(), UnBatch()]).validate()
+    contract = Pipeline([Batch(size=2), _ListIdentity(), UnBatch()]).validate(inference=True)
 
     assert contract is not None
     assert contract.input_type is int
