@@ -88,12 +88,81 @@ class StringConsumer:
         return value
 
 
+class DictConsumer:
+    def __call__(self, value: dict[str, int]) -> bool:
+        return True
+
+
 class ContractPassthrough:
     def __call__(self, value: Any) -> Any:
         return value
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
         return (Any,), current_output
+
+
+class DynamicFixedDictOutput:
+    def __call__(self, value: Any) -> dict[str, int]:
+        return {"x": 1}
+
+    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+        return (Any,), dict[str, int]
+
+
+VALIDATION_MODE_CASES = [
+    pytest.param(
+        {"strict": False},
+        Any,
+        str,
+        id="non-strict-forward-only",
+    ),
+    pytest.param(
+        {"pipeline_input_type": bool, "strict": False},
+        bool,
+        str,
+        id="non-strict-forward-with-pipeline-input",
+    ),
+    pytest.param(
+        {"inference": True, "strict": False},
+        int,
+        str,
+        id="non-strict-backward-inference",
+    ),
+    pytest.param(
+        {"strict": True},
+        Any,
+        str,
+        id="strict-forward-only",
+    ),
+    pytest.param(
+        {"pipeline_input_type": bool, "strict": True},
+        bool,
+        str,
+        id="strict-forward-with-pipeline-input",
+    ),
+    pytest.param(
+        {"inference": True, "strict": True},
+        int,
+        str,
+        id="strict-backward-inference",
+    ),
+]
+
+
+STRICT_FAILURE_MODE_CASES = [
+    pytest.param(
+        {"strict": True},
+        id="strict-forward-only",
+    ),
+    pytest.param(
+        {"pipeline_input_type": bool, "strict": True},
+        id="strict-forward-with-pipeline-input",
+    ),
+    pytest.param(
+        {"inference": True, "strict": True},
+        id="strict-backward-inference",
+    ),
+]
 
 
 def test_validate_accepts_empty_pipeline():
@@ -267,3 +336,44 @@ def test_validate_merges_complementary_partial_constraints():
     assert contract is not None
     assert contract.input_type == tuple[int, str]
     assert contract.output_type is bool
+
+
+def test_inference_does_not_narrow_input_through_dynamic_fixed_output():
+    contract = Pipeline([
+        ContractPassthrough(),
+        DynamicFixedDictOutput(),
+        DictConsumer(),
+    ]).validate(inference=True)
+
+    assert contract is not None
+    assert contract.input_type is Any
+    assert contract.output_type is bool
+
+
+@pytest.mark.parametrize(
+    ("validate_kwargs", "expected_input_type", "expected_output_type"),
+    VALIDATION_MODE_CASES,
+)
+def test_validate_matrix_for_transitive_pipeline(validate_kwargs, expected_input_type, expected_output_type):
+    contract = Pipeline([ContractPassthrough(), IntToString()]).validate(**validate_kwargs)
+
+    assert contract is not None
+    assert contract.input_type == expected_input_type
+    assert contract.output_type is expected_output_type
+
+
+@pytest.mark.parametrize("validate_kwargs", STRICT_FAILURE_MODE_CASES)
+def test_validate_matrix_strict_rejects_vague_pipeline_in_all_modes(validate_kwargs):
+    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
+        Pipeline([VagueOp()]).validate(**validate_kwargs)
+
+
+def test_declared_pipeline_input_can_surface_incompatible_entry_type():
+    pipeline = Pipeline([ContractPassthrough(), IntToString()])
+
+    contract = pipeline.validate()
+    assert contract is not None
+    assert contract.input_type is Any
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.validate(pipeline_input_type=str)
