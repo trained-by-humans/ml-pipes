@@ -124,6 +124,13 @@ def test_pick_out_of_bounds_silent_on_vague_input():
     pipeline.validate()  # must not raise
 
 
+def test_pick_validation_rejects_known_non_tuple_input():
+    pipeline = Pipeline([IntToString(), Pick(0)])
+
+    with pytest.raises(PipelineValidationError, match="Pick requires a tuple boundary"):
+        pipeline.validate()
+
+
 def test_pick_establishes_tuple_input_boundary_from_downstream_type():
     contract = Pipeline([Pick(0), IntToString()]).validate()
 
