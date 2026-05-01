@@ -434,17 +434,93 @@ def test_unbound_typevar_in_produced_accepts_anything():
     assert is_single_annotation_compatible(_U, _Base)
 
 
-def test_typevar_output_resolved_to_concrete_input_type():
-    # ~_T is resolved to _Child (the concrete input), so ConsumesBase sees _Child, not ~_T
+def test_typevar_output_resolved_when_same_typevar_flows_through_input():
+    # ~_T in both input and output preserves the concrete subtype.
+    class IdentityTypeVar:
+        def __call__(self, x: _T) -> _T: ...  # type: ignore[empty-body]
+
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
+
+    pipeline = Pipeline([IdentityTypeVar(), ConsumesChild()])
+    pipeline.validate(pipeline_input_type=_Child)
+
+
+def test_typevar_output_not_resolved_from_bound_only():
+    # A bound alone (_Base -> ~_T) must not collapse to the concrete input subtype.
     class ProducesTypeVar:
         def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
 
-    class ConsumesBase:
-        def __call__(self, x: _Base) -> str: ...  # type: ignore[empty-body]
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
 
-    # _Child fed in → ~_T resolved to _Child → _Child is subclass of _Base → accepted
-    pipeline = Pipeline([ProducesTypeVar(), ConsumesBase()], auto_validate=True)
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([ProducesTypeVar(), ConsumesChild()], auto_validate=True).validate(
+            pipeline_input_type=_Child
+        )
+
+
+def test_typevar_input_to_base_output_does_not_preserve_subtype():
+    class TypeVarToBase:
+        def __call__(self, x: _T) -> _Base: ...  # type: ignore[empty-body]
+
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([TypeVarToBase(), ConsumesChild()], auto_validate=True).validate(
+            pipeline_input_type=_Child
+        )
+
+
+def test_declared_base_input_through_identity_typevar_stays_base():
+    class IdentityTypeVar:
+        def __call__(self, x: _T) -> _T: ...  # type: ignore[empty-body]
+
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([IdentityTypeVar(), ConsumesChild()]).validate(
+            pipeline_input_type=_Base
+        )
+
+
+def test_unbound_identity_typevar_preserves_declared_input_type():
+    class IdentityUnboundTypeVar:
+        def __call__(self, x: _U) -> _U: ...  # type: ignore[empty-body]
+
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
+
+    pipeline = Pipeline([IdentityUnboundTypeVar(), ConsumesChild()])
     pipeline.validate(pipeline_input_type=_Child)
+
+
+def test_typevar_output_not_resolved_from_multi_parameter_signature():
+    class MultiInputTypeVar:
+        def __call__(self, x: _T, y: int) -> _T: ...  # type: ignore[empty-body]
+
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([MultiInputTypeVar(), ConsumesChild()]).validate(
+            pipeline_input_type=tuple[_Child, int]
+        )
+
+
+def test_nested_typevar_output_is_not_recursively_specialized():
+    class WrapTypeVarInList:
+        def __call__(self, x: _T) -> list[_T]: ...  # type: ignore[empty-body]
+
+    class ConsumesChildList:
+        def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([WrapTypeVarInList(), ConsumesChildList()]).validate(
+            pipeline_input_type=_Child
+        )
 
 
 def test_typevar_pipeline_rejects_narrower_consumer():
