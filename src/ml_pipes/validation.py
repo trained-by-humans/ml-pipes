@@ -55,6 +55,70 @@ class _OperatorBoundary:
     def effective_output_type(self) -> Any:
         return self.effective_boundary.output_type
 
+    @staticmethod
+    def _collapse_input_types(input_types: tuple[Any, ...]) -> Any:
+        if len(input_types) == 1:
+            return input_types[0]
+        return tuple[input_types]
+
+    @property
+    def collapsed_input_type(self) -> Any:
+        static_input = (
+            self._collapse_input_types(self.static_boundary.input_types)
+            if self.static_boundary is not None
+            else None
+        )
+        dynamic_input = (
+            self._collapse_input_types(self.dynamic_boundary.input_types)
+            if self.dynamic_boundary is not None
+            else None
+        )
+
+        match (static_input, dynamic_input):
+            case (None, input_type):
+                return input_type
+            case (input_type, None):
+                return input_type
+            case (static_input, dynamic_input):
+                return refine_input_constraint(static_input, dynamic_input)
+
+    @property
+    def collapsed_dynamic_input_type(self) -> Any | None:
+        if self.dynamic_boundary is None:
+            return None
+        return self._collapse_input_types(self.dynamic_boundary.input_types)
+
+    def probe_contract(self, probe_input: Any) -> tuple[tuple[Any, ...], Any] | None:
+        if self.dynamic_boundary is None:
+            return None
+
+        probe_annotations = dict(self.context_inputs or {})
+        try:
+            return self.operator.resolve_contract(
+                probe_input,
+                probe_annotations,
+                expand_output_annotation,
+                None,
+            )
+        except Exception:
+            return None
+
+    def is_explicitly_transitive(self) -> bool:
+        if self.dynamic_boundary is None:
+            return False
+        probe_input = materialize_probe_annotation(self.previous_output_type)
+        if probe_input is Any:
+            if self.collapsed_dynamic_input_type is None:
+                return False
+            probe_input = materialize_probe_annotation(self.collapsed_dynamic_input_type)
+        if probe_input is Any:
+            return False
+        result = self.probe_contract(probe_input)
+        if result is None:
+            return False
+        _, probe_output = result
+        return can_refine_annotation(self.effective_output_type, probe_output)
+
 
 class PipelineValidator:
     def __init__(self, operators: list[Any]):
@@ -90,7 +154,7 @@ class PipelineValidator:
         boundaries = self._run_forward_boundary_resolution_pass(pipeline_input_type)
         self._validate_downstream_compatibility(boundaries)
 
-        entry_input_type = self._collapse_boundary_input_types(boundaries[0])
+        entry_input_type = boundaries[0].collapsed_input_type
         resolved_pipeline_input_type = tighten_if_more_concrete(
             pipeline_input_type,
             entry_input_type,
@@ -245,44 +309,17 @@ class PipelineValidator:
         required_upstream_type: Any = Any
         for boundary in reversed(boundaries):
             # Example: static says `object`, dynamic says `tuple[int, Any]` -> start from `tuple[int, Any]`.
-            boundary_input_type = cls._collapse_boundary_input_types(boundary)
+            boundary_input_type = boundary.collapsed_input_type
             # Example: downstream needs `tuple[int, str]` -> project that shape backward through this operator.
             projected_input_type = cls._project_input_back_through(boundary, required_upstream_type)
             # Example: local says `tuple[int, Any]`, projection says `tuple[int, str]` -> keep `tuple[int, str]`.
             required_upstream_type = refine_input_constraint(boundary_input_type, projected_input_type)
         return required_upstream_type
 
-    @staticmethod
-    def _collapse_input_types(input_types: tuple[Any, ...]) -> Any:
-        if len(input_types) == 1:
-            return input_types[0]
-        return tuple[input_types]
-
-    @classmethod
-    def _collapse_boundary_input_types(cls, boundary: _OperatorBoundary) -> Any:
-        static_input = (
-            cls._collapse_input_types(boundary.static_boundary.input_types)
-            if boundary.static_boundary is not None
-            else None
-        )
-        dynamic_input = (
-            cls._collapse_input_types(boundary.dynamic_boundary.input_types)
-            if boundary.dynamic_boundary is not None
-            else None
-        )
-
-        match (static_input, dynamic_input):
-            case (None, input_type):
-                return input_type
-            case (input_type, None):
-                return input_type
-            case (static_input, dynamic_input):
-                return refine_input_constraint(static_input, dynamic_input)
-
     @classmethod
     def _project_input_back_through(cls, boundary: _OperatorBoundary, inferred: Any) -> Any:
         contract_input = cls._project_contract_input_back_through(boundary, inferred)
-        boundary_input_type = cls._collapse_boundary_input_types(boundary)
+        boundary_input_type = boundary.collapsed_input_type
         if contract_input is not Any:
             return refine_input_constraint(boundary_input_type, contract_input)
         if is_annotation_compatible(boundary.effective_output_type, (inferred,)):
@@ -294,7 +331,7 @@ class PipelineValidator:
         if boundary.dynamic_boundary is None:
             return Any
 
-        template_input = cls._collapse_input_types(boundary.dynamic_boundary.input_types)
+        template_input = boundary.collapsed_dynamic_input_type
         specialized_input = specialize_input_from_output_template(
             template_input,
             boundary.dynamic_boundary.output_type,
@@ -303,39 +340,22 @@ class PipelineValidator:
         if specialized_input is not Any and cls._confirm_contract_projection(boundary, specialized_input, inferred):
             return specialized_input
 
-        contract_probe = cls._probe_contract(boundary, inferred)
+        contract_probe = boundary.probe_contract(inferred)
         if contract_probe is None:
             return Any
         input_types, output_type = contract_probe
-        collapsed_input = cls._collapse_input_types(input_types)
+        collapsed_input = boundary._collapse_input_types(input_types)
         if output_type == inferred and collapsed_input == inferred:
             return inferred
         return Any
 
     @classmethod
     def _confirm_contract_projection(cls, boundary: _OperatorBoundary, candidate_input: Any, inferred: Any) -> bool:
-        contract_probe = cls._probe_contract(boundary, candidate_input)
+        contract_probe = boundary.probe_contract(candidate_input)
         if contract_probe is None:
             return False
         _, output_type = contract_probe
         return output_type == inferred
-
-    @classmethod
-    def _probe_contract(
-        cls,
-        boundary: _OperatorBoundary,
-        probe_input: Any,
-    ) -> tuple[tuple[Any, ...], Any] | None:
-        probe_annotations = dict(boundary.context_inputs or {})
-        try:
-            return boundary.operator.resolve_contract(
-                probe_input,
-                probe_annotations,
-                expand_output_annotation,
-                None,
-            )
-        except Exception:
-            return None
 
     def _validate_contracts_strictly(self, boundaries: list[_OperatorBoundary]) -> None:
         for i, boundary in enumerate(boundaries):
@@ -345,35 +365,12 @@ class PipelineValidator:
                     f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                     f"to accept and thread the upstream type dynamically."
                 )
-            if not is_concrete(boundary.effective_output_type) and not self._is_explicitly_transitive_boundary(boundary):
+            if not is_concrete(boundary.effective_output_type) and not boundary.is_explicitly_transitive():
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
                     f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
                 )
-
-    @classmethod
-    def _is_explicitly_transitive_boundary(cls, boundary: _OperatorBoundary) -> bool:
-        if boundary.dynamic_boundary is None:
-            return False
-        probe_input = cls._build_transitivity_probe_input(boundary)
-        if probe_input is Any:
-            return False
-        result = cls._probe_contract(boundary, probe_input)
-        if result is None:
-            return False
-        _, probe_output = result
-        return can_refine_annotation(boundary.effective_output_type, probe_output)
-
-    @classmethod
-    def _build_transitivity_probe_input(cls, boundary: _OperatorBoundary) -> Any:
-        probe_from_previous = materialize_probe_annotation(boundary.previous_output_type)
-        if probe_from_previous is not Any:
-            return probe_from_previous
-
-        return materialize_probe_annotation(
-            cls._collapse_input_types(boundary.dynamic_boundary.input_types)
-        )
 
 
 def specialize_input_from_output_template(input_template: Any, output_template: Any, inferred_output: Any) -> Any:
