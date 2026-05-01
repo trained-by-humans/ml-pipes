@@ -41,7 +41,7 @@ def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers:
     if tile:
         return Pipeline([
             Store("source_frame"),
-            Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
+            Tile(slice_wh=(240, 240), overlap_wh=(80, 80)),
             Store("tile_rects", index=1),
             Pick(0),
             Scatter(max_concurrency=6),
@@ -94,6 +94,9 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         while True:
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                stopped = True
+
             while not stopped and len(pending) < workers:
                 ok, frame = reader.latest()
                 if not ok or frame is None:
@@ -104,10 +107,13 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
             if not pending:
                 break
 
-            result = pending.popleft().result()
-            cv2.imshow("Shibuya Crossing - YOLOv8", result.array)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                stopped = True
+            future = pending[0]
+            try:
+                result = future.result(timeout=0.05)
+                pending.popleft()
+                cv2.imshow("Shibuya Crossing - YOLOv8", result.array)
+            except TimeoutError:
+                pass
 
     reader.stop()
     cv2.destroyAllWindows()
