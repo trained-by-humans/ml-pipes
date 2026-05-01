@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import collections
 import sys
-import time
 import urllib.error
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,45 +20,27 @@ import numpy as np
 
 from ..common import add_assets_dir_arg, download_if_missing
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
+from ml_pipes import ImagePayload, Normalize, Pick, Pipeline, Recall, Store, TensorPayload, ThroughputCollector
 
 CSRNET_MODEL_NAME = "csrnet_shanghaitech_b_rootstrap.pth"
 CSRNET_MODEL_URL = "https://huggingface.co/rootstrap-org/crowd-counting/resolve/main/weights.pth"
 
-
-class RollingAverage:
-    def __init__(self, window: int = 12) -> None:
-        self._values: collections.deque[float] = collections.deque(maxlen=max(1, window))
-
-    def update(self, value: float) -> float:
-        self._values.append(float(value))
-        return float(sum(self._values) / len(self._values))
+_IMAGENET_MEAN_RGB = (0.485, 0.456, 0.406)
+_IMAGENET_STD_RGB = (0.229, 0.224, 0.225)
 
 
-class RollingFPS:
-    def __init__(self, window: int = 30) -> None:
-        self._timestamps: collections.deque[float] = collections.deque(maxlen=max(2, window))
+# ---------------------------------------------------------------------------
+# Generic density/CNN result types
+# ---------------------------------------------------------------------------
 
-    def tick(self) -> float:
-        now = time.perf_counter()
-        self._timestamps.append(now)
-        if len(self._timestamps) < 2:
-            return 0.0
-        elapsed = self._timestamps[-1] - self._timestamps[0]
-        if elapsed <= 0:
-            return 0.0
-        return float((len(self._timestamps) - 1) / elapsed)
+@dataclass(frozen=True)
+class DensityPrediction:
+    density_map: np.ndarray
 
 
-def _import_torch() -> tuple[Any, Any]:
-    try:
-        import torch
-        import torch.nn as nn
-    except ImportError as exc:
-        raise RuntimeError(
-            "CSRNet example requires torch. Install it in the project environment before running this script."
-        ) from exc
-    return torch, nn
-
+# ---------------------------------------------------------------------------
+# CSRNet architecture
+# ---------------------------------------------------------------------------
 
 def build_csrnet_model() -> Any:
     _, nn = _import_torch()
@@ -90,6 +72,21 @@ def build_csrnet_model() -> Any:
             return self.output_layer(x)
 
     return CSRNet()
+
+
+# ---------------------------------------------------------------------------
+# Torch/runtime integration
+# ---------------------------------------------------------------------------
+
+def _import_torch() -> tuple[Any, Any]:
+    try:
+        import torch
+        import torch.nn as nn
+    except ImportError as exc:
+        raise RuntimeError(
+            "CSRNet example requires torch. Install it in the project environment before running this script."
+        ) from exc
+    return torch, nn
 
 
 def unwrap_state_dict(checkpoint: Any) -> dict[str, Any]:
@@ -152,58 +149,124 @@ def load_model(weights_path: Path, device: str) -> tuple[Any, Any]:
     return model, torch
 
 
-def preprocess_frame(frame: np.ndarray, torch: Any, device: str) -> Any:
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-    normalized = (rgb - mean) / std
-    chw = np.transpose(normalized, (2, 0, 1))[None, ...]
-    tensor = torch.from_numpy(np.ascontiguousarray(chw))
-    return tensor.to(device)
+class CSRNetInfer:
+    def __init__(self, model: Any, torch: Any, device: str) -> None:
+        self.model = model
+        self.torch = torch
+        self.device = device
 
-
-def infer_density(frame: np.ndarray, model: Any, torch: Any, device: str) -> tuple[float, np.ndarray, float]:
-    started = time.perf_counter()
-    tensor = preprocess_frame(frame, torch, device)
-    with torch.inference_mode():
-        density = model(tensor).squeeze(0).squeeze(0).detach().cpu().numpy()
-    density = np.maximum(density.astype(np.float32, copy=False), 0.0)
-    latency_ms = (time.perf_counter() - started) * 1000.0
-    return float(density.sum()), density, latency_ms
-
-
-def density_to_heatmap(density_map: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
-    height, width = output_shape
-    density = np.maximum(density_map.astype(np.float32, copy=False), 0.0)
-    if density.size == 0 or float(density.max()) <= 0.0:
-        return np.zeros((height, width, 3), dtype=np.uint8)
-    normalized = cv2.normalize(density, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-    heatmap = cv2.applyColorMap(normalized.astype(np.uint8), cv2.COLORMAP_TURBO)
-    return cv2.resize(heatmap, (width, height), interpolation=cv2.INTER_CUBIC)
-
-
-def render_overlay(frame: np.ndarray, density_map: np.ndarray, count: float, smoothed: float, latency_ms: float, fps: float) -> np.ndarray:
-    heatmap = density_to_heatmap(density_map, frame.shape[:2])
-    canvas = cv2.addWeighted(frame, 0.60, heatmap, 0.40, 0.0)
-    cv2.rectangle(canvas, (0, 0), (430, 110), (15, 18, 28), thickness=-1)
-    lines = (
-        "Backend: CSRNet",
-        f"Count: {count:.1f}",
-        f"Smoothed: {smoothed:.1f}",
-        f"Latency: {latency_ms:.1f} ms   FPS: {fps:.1f}",
-    )
-    for idx, line in enumerate(lines):
-        cv2.putText(
-            canvas,
-            line,
-            (14, 28 + idx * 22),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
-            (236, 240, 241),
-            2,
-            cv2.LINE_AA,
+    def __call__(self, tensor_payload: TensorPayload) -> DensityPrediction:
+        tensor = self.torch.from_numpy(np.ascontiguousarray(tensor_payload.array)).to(self.device)
+        with self.torch.inference_mode():
+            density = self.model(tensor).squeeze(0).squeeze(0).detach().cpu().numpy()
+        return DensityPrediction(
+            density_map=density.astype(np.float32, copy=False),
         )
-    return canvas
+
+
+# ---------------------------------------------------------------------------
+# Generic density-map postprocess operators
+# ---------------------------------------------------------------------------
+
+class ClampDensity:
+    def __call__(self, prediction: DensityPrediction) -> DensityPrediction:
+        return DensityPrediction(
+            density_map=np.maximum(prediction.density_map.astype(np.float32, copy=False), 0.0),
+        )
+
+
+class SumDensity:
+    def __call__(self, prediction: DensityPrediction) -> float:
+        return float(prediction.density_map.sum())
+
+
+# ---------------------------------------------------------------------------
+# Generic heatmap/overlay operators
+# ---------------------------------------------------------------------------
+
+class DensityToHeatmap:
+    def __init__(
+        self,
+        colormap: int = cv2.COLORMAP_TURBO,
+        interpolation: int = cv2.INTER_CUBIC,
+    ) -> None:
+        self.colormap = colormap
+        self.interpolation = interpolation
+
+    def __call__(self, source_image: ImagePayload, prediction: DensityPrediction) -> tuple[ImagePayload, ImagePayload]:
+        height, width = source_image.array.shape[:2]
+        density = np.maximum(prediction.density_map.astype(np.float32, copy=False), 0.0)
+        if density.size == 0 or float(density.max()) <= 0.0:
+            heatmap = np.zeros((height, width, 3), dtype=np.uint8)
+        else:
+            normalized = cv2.normalize(density, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+            heatmap = cv2.applyColorMap(normalized.astype(np.uint8), self.colormap)
+            heatmap = cv2.resize(heatmap, (width, height), interpolation=self.interpolation)
+        return source_image, ImagePayload(array=heatmap, color_space="BGR", layout="HWC")
+
+
+class BlendImages:
+    def __init__(self, base_weight: float = 0.60, overlay_weight: float = 0.40) -> None:
+        self.base_weight = base_weight
+        self.overlay_weight = overlay_weight
+
+    def __call__(self, source_image: ImagePayload, overlay_image: ImagePayload) -> ImagePayload:
+        if source_image.layout != "HWC" or overlay_image.layout != "HWC":
+            raise ValueError("BlendImages expects HWC images")
+        if source_image.array.shape != overlay_image.array.shape:
+            raise ValueError(
+                f"BlendImages requires matching shapes, got {source_image.array.shape} and {overlay_image.array.shape}"
+            )
+        blended = cv2.addWeighted(
+            source_image.array,
+            self.base_weight,
+            overlay_image.array,
+            self.overlay_weight,
+            0.0,
+        )
+        return ImagePayload(
+            array=blended,
+            color_space=source_image.color_space,
+            layout=source_image.layout,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline composition
+# ---------------------------------------------------------------------------
+
+def build_preprocess_pipeline() -> Pipeline:
+    return Pipeline([
+        Store("source_frame"),
+        Normalize(
+            scale=1.0 / 255.0,
+            mean=_IMAGENET_MEAN_RGB,
+            std=_IMAGENET_STD_RGB,
+            output_layout="NCHW",
+            output_color_space="RGB",
+        ),
+    ])
+
+
+def build_postprocess_pipeline() -> Pipeline:
+    return Pipeline([
+        ClampDensity(),
+        Store("density_prediction"),
+        SumDensity(),
+        Store("count"),
+        Recall("density_prediction", index=0),
+        Pick(0),
+        Recall("source_frame", index=0),
+        DensityToHeatmap(),
+        BlendImages(),
+        Recall("count"),
+    ])
+
+
+def build_frame_pipeline(infer_op: Any) -> Pipeline:
+    pipeline = build_preprocess_pipeline() + Pipeline([infer_op]) + build_postprocess_pipeline()
+    pipeline.validate()
+    return pipeline
 
 
 def run(
@@ -214,8 +277,6 @@ def run(
     stride: int,
     weights: Path | None,
     device: str,
-    smoothing_window: int,
-    log_interval_s: float,
 ) -> int:
     try:
         resolved_weights = resolve_weights_path(assets_dir, weights)
@@ -234,11 +295,13 @@ def run(
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    count_smoother = RollingAverage(window=smoothing_window)
-    fps_monitor = RollingFPS()
-    last_log = 0.0
+    throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
     pending: collections.deque[Future] = collections.deque()
     stopped = False
+    frame_pipeline = build_frame_pipeline(CSRNetInfer(model, torch, resolved_device))
+    frame_pipeline.set_tracing(throughput)
+
+    throughput.target_fps = reader.stream_fps
 
     print(
         f"Streaming with {workers} worker(s), stride={stride}, device={resolved_device} "
@@ -246,9 +309,8 @@ def run(
         file=sys.stderr,
     )
 
-    def infer(frame: Any) -> tuple[np.ndarray, float, np.ndarray, float]:
-        count, density_map, latency_ms = infer_density(frame, model, torch, resolved_device)
-        return frame, count, density_map, latency_ms
+    def infer(frame: Any) -> tuple[ImagePayload, float]:
+        return frame_pipeline(ImagePayload(array=frame, color_space="BGR", layout="HWC"))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         while True:
@@ -267,26 +329,16 @@ def run(
 
             future = pending[0]
             try:
-                frame, count, density_map, latency_ms = future.result(timeout=0.05)
+                annotated, count = future.result(timeout=0.05)
                 pending.popleft()
-                smoothed = count_smoother.update(count)
-                fps = fps_monitor.tick()
-                annotated = render_overlay(frame, density_map, count, smoothed, latency_ms, fps)
-                cv2.imshow("Shibuya Crossing - CSRNet", annotated)
-
-                now = time.perf_counter()
-                if now - last_log >= log_interval_s:
-                    print(
-                        f"[csrnet] count={count:.1f} smoothed={smoothed:.1f} "
-                        f"latency={latency_ms:.1f}ms fps={fps:.1f}",
-                        file=sys.stderr,
-                    )
-                    last_log = now
+                cv2.imshow("Shibuya Crossing - CSRNet", annotated.array)
             except TimeoutError:
                 pass
 
     reader.stop()
     cv2.destroyAllWindows()
+    throughput.flush()
+    throughput.print_summary()
     return 0
 
 
@@ -312,18 +364,6 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help="Torch device used for inference.",
     )
-    parser.add_argument(
-        "--smoothing-window",
-        type=int,
-        default=12,
-        help="Rolling window used to smooth the displayed count.",
-    )
-    parser.add_argument(
-        "--log-interval-s",
-        type=float,
-        default=1.0,
-        help="How often to print count and latency metrics.",
-    )
     return parser.parse_args()
 
 
@@ -337,8 +377,6 @@ def main() -> int:
         stride=args.stride,
         weights=args.weights,
         device=args.device,
-        smoothing_window=args.smoothing_window,
-        log_interval_s=args.log_interval_s,
     )
 
 
