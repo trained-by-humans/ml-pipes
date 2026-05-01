@@ -16,28 +16,65 @@ if __name__ == "__main__" and __package__ is None:
 import cv2
 
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
-from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from ..run_yolo8_onnx import YOLO8_MODELS
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes import (
+    ArgMax,
+    ConvertBoxFormat,
     DrawBoxes,
-    Embed,
+    Extract,
+    FilterTensors,
     Gather,
+    GatherScores,
     ImagePayload,
+    Infer,
+    NMS,
+    NMM,
+    Normalize,
     Pick,
     Pipeline,
+    ProjectBoxes,
     Recall,
-    NMM,
+    Resize,
     Scatter,
+    Slice,
+    Squeeze,
     Stitch,
     Store,
     Tile,
     ThroughputCollector,
+    ToDetections,
+    Transpose,
     inline,
 )
 
+_KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella
+
+
+def _infer_ops(model_path: Path, conf_threshold: float) -> list:
+    return [
+        Resize((640, 640)),
+        Store("resize_transform", index=1),
+        Pick(0),
+        Normalize(),
+        Infer(model_path),
+        Extract("output0", as_="preds"),
+        Squeeze("preds"),
+        Transpose("preds"),
+        Slice("preds", slice(None, 4), as_="boxes"),
+        Slice("preds", slice(4, None), as_="scores"),
+        ArgMax("scores", as_="classes"),
+        GatherScores("scores", "classes"),
+        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in _KEEP_CLASSES for c in r["classes"]]),
+        ConvertBoxFormat(from_="cxcywh"),
+        NMS(conf_threshold=conf_threshold),
+        Recall("resize_transform"),
+        ProjectBoxes(),
+        ToDetections(),
+    ]
+
 
 def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers: int = 1) -> Pipeline:
-    infer_pipe = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
     if tile:
         return Pipeline([
             Store("source_frame"),
@@ -45,7 +82,7 @@ def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers:
             Store("tile_rects", index=1),
             Pick(0),
             Scatter(max_concurrency=6),
-            inline(infer_pipe),
+            inline(Pipeline(_infer_ops(model_path, conf_threshold))),
             Gather(),
             Recall("tile_rects"),
             Stitch(),
@@ -56,7 +93,7 @@ def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers:
         ], auto_validate=True)
     return Pipeline([
         Store("source_frame"),
-        Embed(infer_pipe),
+        inline(Pipeline(_infer_ops(model_path, conf_threshold))),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),

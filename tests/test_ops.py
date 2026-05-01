@@ -11,7 +11,8 @@ from ml_pipes.ops import (
     ConvertBoxFormat,
     DrawBoxes,
     Extract,
-    FilterBy,
+    FilterTensors,
+    MaskTensors,
     GatherScores,
     Infer,
     LogDetections,
@@ -348,10 +349,10 @@ def test_nms_suppresses_same_class_overlap():
 
 
 # ---------------------------------------------------------------------------
-# FilterBy
+# MaskTensors
 # ---------------------------------------------------------------------------
 
-def test_filter_by_synchronises_extra_tensor_with_nms_kept_indices():
+def test_mask_tensors_synchronises_extra_tensor_with_nms_kept_indices():
     registry = _make_registry(
         boxes=[[10, 10, 50, 50], [12, 12, 48, 48]],
         scores=[0.95, 0.85],
@@ -360,7 +361,7 @@ def test_filter_by_synchronises_extra_tensor_with_nms_kept_indices():
     registry["coefficients"] = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
 
     result = NMS(kept_as="kept")(registry)
-    result = FilterBy("coefficients", indices="kept")(result)
+    result = MaskTensors("coefficients", indices="kept")(result)
 
     assert result["coefficients"].shape == (1, 2)
     assert result["coefficients"].tolist() == [[1.0, 2.0]]
@@ -666,3 +667,54 @@ def test_project_roi_masks_preserves_fractional_box():
     result = ProjectRoIMasks(mask_threshold=0.5)(registry, transform)
 
     assert np.any(result["masks"][0]), "mask was silently dropped due to truncation"
+
+
+# ---------------------------------------------------------------------------
+# MaskTensors / FilterTensors
+# ---------------------------------------------------------------------------
+
+def _registry(**arrays: np.ndarray) -> TensorRegistry:
+    r = TensorRegistry()
+    for k, v in arrays.items():
+        r[k] = v
+    return r
+
+
+def test_mask_tensors_applies_index_array():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        kept=np.array([0, 2]),
+    )
+    result = MaskTensors("scores", "kept")(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+
+
+def test_mask_tensors_writes_to_new_key():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        kept=np.array([1]),
+    )
+    result = MaskTensors("scores", "kept", as_="filtered_scores")(r)
+    assert result["filtered_scores"].tolist() == [0.5]
+    assert result["scores"].tolist() == [0.9, 0.5, 0.8]
+
+
+def test_filter_tensors_applies_predicate():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([0, 1, 0]),
+    )
+    result = FilterTensors("scores", predicate=lambda reg: reg["classes"] == 0)(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+
+
+def test_filter_tensors_applies_to_multiple_keys():
+    r = _registry(
+        boxes=np.array([[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]]),
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([0, 1, 0]),
+    )
+    result = FilterTensors("boxes", "scores", "classes", predicate=lambda reg: reg["classes"] == 0)(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+    assert result["classes"].tolist() == [0, 0]
+    assert len(result["boxes"]) == 2
