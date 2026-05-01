@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from examples.streaming.run_shibuya_csrnet import RollingAverage, density_to_heatmap, render_overlay, unwrap_state_dict
-
-
-def test_rolling_average_uses_recent_window() -> None:
-    avg = RollingAverage(window=3)
-
-    assert avg.update(3) == 3.0
-    assert avg.update(6) == 4.5
-    assert avg.update(9) == 6.0
-    assert avg.update(12) == 9.0
+from examples.streaming.run_shibuya_csrnet import (
+    BlendImages,
+    ClampDensity,
+    DensityToHeatmap,
+    DensityPrediction,
+    SumDensity,
+    build_frame_pipeline,
+    unwrap_state_dict,
+)
+from ml_pipes import ImagePayload, TensorPayload
 
 
 def test_unwrap_state_dict_strips_module_prefix() -> None:
@@ -29,20 +29,53 @@ def test_unwrap_state_dict_strips_module_prefix() -> None:
 
 
 def test_density_to_heatmap_matches_requested_size() -> None:
-    density = np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32)
+    source = ImagePayload(array=np.zeros((24, 32, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    prediction = DensityPrediction(density_map=np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32))
 
-    heatmap = density_to_heatmap(density, (24, 32))
+    returned_source, heatmap = DensityToHeatmap()(source, prediction)
 
-    assert heatmap.shape == (24, 32, 3)
-    assert heatmap.dtype == np.uint8
+    assert returned_source is source
+    assert heatmap.array.shape == (24, 32, 3)
+    assert heatmap.array.dtype == np.uint8
 
 
-def test_render_overlay_preserves_frame_shape() -> None:
-    frame = np.zeros((64, 96, 3), dtype=np.uint8)
-    density = np.ones((8, 12), dtype=np.float32)
+def test_density_prediction_postprocess_clamps_and_sums() -> None:
+    prediction = DensityPrediction(
+        density_map=np.array([[-1.0, 1.5], [2.0, -0.5]], dtype=np.float32),
+    )
 
-    annotated = render_overlay(frame, density, count=11.0, smoothed=10.5, latency_ms=8.5, fps=12.3)
+    clamped = ClampDensity()(prediction)
+    counted = SumDensity()(clamped)
 
-    assert annotated.shape == frame.shape
-    assert annotated.dtype == frame.dtype
-    assert np.count_nonzero(annotated) > 0
+    assert np.array_equal(clamped.density_map, np.array([[0.0, 1.5], [2.0, 0.0]], dtype=np.float32))
+    assert counted == 3.5
+
+
+def test_build_frame_pipeline_returns_source_frame_and_typed_prediction() -> None:
+    class StubInfer:
+        def __call__(self, tensor: TensorPayload) -> DensityPrediction:
+            assert tensor.layout == "NCHW"
+            assert tensor.array.shape == (1, 3, 6, 8)
+            return DensityPrediction(
+                density_map=np.array([[1.0, -2.0], [3.0, 4.0]], dtype=np.float32),
+            )
+
+    pipeline = build_frame_pipeline(StubInfer())
+    image = ImagePayload(array=np.zeros((6, 8, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+    annotated, count = pipeline(image)
+
+    assert isinstance(annotated, ImagePayload)
+    assert annotated.array.shape == image.array.shape
+    assert count == 8.0
+
+
+def test_blend_images_preserves_frame_shape() -> None:
+    base = ImagePayload(array=np.zeros((64, 96, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    overlay = ImagePayload(array=np.ones((64, 96, 3), dtype=np.uint8) * 255, color_space="BGR", layout="HWC")
+
+    annotated = BlendImages()(base, overlay)
+
+    assert annotated.array.shape == base.array.shape
+    assert annotated.array.dtype == base.array.dtype
+    assert np.count_nonzero(annotated.array) > 0
