@@ -1,7 +1,8 @@
 import pytest
-from typing import Any
+from typing import Any, TypeVar
 
 from ml_pipes import Pipeline, PipelineValidationError, Scatter, Gather, Batch, UnBatch
+from ml_pipes.validation import is_single_annotation_compatible
 
 
 class IntToString:
@@ -377,3 +378,93 @@ def test_declared_pipeline_input_can_surface_incompatible_entry_type():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate(pipeline_input_type=str)
+
+
+# ---------------------------------------------------------------------------
+# TypeVar compatibility
+# ---------------------------------------------------------------------------
+
+class _Base:
+    pass
+
+class _Child(_Base):
+    pass
+
+class _Unrelated:
+    pass
+
+_T = TypeVar("_T", bound=_Base)
+_U = TypeVar("_U")  # unbound
+
+
+def test_typevar_in_expected_accepts_bound_subclass():
+    # produced=_Child, expected=~_T (bound=_Base) → _Child is subclass of _Base
+    assert is_single_annotation_compatible(_Child, _T)
+
+
+def test_typevar_in_expected_accepts_exact_bound():
+    assert is_single_annotation_compatible(_Base, _T)
+
+
+def test_typevar_in_expected_rejects_unrelated():
+    assert not is_single_annotation_compatible(_Unrelated, _T)
+
+
+def test_typevar_in_produced_accepts_when_bound_subclass_of_expected():
+    # produced=~_T (bound=_Base), expected=_Base → bound is assignable to expected
+    assert is_single_annotation_compatible(_T, _Base)
+
+
+def test_typevar_in_produced_rejects_when_expected_is_subtype_of_bound():
+    # produced=~_T (bound=_Base), expected=_Child → _Child < _Base but _Base is not assignable to _Child
+    assert not is_single_annotation_compatible(_T, _Child)
+
+
+def test_typevar_in_produced_rejects_fully_unrelated():
+    assert not is_single_annotation_compatible(_T, _Unrelated)
+
+
+def test_unbound_typevar_in_expected_accepts_anything():
+    assert is_single_annotation_compatible(int, _U)
+    assert is_single_annotation_compatible(_Base, _U)
+
+
+def test_unbound_typevar_in_produced_accepts_anything():
+    assert is_single_annotation_compatible(_U, int)
+    assert is_single_annotation_compatible(_U, _Base)
+
+
+def test_typevar_output_resolved_to_concrete_input_type():
+    # ~_T is resolved to _Child (the concrete input), so ConsumesBase sees _Child, not ~_T
+    class ProducesTypeVar:
+        def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
+
+    class ConsumesBase:
+        def __call__(self, x: _Base) -> str: ...  # type: ignore[empty-body]
+
+    # _Child fed in → ~_T resolved to _Child → _Child is subclass of _Base → accepted
+    pipeline = Pipeline([ProducesTypeVar(), ConsumesBase()], auto_validate=True)
+    pipeline.validate(pipeline_input_type=_Child)
+
+
+def test_typevar_pipeline_rejects_narrower_consumer():
+    # ~_T resolved to _Base; _Child is a strict subtype of _Base → _Base not assignable to _Child
+    class ProducesTypeVar:
+        def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
+
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([ProducesTypeVar(), ConsumesChild()], auto_validate=True)
+
+
+def test_typevar_pipeline_rejects_incompatible_consumer():
+    class ProducesTypeVar:
+        def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
+
+    class ConsumesUnrelated:
+        def __call__(self, x: _Unrelated) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([ProducesTypeVar(), ConsumesUnrelated()], auto_validate=True)
