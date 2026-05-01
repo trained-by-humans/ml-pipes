@@ -47,7 +47,7 @@ from ml_pipes import (
     ThroughputCollector,
     ToDetections,
     Transpose,
-    inline, Inline,
+    Inline,
 )
 
 _KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella
@@ -78,36 +78,35 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
 
 
 def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers: int = 1) -> Pipeline:
-    if tile:
-        return Pipeline([
-            Store("source_frame"),
-            Tile(slice_wh=(240, 240), overlap_wh=(80, 80)),
-            Store("tile_rects", index=1),
-            Pick(0),
-            Scatter(max_concurrency=6),
-            Inline(_infer_pipeline(model_path, conf_threshold)),
-            Gather(),
-            Recall("tile_rects"),
-            Stitch(),
-            NMM(iou_threshold=0.5),
-            FilterPredictionsByClass(_KEEP_CLASSES),
-            FilterPredictionsByArea(max_area=_MAX_HUMAN_AREA),
-            Recall("source_frame", index=0),
-            DrawBoxes(class_names=COCO_CLASSES),
-            Pick(0),
-        ], auto_validate=True)
-    return Pipeline([
+    pre_process = Pipeline([
         Store("source_frame"),
+    ])
+
+    pipeline = Pipeline([
+        Tile(slice_wh=(240, 240), overlap_wh=(80, 80)),
+        Store("tile_rects", index=1),
+        Pick(0),
+        Scatter(max_concurrency=6),
         Inline(_infer_pipeline(model_path, conf_threshold)),
+        Gather(),
+        Recall("tile_rects"),
+        Stitch(),
+        NMM(iou_threshold=0.5),
+    ], auto_validate=True) if tile else _infer_pipeline(model_path, conf_threshold)
+
+    post_process = Pipeline([
         FilterPredictionsByClass(_KEEP_CLASSES),
         FilterPredictionsByArea(max_area=_MAX_HUMAN_AREA),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
-    ], auto_validate=True)
+    ])
+
+    return pre_process + pipeline + post_process
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool, conf_threshold: float) -> int:
+def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool,
+                 conf_threshold: float) -> int:
     model_name, model_url = YOLO8_MODELS[model]
     model_path = resolve_model_path(assets_dir, model_name, model_url, model)
     if model_path is None:
@@ -129,7 +128,8 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
     throughput.target_fps = reader.stream_fps
     mode = "tiled" if tile else "standard"
-    print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
+    print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.",
+          file=sys.stderr)
 
     pending: collections.deque[Future] = collections.deque()
     stopped = False
