@@ -291,8 +291,8 @@ assert contract.output_type == tuple[ImagePayload, ResizeTransform]
 
 `strict=True` adds an additional check on top of the normal validation passes.
 
-Its goal is not to tighten the pipeline boundary. Its goal is to reject vague
-operator boundaries.
+Its goal is not to tighten the pipeline boundary. Its goal is to reject
+unresolved operator-boundary ambiguity.
 
 In strict mode, every operator must resolve to concrete input and output
 boundaries, either through annotations or through `resolve_contract(...)`.
@@ -301,6 +301,23 @@ Unresolved `Any` means validation cannot fully reason about that operator.
 ```python
 pipeline.validate(strict=True)
 ```
+
+### What `strict=True` means today
+
+Strict mode checks operator boundaries locally.
+
+It runs the normal validation passes first, then rejects any operator whose
+resolved input or output boundary still contains unresolved `Any`, unless that
+ambiguity is explicitly justified through `resolve_contract(...)`.
+
+So today, strict mode means:
+
+- no unresolved operator-boundary ambiguity,
+- explicit justification for generic operators.
+
+It does not mean global worst-case pipeline reasoning. A strict-mode failure
+means the validator could not fully justify one operator boundary, not
+necessarily that the pipeline is definitely unsafe at runtime.
 
 Strict mode is orthogonal to boundary tightening:
 
