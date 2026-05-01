@@ -1,269 +1,444 @@
 # Pipeline Validation
 
-Validation catches structural and type errors in a pipeline before it runs.
-The earlier an error is found, the cheaper it is — a `PipelineValidationError`
-at construction or deploy time is far better than a `TypeError` or `KeyError`
-buried inside a batch at runtime.
+Validation catches structural, scoping, and type errors in a pipeline before
+it runs. A `PipelineValidationError` at construction or deploy time is much
+cheaper than a `TypeError` or `KeyError` buried inside a batch at runtime.
 
-## Triggers
+## How to run validation
 
 Validation never runs automatically unless you ask for it.
 
-**At construction**
-
-Validates immediately after `__init__`. Any error raises before the pipeline
-object is returned to the caller:
+### At construction
 
 ```python
 pipeline = Pipeline([...], auto_validate=True)
 ```
 
-**After `extend()`**
+The full pipeline is validated during `__init__`. Any error raises before the
+pipeline is returned.
 
-When `auto_validate=True`, every `extend()` call re-validates the full
-pipeline:
+### After `extend()`
 
 ```python
 pipeline = Pipeline([Store("x")], auto_validate=True)
 pipeline.extend([Recall("x")])   # re-validates automatically
 ```
 
-**Explicit call**
+When `auto_validate=True`, every `extend()` call re-validates the full
+pipeline.
 
-Call it any time — after construction, after extending, or before a deployment.
+### Explicit call
 
 ```python
 pipeline.validate()
 ```
 
-> [!WARNING] 
-> Recommended before the first production run and after any mutation
-of a joined pipeline (see [COMPOSITION.md](COMPOSITION.md)).
+Call it after construction, after extending existing pipeline or composing new ones, or after deployment just before 
+starting the pipeline.
 
-## Validations
+> [!WARNING]
+> Validation is recommended after any pipeline mutation.
+> See [COMPOSITION.md](COMPOSITION.md) for composition semantics.
 
-Checks run in order. A failure in an earlier check stops execution — later
-checks are not reached. All errors are raised as `PipelineValidationError(ValueError)`.
+## What validation checks
 
-### 1. Batch pairing
+All validation failures raise `PipelineValidationError`, which subclasses
+`ValueError`.
 
-Walks the operator list and checks that every `Batch` has a matching `UnBatch`
-and vice versa. Nesting is not allowed — a `Batch` inside a `Batch` region
-raises immediately.
+### 1. Region structure checks
+
+A *region* is a bounded section of the pipeline such as
+`Batch ... UnBatch` or `Scatter ... Gather` (See
+[Regions](ARCHITECTURE.md#regions)). 
+Validation checks that region openers and closers are structurally
+sound. 
+
+It rejects:
+
+- unmatched closers,
+- unmatched openers,
+- interleaved regions,
+- directly nested regions of the same kind.
+
+Examples:
 
 ```
-Batch → Op → Op → UnBatch      ✅ valid
-Batch → Op → Op                ❌ Batch has no matching UnBatch
-Op → UnBatch                   ❌ UnBatch at position N has no matching Batch
-Batch → Batch → UnBatch        ❌ Nested Batch regions are not supported
+Batch -> Op -> Op -> UnBatch                valid
+Batch -> Op -> Op                           Batch has no matching UnBatch
+Op -> UnBatch                               UnBatch has no matching opener
+Scatter -> Batch -> Gather                  regions interleave
+Batch -> Batch -> UnBatch -> UnBatch        directly nested Batch forbidden
 ```
 
-### 2. Context interactions
+This pass is purely structural. It does not look at types yet.
 
-Walks the operator list and tracks which keys have been stored at each point.
-A `Recall` is only valid if its key was stored earlier in the same scope.
+### 2. Context scoping checks
+
+Context scope follows the runtime boundaries of the pipeline: outer and inner
+regions do not share stored keys, and embedded pipelines use their own
+isolated context. (See [context-system](ARCHITECTURE.md#context-system)).
+Validation then walks the operator list and tracks which keys are available at
+each point.
+
+A `Recall("x")` is only valid if `"x"` was previously stored in the same
+scope.
 
 Scope rules:
 
-- `Store` inside a `Batch` region is only visible inside that region — it is
-  discarded when `UnBatch` is reached.
-- Keys stored outside a `Batch` region survive across it and are visible after
-  `UnBatch`.
-- `Embed` runs with a fully isolated context — outer keys are invisible inside
-  an embedded pipeline, and inner keys do not leak out.
+- A key stored inside a region is only visible inside that region.
+- A key stored outside a region remains visible after that region closes.
+- `Embed` validates the inner pipeline separately, so inner and outer contexts
+  are isolated.
+
+Examples:
 
 ```python
-Pipeline([Store("x"), Recall("x")])                         # ✅ correct order
-Pipeline([Recall("x")])                                     # ❌ key not stored
-Pipeline([Recall("x"), Store("x")])                         # ❌ Recall before Store
-Pipeline([Batch(...), Store("x"), UnBatch(), Recall("x")])  # ❌ key out of scope
-Pipeline([Store("x"), Batch(...), UnBatch(), Recall("x")])  # ✅ outer key survives
+Pipeline([Store("x"), Recall("x")])                         # valid
+Pipeline([Recall("x")])                                     # invalid
+Pipeline([Recall("x"), Store("x")])                         # invalid
+Pipeline([Batch(size=2), Store("x"), UnBatch(), Recall("x")])  # invalid
+Pipeline([Store("x"), Batch(size=2), UnBatch(), Recall("x")])  # valid
+```
+
+When a recall fails, validation reports the operator label and the keys that
+were available at that point:
+
+```text
+Recall('transform') at 3:Recall references a key that was not stored.
+Keys available at this point: ['features', 'metadata']
+```
+
+If no keys were available:
+
+```text
+Keys available at this point: (none)
+```
+
+If the failure happens inside `Embed`, the outer error wraps the inner one so
+the attribution stays clear.
+
+### 3. Type validation checks
+
+Type validation checks that the type produced at each boundary (operator output) is compatible
+with the type expected by the next boundary (next operator input).
+
+Missing annotations are rejected immediately and identify the offending
+operator:
+
+```text
+StringToFloat is missing a type annotation for __call__ input
+IntToString is missing a return type annotation for __call__
+```
+
+Example of compatible boundary:
+
+```text
+IntToString(value: int) -> str
+str -> str
+StringToFloat(value: str) -> float
+```
+
+Tuple outputs are unpacked automatically when the next operator takes multiple
+positional parameters:
+
+```text
+IntToPair(value: int) -> tuple[int, str]
+tuple[int, str] -> (int, str)
+PairToBool(number: int, text: str) -> bool
+```
+
+Broader downstream input types are allowed:
+
+```text
+str -> object
+```
+
+So an operator producing `str` can feed one that accepts `object`.
+
+If a boundary is incompatible, validation raises with the operator label:
+
+```text
+Pipeline contract mismatch at 1:PairToBool:
+  IntToPair returns (int, str) but PairToBool expects (int, float)
+```
+
+> [!TIP]
+> Checks run in order. A failure in an earlier pass stops execution, so later
+> passes are not reached.
+
+## Validation and boundaries
+
+Type validation works on operator boundaries. Each operator defines its own
+boundary by providing information about its input and output. If an operator
+boundary is vague, or the pipeline input type is unclear (for example because
+the entry operators are generic), that vagueness can propagate forward and
+reduce how much validation can prove.
+
+The default mode validates from the boundary information already available. The
+other two modes improve the same validation by tightening those boundaries with
+additional information.
+
+### 1. Default mode
+
+```python
+contract = pipeline.validate()
+```
+
+This is the baseline behavior:
+
+- validation starts at the beginning of the pipeline and walks forward,
+  checking compatibility using the boundaries it can resolve during the
+  forward pass.
+- if there is no clear input type for the pipeline, validation assumes the
+  pipeline input type is `Any`.
+
+Example:
+
+```python
+contract = Pipeline([Decode(), Resize((640, 640))]).validate()
+assert contract.input_type is bytes
+```
+
+If the first operator boundary is vague, validation may still succeed, but the
+pipeline boundary stays loose:
+
+```python
+contract = Pipeline([Pick(0)]).validate()
+assert contract.input_type is Any
+```
+
+### 2. Declared pipeline input mode
+
+```python
+contract = pipeline.validate(pipeline_input_type=ImagePayload)
+```
+
+This is the direct way to improve validation accuracy when the entry boundary
+is otherwise vague.
+
+The declared type does two things:
+
+- it gives the forward pass a concrete starting boundary, which can tighten
+  the resolved operator boundaries and, as a result, the final pipeline
+  boundary,
+- it is also an asserted expected input contract, so validation will fail if
+  the pipeline is incompatible with that declared input.
+
+That means an incorrect declaration can fail validation, which is exactly what
+you want.
+
+Example:
+
+```python
+contract = Pipeline([Normalize(), Infer("model.onnx")]).validate(
+    pipeline_input_type=ImagePayload
+)
+assert contract.input_type is ImagePayload
+```
+
+### 3. Backward inference mode
+
+```python
+contract = pipeline.validate(inference=True)
+```
+
+This is an additional improvement over the default mode.
+
+Validation tries to infer a tighter pipeline boundary from downstream
+constraints.
+
+This helps when:
+
+- the entry operator is generic or transitive,
+- but later operators force the input to be more specific.
+
+Example:
+
+```python
+contract = Pipeline([Scatter(), Store("raw"), Decode(), ...]).validate(
+    inference=True
+)
+
+assert contract.input_type == list[bytes]
 ```
 
 > [!CAUTION]
-> Available keys are listed when a `Recall` references a missing key:
-> 
-> ```
-> Recall('transform') at 3:Recall references a key that was not stored.
-> Keys available at this point: ['features', 'metadata']
-> ```
-> 
-> When no keys have been stored yet:
-> 
-> ```
-> Keys available at this point: (none)
-> ```
-> 
-> Embed attribution wraps the inner error so the outer position is clear:
-> 
-> ```
-> Validation error inside 1:Embed: Recall('x') at 0:Recall references a key
-> that was not stored. Keys available at this point: (none)
-> ```
+> Backward inference only works while the chain remains transparent enough to
+> project constraints backward. Vague or opaque operators stop refinement, and
+> the boundary remains looser.
 
-### 3. Type contract
+### What validation returns
 
-Walks the operator list and threads the output type of each operator into the
-input type expected by the next. A mismatch raises with a message identifying
-the exact boundary.
-
-- **Annotations required** — every operator must annotate its `__call__`
-  parameters and return type. Missing annotations raise before any type
-  comparison is attempted.
-
-  ```
-  IntToString(value: int) → str
-  │
-  str    ✅  output == input
-  │
-  StringToFloat(value: str) → float
-  ```
-
-- **Tuple unpacking** — a `tuple[int, str]` output is automatically unpacked
-  into the next operator's `(number: int, text: str)` parameters.
-
-  ```
-  IntToPair(value: int) → tuple[int, str]
-  │
-  tuple[int, str]   ✅  unpacked into → (int, str) 
-  │
-  PairToString(number: int, text: str) → str
-  ```
-
-- **Store / Recall type threading** 
-  `Store` records the annotation of the saved value.
-  ```
-  str, float
-  │
-  Store("label", index=0)    ✅ Store str as "label"
-  │
-  str, float
-  ```
-  `Recall` injects it back into the type stream so downstream
-  operators see the correct types.
-  ```
-  int                # later down the pipeline
-  │
-  Recall("label")              
-  │
-  tuple[int, str]    ✅  inject stored parameter properly
-  ```
-
-- **Embed boundary check** — the inner pipeline is validated independently
-  and then its first input type is checked against the outer pipeline's
-  current output type at the join point.
-
-  ```
-  IntToString(value: int) → str
-  │
-  str → str    ✅  output == embed first input
-  │
-  embed(StringProcessingPipeline(value: str) → float)
-  ```
-
-- **Covariant assignment** — broader downstream input types are accepted; an
-  operator returning `str` feeding into one that expects `object` is valid.
-
-  ```
-  IntToString(value: int) → str
-  │
-  str → object      ✅  str ⊆ object
-  │
-  ObjectConsumer(value: object) → object
-  ```
-
-> [!CAUTION]
-> Operator index and class name appear in every message so the failing boundary
-> can be located without counting operators manually:
-> 
-> ```
-> Pipeline contract mismatch at 2:StringToFloat:
->   IntToString returns str but StringToFloat expects float
-> ```
-> 
-> Missing annotations name the offending operator:
-> 
-> ```
-> StringToFloat is missing a type annotation for __call__ input
-> IntToString is missing a return type annotation for __call__
-> ```
-
-## Strict mode
-
-`strict=True` adds a fourth check on top of the normal three. The goal is to
-eliminate type ambiguity across the entire pipeline — every operator must
-declare, either through annotations or through `resolve_contract`, exactly what
-it accepts and what it produces. An unresolved `Any` is a gap in the contract:
-the pipeline cannot reason about what flows through that boundary, which means
-type mismatches downstream can go undetected until runtime.
-
-The check rejects any operator whose resolved input or output type is still
-`Any` after `_resolve_type_contract` has run with the real upstream types.
+Validation returns a `TypeContract`:
 
 ```python
-pipeline = Pipeline([..., LogDetections(), ...], strict=True)
-pipeline.validate()
+contract = Pipeline([Decode(), Resize((640, 640))]).validate()
+
+assert contract.input_type is bytes
+assert contract.output_type == tuple[ImagePayload, ResizeTransform]
 ```
-Vague types are resolved through contract resolution: 
+
+- `input_type` is the resolved pipeline input boundary after any tightening.
+- `output_type` is the resolved output type of the last operator.
+
+## What strict mode is
+
+`strict=True` adds an additional check on top of the normal validation passes.
+
+Its goal is not to tighten the pipeline boundary. Its goal is to reject
+unresolved operator-boundary ambiguity.
+
+In strict mode, every operator must resolve to concrete input and output
+boundaries, either through annotations or through `resolve_contract(...)`.
+Unresolved `Any` means validation cannot fully reason about that operator.
+
 ```python
-class LogDetections():
+pipeline.validate(strict=True)
+```
+
+### What `strict=True` means today
+
+Strict mode checks operator boundaries locally.
+
+It runs the normal validation passes first, then rejects any operator whose
+resolved input or output boundary still contains unresolved `Any`, unless that
+ambiguity is explicitly justified through `resolve_contract(...)`.
+
+So today, strict mode means:
+
+- no unresolved operator-boundary ambiguity,
+- explicit justification for generic operators.
+
+It does not mean global worst-case pipeline reasoning. A strict-mode failure
+means the validator could not fully justify one operator boundary, not
+necessarily that the pipeline is definitely unsafe at runtime.
+
+Strict mode is orthogonal to boundary tightening:
+
+- it operates on resolved operator boundaries,
+- it does not care whether the final pipeline `input_type` came from default
+  tightening, an explicit `pipeline_input_type`, or backward inference.
+
+Generic operators can still satisfy strict mode if they resolve concretely from
+the upstream type:
+
+```python
+class LogDetections:
     def __call__(self, payload: Any) -> Any:
         ...
-    
+
     def resolve_contract(self, current_output, stored_annotations, expand, error_type):
-        return (Any,), current_output  # accept anything, return what I received
+        return (Any,), current_output
 ```
 
-`Store`, `Recall`, `Pick`, `Batch`, and `UnBatch` are examples of generic
-operators that satisfy strict mode this way — each implements `resolve_contract`
-to accept any upstream type and produce a concrete output from it.
+This is enough for strict mode as long as `resolve_contract(...)` produces
+concrete boundaries at validation time.
 
-> [!TIP] 
-> For side-effect operators that accept any input and return it
-> unchanged (logging, saving to disk, drawing annotations), subclass
-> `SideEffectOp` instead. It provides both the passthrough `__call__` and the
-> correct `resolve_contract` with no boilerplate:
->
-> ```python
-> class MyLogger(SideEffectOp):
->     def effect(self, payload: Any) -> None:
->         print(payload)   # side effect only; return value is managed by the base
-> ```
+> [!TIP]
+> For side-effect operators that accept any input and return it unchanged,
+> subclass `SideEffectOp` instead of writing the passthrough logic yourself.
 
-> [!CAUTION]
-> Vague input is checked first:
-> 
-> ```
-> Strict mode violation at 2:LogOp: input type is unresolved (Any).
->   Fix: annotate the parameter with a concrete type, or implement resolve_contract
->   to accept and thread the upstream type dynamically.
-> ```
-> 
-> Vague output is only reached when input type is resolved:
-> 
-> ```
-> Strict mode violation at 2:LogOp: output type is unresolved (Any).
->   Fix: annotate the return type with a concrete type, or implement resolve_contract
->   to return the upstream type (e.g. passthrough: return (Any,), current_output).
-> ```
+Strict-mode failures are explicit:
 
-## Composition and live references
+```text
+Strict mode violation at 2:LogOp: input type is unresolved (Any).
+  Fix: annotate the parameter with a concrete type, or implement resolve_contract
+  to accept and thread the upstream type dynamically.
+```
 
-`>>` and `embed()` hold live references to the original pipeline objects.
-Mutating a joined pipeline after composition changes its type contract without
-the outer pipeline knowing. Always call `validate()` after any such mutation
-and before the next execution.
+```text
+Strict mode violation at 2:LogOp: output type is unresolved (Any).
+  Fix: annotate the return type with a concrete type, or implement resolve_contract
+  to return the upstream type (e.g. passthrough: return (Any,), current_output).
+```
+
+## How validation works internally
+
+Internally, validation needs two things:
+
+1. each operator must expose a boundary the validator can reason about,
+2. and those boundaries must be resolved against the current upstream type at
+   each point in the pipeline.
+
+### The two foundations of type validation
+
+#### 1. Operator signature boundaries
+
+The first foundation is the operator signature: the annotated input parameters
+and return type on `__call__`.
+
+For a normal typed operator, the signature is enough:
 
 ```python
-detector = Pipeline([Infer("yolo.onnx"), Extract("output0")])
-pipeline = preprocess >> detector
-
-detector.extend([SerializeToDict()])   # output type changes to dict
-
-pipeline.validate()   # catches the broken boundary before it reaches production
+class IntToString:
+    def __call__(self, value: int) -> str:
+        return str(value)
 ```
 
-`+` and `inline()` copy operators at construction time — there are no live
-references and no silent contract changes after the fact.
+From that alone, validation can resolve:
 
-See [COMPOSITION.md](COMPOSITION.md) for the full composition semantics.
+- input boundary: `int`
+- output boundary: `str`
+
+This is the simplest and preferred case.
+
+#### 2. Operator contract boundaries
+
+Some operators cannot be described accurately by a static signature alone.
+
+Examples:
+
+- operators that accept many shapes of input,
+- operators whose output depends on the upstream type,
+- operators that depend on stored context,
+- operators whose boundary cannot be described precisely by a single static signature.
+
+Those operators need a dynamic contract through `resolve_contract(...)`.
+
+```python
+def resolve_contract(
+    self,
+    current_output,
+    stored_annotations,
+    expand_output_annotation,
+    validation_error_type,
+):
+    ...
+```
+
+A signature can say what an operator accepts in general, but a contract can
+say what this operator accepts and produces at this exact point in this exact
+pipeline.
+
+Example:
+
+```python
+class PassthroughOp:
+    def __call__(self, value: Any) -> Any:
+        return value
+
+    def resolve_contract(self, current_output, stored_annotations, expand, error_type):
+        return (Any,), current_output
+```
+
+The static signature is vague. The dynamic contract is precise: "I accept
+anything, and I return exactly what came in."
+
+That is why contracts exist. Without them, generic and context-sensitive
+operators would poison validation with `Any`.
+
+### How boundaries are resolved and matched
+
+Each operator contributes an input boundary and an output boundary. Validation
+resolves them from:
+
+- static signatures from `__call__`,
+- dynamic contracts from `resolve_contract(...)`,
+- and the current upstream type flowing through the pipeline.
+
+That is how operators like `Store`, `Recall`, `Pick`, `Batch`, `UnBatch`,
+`Scatter`, and `Gather` can stay generic while still participating in accurate
+validation.
+
+If an operator has neither usable annotations nor a usable dynamic contract,
+validation fails immediately.

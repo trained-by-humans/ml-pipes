@@ -28,6 +28,7 @@ from .types import (
     TensorPayload,
     TensorRegistry,
 )
+from .validation import PipelineValidationError, is_annotation_compatible
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +211,14 @@ class Cast:
         self.field = field
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        return (Any,), current_output  # cast changes precision, not the payload type
+        if self.field is not None:
+            # field= mode: receives a dataclass (e.g. RuntimeOutputs), returns the same type
+            t = current_output if current_output is not None else Any
+            return (t,), t
+        tensor_like = TensorPayload | tuple[TensorPayload, ...]
+        if current_output is not Any and is_annotation_compatible(current_output, (tensor_like,)):
+            return (current_output,), current_output
+        return (tensor_like,), tensor_like
 
     def __call__(self, value: object) -> object:
         if self.field is not None:
@@ -1191,14 +1199,23 @@ class Pick:
 
     def resolve_contract(
         self,
-        current_output: Any | None,
+        current_output: Any,
         stored_annotations: dict[str, Any],
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        if current_output is None or get_origin(current_output) is not tuple:
+        if current_output is Any:
             return (Any,), Any
-        parts = get_args(current_output)
+        if get_origin(current_output) is tuple:
+            parts = get_args(current_output)
+        elif isinstance(current_output, tuple):
+            parts = current_output
+        else:
+            error_type = validation_error_type or PipelineValidationError
+            raise error_type(
+                f"Pick requires a tuple boundary, got {current_output}"
+            )
+
         selected = []
         for i in self.indices:
             if i >= len(parts):
@@ -1465,4 +1482,3 @@ class Distribute:
             )
             result.append(RuntimeOutputs(tensors=sample_tensors, names=outputs.names))
         return result
-

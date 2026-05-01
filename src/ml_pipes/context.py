@@ -49,7 +49,7 @@ class ContextOp(ABC):
     @abstractmethod
     def resolve_contract(
         self,
-        current_output: Any | None,
+        current_output: Any,
         stored_annotations: dict[str, Any],
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
@@ -68,13 +68,13 @@ class Store(ContextOp):
 
     def resolve_contract(
         self,
-        current_output: Any | None,
+        current_output: Any,
         stored_annotations: dict[str, Any],
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         stored_annotations[self.name] = self._extract_annotation(current_output, expand_output_annotation, validation_error_type)
-        return (Any,), Any if current_output is None else current_output
+        return (Any,), current_output
 
     def _extract(self, current: Any) -> Any:
         if self.index is None:
@@ -84,7 +84,7 @@ class Store(ContextOp):
         return current[self.index]
 
     def _extract_annotation(self, annotation: Any | None, expand_output_annotation: Any, validation_error_type: type[Exception] | None = None) -> Any:
-        if annotation is None:
+        if annotation is None or annotation is Any:
             return Any
         if self.index is None:
             return annotation
@@ -115,13 +115,13 @@ class Recall(ContextOp):
 
     def resolve_contract(
         self,
-        current_output: Any | None,
+        current_output: Any,
         stored_annotations: dict[str, Any],
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         stored_annotation = stored_annotations.get(self.name, Any)
-        current_parts = expand_output_annotation(current_output) if current_output is not None else (Any,)
+        current_parts = expand_output_annotation(current_output)
         if self.index is None:
             result_parts = current_parts + (stored_annotation,)
         else:

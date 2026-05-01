@@ -1,4 +1,5 @@
 import threading
+from typing import Any
 
 import numpy as np
 import pytest
@@ -233,6 +234,24 @@ def test_validate_raises_on_nested_batch():
 def test_validate_accepts_matched_batch_unbatch_pair():
     pipeline = Pipeline([Batch(size=2), UnBatch()])
     pipeline.validate()  # must not raise
+
+
+def test_batch_type_contract_uses_outer_sample_input_not_inner_batch_input():
+    class _ListIdentity:
+        def __call__(self, values: list[int]) -> list[int]:
+            return values
+
+    contract = Pipeline([Batch(size=2), _ListIdentity(), UnBatch()]).validate(inference=True)
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_batch_type_contract_returns_generic_sample_if_no_type_constraints():
+    contract = Pipeline([Batch(size=2), Store("x"), UnBatch()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is Any
 
 
 def test_validate_accepts_context_ops_inside_batch_region():
