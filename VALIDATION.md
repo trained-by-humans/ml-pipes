@@ -33,41 +33,25 @@ pipeline.
 pipeline.validate()
 ```
 
-Call it after construction, after extending, or before deployment.
-
-This is especially important for joined pipelines. `>>` and `embed()` hold
-live references to the original pipeline objects, so mutating one side after
-composition can change the effective contract without the outer pipeline
-knowing.
-
-```python
-detector = Pipeline([Infer("yolo.onnx"), Extract("output0")])
-pipeline = preprocess >> detector
-
-detector.extend([ToDict()])   # custom operator: output type changes
-
-pipeline.validate()
-```
-
-`+` and `inline()` copy operators at construction time, so they do not carry
-those live-reference contract changes forward.
+Call it after construction, after extending existing pipeline or composing new ones, or after deployment just before 
+starting the pipeline.
 
 > [!WARNING]
-> Recommended before the first production run and after any mutation of a
-> joined pipeline. See [COMPOSITION.md](COMPOSITION.md).
+> Validation is recommended after any pipeline mutation.
+> See [COMPOSITION.md](COMPOSITION.md) for composition semantics.
 
 ## What validation checks
-
-Checks run in order. A failure in an earlier pass stops execution, so later
-passes are not reached.
 
 All validation failures raise `PipelineValidationError`, which subclasses
 `ValueError`.
 
 ### 1. Region structure checks
 
-Validation first checks that region openers and closers are structurally
-sound.
+A *region* is a bounded section of the pipeline such as
+`Batch ... UnBatch` or `Scatter ... Gather` (See
+[Regions](ARCHITECTURE.md#regions)). 
+Validation checks that region openers and closers are structurally
+sound. 
 
 It rejects:
 
@@ -90,6 +74,9 @@ This pass is purely structural. It does not look at types yet.
 
 ### 2. Context scoping checks
 
+Context scope follows the runtime boundaries of the pipeline: outer and inner
+regions do not share stored keys, and embedded pipelines use their own
+isolated context. (See [context-system](ARCHITECTURE.md#context-system)).
 Validation then walks the operator list and tracks which keys are available at
 each point.
 
@@ -132,8 +119,8 @@ the attribution stays clear.
 
 ### 3. Type validation checks
 
-Type validation checks that the type produced at each boundary is compatible
-with the type expected by the next boundary.
+Type validation checks that the type produced at each boundary (operator output) is compatible
+with the type expected by the next boundary (next operator input).
 
 Missing annotations are rejected immediately and identify the offending
 operator:
@@ -143,7 +130,7 @@ StringToFloat is missing a type annotation for __call__ input
 IntToString is missing a return type annotation for __call__
 ```
 
-Examples:
+Example of compatible boundary:
 
 ```text
 IntToString(value: int) -> str
@@ -175,21 +162,23 @@ Pipeline contract mismatch at 1:PairToBool:
   IntToPair returns (int, str) but PairToBool expects (int, float)
 ```
 
-## How boundary tightening is configured
+> [!TIP]
+> Checks run in order. A failure in an earlier pass stops execution, so later
+> passes are not reached.
 
-Boundary tightening is a validation configuration concern.
+## Validation and boundaries
 
-Type validation is only as accurate as the boundary it can reason from. If the
-pipeline starts from `Any`, that vagueness can propagate forward and reduce how
-much validation can prove.
+Type validation works on operator boundaries. Each operator defines its own
+boundary by providing information about its input and output. If an operator
+boundary is vague, or the pipeline input type is unclear (for example because
+the entry operators are generic), that vagueness can propagate forward and
+reduce how much validation can prove.
 
-So validation tries to tighten the pipeline boundary before and during type
-checking. The returned `TypeContract.input_type` is the result of that
-tightening, not the reason for it.
+The default mode validates from the boundary information already available. The
+other two modes improve the same validation by tightening those boundaries with
+additional information.
 
-Validation exposes three modes.
-
-### 1. Default forward tightening mode
+### 1. Default mode
 
 ```python
 contract = pipeline.validate()
@@ -197,9 +186,11 @@ contract = pipeline.validate()
 
 This is the baseline behavior:
 
-- validation starts from `Any`,
-- and tightens the pipeline boundary only if the first concrete entry boundary
-  it can determine is more specific than `Any`.
+- validation starts at the beginning of the pipeline and walks forward,
+  checking compatibility using the boundaries it can resolve during the
+  forward pass.
+- if there is no clear input type for the pipeline, validation assumes the
+  pipeline input type is `Any`.
 
 Example:
 
@@ -227,8 +218,11 @@ is otherwise vague.
 
 The declared type does two things:
 
-- it tightens the pipeline boundary up front,
-- and it is checked as the declared pipeline input for the pipeline.
+- it gives the forward pass a concrete starting boundary, which can tighten
+  the resolved operator boundaries and, as a result, the final pipeline
+  boundary,
+- it is also an asserted expected input contract, so validation will fail if
+  the pipeline is incompatible with that declared input.
 
 That means an incorrect declaration can fail validation, which is exactly what
 you want.
@@ -248,7 +242,7 @@ assert contract.input_type is ImagePayload
 contract = pipeline.validate(inference=True)
 ```
 
-This is an additional improvement over the default forward pass.
+This is an additional improvement over the default mode.
 
 Validation tries to infer a tighter pipeline boundary from downstream
 constraints.
@@ -261,17 +255,17 @@ This helps when:
 Example:
 
 ```python
-contract = Pipeline([Scatter(), Decode(), Gather()]).validate(
+contract = Pipeline([Scatter(), Store("raw"), Decode(), ...]).validate(
     inference=True
 )
 
 assert contract.input_type == list[bytes]
-assert contract.output_type == list[ImagePayload]
 ```
 
-Backward inference only works while the chain remains transparent enough to
-project constraints backward. Vague or opaque operators stop refinement, and
-the boundary remains looser.
+> [!CAUTION]
+> Backward inference only works while the chain remains transparent enough to
+> project constraints backward. Vague or opaque operators stop refinement, and
+> the boundary remains looser.
 
 ### What validation returns
 
@@ -284,10 +278,10 @@ assert contract.input_type is bytes
 assert contract.output_type == tuple[ImagePayload, ResizeTransform]
 ```
 
-- `input_type` is the result of boundary tightening.
+- `input_type` is the resolved pipeline input boundary after any tightening.
 - `output_type` is the resolved output type of the last operator.
 
-## What strict mode checks
+## What strict mode is
 
 `strict=True` adds an additional check on top of the normal validation passes.
 
@@ -360,11 +354,11 @@ Strict mode violation at 2:LogOp: output type is unresolved (Any).
 
 ## How validation works internally
 
-Validation is built from two ideas:
+Internally, validation needs two things:
 
-1. Each operator must expose a boundary the validator can reason about.
-2. The validator threads those boundaries through the pipeline and tries to
-   tighten the pipeline boundary so the reasoning stays accurate.
+1. each operator must expose a boundary the validator can reason about,
+2. and those boundaries must be resolved against the current upstream type at
+   each point in the pipeline.
 
 ### The two foundations of type validation
 
@@ -412,11 +406,9 @@ def resolve_contract(
     ...
 ```
 
-Why this is needed:
-
-- a signature can say what an operator accepts in general,
-- but a contract can say what this operator accepts and produces at this exact
-  point in this exact pipeline.
+A signature can say what an operator accepts in general, but a contract can
+say what this operator accepts and produces at this exact point in this exact
+pipeline.
 
 Example:
 
@@ -437,9 +429,8 @@ operators would poison validation with `Any`.
 
 ### How boundaries are resolved and matched
 
-Each operator contributes an input boundary and an output boundary.
-
-Validation resolves them from:
+Each operator contributes an input boundary and an output boundary. Validation
+resolves them from:
 
 - static signatures from `__call__`,
 - dynamic contracts from `resolve_contract(...)`,
@@ -451,10 +442,3 @@ validation.
 
 If an operator has neither usable annotations nor a usable dynamic contract,
 validation fails immediately.
-
-In practice:
-
-- signatures are the default source of truth,
-- contracts refine or replace signatures when the operator is dynamic,
-- and the upstream type is what lets contracts specialize to the current
-  pipeline position.
