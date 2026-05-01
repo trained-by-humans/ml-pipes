@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ml_pipes import Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store
+from ml_pipes import Gather, ImagePayload, Pipeline, PipelineValidationError, Recall, Resize, Scatter, Store
 from ml_pipes.scatter import ScatterGate, _ScatterEntry
 
 
@@ -128,6 +128,29 @@ def test_pipeline_scatter_gather_worker_exception_propagates():
 def test_pipeline_scatter_gather_type_contract():
     contract = Pipeline([Scatter(max_concurrency=1), _Double(), Gather()]).validate()
     assert contract is not None
+
+
+def test_scatter_type_contract_uses_outer_list_input_not_inner_region_input():
+    contract = Pipeline([
+        Scatter(max_concurrency=1),
+        Store("snapshot"),
+        Resize((32, 32)),
+        Gather(),
+    ]).validate(inference=True)
+
+    assert contract is not None
+    assert contract.input_type == list[ImagePayload]
+
+
+def test_scatter_type_contract_returns_generic_list_if_no_type_constraints():
+    contract = Pipeline([
+        Scatter(max_concurrency=1),
+        Store("snapshot"),
+        Gather(),
+    ]).validate()
+
+    assert contract is not None
+    assert contract.input_type == list[Any]
 
 
 # ---------------------------------------------------------------------------

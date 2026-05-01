@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from ml_pipes import Pipeline, PipelineValidationError
 from ml_pipes.ops import (
     ArgMax,
     Cast,
@@ -27,6 +28,7 @@ from ml_pipes.ops import (
     Slice,
     Softmax,
     Squeeze,
+    Pick,
     ToDetections,
     ToSegmentations,
     Transpose,
@@ -42,9 +44,98 @@ from ml_pipes.types import (
 )
 
 
+class StringToFloat:
+    def __call__(self, value: str) -> float:
+        return float(value)
+
+
+class IntToString:
+    def __call__(self, value: int) -> str:
+        return str(value)
+
+
+class IntToPair:
+    def __call__(self, value: int) -> tuple[int, str]:
+        return value, str(value)
+
+
 # ---------------------------------------------------------------------------
 # Resize
 # ---------------------------------------------------------------------------
+
+def test_cast_does_not_silence_downstream_type_check():
+    pipeline = Pipeline([Cast("float32"), StringToFloat()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.validate()
+
+
+def test_cast_establishes_tensorpayload_input_contract():
+    contract = Pipeline([Cast("float32")]).validate()
+
+    assert contract is not None
+    assert contract.input_type == (TensorPayload | tuple[TensorPayload, ...])
+
+
+class MakeTensor:
+    def __call__(self, value: int) -> TensorPayload:
+        return TensorPayload(array=np.array([value], dtype=np.float32), layout="N", dtype="float32")
+
+
+class AcceptTensor:
+    def __call__(self, value: TensorPayload) -> int:
+        return int(value.array[0])
+
+
+def test_cast_preserves_single_tensor_contract_for_typed_pipeline():
+    contract = Pipeline([MakeTensor(), Cast("float16"), AcceptTensor()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+# ---------------------------------------------------------------------------
+# Pick
+# ---------------------------------------------------------------------------
+
+def test_pick_validation_propagates_element_type():
+    pipeline = Pipeline([IntToPair(), Pick(0), IntToString()])
+
+    pipeline.validate()
+
+
+def test_pick_validation_rejects_wrong_downstream_type():
+    pipeline = Pipeline([IntToPair(), Pick(0), StringToFloat()])
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        pipeline.validate()
+
+
+def test_pick_out_of_bounds_raises_on_concrete_input():
+    pipeline = Pipeline([IntToPair(), Pick(5)])
+
+    with pytest.raises(PipelineValidationError, match="Pick\\(5\\) is out of bounds"):
+        pipeline.validate()
+
+
+def test_pick_out_of_bounds_silent_on_vague_input():
+    pipeline = Pipeline([Pick(5)])
+
+    pipeline.validate()  # must not raise
+
+
+def test_pick_validation_rejects_known_non_tuple_input():
+    pipeline = Pipeline([IntToString(), Pick(0)])
+
+    with pytest.raises(PipelineValidationError, match="Pick requires a tuple boundary"):
+        pipeline.validate()
+
+
+def test_pick_establishes_tuple_input_boundary_from_downstream_type():
+    contract = Pipeline([Pick(0), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is tuple
 
 def test_resize_op_can_do_plain_resize_without_padding():
     image = np.zeros((10, 20, 3), dtype=np.uint8)
