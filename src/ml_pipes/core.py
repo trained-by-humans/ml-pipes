@@ -26,13 +26,11 @@ class Pipeline:
         self,
         operators: Iterable[Callable[..., Any] | ContextOp],
         auto_validate: bool = False,
-        strict: bool = False,
         tracing: TracingConfig | None = None,
     ):
         self.operators = self._flatten(list(operators))
         self._tracing_config = tracing
         self._auto_validate = auto_validate
-        self._strict = strict
         if auto_validate:
             self.validate()
 
@@ -82,7 +80,7 @@ class Pipeline:
     def validate(
         self,
         pipeline_input_type: Any = Any,
-        strict: bool | None = None,
+        strict: bool = False,
         inference: bool = False,
     ) -> TypeContract | None:
         """Validate the pipeline and return its boundary contract.
@@ -100,8 +98,6 @@ class Pipeline:
         """
         if not self.operators:
             return None
-        if strict is None:
-            strict = self._strict
         return PipelineValidator(self.operators).validate(
             pipeline_input_type=pipeline_input_type,
             strict=strict,

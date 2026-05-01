@@ -106,7 +106,7 @@ def test_strict_skips_transitive_boundaries_and_rejects_first_opaque_vague_opera
 
 
 def test_strict_accepts_fully_transitive_dynamic_chain():
-    Pipeline([Store("x"), PassthroughOp(), Recall("x")], strict=True).validate()
+    Pipeline([Store("x"), PassthroughOp(), Recall("x")]).validate(strict=True)
 
 
 # ---------------------------------------------------------------------------
@@ -128,16 +128,13 @@ def test_strict_validate_can_run_after_auto_validated_extend():
         pipeline.validate(strict=True)
 
 
-def test_strict_constructor_rejects_invalid_auto_validated_pipeline():
-    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
-        Pipeline([VagueOp()], strict=True, auto_validate=True)
+def test_auto_validate_remains_non_strict():
+    Pipeline([VagueOp()], auto_validate=True)
 
 
-def test_strict_constructor_rejects_invalid_extend_when_auto_validate_is_enabled():
-    pipeline = Pipeline([IntToString()], strict=True, auto_validate=True)
-
-    with pytest.raises(PipelineValidationError, match="Strict mode violation"):
-        pipeline.extend([VagueOutputOp()])
+def test_auto_validated_extend_remains_non_strict():
+    pipeline = Pipeline([IntToString()], auto_validate=True)
+    pipeline.extend([VagueOutputOp()])
 
 
 def test_non_strict_accepts_vague_op():
