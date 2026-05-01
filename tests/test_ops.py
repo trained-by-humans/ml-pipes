@@ -11,6 +11,10 @@ from ml_pipes.ops import (
     ConvertBoxFormat,
     DrawBoxes,
     Extract,
+    FilterPredictions,
+    FilterPredictionsByArea,
+    FilterPredictionsByClass,
+    FilterPredictionsByScore,
     FilterTensors,
     MaskTensors,
     GatherScores,
@@ -37,6 +41,7 @@ from ml_pipes.ops import (
 from ml_pipes.types import (
     Detections,
     ImagePayload,
+    Prediction,
     ResizeTransform,
     RuntimeOutputs,
     Segmentations,
@@ -718,3 +723,64 @@ def test_filter_tensors_applies_to_multiple_keys():
     assert result["scores"].tolist() == [0.9, 0.8]
     assert result["classes"].tolist() == [0, 0]
     assert len(result["boxes"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# FilterPredictions
+# ---------------------------------------------------------------------------
+
+def _detections(**kwargs) -> Detections:
+    defaults = dict(boxes=[[0,0,1,1],[1,1,2,2],[2,2,3,3]], scores=[0.9,0.5,0.8], classes=[0,1,0])
+    defaults.update(kwargs)
+    return Detections(**defaults)
+
+def _segmentations() -> Segmentations:
+    masks = [np.zeros((4,4), dtype=bool) for _ in range(3)]
+    return Segmentations(boxes=[[0,0,1,1],[1,1,2,2],[2,2,3,3]], scores=[0.9,0.5,0.8], classes=[0,1,0], masks=masks)
+
+
+def test_filter_predictions_generic_predicate():
+    d = _detections()
+    result = FilterPredictions(predicate=lambda p: [c == 0 for c in p.classes])(d)
+    assert result.classes == [0, 0]
+    assert result.scores == [0.9, 0.8]
+
+
+def test_filter_predictions_preserves_subclass_type():
+    s = _segmentations()
+    result = FilterPredictions(predicate=lambda p: [c == 0 for c in p.classes])(s)
+    assert type(result) is Segmentations
+
+
+def test_filter_predictions_slices_all_fields():
+    s = _segmentations()
+    result = FilterPredictions(predicate=lambda p: [c == 0 for c in p.classes])(s)
+    assert len(result.masks) == 2
+    assert len(result.boxes) == 2
+
+
+def test_filter_predictions_by_class():
+    d = _detections()
+    result = FilterPredictionsByClass({0})(d)
+    assert result.classes == [0, 0]
+
+
+def test_filter_predictions_by_score():
+    d = _detections()
+    result = FilterPredictionsByScore(min_score=0.7)(d)
+    assert result.scores == [0.9, 0.8]
+    assert result.classes == [0, 0]
+
+
+def test_filter_predictions_by_area_min():
+    d = Detections(boxes=[[0,0,5,5],[0,0,1,1]], scores=[0.9,0.8], classes=[0,0])
+    result = FilterPredictionsByArea(min_area=10)(d)
+    assert len(result.boxes) == 1
+    assert result.boxes[0] == [0,0,5,5]
+
+
+def test_filter_predictions_by_area_max():
+    d = Detections(boxes=[[0,0,5,5],[0,0,1,1]], scores=[0.9,0.8], classes=[0,0])
+    result = FilterPredictionsByArea(max_area=2)(d)
+    assert len(result.boxes) == 1
+    assert result.boxes[0] == [0,0,1,1]

@@ -23,6 +23,8 @@ from ml_pipes import (
     ConvertBoxFormat,
     DrawBoxes,
     Extract,
+    FilterPredictionsByArea,
+    FilterPredictionsByClass,
     FilterTensors,
     Gather,
     GatherScores,
@@ -45,14 +47,15 @@ from ml_pipes import (
     ThroughputCollector,
     ToDetections,
     Transpose,
-    inline,
+    inline, Inline,
 )
 
 _KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella
+_MAX_HUMAN_AREA = 1_000  # px² — filters out cars and other large objects
 
 
-def _infer_ops(model_path: Path, conf_threshold: float) -> list:
-    return [
+def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
+    return Pipeline([
         Resize((640, 640)),
         Store("resize_transform", index=1),
         Pick(0),
@@ -71,7 +74,7 @@ def _infer_ops(model_path: Path, conf_threshold: float) -> list:
         Recall("resize_transform"),
         ProjectBoxes(),
         ToDetections(),
-    ]
+    ])
 
 
 def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers: int = 1) -> Pipeline:
@@ -82,18 +85,22 @@ def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers:
             Store("tile_rects", index=1),
             Pick(0),
             Scatter(max_concurrency=6),
-            inline(Pipeline(_infer_ops(model_path, conf_threshold))),
+            Inline(_infer_pipeline(model_path, conf_threshold)),
             Gather(),
             Recall("tile_rects"),
             Stitch(),
             NMM(iou_threshold=0.5),
+            FilterPredictionsByClass(_KEEP_CLASSES),
+            FilterPredictionsByArea(max_area=_MAX_HUMAN_AREA),
             Recall("source_frame", index=0),
             DrawBoxes(class_names=COCO_CLASSES),
             Pick(0),
         ], auto_validate=True)
     return Pipeline([
         Store("source_frame"),
-        inline(Pipeline(_infer_ops(model_path, conf_threshold))),
+        Inline(_infer_pipeline(model_path, conf_threshold)),
+        FilterPredictionsByClass(_KEEP_CLASSES),
+        FilterPredictionsByArea(max_area=_MAX_HUMAN_AREA),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
@@ -108,6 +115,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
     pipeline = build_pipeline(model_path, conf_threshold, tile, workers=workers)
+    pipeline.validate()
     pipeline.set_tracing(throughput)
 
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)

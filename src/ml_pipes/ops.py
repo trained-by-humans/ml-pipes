@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import is_dataclass, replace
 from pathlib import Path
-from typing import Literal, Any, get_args, get_origin
+from typing import Literal, Any, TypeVar, get_args, get_origin
 from typing import TextIO
 
 import time
@@ -23,6 +23,7 @@ from .types import ResizeTransform
 from .types import (
     Detections,
     ImagePayload,
+    Prediction,
     RuntimeOutputs,
     Segmentations,
     TensorPayload,
@@ -1016,6 +1017,66 @@ class ToSegmentations:
             classes=registry[self.classes].tolist(),
             masks=list(masks_data) if isinstance(masks_data, np.ndarray) else masks_data,
         )
+
+
+# ---------------------------------------------------------------------------
+# Prediction filtering
+# ---------------------------------------------------------------------------
+
+PredictionT = TypeVar("PredictionT", bound=Prediction)
+
+
+class FilterPredictions:
+    """Filters a Prediction (or any subclass) using a user-supplied predicate.
+
+    The predicate receives the full Prediction and must return a bool list or
+    index array. Every field is sliced uniformly via Prediction.filter().
+
+    Example:
+        FilterPredictions(predicate=lambda p: [c in {0, 2} for c in p.classes])
+    """
+
+    def __init__(self, predicate: Callable[[Any], Any]):
+        self.predicate = predicate
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return prediction.filter(self.predicate(prediction))
+
+
+class FilterPredictionsByClass:
+    """Keep only predictions whose class is in the given set."""
+
+    def __init__(self, classes: set[int]):
+        self._inner = FilterPredictions(lambda p: [c in classes for c in p.classes])
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return self._inner(prediction)
+
+
+class FilterPredictionsByScore:
+    """Drop predictions below min_score."""
+
+    def __init__(self, min_score: float):
+        self._inner = FilterPredictions(lambda p: [s >= min_score for s in p.scores])
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return self._inner(prediction)
+
+
+class FilterPredictionsByArea:
+    """Drop predictions whose box area (xyxy) falls outside [min_area, max_area] pixel²."""
+
+    def __init__(self, min_area: float = 0, max_area: float | None = None):
+        def predicate(p: Any) -> list[bool]:
+            result = []
+            for x1, y1, x2, y2 in p.boxes:
+                area = (x2 - x1) * (y2 - y1)
+                result.append(area >= min_area and (max_area is None or area <= max_area))
+            return result
+        self._inner = FilterPredictions(predicate)
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return self._inner(prediction)
 
 
 # ---------------------------------------------------------------------------
