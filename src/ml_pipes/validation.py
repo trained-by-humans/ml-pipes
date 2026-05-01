@@ -290,6 +290,7 @@ class PipelineValidator:
             previous_output_type = _resolve_typevar_output(
                 boundaries[-1].effective_output_type,
                 previous_output_type,
+                boundaries[-1].effective_input_types,
             )
 
         return boundaries
@@ -647,8 +648,10 @@ def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
     )
 
 
-def _resolve_typevar_output(output_type: Any, input_type: Any) -> Any:
+def _resolve_typevar_output(output_type: Any, input_type: Any, input_types: tuple[Any, ...]) -> Any:
     if not isinstance(output_type, TypeVar):
+        return output_type
+    if len(input_types) != 1 or input_types[0] is not output_type:
         return output_type
     bound = output_type.__bound__
     if bound is None or is_concrete_assignable(input_type, bound):
