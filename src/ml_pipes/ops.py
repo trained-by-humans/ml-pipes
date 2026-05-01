@@ -768,6 +768,40 @@ class MaskTensors:
         return registry
 
 
+class MapTensor:
+    """Applies a function to a tensor and writes the result to as_ (defaults to src).
+
+    Example — convert 1-indexed COCO labels to 0-indexed classes:
+        MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes")
+    """
+
+    def __init__(self, src: str, fn: Callable[[Any], Any], as_: str | None = None):
+        self.src = src
+        self.fn = fn
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = self.fn(registry[self.src])
+        return registry
+
+
+class ThresholdTensors:
+    """Shorthand for FilterTensors with a score threshold predicate.
+
+    The score tensor is always filtered automatically; additional keys are listed as positional args.
+
+    Example:
+        ThresholdTensors("boxes", "masks", "classes", score="scores", min_score=0.7)
+    """
+
+    def __init__(self, *srcs: str, score: str, min_score: float):
+        all_srcs = (score,) + tuple(s for s in srcs if s != score)
+        self._inner = FilterTensors(*all_srcs, predicate=lambda r: r[score] >= min_score)
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
 class FilterTensors:
     """Filters one or more tensors using a single user-supplied predicate.
 
