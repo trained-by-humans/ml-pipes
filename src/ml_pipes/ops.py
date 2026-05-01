@@ -589,7 +589,7 @@ class NMS:
     """Non-Maximum Suppression on named tensors in a TensorRegistry.
 
     Filters boxes, scores, and classes in-place.
-    Optionally stores the kept indices under kept_as for use with FilterBy.
+    Optionally stores the kept indices under kept_as for use with MaskTensors.
     """
 
     def __init__(
@@ -748,8 +748,9 @@ class NMM:
         return Detections(boxes=merged_boxes, scores=merged_scores, classes=merged_classes)
 
 
-class FilterBy:
-    """Filters a tensor by an index array stored in the registry: as_ = src[indices].
+class MaskTensors:
+    """Applies a pre-existing index mask from the registry to a tensor:
+    registry[as_] = registry[src][registry[indices]]
 
     Pair with NMS(kept_as=...) to synchronise extra tensors (e.g. mask coefficients)
     with the boxes/scores/classes that NMS already filtered.
@@ -764,6 +765,27 @@ class FilterBy:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         registry[self.as_] = registry[self.src][registry[self.indices]]
+        return registry
+
+
+class FilterTensors:
+    """Filters one or more tensors using a single user-supplied predicate.
+
+    The predicate is evaluated once and the resulting mask is applied to every
+    key. All keys are updated in-place.
+
+    Example — keep only person and car before NMS:
+        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in {0, 2} for c in r["classes"]])
+    """
+
+    def __init__(self, *srcs: str, predicate: Callable[[TensorRegistry], Any]):
+        self.srcs = srcs
+        self.predicate = predicate
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        mask = self.predicate(registry)
+        for src in self.srcs:
+            registry[src] = registry[src][mask]
         return registry
 
 
