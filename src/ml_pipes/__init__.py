@@ -1,4 +1,5 @@
 from .context import Context, Recall, Store
+from .inspection import InspectionResult
 from .core import Pipeline, Embed, embed, Inline, inline
 from .validation import PipelineValidationError, TypeContract
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
@@ -106,6 +107,7 @@ __all__ = [
     "GatherRows",
     "GatherScores",
     "ImagePayload",
+    "InspectionResult",
     "Infer",
     "LoadFile",
     "LogDetections",

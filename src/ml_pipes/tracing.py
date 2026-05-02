@@ -14,6 +14,8 @@ class StepSpan:
     input_shape: tuple | None = None
     output_shape: tuple | None = None
     child_trace: InvocationTrace | None = None
+    output_value: Any = None
+    operator_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -34,6 +36,7 @@ class TracingConfig:
     collector: TraceCollector
     operator_labels: list[str] | None = None
     capture_shapes: bool = False
+    capture_values: bool = False
 
 
 class TraceCollector(ABC):
