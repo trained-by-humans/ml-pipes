@@ -3,15 +3,10 @@ from __future__ import annotations
 import numpy as np
 
 from examples.streaming.run_shibuya_csrnet import (
-    BlendImages,
-    ClampDensity,
-    DensityToHeatmap,
-    DensityPrediction,
-    SumDensity,
     build_frame_pipeline,
     unwrap_state_dict,
 )
-from ml_pipes import ImagePayload, TensorPayload
+from ml_pipes import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, ImagePayload, SumDensity, TensorPayload
 
 
 def test_unwrap_state_dict_strips_module_prefix() -> None:
