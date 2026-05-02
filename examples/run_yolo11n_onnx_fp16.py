@@ -14,8 +14,8 @@ from common import (
     visualize_detections_and_store,
 )
 from ml_pipes import (
+    AsType,
     ArgMax,
-    Cast,
     ConvertBoxFormat,
     GatherScores,
     Infer,
@@ -52,10 +52,10 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
             Store("resize_transform", index=1),
             Pick(0),
             Normalize(),
-            Cast("float16"),
+            AsType("float16"),
             Infer(model_path, dtype="float16"),
-            Cast("float32", field="tensors"),
             Extract("output0", as_="preds"),
+            AsType(src="preds", dtype="float32"),
             Squeeze("preds"),
             Transpose("preds"),
             Slice("preds", slice(None, 4), as_="boxes"),

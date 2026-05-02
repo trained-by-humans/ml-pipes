@@ -3,15 +3,15 @@ from .core import Pipeline, Embed, embed, Inline, inline
 from .validation import PipelineValidationError, TypeContract
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
 from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
-from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity
+from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
 from .ops import (
+    AsType,
     ArgMax,
     FilterPredictions,
     FilterPredictionsByClass,
     FilterPredictionsByScore,
     FilterPredictionsByArea,
     Batch,
-    Cast,
     Collate,
     ConvertBoxFormat,
     Decode,
@@ -77,13 +77,14 @@ __all__ = [
     "TraceCollector",
     "TracingConfig",
     "Batch",
-    "Cast",
+    "AsType",
     "Collate",
     "ConvertBoxFormat",
     "Context",
     "DensityPrediction",
     "ClampDensity",
     "SumDensity",
+    "ToDensityPrediction",
     "DensityToHeatmap",
     "BlendImages",
     "Decode",

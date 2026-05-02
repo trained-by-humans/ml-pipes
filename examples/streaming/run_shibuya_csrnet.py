@@ -20,18 +20,22 @@ import numpy as np
 from ..common import add_assets_dir_arg, download_if_missing
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes import (
+    AsType,
     BlendImages,
     ClampDensity,
-    DensityPrediction,
     DensityToHeatmap,
+    Extract,
     ImagePayload,
     Normalize,
     Pick,
     Pipeline,
     Recall,
+    RuntimeOutputs,
+    Squeeze,
     Store,
     SumDensity,
     TensorPayload,
+    ToDensityPrediction,
     ThroughputCollector,
 )
 
@@ -159,12 +163,15 @@ class CSRNetInfer:
         self.torch = torch
         self.device = device
 
-    def __call__(self, tensor_payload: TensorPayload) -> DensityPrediction:
+    def __call__(self, tensor_payload: TensorPayload) -> RuntimeOutputs:
+        if tensor_payload.layout != "NCHW":
+            raise ValueError(f"CSRNetInfer expects NCHW tensor layout, got {tensor_payload.layout}")
         tensor = self.torch.from_numpy(np.ascontiguousarray(tensor_payload.array)).to(self.device)
         with self.torch.inference_mode():
-            density = self.model(tensor).squeeze(0).squeeze(0).detach().cpu().numpy()
-        return DensityPrediction(
-            density_map=density.astype(np.float32, copy=False),
+            density = self.model(tensor).cpu().numpy()
+        return RuntimeOutputs(
+            tensors=(TensorPayload(array=density, layout="NCHW", dtype=str(density.dtype)),),
+            names=("output0",),
         )
 
 
@@ -187,6 +194,10 @@ def build_preprocess_pipeline() -> Pipeline:
 
 def build_postprocess_pipeline() -> Pipeline:
     return Pipeline([
+        Extract("output0", as_="density"),
+        Squeeze("density", axis=(0, 1)),
+        AsType(src="density", dtype="float32"),
+        ToDensityPrediction("density"),
         ClampDensity(),
         Store("density_prediction"),
         SumDensity(),
