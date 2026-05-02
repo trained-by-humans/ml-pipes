@@ -5,7 +5,6 @@ import collections
 import sys
 import urllib.error
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,22 +19,27 @@ import numpy as np
 
 from ..common import add_assets_dir_arg, download_if_missing
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
-from ml_pipes import ImagePayload, Normalize, Pick, Pipeline, Recall, Store, TensorPayload, ThroughputCollector
+from ml_pipes import (
+    BlendImages,
+    ClampDensity,
+    DensityPrediction,
+    DensityToHeatmap,
+    ImagePayload,
+    Normalize,
+    Pick,
+    Pipeline,
+    Recall,
+    Store,
+    SumDensity,
+    TensorPayload,
+    ThroughputCollector,
+)
 
 CSRNET_MODEL_NAME = "csrnet_shanghaitech_b_rootstrap.pth"
 CSRNET_MODEL_URL = "https://huggingface.co/rootstrap-org/crowd-counting/resolve/main/weights.pth"
 
 _IMAGENET_MEAN_RGB = (0.485, 0.456, 0.406)
 _IMAGENET_STD_RGB = (0.229, 0.224, 0.225)
-
-
-# ---------------------------------------------------------------------------
-# Generic density/CNN result types
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class DensityPrediction:
-    density_map: np.ndarray
 
 
 # ---------------------------------------------------------------------------
@@ -161,73 +165,6 @@ class CSRNetInfer:
             density = self.model(tensor).squeeze(0).squeeze(0).detach().cpu().numpy()
         return DensityPrediction(
             density_map=density.astype(np.float32, copy=False),
-        )
-
-
-# ---------------------------------------------------------------------------
-# Generic density-map postprocess operators
-# ---------------------------------------------------------------------------
-
-class ClampDensity:
-    def __call__(self, prediction: DensityPrediction) -> DensityPrediction:
-        return DensityPrediction(
-            density_map=np.maximum(prediction.density_map.astype(np.float32, copy=False), 0.0),
-        )
-
-
-class SumDensity:
-    def __call__(self, prediction: DensityPrediction) -> float:
-        return float(prediction.density_map.sum())
-
-
-# ---------------------------------------------------------------------------
-# Generic heatmap/overlay operators
-# ---------------------------------------------------------------------------
-
-class DensityToHeatmap:
-    def __init__(
-        self,
-        colormap: int = cv2.COLORMAP_TURBO,
-        interpolation: int = cv2.INTER_CUBIC,
-    ) -> None:
-        self.colormap = colormap
-        self.interpolation = interpolation
-
-    def __call__(self, source_image: ImagePayload, prediction: DensityPrediction) -> tuple[ImagePayload, ImagePayload]:
-        height, width = source_image.array.shape[:2]
-        density = np.maximum(prediction.density_map.astype(np.float32, copy=False), 0.0)
-        if density.size == 0 or float(density.max()) <= 0.0:
-            heatmap = np.zeros((height, width, 3), dtype=np.uint8)
-        else:
-            normalized = cv2.normalize(density, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-            heatmap = cv2.applyColorMap(normalized.astype(np.uint8), self.colormap)
-            heatmap = cv2.resize(heatmap, (width, height), interpolation=self.interpolation)
-        return source_image, ImagePayload(array=heatmap, color_space="BGR", layout="HWC")
-
-
-class BlendImages:
-    def __init__(self, base_weight: float = 0.60, overlay_weight: float = 0.40) -> None:
-        self.base_weight = base_weight
-        self.overlay_weight = overlay_weight
-
-    def __call__(self, source_image: ImagePayload, overlay_image: ImagePayload) -> ImagePayload:
-        if source_image.layout != "HWC" or overlay_image.layout != "HWC":
-            raise ValueError("BlendImages expects HWC images")
-        if source_image.array.shape != overlay_image.array.shape:
-            raise ValueError(
-                f"BlendImages requires matching shapes, got {source_image.array.shape} and {overlay_image.array.shape}"
-            )
-        blended = cv2.addWeighted(
-            source_image.array,
-            self.base_weight,
-            overlay_image.array,
-            self.overlay_weight,
-            0.0,
-        )
-        return ImagePayload(
-            array=blended,
-            color_space=source_image.color_space,
-            layout=source_image.layout,
         )
 
 
