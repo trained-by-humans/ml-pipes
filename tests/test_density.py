@@ -3,18 +3,27 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ml_pipes import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, ImagePayload, SumDensity
+from ml_pipes import (
+    BlendImages,
+    ClampDensity,
+    DensityPrediction,
+    DensityToHeatmap,
+    ImagePayload,
+    SumDensity,
+    TensorRegistry,
+    ToDensityPrediction,
+)
 
 
-def test_clamp_density_zeroes_negative_values_and_coerces_float32() -> None:
+def test_clamp_density_zeroes_negative_values_and_preserves_dtype() -> None:
     prediction = DensityPrediction(
         density_map=np.array([[-1, 2], [3, -4]], dtype=np.int16),
     )
 
     clamped = ClampDensity()(prediction)
 
-    assert clamped.density_map.dtype == np.float32
-    assert np.array_equal(clamped.density_map, np.array([[0.0, 2.0], [3.0, 0.0]], dtype=np.float32))
+    assert clamped.density_map.dtype == np.int16
+    assert np.array_equal(clamped.density_map, np.array([[0, 2], [3, 0]], dtype=np.int16))
 
 
 def test_clamp_density_preserves_positive_values() -> None:
@@ -51,6 +60,24 @@ def test_sum_density_on_empty_map_returns_zero() -> None:
     counted = SumDensity()(prediction)
 
     assert counted == 0.0
+
+
+def test_to_density_prediction_reads_named_tensor_and_preserves_dtype() -> None:
+    registry = TensorRegistry({"density": np.array([[1, 2], [3, 4]], dtype=np.int16)})
+
+    prediction = ToDensityPrediction("density")(registry)
+
+    assert prediction.density_map.dtype == np.int16
+    assert np.array_equal(prediction.density_map, np.array([[1, 2], [3, 4]], dtype=np.int16))
+
+
+def test_to_density_prediction_returns_array_view_without_copy_when_possible() -> None:
+    density = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float16)
+    registry = TensorRegistry({"density": density})
+
+    prediction = ToDensityPrediction("density")(registry)
+
+    assert prediction.density_map is density
 
 
 def test_density_to_heatmap_matches_requested_size_and_metadata() -> None:
@@ -114,6 +141,17 @@ def test_density_to_heatmap_accepts_custom_colormap_and_interpolation() -> None:
 
     assert heatmap.array.shape == (20, 10, 3)
     assert heatmap.array.dtype == np.uint8
+
+
+def test_density_to_heatmap_accepts_integer_density_without_precast() -> None:
+    source = ImagePayload(array=np.zeros((20, 10, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    prediction = DensityPrediction(density_map=np.array([[0, 1], [2, 4]], dtype=np.int16))
+
+    _, heatmap = DensityToHeatmap()(source, prediction)
+
+    assert heatmap.array.shape == (20, 10, 3)
+    assert heatmap.array.dtype == np.uint8
+    assert np.count_nonzero(heatmap.array) > 0
 
 
 def test_blend_images_preserves_shape_dtype_and_metadata() -> None:

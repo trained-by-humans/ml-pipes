@@ -6,7 +6,6 @@ import sys
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import is_dataclass, replace
 from pathlib import Path
 from typing import Literal, Any, TypeVar, get_args, get_origin
 from typing import TextIO
@@ -206,41 +205,55 @@ class Normalize:
         return payload
 
 
-class Cast:
-    def __init__(self, dtype: str, field: str | None = None):
+class AsType:
+    def __init__(self, dtype: str, src: str | None = None, as_: str | None = None):
         self.dtype = np.dtype(dtype)
-        self.field = field
+        self.src = src
+        self.as_ = as_ or src
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        if self.field is not None:
-            # field= mode: receives a dataclass (e.g. RuntimeOutputs), returns the same type
-            t = current_output if current_output is not None else Any
-            return (t,), t
-        tensor_like = TensorPayload | tuple[TensorPayload, ...]
+        if self.src is not None:
+            return (TensorRegistry,), TensorRegistry
+        tensor_like = (
+            TensorPayload
+            | np.ndarray
+            | tuple[TensorPayload, ...]
+            | tuple[np.ndarray, ...]
+            | list[TensorPayload]
+            | list[np.ndarray]
+        )
         if current_output is not Any and is_annotation_compatible(current_output, (tensor_like,)):
             return (current_output,), current_output
         return (tensor_like,), tensor_like
 
     def __call__(self, value: object) -> object:
-        if self.field is not None:
-            selected = getattr(value, self.field)
-            casted = self._cast_tensor_value(selected)
-            if is_dataclass(value):
-                return replace(value, **{self.field: casted})
-            raise TypeError(
-                f"Cast field={self.field!r} requires a dataclass value, got {type(value)!r}"
-            )
-        return self._cast_tensor_value(value)
+        if self.src is not None:
+            if not isinstance(value, TensorRegistry):
+                raise TypeError(f"AsType src={self.src!r} requires TensorRegistry, got {type(value)!r}")
+            value[self.as_] = self._cast_array(value[self.src])
+            return value
+        return self._cast_value(value)
 
-    def _cast_tensor_value(self, value: object) -> TensorPayload | tuple[TensorPayload, ...]:
+    def _cast_value(self, value: object) -> object:
         if isinstance(value, TensorPayload):
-            return TensorPayload(array=value.array.astype(self.dtype), layout=value.layout, dtype=str(self.dtype))
-        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-            return tuple(
-                TensorPayload(array=tensor.array.astype(self.dtype), layout=tensor.layout, dtype=str(self.dtype))
-                for tensor in value
-            )
-        raise TypeError(f"Cast does not support value type {type(value)!r}")
+            return TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype))
+        if isinstance(value, np.ndarray):
+            return self._cast_array(value)
+        if isinstance(value, tuple):
+            return tuple(self._cast_sequence_item(item) for item in value)
+        if isinstance(value, list):
+            return [self._cast_sequence_item(item) for item in value]
+        raise TypeError(f"AsType does not support value type {type(value)!r}")
+
+    def _cast_sequence_item(self, value: object) -> TensorPayload | np.ndarray:
+        if isinstance(value, TensorPayload):
+            return TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype))
+        if isinstance(value, np.ndarray):
+            return self._cast_array(value)
+        raise TypeError(f"AsType does not support sequence item type {type(value)!r}")
+
+    def _cast_array(self, value: np.ndarray) -> np.ndarray:
+        return np.asarray(value).astype(self.dtype, copy=False)
 
 
 # ---------------------------------------------------------------------------

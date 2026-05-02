@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from .types import ImagePayload
+from .types import ImagePayload, TensorRegistry
 
 
 @dataclass(frozen=True)
@@ -16,13 +16,23 @@ class DensityPrediction:
 class ClampDensity:
     def __call__(self, prediction: DensityPrediction) -> DensityPrediction:
         return DensityPrediction(
-            density_map=np.maximum(prediction.density_map.astype(np.float32, copy=False), 0.0),
+            density_map=np.maximum(prediction.density_map, 0),
         )
 
 
 class SumDensity:
     def __call__(self, prediction: DensityPrediction) -> float:
         return float(prediction.density_map.sum())
+
+
+class ToDensityPrediction:
+    def __init__(self, src: str = "density") -> None:
+        self.src = src
+
+    def __call__(self, registry: TensorRegistry) -> DensityPrediction:
+        return DensityPrediction(
+            density_map=np.asarray(registry[self.src]),
+        )
 
 
 class DensityToHeatmap:
@@ -36,7 +46,7 @@ class DensityToHeatmap:
 
     def __call__(self, source_image: ImagePayload, prediction: DensityPrediction) -> tuple[ImagePayload, ImagePayload]:
         height, width = source_image.array.shape[:2]
-        density = np.maximum(prediction.density_map.astype(np.float32, copy=False), 0.0)
+        density = np.maximum(prediction.density_map, 0)
         if density.size == 0 or float(density.max()) <= 0.0:
             heatmap = np.zeros((height, width, 3), dtype=np.uint8)
         else:
