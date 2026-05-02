@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import inspect
 import logging
 import time
@@ -12,6 +13,16 @@ from .context import Context, ContextOp
 from .region import RegionCloser, RegionOpener
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape
 from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
+
+
+def _snapshot(value: Any) -> Any:
+    """Deep-copy *value* so inspection captures a point-in-time snapshot."""
+    return copy.deepcopy(value)
+
+
+def _operator_config(op: Any) -> dict:
+    """Return public instance attributes as a dict for tooltip rendering."""
+    return {k: v for k, v in vars(op).items() if not k.startswith("_") and k != "pipeline"}
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,18 @@ class Pipeline:
                 except Exception:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
         return result
+
+    def inspect(self, value: Any) -> "InspectionResult":
+        """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
+        from .inspection import InspectionResult, _CaptureCollector
+        collector = _CaptureCollector()
+        old = self._tracing_config
+        self._tracing_config = TracingConfig(collector, capture_shapes=True, capture_values=True)
+        try:
+            self(value)
+        finally:
+            self._tracing_config = old
+        return InspectionResult(collector.trace.spans)
 
     def validate(
         self,
@@ -161,6 +184,8 @@ class Pipeline:
             label, t, time.perf_counter() - t,
             input_shape=_extract_shape(current) if capture else None,
             output_shape=_extract_shape(result) if capture else None,
+            output_value=_snapshot(result) if (cfg and cfg.capture_values) else None,
+            operator_config=_operator_config(operator) if (cfg and cfg.capture_values) else "",
         ))
         return result, ctx_out
 
