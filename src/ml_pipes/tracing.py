@@ -11,8 +11,8 @@ class StepSpan:
     start_time: float
     duration_s: float
     error: bool = False
-    input_shape: tuple | None = None
-    output_shape: tuple | None = None
+    input_shape: tuple | str | None = None
+    output_shape: tuple | str | None = None
     child_trace: InvocationTrace | None = None
     output_value: Any = None
     operator_config: dict[str, Any] = field(default_factory=dict)
@@ -91,11 +91,34 @@ def merge_traces(traces: list[InvocationTrace]) -> InvocationTrace:
     )
 
 
-def _extract_shape(value: Any) -> tuple | None:
+def _extract_shape(value: Any) -> str | None:
+    name = type(value).__name__
+    # ImagePayload, TensorPayload (have .array.shape)
     if hasattr(value, "array") and hasattr(value.array, "shape"):
-        return tuple(value.array.shape)
+        return f"{name} {value.array.shape}"
+    # bare numpy array
     if hasattr(value, "shape"):
-        return tuple(value.shape)
-    if isinstance(value, (list, tuple)):
-        return (len(value),)
-    return None
+        return f"{name} {value.shape}"
+    # TensorRegistry: one "key: shape" entry per tensor
+    if hasattr(value, "_tensors") and isinstance(getattr(value, "_tensors", None), dict):
+        entries = ", ".join(f"{k}: {v.shape}" for k, v in value._tensors.items())
+        return f"{name} {{{entries}}}"
+    # RuntimeOutputs: named output tensors
+    if hasattr(value, "names") and hasattr(value, "tensors"):
+        entries = ", ".join(f"{n}: {t.array.shape}" for n, t in zip(value.names, value.tensors))
+        return f"{name} {{{entries}}}"
+    # Detections / Segmentations
+    if hasattr(value, "boxes") and hasattr(value, "scores"):
+        n = len(value.boxes)
+        suffix = " + masks" if hasattr(value, "masks") else ""
+        return f"{name} ({n}{suffix})"
+    # bytes
+    if isinstance(value, bytes):
+        return f"{name} ({len(value)} B)"
+    # tuple: recurse, join with " · "
+    if isinstance(value, tuple):
+        parts = [_extract_shape(v) or type(v).__name__ for v in value]
+        return "(" + " · ".join(parts) + ")"
+    if isinstance(value, list):
+        return f"{name} [{len(value)}]"
+    return name

@@ -175,8 +175,8 @@ def test_shapes_recorded_for_ndarray():
     result = p(arr)
     assert result is arr
     span = cap.traces[0].spans[0]
-    assert span.input_shape == (3, 4)
-    assert span.output_shape == (3, 4)
+    assert span.input_shape == "ndarray (3, 4)"
+    assert span.output_shape == "ndarray (3, 4)"
 
 
 def test_shapes_recorded_for_tensor_payload():
@@ -188,7 +188,7 @@ def test_shapes_recorded_for_tensor_payload():
     p, cap = _make_pipeline([_passthrough], capture_shapes=True)
     result = p(payload)
     assert result is payload
-    assert cap.traces[0].spans[0].input_shape == (1, 3, 640, 640)
+    assert cap.traces[0].spans[0].input_shape == "TensorPayload (1, 3, 640, 640)"
 
 
 # ---------------------------------------------------------------------------
