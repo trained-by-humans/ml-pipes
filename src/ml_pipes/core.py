@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import inspect
 import logging
 import time
@@ -11,18 +10,9 @@ _log = logging.getLogger(__name__)
 
 from .context import Context, ContextOp
 from .region import RegionCloser, RegionOpener
-from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape
+from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, operator_config, snapshot
 from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
 
-
-def _snapshot(value: Any) -> Any:
-    """Deep-copy *value* so inspection captures a point-in-time snapshot."""
-    return copy.deepcopy(value)
-
-
-def _operator_config(op: Any) -> dict:
-    """Return public instance attributes as a dict for tooltip rendering."""
-    return {k: v for k, v in vars(op).items() if not k.startswith("_") and k != "pipeline"}
 
 
 @dataclass(frozen=True)
@@ -49,10 +39,15 @@ class Pipeline:
         self,
         collector: TraceCollector | None,
         operator_labels: list[str] | None = None,
+        capture_config: bool = False,
         capture_shapes: bool = False,
+        capture_outputs: bool = False,
     ) -> None:
         """Attach or replace tracing. Pass collector=None to disable."""
-        self._tracing_config = TracingConfig(collector, operator_labels, capture_shapes) if collector is not None else None
+        self._tracing_config = (
+            TracingConfig(collector, operator_labels, capture_config, capture_shapes, capture_outputs)
+            if collector is not None else None
+        )
 
     def extend(self, operators: Iterable[Callable[..., Any] | ContextOp]) -> Pipeline:
         """Append *operators* to this pipeline in place and return self."""
@@ -93,7 +88,7 @@ class Pipeline:
         from .inspection import InspectionResult, _CaptureCollector
         collector = _CaptureCollector()
         old = self._tracing_config
-        self._tracing_config = TracingConfig(collector, capture_shapes=True, capture_values=True)
+        self._tracing_config = TracingConfig(collector, capture_shapes=True, capture_outputs=True, capture_config=True)
         try:
             self(value)
         finally:
@@ -182,10 +177,10 @@ class Pipeline:
             raise
         trace.spans.append(StepSpan(
             label, t, time.perf_counter() - t,
+            operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
             input_shape=_extract_shape(current) if capture else None,
             output_shape=_extract_shape(result) if capture else None,
-            output_value=_snapshot(result) if (cfg and cfg.capture_values) else None,
-            operator_config=_operator_config(operator) if (cfg and cfg.capture_values) else "",
+            output_value=snapshot(result) if (cfg and cfg.capture_outputs) else None,
         ))
         return result, ctx_out
 

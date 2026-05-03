@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -11,11 +12,11 @@ class StepSpan:
     start_time: float
     duration_s: float
     error: bool = False
+    operator_config: dict[str, Any] = field(default_factory=dict)
     input_shape: tuple | str | None = None
     output_shape: tuple | str | None = None
-    child_trace: InvocationTrace | None = None
     output_value: Any = None
-    operator_config: dict[str, Any] = field(default_factory=dict)
+    child_trace: InvocationTrace | None = None
 
 
 @dataclass
@@ -35,8 +36,19 @@ class InvocationTrace:
 class TracingConfig:
     collector: TraceCollector
     operator_labels: list[str] | None = None
+    capture_config: bool = False
     capture_shapes: bool = False
-    capture_values: bool = False
+    capture_outputs: bool = False
+
+
+def snapshot(value: Any) -> Any:
+    """Deep-copy *value* so a span captures a point-in-time snapshot."""
+    return copy.deepcopy(value)
+
+
+def operator_config(op: Any) -> dict[str, Any]:
+    """Return public instance attributes of *op* for tooltip/tracing display."""
+    return {k: v for k, v in vars(op).items() if not k.startswith("_") and k != "pipeline"}
 
 
 class TraceCollector(ABC):
