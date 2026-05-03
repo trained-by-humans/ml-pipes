@@ -164,6 +164,45 @@ def _render_text_content(value: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Matplotlib text helpers
+# ---------------------------------------------------------------------------
+
+def _plot_text_lines(value: Any, max_rows: int = 8) -> list[str]:
+    """Return short key=value lines describing *value* for a matplotlib text box."""
+    if isinstance(value, ResizeTransform):
+        return [
+            f"  scale  {_fmt_floats(value.scale)}",
+            f"  pad    {_fmt_floats(value.pad)}",
+            f"  orig   {value.original_shape}",
+            f"  sized  {value.resized_shape}",
+        ]
+    if isinstance(value, RuntimeOutputs):
+        return [f"  {n}: {t.array.shape}" for n, t in zip(value.names, value.tensors)]
+    if isinstance(value, TensorRegistry):
+        return [f"  {k}: {v.shape}" for k, v in value._tensors.items()]
+    if isinstance(value, Segmentations):
+        n = len(value.boxes)
+        lines = [f"  [{i}] cls={value.classes[i]} s={value.scores[i]:.2f} mask✓"
+                 for i in range(min(n, max_rows))]
+        if n > max_rows:
+            lines.append(f"  … +{n - max_rows} more")
+        return lines
+    if isinstance(value, Detections):
+        n = len(value.boxes)
+        lines = [f"  [{i}] cls={value.classes[i]} s={value.scores[i]:.2f}"
+                 for i in range(min(n, max_rows))]
+        if n > max_rows:
+            lines.append(f"  … +{n - max_rows} more")
+        return lines
+    if isinstance(value, bytes):
+        return [f"  {len(value)} B"]
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return [f"  {f.name}: {getattr(value, f.name)}" for f in dataclasses.fields(value)]
+    r = repr(value)
+    return [f"  {r[:40]}"] if r else []
+
+
+# ---------------------------------------------------------------------------
 # Per-span rendering
 # ---------------------------------------------------------------------------
 
@@ -407,6 +446,115 @@ class InspectionResult:
 
         cards_html = "\n".join(cards)
         return f'{_CARD_CSS}<div class="insp-container">{cards_html}</div>'
+
+    def plot(self, cols: int = 6) -> "matplotlib.figure.Figure":
+        """Render each pipeline step as a subplot in a matplotlib figure.
+
+        Works in scripts, terminals (with a GUI backend), and Jupyter alike.
+        Returns the Figure so callers can save, show, or embed it.
+
+        Args:
+            cols: number of columns in the subplot grid (default 6).
+        """
+        import matplotlib  # local import — matplotlib is optional
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+
+        n = len(self.spans)
+        rows = (n + cols - 1) // cols
+        fig, axes = plt.subplots(rows, cols, figsize=(cols * 2.6, rows * 3.2))
+        # Normalise to a flat list regardless of grid shape
+        ax_flat: list[matplotlib.axes.Axes] = np.array(axes).flatten().tolist()
+
+        last_image_arr: np.ndarray | None = None
+
+        for i, span in enumerate(self.spans):
+            ax = ax_flat[i]
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            val = span.output_value
+            img_val = _find_image_element(val) if val is not None else None
+
+            # --- resolve display image ---
+            if img_val is not None:
+                if isinstance(img_val, ImagePayload):
+                    arr = img_val.array
+                    if img_val.color_space == "BGR":
+                        arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+                    last_image_arr = arr
+                else:  # TensorPayload heatmap
+                    t = img_val
+                    ch = t.array
+                    if ch.ndim == 4:
+                        ch = ch[0, 0] if t.layout.startswith("N") else ch[0, :, :, 0]
+                    elif ch.ndim == 3:
+                        ch = ch[0] if t.layout.startswith("C") else ch[:, :, 0]
+                    ch = ch.astype(np.float32)
+                    mn, mx = ch.min(), ch.max()
+                    if mx > mn:
+                        ch = ((ch - mn) / (mx - mn) * 255).astype(np.uint8)
+                    else:
+                        ch = np.zeros_like(ch, dtype=np.uint8)
+                    heat = cv2.applyColorMap(ch, cv2.COLORMAP_VIRIDIS)
+                    last_image_arr = cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
+
+                ax.imshow(last_image_arr)
+            elif last_image_arr is not None:
+                ax.imshow(last_image_arr, alpha=0.2)
+
+            # --- text annotation for non-image content ---
+            non_image = _non_image_elements(val) if val is not None else []
+            if non_image:
+                lines: list[str] = []
+                for item in non_image:
+                    lines.append(type(item).__name__)
+                    lines += _plot_text_lines(item)
+                text = "\n".join(lines)
+                ax.text(
+                    0.04, 0.97, text,
+                    transform=ax.transAxes,
+                    va="top", ha="left",
+                    fontsize=6.5,
+                    family="monospace",
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.82),
+                )
+            elif val is not None and img_val is None:
+                # Scalar / bytes / unknown — just show type name
+                ax.text(
+                    0.5, 0.5, type(val).__name__,
+                    transform=ax.transAxes,
+                    va="center", ha="center",
+                    fontsize=8, color="#888",
+                )
+
+            # --- title ---
+            cfg_short = ""
+            if span.operator_config:
+                parts = [f"{k}={v!r}" for k, v in span.operator_config.items()]
+                joined = ", ".join(parts)
+                cfg_short = joined if len(joined) <= 28 else joined[:25] + "…"
+
+            ax.set_title(
+                span.label + ("\n" + cfg_short if cfg_short else ""),
+                fontsize=7.5,
+                fontweight="bold",
+                pad=3,
+                loc="left",
+            )
+
+            # error indicator
+            if span.error:
+                for spine in ax.spines.values():
+                    spine.set_edgecolor("#c00")
+                    spine.set_linewidth(2)
+
+        # Hide unused axes
+        for ax in ax_flat[n:]:
+            ax.set_visible(False)
+
+        fig.tight_layout(pad=0.5)
+        return fig
 
     def save(self, path: str | Path | None = None, open_browser: bool = True) -> Path:
         """Write the inspection report to an HTML file and return its path.
