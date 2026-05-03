@@ -31,7 +31,8 @@ from typing import Any
 import cv2
 import numpy as np
 
-from .tracing import InvocationTrace, StepSpan, TraceCollector
+from .tracing import InvocationTrace, StepSpan, TraceCollector, _fmt_batch_size
+from .tiling import TileRect
 from .types import (
     Detections,
     ImagePayload,
@@ -103,17 +104,23 @@ def _image_to_rgb(value: ImagePayload) -> np.ndarray:
     return arr
 
 
-def _make_grid(images: list[np.ndarray]) -> np.ndarray:
+def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
     """Tile a list of HxWx3 RGB images into a square-ish grid."""
     import math
     n = len(images)
     cols = math.ceil(math.sqrt(n))
     rows = math.ceil(n / cols)
     h, w = images[0].shape[:2]
-    grid = np.zeros((rows * h, cols * w, 3), dtype=np.uint8)
+    gh = rows * h + divider * (rows - 1)
+    gw = cols * w + divider * (cols - 1)
+    grid = np.full((gh, gw, 3), 180, dtype=np.uint8)  # 180 = light grey divider colour
     for idx, img in enumerate(images):
+        if img.shape[:2] != (h, w):
+            img = cv2.resize(img, (w, h))
         r, c = divmod(idx, cols)
-        grid[r * h:(r + 1) * h, c * w:(c + 1) * w] = img
+        y = r * (h + divider)
+        x = c * (w + divider)
+        grid[y:y + h, x:x + w] = img
     return grid
 
 
@@ -131,6 +138,15 @@ def _tensor_item_to_heatmap(arr: np.ndarray, layout: str) -> np.ndarray:
         ch = np.zeros_like(ch, dtype=np.uint8)
     heat = cv2.applyColorMap(ch, cv2.COLORMAP_VIRIDIS)
     return cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
+
+
+def _render_tile_rect(value: TileRect) -> list[_Block]:
+    w = value.x2 - value.x1
+    h = value.y2 - value.y1
+    return [_TextBlock("TileRect", [
+        ("origin", f"({value.x1}, {value.y1})"),
+        ("size",   f"{w}×{h}"),
+    ])]
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +194,17 @@ def _value_to_blocks(value: Any) -> list[_Block]:
         return blocks
 
     if isinstance(value, list) and value:
+        _LIST_MAX = 6
         for type_, renderer in _BLOCK_RENDERERS.items():
             if isinstance(value[0], type_):
-                rows = [(f"[{i}]", _block_summary(renderer(item))) for i, item in enumerate(value)]
+                all_blocks = [renderer(item) for item in value]
+                first = all_blocks[0]
+                if first and isinstance(first[0], _ImageBlock):
+                    grid = _make_grid([b.array for blocks in all_blocks for b in blocks if isinstance(b, _ImageBlock)], divider=2)
+                    return [_ImageBlock(title=f"{first[0].title.split('  ')[0]}  ×{len(value)}", array=grid)]
+                rows = [(f"[{i}]", _block_summary(blocks)) for i, blocks in enumerate(all_blocks[:_LIST_MAX])]
+                if len(value) > _LIST_MAX:
+                    rows.append(("…", f"+{len(value) - _LIST_MAX} more"))
                 return [_TextBlock(f"list  ×{len(value)}", rows)]
         item_type = type(value[0]).__name__
         return [_TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
@@ -259,10 +283,30 @@ def _register_builtin_renderers() -> None:
     register_block_renderer(ResizeTransform,   _render_resize_transform)
     register_block_renderer(RuntimeOutputs,    _render_runtime_outputs)
     register_block_renderer(TensorRegistry,    _render_tensor_registry)
+    register_block_renderer(TileRect,          _render_tile_rect)
     register_block_renderer(bytes,             _render_bytes)
 
 
 _register_builtin_renderers()
+
+
+def _region_summary_block(span: StepSpan) -> list[_Block]:
+    """Text block summarising a region opener (Scatter/Batch) from its child_trace metadata."""
+    ct = span.child_trace
+    rows: list[tuple[str, str]] = []
+    if ct.workers is not None:
+        rows.append(("items",       _fmt_batch_size(ct.batch_size)))
+        rows.append(("concurrency", str(ct.workers)))
+        rows.append(("steps",       str(len(ct.spans))))
+        rows.append(("total",       f"{ct.total_duration_s * 1000:.1f} ms"))
+    elif ct.batch_size is not None:
+        rows.append(("batch size", _fmt_batch_size(ct.batch_size)))
+        rows.append(("steps",      str(len(ct.spans))))
+        rows.append(("total",      f"{ct.total_duration_s * 1000:.1f} ms"))
+    else:
+        rows.append(("steps", str(len(ct.spans))))
+        rows.append(("total", f"{ct.total_duration_s * 1000:.1f} ms"))
+    return [_TextBlock(span.label.split(":", 1)[-1], rows)]
 
 
 def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepView, np.ndarray | None]:
@@ -274,7 +318,8 @@ def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepV
     val = span.output_value
     if val is None:
         children, _ = _build_views_from_trace(span.child_trace, last_image)
-        return _StepView(span.label, span.operator_config, [], children=children), last_image
+        blocks = _region_summary_block(span) if span.child_trace is not None else []
+        return _StepView(span.label, span.operator_config, blocks, children=children), last_image
 
     raw_blocks = _value_to_blocks(val)
 
