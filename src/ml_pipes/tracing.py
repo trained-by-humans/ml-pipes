@@ -92,9 +92,20 @@ def snapshot(value: Any) -> Any:
     return copy.deepcopy(value)
 
 
+_PICKLE_SAFE = (bool, int, float, str, bytes, type(None))
+
+
 def operator_config(op: Any) -> dict[str, Any]:
-    """Return public instance attributes of *op* for tooltip/tracing display."""
-    return {k: v for k, v in vars(op).items() if not k.startswith("_") and k != "pipeline"}
+    """Return public instance attributes of *op* for tooltip/tracing display.
+
+    Non-serializable values (callables, arbitrary objects) are converted to
+    their repr() so the result is always safe to pickle.
+    """
+    return {
+        k: v if isinstance(v, _PICKLE_SAFE) else repr(v)
+        for k, v in vars(op).items()
+        if not k.startswith("_") and k != "pipeline"
+    }
 
 
 class TraceCollector(ABC):
