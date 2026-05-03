@@ -818,3 +818,84 @@ def test_filter_predictions_by_area_max():
     result = FilterPredictionsByArea(max_area=2)(d)
     assert len(result.boxes) == 1
     assert result.boxes[0] == [0,0,1,1]
+
+
+# ---------------------------------------------------------------------------
+# Prediction.filter — mask variants
+# ---------------------------------------------------------------------------
+
+def test_filter_bool_list():
+    d = _detections()
+    result = d.filter([True, False, True])
+    assert result.scores == [0.9, 0.8]
+    assert result.classes == [0, 0]
+
+
+def test_filter_bool_list_all_false():
+    d = _detections()
+    result = d.filter([False, False, False])
+    assert result.boxes == []
+    assert result.scores == []
+    assert result.classes == []
+
+
+def test_filter_bool_list_all_true():
+    d = _detections()
+    result = d.filter([True, True, True])
+    assert result.scores == d.scores
+    assert result.classes == d.classes
+
+
+def test_filter_numpy_bool_array():
+    d = _detections()
+    mask = np.array([True, False, True])
+    result = d.filter(mask)
+    assert result.scores == [0.9, 0.8]
+
+
+def test_filter_index_list():
+    d = _detections()
+    result = d.filter([0, 2])
+    assert result.scores == [0.9, 0.8]
+    assert result.classes == [0, 0]
+
+
+def test_filter_index_list_single():
+    d = _detections()
+    result = d.filter([1])
+    assert result.scores == [0.5]
+    assert result.classes == [1]
+
+
+def test_filter_numpy_index_array():
+    d = _detections()
+    result = d.filter(np.array([0, 2]))
+    assert result.scores == [0.9, 0.8]
+
+
+def test_filter_numpy_argsort():
+    d = _detections()
+    # argsort ascending by score: [1, 2, 0] → keep top-2 → indices [2, 0]
+    indices = np.argsort(d.scores)[-2:]
+    result = d.filter(indices)
+    assert set(result.scores) == {0.9, 0.8}
+
+
+def test_filter_empty_mask():
+    d = _detections()
+    result = d.filter([])
+    assert result.boxes == []
+    assert result.scores == []
+    assert result.classes == []
+
+
+def test_filter_index_out_of_bounds_raises():
+    d = _detections()
+    with pytest.raises(IndexError):
+        d.filter([0, 99])
+
+
+def test_filter_bool_mask_too_long_raises():
+    d = _detections()
+    with pytest.raises(IndexError):
+        d.filter([True, False, True, True])  # 4 elements, only 3 predictions

@@ -75,8 +75,13 @@ class Prediction:
     any subclass without knowing its field names.
     """
 
-    def filter(self: PredictionT, mask: list[Any]) -> PredictionT:
-        kept = [i for i, m in enumerate(mask) if m]
+    def filter(self: PredictionT, mask: Any) -> PredictionT:
+        if len(mask) == 0:
+            kept: list[int] = []
+        elif isinstance(mask[0], (bool, np.bool_)):
+            kept = [i for i, m in enumerate(mask) if m]
+        else:
+            kept = [int(i) for i in mask]
         sliced = {f.name: [getattr(self, f.name)[i] for i in kept]
                   for f in dataclasses.fields(self)}
         return type(self)(**sliced)
