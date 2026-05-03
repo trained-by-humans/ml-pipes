@@ -55,9 +55,18 @@ def main() -> int:
 
     print("Running inspection...", file=sys.stderr)
     result = pipeline.inspect(image_path)
-
     print(result)
-    result.save(path=args.output, open_browser=not args.no_browser)
+
+    # In a script — opens a window (or save to file)
+    # fig = result.plot(cols=6)
+    # fig.savefig("inspect.png", dpi=150)
+    # fig.show()
+
+    # In Jupyter — inline display
+    result.show()
+
+    # In Browser
+    result.show_in_browser()
     return 0
 
 

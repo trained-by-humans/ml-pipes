@@ -1,5 +1,5 @@
 from .context import Context, Recall, Store
-from .inspection import InspectionResult
+from .inspection import HtmlRenderer, InspectionResult, InspectionSerializer, PlotRenderer
 from .core import Pipeline, Embed, embed, Inline, inline
 from .validation import PipelineValidationError, TypeContract
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
@@ -106,8 +106,11 @@ __all__ = [
     "Gather",
     "GatherRows",
     "GatherScores",
+    "HtmlRenderer",
     "ImagePayload",
     "InspectionResult",
+    "InspectionSerializer",
+    "PlotRenderer",
     "Infer",
     "LoadFile",
     "LogDetections",
