@@ -1,11 +1,28 @@
+"""Pipeline step-by-step inspection: data preparation and rendering.
+
+Architecture
+------------
+1. _to_step_view(span, last_image)
+       Converts a StepSpan into a _StepView — display-ready primitives:
+       a list of _Block objects, where each block is either an image block
+       (numpy RGB array) or a text block (title + key/value rows).
+       All type-specific logic lives here. Renderers are dumb.
+
+2. HtmlRenderer / PlotRenderer
+       Consume _StepView lists and produce HTML or a matplotlib Figure.
+       Both classes accept layout/style options; adding a new renderer
+       requires no changes to _to_step_view.
+"""
+
 from __future__ import annotations
 
 import base64
 import dataclasses
-import html
+import html as _html
 import os
 import tempfile
 import webbrowser
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +41,10 @@ from .types import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Capture collector (used by Pipeline.inspect)
+# ---------------------------------------------------------------------------
+
 class _CaptureCollector(TraceCollector):
     def __init__(self) -> None:
         self.trace: InvocationTrace | None = None
@@ -33,67 +54,37 @@ class _CaptureCollector(TraceCollector):
 
 
 # ---------------------------------------------------------------------------
-# Array → data URI
+# Display primitives
 # ---------------------------------------------------------------------------
 
-def _array_to_data_uri(arr: np.ndarray) -> str:
-    _, buf = cv2.imencode(".png", arr)
-    b64 = base64.b64encode(buf).decode()
-    return f"data:image/png;base64,{b64}"
+@dataclass
+class _ImageBlock:
+    title: str
+    array: np.ndarray      # RGB, uint8, ready for imshow / imencode
+    dim: bool = False      # True when carrying forward a previous step's image
 
 
-def _image_payload_to_uri(value: ImagePayload) -> str:
-    arr = value.array
-    if value.color_space == "BGR":
-        arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-    return _array_to_data_uri(arr)
+@dataclass
+class _TextBlock:
+    title: str
+    rows: list[tuple[str, str]]   # (key, value) pairs, both pre-stringified
+    dim: bool = False
 
 
-def _tensor_payload_to_heatmap_uri(value: TensorPayload) -> str:
-    arr = value.array
-    if arr.ndim == 3:
-        channel = arr[0] if value.layout.startswith("C") else arr[:, :, 0]
-    elif arr.ndim == 4:
-        channel = arr[0, 0] if value.layout.startswith("N") else arr[0, :, :, 0]
-    else:
-        channel = arr
-    channel = channel.astype(np.float32)
-    mn, mx = channel.min(), channel.max()
-    if mx > mn:
-        channel = ((channel - mn) / (mx - mn) * 255).astype(np.uint8)
-    else:
-        channel = np.zeros_like(channel, dtype=np.uint8)
-    heat = cv2.applyColorMap(channel, cv2.COLORMAP_VIRIDIS)
-    return _array_to_data_uri(heat)
+_Block = _ImageBlock | _TextBlock
+
+
+@dataclass
+class _StepView:
+    label: str                          # "3:Resize"
+    operator_config: dict[str, Any]
+    blocks: list[_Block]
+    error: bool = False
 
 
 # ---------------------------------------------------------------------------
-# Structured text rendering (key/value table, no repr() strings)
+# Value → display primitives
 # ---------------------------------------------------------------------------
-
-_IMG_STYLE = "max-width:240px;max-height:200px;object-fit:contain;display:block;"
-_TBL_STYLE = "font-size:11px;border-collapse:collapse;width:100%;"
-_TD_K = "padding:1px 6px 1px 0;color:#555;white-space:nowrap;vertical-align:top;"
-_TD_V = "padding:1px 0;word-break:break-all;vertical-align:top;"
-
-_BLOCK_TITLE = (
-    "font-size:10px;font-weight:600;color:#555;"
-    "text-transform:uppercase;letter-spacing:0.04em;margin-bottom:3px;"
-)
-_BLOCK_TITLE_DIM = (
-    "font-size:10px;font-weight:600;color:#bbb;"
-    "text-transform:uppercase;letter-spacing:0.04em;margin-bottom:3px;"
-)
-
-
-def _kv_table(rows: list[tuple[str, str]]) -> str:
-    inner = "".join(
-        f'<tr><td style="{_TD_K}">{html.escape(k)}</td>'
-        f'<td style="{_TD_V}">{html.escape(v)}</td></tr>'
-        for k, v in rows
-    )
-    return f'<table style="{_TBL_STYLE}">{inner}</table>'
-
 
 def _fmt_floats(seq: Any, precision: int = 3) -> str:
     try:
@@ -102,36 +93,67 @@ def _fmt_floats(seq: Any, precision: int = 3) -> str:
         return str(seq)
 
 
-def _named_block(title: str, content: str, dim: bool = False) -> str:
-    style = _BLOCK_TITLE_DIM if dim else _BLOCK_TITLE
-    return (
-        f'<div style="margin-bottom:8px;">'
-        f'<div style="{style}">{html.escape(title)}</div>'
-        f'{content}'
-        f'</div>'
-    )
+def _image_to_rgb(value: ImagePayload) -> np.ndarray:
+    arr = value.array
+    if value.color_space == "BGR":
+        arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+    return arr
 
 
-def _render_text_content(value: Any) -> str:
-    """Render a single non-image value as a titled key/value block."""
+def _tensor_to_heatmap(value: TensorPayload) -> np.ndarray:
+    arr = value.array
+    if arr.ndim == 4:
+        ch = arr[0, 0] if value.layout.startswith("N") else arr[0, :, :, 0]
+    elif arr.ndim == 3:
+        ch = arr[0] if value.layout.startswith("C") else arr[:, :, 0]
+    else:
+        ch = arr
+    ch = ch.astype(np.float32)
+    mn, mx = ch.min(), ch.max()
+    if mx > mn:
+        ch = ((ch - mn) / (mx - mn) * 255).astype(np.uint8)
+    else:
+        ch = np.zeros_like(ch, dtype=np.uint8)
+    heat = cv2.applyColorMap(ch, cv2.COLORMAP_VIRIDIS)
+    return cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
+
+
+def _value_to_blocks(value: Any) -> list[_Block]:
+    """Convert a pipeline output value to a list of display blocks."""
+    if isinstance(value, tuple):
+        blocks: list[_Block] = []
+        for item in value:
+            blocks.extend(_value_to_blocks(item))
+        return blocks
+
     name = type(value).__name__
 
+    if isinstance(value, ImagePayload):
+        h, w = value.array.shape[:2]
+        return [_ImageBlock(
+            title=f"{name}  {w}×{h}  {value.color_space}",
+            array=_image_to_rgb(value),
+        )]
+
+    if isinstance(value, TensorPayload):
+        return [_ImageBlock(
+            title=f"{name}  {value.array.shape}  {value.dtype}  ·  ch0 heatmap",
+            array=_tensor_to_heatmap(value),
+        )]
+
     if isinstance(value, ResizeTransform):
-        rows = [
-            ("scale", _fmt_floats(value.scale)),
-            ("pad", _fmt_floats(value.pad)),
+        return [_TextBlock(name, [
+            ("scale",    _fmt_floats(value.scale)),
+            ("pad",      _fmt_floats(value.pad)),
             ("original", str(value.original_shape)),
-            ("resized", str(value.resized_shape)),
-        ]
-        return _named_block(name, _kv_table(rows))
+            ("resized",  str(value.resized_shape)),
+        ])]
 
     if isinstance(value, RuntimeOutputs):
-        rows = [(n, str(t.array.shape)) for n, t in zip(value.names, value.tensors)]
-        return _named_block(name, _kv_table(rows))
+        return [_TextBlock(name, [(n, str(t.array.shape)) for n, t in zip(value.names, value.tensors)])]
 
     if isinstance(value, TensorRegistry):
-        rows = [(k, str(v.shape)) for k, v in value._tensors.items()]
-        return _named_block(name, _kv_table(rows))
+        return [_TextBlock(name, [(k, str(v.shape)) for k, v in value._tensors.items()])]
 
     if isinstance(value, Segmentations):
         n = len(value.boxes)
@@ -139,7 +161,7 @@ def _render_text_content(value: Any) -> str:
                 for i in range(min(n, 6))]
         if n > 6:
             rows.append(("…", f"+{n - 6} more"))
-        return _named_block(f"{name} ({n})", _kv_table(rows))
+        return [_TextBlock(f"{name} ({n})", rows)]
 
     if isinstance(value, Detections):
         n = len(value.boxes)
@@ -147,131 +169,64 @@ def _render_text_content(value: Any) -> str:
                 for i in range(min(n, 6))]
         if n > 6:
             rows.append(("…", f"+{n - 6} more"))
-        return _named_block(f"{name} ({n})", _kv_table(rows))
+        return [_TextBlock(f"{name} ({n})", rows)]
 
     if isinstance(value, bytes):
-        return _named_block(name, _kv_table([("size", f"{len(value) / 1024:.1f} KB")]))
+        return [_TextBlock(name, [("size", f"{len(value) / 1024:.1f} KB")])]
 
-    # Generic dataclass
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        rows = [(f.name, str(getattr(value, f.name))) for f in dataclasses.fields(value)]
-        return _named_block(name, _kv_table(rows))
+        return [_TextBlock(name, [(f.name, str(getattr(value, f.name))) for f in dataclasses.fields(value)])]
 
-    text = html.escape(repr(value))
-    if len(text) > 300:
-        text = text[:300] + "…"
-    return _named_block(name, f'<pre style="font-size:11px;margin:0;white-space:pre-wrap;">{text}</pre>')
+    text = repr(value)
+    return [_TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
 
 
-# ---------------------------------------------------------------------------
-# Matplotlib text helpers
-# ---------------------------------------------------------------------------
+def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepView, np.ndarray | None]:
+    """Convert a StepSpan to a _StepView and return the updated last_image."""
+    if span.error:
+        return _StepView(span.label, span.operator_config, [], error=True), last_image
 
-def _plot_text_lines(value: Any, max_rows: int = 8) -> list[str]:
-    """Return short key=value lines describing *value* for a matplotlib text box."""
-    if isinstance(value, ResizeTransform):
-        return [
-            f"  scale  {_fmt_floats(value.scale)}",
-            f"  pad    {_fmt_floats(value.pad)}",
-            f"  orig   {value.original_shape}",
-            f"  sized  {value.resized_shape}",
-        ]
-    if isinstance(value, RuntimeOutputs):
-        return [f"  {n}: {t.array.shape}" for n, t in zip(value.names, value.tensors)]
-    if isinstance(value, TensorRegistry):
-        return [f"  {k}: {v.shape}" for k, v in value._tensors.items()]
-    if isinstance(value, Segmentations):
-        n = len(value.boxes)
-        lines = [f"  [{i}] cls={value.classes[i]} s={value.scores[i]:.2f} mask✓"
-                 for i in range(min(n, max_rows))]
-        if n > max_rows:
-            lines.append(f"  … +{n - max_rows} more")
-        return lines
-    if isinstance(value, Detections):
-        n = len(value.boxes)
-        lines = [f"  [{i}] cls={value.classes[i]} s={value.scores[i]:.2f}"
-                 for i in range(min(n, max_rows))]
-        if n > max_rows:
-            lines.append(f"  … +{n - max_rows} more")
-        return lines
-    if isinstance(value, bytes):
-        return [f"  {len(value)} B"]
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return [f"  {f.name}: {getattr(value, f.name)}" for f in dataclasses.fields(value)]
-    r = repr(value)
-    return [f"  {r[:40]}"] if r else []
+    val = span.output_value
+    if val is None:
+        return _StepView(span.label, span.operator_config, []), last_image
+
+    raw_blocks = _value_to_blocks(val)
+
+    # Find first image block to update last_image
+    new_image: np.ndarray | None = None
+    for b in raw_blocks:
+        if isinstance(b, _ImageBlock):
+            new_image = b.array
+            break
+
+    blocks: list[_Block]
+    if new_image is not None:
+        last_image = new_image
+        blocks = raw_blocks
+    elif last_image is not None:
+        # Carry forward: prepend a dimmed image block, keep text blocks
+        carry = _ImageBlock(title="↑ previous", array=last_image, dim=True)
+        blocks = [carry] + raw_blocks
+    else:
+        blocks = raw_blocks
+
+    return _StepView(span.label, span.operator_config, blocks), last_image
 
 
 # ---------------------------------------------------------------------------
-# Per-span rendering
+# HTML renderer
 # ---------------------------------------------------------------------------
 
-def _find_image_element(value: Any) -> ImagePayload | TensorPayload | None:
-    if isinstance(value, (ImagePayload, TensorPayload)):
-        return value
-    if isinstance(value, tuple):
-        for item in value:
-            found = _find_image_element(item)
-            if found is not None:
-                return found
-    return None
+_IMG_STYLE = "max-width:240px;max-height:200px;object-fit:contain;display:block;"
+_TBL_STYLE = "font-size:11px;border-collapse:collapse;width:100%;"
+_TD_K = "padding:1px 6px 1px 0;color:#555;white-space:nowrap;vertical-align:top;"
+_TD_V = "padding:1px 0;word-break:break-all;vertical-align:top;"
+_TITLE_STYLE = (
+    "font-size:10px;font-weight:600;text-transform:uppercase;"
+    "letter-spacing:0.04em;margin-bottom:3px;"
+)
 
-
-def _non_image_elements(value: Any) -> list[Any]:
-    if isinstance(value, (ImagePayload, TensorPayload)):
-        return []
-    if isinstance(value, tuple):
-        return [item for item in value if not isinstance(item, (ImagePayload, TensorPayload))]
-    return [value]
-
-
-def _render_span_body(value: Any, last_image_uri: str | None) -> tuple[str, str | None]:
-    """Return (html_body, new_last_image_uri).
-
-    Each output element is rendered as a named block (title + content), stacked
-    vertically. Image/tensor blocks appear first; non-image blocks below.
-    Carry-forward images use a dimmed title so it's clear no new image was produced.
-    """
-    img_val = _find_image_element(value)
-    new_image = img_val is not None
-
-    parts: list[str] = []
-
-    if new_image:
-        last_image_uri = (
-            _image_payload_to_uri(img_val)
-            if isinstance(img_val, ImagePayload)
-            else _tensor_payload_to_heatmap_uri(img_val)
-        )
-        if isinstance(img_val, ImagePayload):
-            h, w = img_val.array.shape[:2]
-            title = f"ImagePayload  {w}×{h}  {img_val.color_space}"
-            img_html = f'<img src="{last_image_uri}" style="{_IMG_STYLE}">'
-        else:
-            title = f"TensorPayload  {img_val.array.shape}  {img_val.dtype}"
-            note = html.escape(f"layout: {img_val.layout}  · channel 0 heatmap")
-            img_html = (
-                f'<img src="{last_image_uri}" style="{_IMG_STYLE}">'
-                f'<div style="font-size:10px;color:#888;margin-top:2px;">{note}</div>'
-            )
-        parts.append(_named_block(title, img_html))
-
-    elif last_image_uri:
-        img_html = f'<img src="{last_image_uri}" style="{_IMG_STYLE}opacity:0.2;">'
-        parts.append(_named_block("↑ previous", img_html, dim=True))
-
-    for item in _non_image_elements(value):
-        parts.append(_render_text_content(item))
-
-    body = "\n".join(parts) if parts else "<em style='font-size:11px;color:#aaa;'>no output</em>"
-    return body, last_image_uri
-
-
-# ---------------------------------------------------------------------------
-# CSS + JS
-# ---------------------------------------------------------------------------
-
-_CARD_CSS = """
+_CSS = """
 <style>
 .insp-container {
   display: flex;
@@ -297,57 +252,26 @@ _CARD_CSS = """
   border-bottom: 1px solid #d8d8d8;
   border-radius: 6px 6px 0 0;
 }
-.insp-card-name-wrap {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
+.insp-card-name-wrap { display: flex; align-items: center; gap: 5px; }
 .insp-card-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: #222;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
+  font-size: 12px; font-weight: 600; color: #222;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
 }
 .insp-cfg-icon {
-  font-size: 10px;
-  color: #999;
-  cursor: default;
-  line-height: 1;
-  border: 1px solid #ccc;
-  border-radius: 3px;
-  padding: 0 3px;
-  background: #fff;
-  user-select: none;
-  flex-shrink: 0;
+  font-size: 10px; color: #999; cursor: default; line-height: 1;
+  border: 1px solid #ccc; border-radius: 3px; padding: 0 3px;
+  background: #fff; user-select: none; flex-shrink: 0;
 }
 .insp-cfg-icon:hover { color: #333; border-color: #888; }
-.insp-card-body {
-  padding: 7px 8px;
-  border-radius: 0 0 6px 6px;
-}
-.insp-card-error .insp-card-head {
-  background: #fff0f0;
-  border-color: #f5a0a0;
-}
+.insp-card-body { padding: 7px 8px; border-radius: 0 0 6px 6px; }
+.insp-card-error .insp-card-head { background: #fff0f0; border-color: #f5a0a0; }
 .insp-card-error .insp-card-name { color: #c00; }
-
-/* Shared fixed tooltip popup */
 #insp-cfg-popup {
-  display: none;
-  position: fixed;
-  z-index: 9999;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  border-radius: 5px;
-  padding: 8px 10px;
-  font-size: 11px;
+  display: none; position: fixed; z-index: 9999;
+  background: #1e1e1e; color: #d4d4d4; border-radius: 5px;
+  padding: 8px 10px; font-size: 11px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(0,0,0,.4);
+  white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.4);
   pointer-events: none;
 }
 #insp-cfg-popup table { border-collapse: collapse; }
@@ -355,9 +279,7 @@ _CARD_CSS = """
 .insp-cfg-key { color: #9cdcfe; }
 .insp-cfg-val { color: #ce9178; }
 </style>
-
 <div id="insp-cfg-popup"></div>
-
 <script>
 (function() {
   var popup = document.getElementById('insp-cfg-popup');
@@ -365,11 +287,10 @@ _CARD_CSS = """
     var icon = e.target.closest('.insp-cfg-icon');
     if (!icon) return;
     popup.innerHTML = icon.dataset.cfg;
+    popup.style.display = 'block';
     var r = icon.getBoundingClientRect();
     var left = r.left;
     var top = r.bottom + 6;
-    popup.style.display = 'block';
-    // nudge left if it would overflow viewport
     var pw = popup.offsetWidth;
     if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
     popup.style.left = left + 'px';
@@ -383,18 +304,134 @@ _CARD_CSS = """
 """
 
 
-def _config_tooltip(cfg: dict) -> str:
-    """Render operator config as a ⚙ icon; tooltip is shown via fixed-position JS popup."""
-    if not cfg:
-        return ""
-    rows = "".join(
-        f'<tr><td class="insp-cfg-key">{html.escape(k)}</td>'
-        f'<td class="insp-cfg-val">{html.escape(repr(v))}</td></tr>'
-        for k, v in cfg.items()
-    )
-    table_html = f"<table>{rows}</table>"
-    attr_val = html.escape(table_html, quote=True)
-    return f'<span class="insp-cfg-icon" data-cfg="{attr_val}">⚙</span>'
+class HtmlRenderer:
+    """Renders a list of _StepView objects as an HTML card strip."""
+
+    def render(self, views: list[_StepView]) -> str:
+        cards = [self._card(v) for v in views]
+        return f'{_CSS}<div class="insp-container">{"".join(cards)}</div>'
+
+    def _card(self, view: _StepView) -> str:
+        error_cls = " insp-card-error" if view.error else ""
+        tooltip = self._config_tooltip(view.operator_config)
+        body = self._body(view)
+        return (
+            f'<div class="insp-card{error_cls}">'
+            f'<div class="insp-card-head">'
+            f'<div class="insp-card-name-wrap">'
+            f'<span class="insp-card-name">{_html.escape(view.label)}</span>'
+            f'{tooltip}'
+            f'</div></div>'
+            f'<div class="insp-card-body">{body}</div>'
+            f'</div>'
+        )
+
+    def _body(self, view: _StepView) -> str:
+        if view.error:
+            return '<div style="font-size:12px;color:#c00;padding:4px 0;">Error during execution</div>'
+        if not view.blocks:
+            return "<em style='font-size:11px;color:#aaa;'>no value captured</em>"
+        return "".join(self._block(b) for b in view.blocks)
+
+    def _block(self, block: _Block) -> str:
+        dim = block.dim
+        title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
+        title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
+
+        if isinstance(block, _ImageBlock):
+            _, buf = cv2.imencode(".png", cv2.cvtColor(block.array, cv2.COLOR_RGB2BGR))
+            uri = "data:image/png;base64," + base64.b64encode(buf).decode()
+            opacity = "0.2" if dim else "1"
+            img_html = f'<img src="{uri}" style="{_IMG_STYLE}opacity:{opacity};">'
+            return f'<div style="margin-bottom:8px;">{title_html}{img_html}</div>'
+
+        # _TextBlock
+        inner = "".join(
+            f'<tr><td style="{_TD_K}">{_html.escape(k)}</td>'
+            f'<td style="{_TD_V}">{_html.escape(v)}</td></tr>'
+            for k, v in block.rows
+        )
+        tbl = f'<table style="{_TBL_STYLE}">{inner}</table>'
+        return f'<div style="margin-bottom:8px;">{title_html}{tbl}</div>'
+
+    def _config_tooltip(self, cfg: dict) -> str:
+        if not cfg:
+            return ""
+        rows = "".join(
+            f'<tr><td class="insp-cfg-key">{_html.escape(k)}</td>'
+            f'<td class="insp-cfg-val">{_html.escape(repr(v))}</td></tr>'
+            for k, v in cfg.items()
+        )
+        table_html = f"<table>{rows}</table>"
+        return f'<span class="insp-cfg-icon" data-cfg="{_html.escape(table_html, quote=True)}">⚙</span>'
+
+
+# ---------------------------------------------------------------------------
+# Plot renderer
+# ---------------------------------------------------------------------------
+
+class PlotRenderer:
+    """Renders a list of _StepView objects as a matplotlib Figure."""
+
+    def __init__(self, cols: int = 6, cell_w: float = 2.6, cell_h: float = 3.2) -> None:
+        self.cols = cols
+        self.cell_w = cell_w
+        self.cell_h = cell_h
+
+    def render(self, views: list[_StepView]) -> "matplotlib.figure.Figure":
+        import matplotlib
+        import matplotlib.pyplot as plt
+
+        n = len(views)
+        rows = max(1, (n + self.cols - 1) // self.cols)
+        fig, axes = plt.subplots(rows, self.cols,
+                                 figsize=(self.cols * self.cell_w, rows * self.cell_h))
+        ax_flat: list[matplotlib.axes.Axes] = np.array(axes).flatten().tolist()
+
+        for i, view in enumerate(views):
+            self._axes(ax_flat[i], view)
+        for ax in ax_flat[n:]:
+            ax.set_visible(False)
+
+        fig.tight_layout(pad=0.5)
+        return fig
+
+    def _axes(self, ax: "matplotlib.axes.Axes", view: _StepView) -> None:
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        if view.error:
+            for spine in ax.spines.values():
+                spine.set_edgecolor("#c00")
+                spine.set_linewidth(2)
+            ax.set_title(view.label, fontsize=7.5, fontweight="bold", pad=3, loc="left")
+            return
+
+        for block in view.blocks:
+            if isinstance(block, _ImageBlock):
+                ax.imshow(block.array, alpha=0.2 if block.dim else 1.0)
+            else:
+                text = block.title + "\n" + "\n".join(
+                    f"  {k}  {v}" if k else f"  {v}" for k, v in block.rows
+                )
+                ax.text(
+                    0.04, 0.97, text,
+                    transform=ax.transAxes,
+                    va="top", ha="left",
+                    fontsize=6.5, family="monospace",
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.85),
+                )
+
+        cfg = view.operator_config
+        cfg_short = ""
+        if cfg:
+            joined = ", ".join(f"{k}={v!r}" for k, v in cfg.items())
+            cfg_short = "\n" + (joined if len(joined) <= 30 else joined[:27] + "…")
+
+        ax.set_title(
+            view.label + cfg_short,
+            fontsize=7.5, fontweight="bold", pad=3, loc="left",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +444,18 @@ class InspectionResult:
     def __init__(self, spans: list[StepSpan]) -> None:
         self.spans = spans
 
+    # -- views (lazy, shared by both renderers) --
+
+    def _build_views(self) -> list[_StepView]:
+        views: list[_StepView] = []
+        last_image: np.ndarray | None = None
+        for span in self.spans:
+            view, last_image = _to_step_view(span, last_image)
+            views.append(view)
+        return views
+
+    # -- text repr --
+
     def __repr__(self) -> str:
         lines = ["InspectionResult:"]
         for span in self.spans:
@@ -415,153 +464,21 @@ class InspectionResult:
             lines.append(f"  {span.label:35s}  {str(shape):20s}{err}")
         return "\n".join(lines)
 
+    # -- Jupyter HTML --
+
     def _repr_html_(self) -> str:
-        cards = []
-        last_image_uri: str | None = None
+        return HtmlRenderer().render(self._build_views())
 
-        for span in self.spans:
-            error_cls = " insp-card-error" if span.error else ""
+    # -- matplotlib --
 
-            if span.error:
-                body_html = '<div style="font-size:12px;color:#c00;padding:4px 0;">Error during execution</div>'
-            else:
-                val = span.output_value
-                if val is not None:
-                    body_html, last_image_uri = _render_span_body(val, last_image_uri)
-                else:
-                    body_html = "<em style='font-size:11px;color:#aaa;'>no value captured</em>"
+    def plot(self, cols: int = 6, cell_w: float = 2.6, cell_h: float = 3.2) -> "matplotlib.figure.Figure":
+        """Render each step as a matplotlib subplot. Returns the Figure."""
+        return PlotRenderer(cols=cols, cell_w=cell_w, cell_h=cell_h).render(self._build_views())
 
-            tooltip = _config_tooltip(span.operator_config)
-            cards.append(
-                f'<div class="insp-card{error_cls}">'
-                f'  <div class="insp-card-head">'
-                f'    <div class="insp-card-name-wrap">'
-                f'      <span class="insp-card-name">{html.escape(span.label)}</span>'
-                f'      {tooltip}'
-                f'    </div>'
-                f'  </div>'
-                f'  <div class="insp-card-body">{body_html}</div>'
-                f'</div>'
-            )
-
-        cards_html = "\n".join(cards)
-        return f'{_CARD_CSS}<div class="insp-container">{cards_html}</div>'
-
-    def plot(self, cols: int = 6) -> "matplotlib.figure.Figure":
-        """Render each pipeline step as a subplot in a matplotlib figure.
-
-        Works in scripts, terminals (with a GUI backend), and Jupyter alike.
-        Returns the Figure so callers can save, show, or embed it.
-
-        Args:
-            cols: number of columns in the subplot grid (default 6).
-        """
-        import matplotlib  # local import — matplotlib is optional
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as mpatches
-
-        n = len(self.spans)
-        rows = (n + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(cols * 2.6, rows * 3.2))
-        # Normalise to a flat list regardless of grid shape
-        ax_flat: list[matplotlib.axes.Axes] = np.array(axes).flatten().tolist()
-
-        last_image_arr: np.ndarray | None = None
-
-        for i, span in enumerate(self.spans):
-            ax = ax_flat[i]
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-            val = span.output_value
-            img_val = _find_image_element(val) if val is not None else None
-
-            # --- resolve display image ---
-            if img_val is not None:
-                if isinstance(img_val, ImagePayload):
-                    arr = img_val.array
-                    if img_val.color_space == "BGR":
-                        arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-                    last_image_arr = arr
-                else:  # TensorPayload heatmap
-                    t = img_val
-                    ch = t.array
-                    if ch.ndim == 4:
-                        ch = ch[0, 0] if t.layout.startswith("N") else ch[0, :, :, 0]
-                    elif ch.ndim == 3:
-                        ch = ch[0] if t.layout.startswith("C") else ch[:, :, 0]
-                    ch = ch.astype(np.float32)
-                    mn, mx = ch.min(), ch.max()
-                    if mx > mn:
-                        ch = ((ch - mn) / (mx - mn) * 255).astype(np.uint8)
-                    else:
-                        ch = np.zeros_like(ch, dtype=np.uint8)
-                    heat = cv2.applyColorMap(ch, cv2.COLORMAP_VIRIDIS)
-                    last_image_arr = cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
-
-                ax.imshow(last_image_arr)
-            elif last_image_arr is not None:
-                ax.imshow(last_image_arr, alpha=0.2)
-
-            # --- text annotation for non-image content ---
-            non_image = _non_image_elements(val) if val is not None else []
-            if non_image:
-                lines: list[str] = []
-                for item in non_image:
-                    lines.append(type(item).__name__)
-                    lines += _plot_text_lines(item)
-                text = "\n".join(lines)
-                ax.text(
-                    0.04, 0.97, text,
-                    transform=ax.transAxes,
-                    va="top", ha="left",
-                    fontsize=6.5,
-                    family="monospace",
-                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.82),
-                )
-            elif val is not None and img_val is None:
-                # Scalar / bytes / unknown — just show type name
-                ax.text(
-                    0.5, 0.5, type(val).__name__,
-                    transform=ax.transAxes,
-                    va="center", ha="center",
-                    fontsize=8, color="#888",
-                )
-
-            # --- title ---
-            cfg_short = ""
-            if span.operator_config:
-                parts = [f"{k}={v!r}" for k, v in span.operator_config.items()]
-                joined = ", ".join(parts)
-                cfg_short = joined if len(joined) <= 28 else joined[:25] + "…"
-
-            ax.set_title(
-                span.label + ("\n" + cfg_short if cfg_short else ""),
-                fontsize=7.5,
-                fontweight="bold",
-                pad=3,
-                loc="left",
-            )
-
-            # error indicator
-            if span.error:
-                for spine in ax.spines.values():
-                    spine.set_edgecolor("#c00")
-                    spine.set_linewidth(2)
-
-        # Hide unused axes
-        for ax in ax_flat[n:]:
-            ax.set_visible(False)
-
-        fig.tight_layout(pad=0.5)
-        return fig
+    # -- save to file --
 
     def save(self, path: str | Path | None = None, open_browser: bool = True) -> Path:
-        """Write the inspection report to an HTML file and return its path.
-
-        If *path* is None a temporary file is created. Prints the path to stdout.
-        Pass open_browser=False to suppress auto-opening.
-        """
+        """Write the HTML report to a file. Prints the path. Opens browser unless open_browser=False."""
         if path is None:
             fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
             os.close(fd)
