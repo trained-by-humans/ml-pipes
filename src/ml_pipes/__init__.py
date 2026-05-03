@@ -1,6 +1,6 @@
 from .context import Context, Recall, Store
 from .inspection import HtmlRenderer, InspectionResult, InspectionSerializer, PlotRenderer, register_block_renderer
-from .core import Pipeline, Embed, embed, Inline, inline
+from .core import Pipeline, Embed, embed, Inline, inline, Operator
 from .validation import PipelineValidationError, TypeContract
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
 from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
@@ -117,6 +117,7 @@ __all__ = [
     "LogDetections",
     "MapToObjects",
     "NMM",
+    "Operator",
     "NMS",
     "Normalize",
     "Pick",

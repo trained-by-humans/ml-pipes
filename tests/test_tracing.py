@@ -373,6 +373,45 @@ def test_operator_config_callable_serializable():
     pickle.dumps(cfg)
 
 
+def test_merge_traces_preserves_captured_fields():
+    from ml_pipes.tracing import StepSpan, InvocationTrace, merge_traces
+
+    def make_trace(val: Any) -> InvocationTrace:
+        span = StepSpan(
+            label="1:op",
+            start_time=0.0,
+            duration_s=0.01,
+            error=False,
+            operator_config={"k": "v"},
+            input_shape="(1,)",
+            output_shape="(2,)",
+            output_value=val,
+        )
+        t = InvocationTrace()
+        t.spans.append(span)
+        return t
+
+    merged = merge_traces([make_trace("a"), make_trace("b")])
+    s = merged.spans[0]
+    assert s.output_value == "a"       # first worker's value is representative
+    assert s.output_shape == "(2,)"
+    assert s.input_shape == "(1,)"
+    assert s.operator_config == {"k": "v"}
+    assert not s.error
+
+
+def test_merge_traces_propagates_error_flag():
+    from ml_pipes.tracing import StepSpan, InvocationTrace, merge_traces
+
+    def make_trace(err: bool) -> InvocationTrace:
+        t = InvocationTrace()
+        t.spans.append(StepSpan(label="1:op", start_time=0.0, duration_s=0.01, error=err))
+        return t
+
+    merged = merge_traces([make_trace(False), make_trace(True)])
+    assert merged.spans[0].error is True
+
+
 def test_inspect_with_lambda_operator_is_serializable():
     import pickle
     from ml_pipes import FilterPredictions, InspectionSerializer

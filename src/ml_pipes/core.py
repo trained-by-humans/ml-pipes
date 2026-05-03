@@ -14,6 +14,9 @@ from .region import RegionCloser, RegionOpener
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, operator_config, snapshot
 from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
 
+# An operator is anything the pipeline can execute as a step.
+Operator = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
+
 
 
 @dataclass(frozen=True)
@@ -26,7 +29,7 @@ class Region:
 class Pipeline:
     def __init__(
         self,
-        operators: Iterable[Callable[..., Any] | ContextOp],
+        operators: Iterable[Operator],
         auto_validate: bool = False,
         tracing: TracingConfig | None = None,
     ):
@@ -49,7 +52,7 @@ class Pipeline:
             if collector is not None else None
         )
 
-    def extend(self, operators: Iterable[Callable[..., Any] | ContextOp]) -> Pipeline:
+    def extend(self, operators: Iterable[Operator]) -> Pipeline:
         """Append *operators* to this pipeline in place and return self."""
         self.operators.extend(self._flatten(list(operators)))
         if self._auto_validate:
@@ -192,7 +195,7 @@ class Pipeline:
         return j - 1
 
     @staticmethod
-    def _flatten(operators: list) -> list:
+    def _flatten(operators: list[Operator]) -> list[Operator]:
         flat = []
         for op in operators:
             if isinstance(op, Inline):

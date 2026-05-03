@@ -1537,7 +1537,7 @@ class Scatter(RegionOpener):
         def run_region(entry: Any) -> None:
             child_trace = InvocationTrace(batch_size=n_items, workers=gate.max_concurrency) if collecting else _NoOpTrace()
             try:
-                result, child_trace = execute_region(entry.value, child_trace)
+                result, child_trace = execute_region(entry.value, child_trace)  # cfg flows via closure in execute_region
                 entry.deposit(result, child_trace if collecting else None)
             except BaseException as exc:
                 entry.deposit_exception(exc, child_trace if collecting else None)
