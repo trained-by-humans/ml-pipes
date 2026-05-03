@@ -84,7 +84,7 @@ class TracingConfig:
     operator_labels: list[str] | None = None
     capture_config: bool = False
     capture_shapes: bool = False
-    capture_outputs: bool = False
+    _capture_outputs: bool = False  # used internally by Pipeline.inspect(); not exposed via set_tracing()
 
 
 def snapshot(value: Any) -> Any:
