@@ -42,11 +42,10 @@ class Pipeline:
         operator_labels: list[str] | None = None,
         capture_config: bool = False,
         capture_shapes: bool = False,
-        capture_outputs: bool = False,
     ) -> None:
         """Attach or replace tracing. Pass collector=None to disable."""
         self._tracing_config = (
-            TracingConfig(collector, operator_labels, capture_config, capture_shapes, capture_outputs)
+            TracingConfig(collector, operator_labels, capture_config, capture_shapes)
             if collector is not None else None
         )
 
@@ -77,7 +76,7 @@ class Pipeline:
     def inspect(self, value: Any) -> InspectionResult:
         """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
         collector = _CaptureCollector()
-        cfg = TracingConfig(collector, capture_shapes=True, capture_outputs=True, capture_config=True)
+        cfg = TracingConfig(collector, capture_shapes=True, _capture_outputs=True, capture_config=True)
         self._call_with_tracing(value, cfg)
         return InspectionResult(collector.trace.spans)
 
@@ -177,7 +176,7 @@ class Pipeline:
             operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
             input_shape=_extract_shape(current) if capture else None,
             output_shape=_extract_shape(result) if capture else None,
-            output_value=snapshot(result) if (cfg and cfg.capture_outputs) else None,
+            output_value=snapshot(result) if (cfg and cfg._capture_outputs) else None,
         ))
         return result, ctx_out
 

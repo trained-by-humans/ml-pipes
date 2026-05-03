@@ -81,7 +81,6 @@ TracingConfig(
     operator_labels=["resize", "infer", "nms"],  # override default "{i}:ClassName" labels
     capture_config=True,    # record StepSpan.operator_config (constructor args)
     capture_shapes=True,    # record StepSpan.input_shape / output_shape
-    capture_outputs=True,   # record StepSpan.output_value (deep-copied snapshot)
 )
 ```
 
@@ -93,18 +92,17 @@ pipeline.set_tracing(
     operator_labels=["resize", "infer", "nms"],
     capture_config=True,
     capture_shapes=True,
-    capture_outputs=True,
 )
 ```
 
-`capture_config`, `capture_shapes`, and `capture_outputs` are intended for
-debugging — they give collectors access to how each operator is configured,
-what shapes it handles, and what it produced, without modifying the pipeline itself.
+`capture_config` and `capture_shapes` are intended for debugging — they give
+collectors access to how each operator is configured and what shapes it handles,
+without modifying the pipeline itself.
 
-> [!CAUTION]
-> `capture_outputs=True` deep-copies every step's output on every call.
-> For large tensors or high-throughput pipelines this adds significant memory
-> and CPU overhead. Only enable it during active debugging.
+`StepSpan.output_value` is also available on spans, populated by
+`Pipeline.inspect()`. It is not exposed via `set_tracing()` because
+deep-copying every step output on every call would be prohibitively expensive
+in production; inspection is a one-shot debugging tool.
 
 ## Attaching and detaching at runtime
 
