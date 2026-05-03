@@ -120,6 +120,26 @@ def _tensor_to_heatmap(value: TensorPayload) -> np.ndarray:
     return cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
 
 
+# ---------------------------------------------------------------------------
+# Block renderer registry
+# ---------------------------------------------------------------------------
+
+# Maps a type to a callable (value) -> list[_Block].
+# Checked in registration order; first match wins (MRO not respected —
+# register subclasses before base classes if both need distinct handlers).
+# External code can extend this via register_block_renderer().
+_BLOCK_RENDERERS: dict[type, Any] = {}
+
+
+def register_block_renderer(type_: type, renderer: Any) -> None:
+    """Register a renderer for *type_* in the inspection block registry.
+
+    *renderer* must be callable as ``renderer(value) -> list[_Block]``.
+    The new entry takes priority over existing entries for the same type.
+    """
+    _BLOCK_RENDERERS[type_] = renderer
+
+
 def _value_to_blocks(value: Any) -> list[_Block]:
     """Convert a pipeline output value to a list of display blocks."""
     if isinstance(value, tuple):
@@ -128,22 +148,30 @@ def _value_to_blocks(value: Any) -> list[_Block]:
             blocks.extend(_value_to_blocks(item))
         return blocks
 
+    for type_, renderer in _BLOCK_RENDERERS.items():
+        if isinstance(value, type_):
+            return renderer(value)
+
     name = type(value).__name__
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return [_TextBlock(name, [(f.name, str(getattr(value, f.name))) for f in dataclasses.fields(value)])]
 
-    if isinstance(value, ImagePayload):
+    text = repr(value)
+    return [_TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
+
+
+def _register_builtin_renderers() -> None:
+    def _render_image(value: ImagePayload) -> list[_Block]:
         h, w = value.array.shape[:2]
-        return [_ImageBlock(
-            title=f"{name}  {w}×{h}  {value.color_space}",
-            array=_image_to_rgb(value),
-        )]
+        name = type(value).__name__
+        return [_ImageBlock(title=f"{name}  {w}×{h}  {value.color_space}", array=_image_to_rgb(value))]
 
-    if isinstance(value, TensorPayload):
-        return [_ImageBlock(
-            title=f"{name}  {value.array.shape}  {value.dtype}  ·  ch0 heatmap",
-            array=_tensor_to_heatmap(value),
-        )]
+    def _render_tensor(value: TensorPayload) -> list[_Block]:
+        name = type(value).__name__
+        return [_ImageBlock(title=f"{name}  {value.array.shape}  {value.dtype}  ·  ch0 heatmap", array=_tensor_to_heatmap(value))]
 
-    if isinstance(value, ResizeTransform):
+    def _render_resize_transform(value: ResizeTransform) -> list[_Block]:
+        name = type(value).__name__
         return [_TextBlock(name, [
             ("scale",    _fmt_floats(value.scale)),
             ("pad",      _fmt_floats(value.pad)),
@@ -151,36 +179,45 @@ def _value_to_blocks(value: Any) -> list[_Block]:
             ("resized",  str(value.resized_shape)),
         ])]
 
-    if isinstance(value, RuntimeOutputs):
+    def _render_runtime_outputs(value: RuntimeOutputs) -> list[_Block]:
+        name = type(value).__name__
         return [_TextBlock(name, [(n, str(t.array.shape)) for n, t in zip(value.names, value.tensors)])]
 
-    if isinstance(value, TensorRegistry):
+    def _render_tensor_registry(value: TensorRegistry) -> list[_Block]:
+        name = type(value).__name__
         return [_TextBlock(name, [(k, str(v.shape)) for k, v in value._tensors.items()])]
 
-    if isinstance(value, Segmentations):
+    def _render_segmentations(value: Segmentations) -> list[_Block]:
+        name = type(value).__name__
         n = len(value.boxes)
-        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}  mask✓")
-                for i in range(min(n, 6))]
+        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}  mask✓") for i in range(min(n, 6))]
         if n > 6:
             rows.append(("…", f"+{n - 6} more"))
         return [_TextBlock(f"{name} ({n})", rows)]
 
-    if isinstance(value, Detections):
+    def _render_detections(value: Detections) -> list[_Block]:
+        name = type(value).__name__
         n = len(value.boxes)
-        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}")
-                for i in range(min(n, 6))]
+        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}") for i in range(min(n, 6))]
         if n > 6:
             rows.append(("…", f"+{n - 6} more"))
         return [_TextBlock(f"{name} ({n})", rows)]
 
-    if isinstance(value, bytes):
-        return [_TextBlock(name, [("size", f"{len(value) / 1024:.1f} KB")])]
+    def _render_bytes(value: bytes) -> list[_Block]:
+        return [_TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
 
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return [_TextBlock(name, [(f.name, str(getattr(value, f.name))) for f in dataclasses.fields(value)])]
+    # Subclasses before base classes so isinstance matching is correct.
+    register_block_renderer(Segmentations, _render_segmentations)
+    register_block_renderer(Detections,    _render_detections)
+    register_block_renderer(ImagePayload,  _render_image)
+    register_block_renderer(TensorPayload, _render_tensor)
+    register_block_renderer(ResizeTransform,   _render_resize_transform)
+    register_block_renderer(RuntimeOutputs,    _render_runtime_outputs)
+    register_block_renderer(TensorRegistry,    _render_tensor_registry)
+    register_block_renderer(bytes,             _render_bytes)
 
-    text = repr(value)
-    return [_TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
+
+_register_builtin_renderers()
 
 
 def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepView, np.ndarray | None]:
