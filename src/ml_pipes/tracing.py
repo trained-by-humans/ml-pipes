@@ -18,6 +18,22 @@ class StepSpan:
     output_value: Any = None
     child_trace: InvocationTrace | None = None
 
+    def __repr__(self) -> str:
+        parts = [f"{self.label} {self.duration_s * 1000:.2f}ms"]
+        if self.error:
+            parts.append("!")
+        if self.output_shape:
+            parts.append(f"→ {self.output_shape}")
+        return " ".join(parts)
+
+
+def _fmt_batch_size(batch_size: float | None) -> str:
+    if batch_size is None:
+        return "?"
+    if float(batch_size).is_integer():
+        return str(int(batch_size))
+    return f"{batch_size:.1f}"
+
 
 @dataclass
 class InvocationTrace:
@@ -30,6 +46,36 @@ class InvocationTrace:
         if self.total_duration_s == 0.0:
             return {s.label: 0.0 for s in self.spans}
         return {s.label: s.duration_s / self.total_duration_s for s in self.spans}
+
+    def __repr__(self) -> str:
+        return _fmt_trace(self)
+
+
+def _fmt_trace(trace: "InvocationTrace", indent: int = 0) -> str:
+    prefix = "  " * indent
+    fracs = trace.span_fractions()
+    lines = []
+    for span in trace.spans:
+        mark = " !" if span.error else ""
+        shape = f"  → {span.output_shape}" if span.output_shape else ""
+        config = f"  cfg={span.operator_config}" if span.operator_config else ""
+        label = span.label[:29] + "…" if len(span.label) > 30 else span.label
+        lines.append(
+            f"{prefix}  {label:30s} {span.duration_s * 1000:7.2f}ms"
+            f"  ({fracs[span.label] * 100:4.1f}%){mark}{shape}{config}"
+        )
+        if span.child_trace is not None:
+            ct = span.child_trace
+            if ct.workers is not None:
+                annotation = f" [n_items={_fmt_batch_size(ct.batch_size)}, concurrency={ct.workers}]"
+            elif ct.batch_size is not None:
+                annotation = f" [batch_size={_fmt_batch_size(ct.batch_size)}]"
+            else:
+                annotation = ""
+            lines.append(f"{prefix}    ↳ child trace{annotation}:")
+            lines.append(_fmt_trace(span.child_trace, indent + 2))
+    lines.append(f"{prefix}  {'total':30s} {trace.total_duration_s * 1000:7.2f}ms")
+    return "\n".join(lines)
 
 
 @dataclass
