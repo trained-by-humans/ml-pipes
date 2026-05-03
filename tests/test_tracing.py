@@ -351,3 +351,37 @@ def test_print_collector_does_not_raise(capsys):
     assert "0:_double" in out
     assert "1:_add_one" in out
     assert "total" in out
+
+
+# ---------------------------------------------------------------------------
+# operator_config — pickle safety
+# ---------------------------------------------------------------------------
+
+def test_operator_config_callable_serializable():
+    import pickle
+    from ml_pipes.tracing import operator_config
+
+    class OpWithLambda:
+        def __init__(self):
+            self.threshold = 0.5
+            self.predicate = lambda x: x > 0  # not pickle-safe as raw value
+
+    cfg = operator_config(OpWithLambda())
+    assert cfg["threshold"] == 0.5
+    assert isinstance(cfg["predicate"], str)   # converted to repr
+    # must not raise
+    pickle.dumps(cfg)
+
+
+def test_inspect_with_lambda_operator_is_serializable():
+    import pickle
+    from ml_pipes import FilterPredictions, InspectionSerializer
+    from ml_pipes.types import Detections
+
+    pred = Detections(boxes=[[0,0,1,1],[1,1,2,2]], scores=[0.9, 0.4], classes=[0, 1])
+    p = Pipeline([FilterPredictions(predicate=lambda d: [s > 0.5 for s in d.scores])])
+    result = p.inspect(pred)
+
+    data = InspectionSerializer().dumps(result)
+    restored = InspectionSerializer().loads(data)
+    assert len(restored.spans) == len(result.spans)
