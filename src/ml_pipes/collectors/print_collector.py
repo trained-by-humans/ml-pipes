@@ -4,14 +4,6 @@ from ..tracing import InvocationTrace
 from .serial_collector import SerialCollector
 
 
-def _fmt_batch_size(batch_size: float | None) -> str:
-    if batch_size is None:
-        return "?"
-    if float(batch_size).is_integer():
-        return str(int(batch_size))
-    return f"{batch_size:.1f}"
-
-
 class PrintCollector(SerialCollector):
     """Prints each trace to stdout. Useful for development and debugging.
 
@@ -27,28 +19,10 @@ class PrintCollector(SerialCollector):
         self.last_trace = trace
         self.print_trace(trace)
 
-    def print_trace(self, trace: InvocationTrace | None = None, indent: int = 0) -> None:
+    def print_trace(self, trace: InvocationTrace | None = None) -> None:
         """Print *trace* (defaults to ``last_trace``) to stdout."""
         if trace is None:
             trace = self.last_trace
         if trace is None:
             return
-        prefix = "  " * indent
-        fracs = trace.span_fractions()
-        for span in trace.spans:
-            mark = " !" if span.error else ""
-            print(
-                f"{prefix}  {span.label:30s} {span.duration_s * 1000:7.2f}ms"
-                f"  ({fracs[span.label] * 100:5.1f}%){mark}"
-            )
-            if span.child_trace is not None:
-                ct = span.child_trace
-                if ct.workers is not None:
-                    annotation = f" [n_items={_fmt_batch_size(ct.batch_size)}, concurrency={ct.workers}]"
-                elif ct.batch_size is not None:
-                    annotation = f" [batch_size={_fmt_batch_size(ct.batch_size)}]"
-                else:
-                    annotation = ""
-                print(f"{prefix}    ↳ child trace{annotation}:")
-                self.print_trace(span.child_trace, indent + 2)
-        print(f"{prefix}  {'total':30s} {trace.total_duration_s * 1000:7.2f}ms")
+        print(trace)
