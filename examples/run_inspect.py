@@ -1,14 +1,20 @@
 """
 Inspection example: visualise the data at every pipeline step.
 
-Runs a full YOLOv8 detection pipeline on a sample image and shows
-the actual output at each step — decoded image, letterboxed resize,
-normalised tensor heatmap, raw inference outputs, post-processing
-state, and final detections.
+Two pipelines are demonstrated:
+
+  simple   — single image through the full YOLOv8 detection pipeline.
+
+  batched  — 8 image paths in, Scatter decodes them concurrently,
+             Batch groups them into batches of 4 for inference,
+             UnBatch/Gather collect per-image detections.
 
 Usage:
     # Open result in the default web browser (default behaviour)
     python run_inspect.py
+
+    # Use the batched pipeline
+    python run_inspect.py --pipeline batched
 
     # Save HTML report to a file (does not open browser)
     python run_inspect.py --save report.html
@@ -40,24 +46,64 @@ from common import (
     resolve_model_path,
     decode,
 )
-from examples.common import COCO_CLASSES, build_output_path, visualize_detections_and_store
+from common import COCO_CLASSES, build_output_path, visualize_detections_and_store
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
-from ml_pipes import HtmlRenderer, InspectionResult, InspectionSerializer, Pipeline
+from run_batch_yolo8_onnx import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
+from ml_pipes import (
+    Gather,
+    HtmlRenderer,
+    Inline,
+    InspectionResult,
+    InspectionSerializer,
+    Pipeline,
+    Scatter,
+)
 
 
 # ---------------------------------------------------------------------------
 # Inspection logic
 # ---------------------------------------------------------------------------
 
-def run_inspection(model_path: Path, image_path: Path, output_path: Path) -> InspectionResult:
+def run_inspection_simple(model_path: Path, image_path: Path, output_path: Path) -> InspectionResult:
+    """Single image → decode → infer → visualize."""
     pipeline: Pipeline = (
         decode()
         + yolo8_inference_pipeline(model_path)
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
     pipeline.validate()
-    print("Running inspection...", file=sys.stderr)
+    print("Running simple inspection...", file=sys.stderr)
     result = pipeline.inspect(image_path)
+    print(result)
+    return result
+
+
+def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResult:
+    """8 paths → Scatter(decode+preprocess) → Gather → Batch(4) Infer → UnBatch → Detections.
+
+    Uses the dynamic-batch ONNX model (yolov8n_dynamic.onnx) which accepts any
+    batch size. Scatter fans the list out to worker threads; Gather collects
+    preprocessed tensors; the Batch region runs batched inference.
+    """
+    from run_batch_yolo8_onnx import _export_dynamic_model
+
+    model_path = assets_dir / BATCH_MODEL_NAME
+    if not model_path.exists():
+        print(f"Exporting dynamic-batch model → {model_path}", file=sys.stderr)
+        _export_dynamic_model(model_path)
+
+    # build_batch_pipeline expects single-threaded Batch gate usage;
+    # wrap it with Scatter/Gather so inspect() can drive it from a list.
+    per_image = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
+    pipeline = Pipeline([
+        Scatter(max_concurrency=4),
+        Inline(per_image),
+        Gather(),
+    ])
+
+    image_paths = [image_path] * 8
+    print("Running batched inspection...", file=sys.stderr)
+    result = pipeline.inspect(image_paths)
     print(result)
     return result
 
@@ -87,6 +133,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_assets_dir_arg(parser)
     add_model_arg(parser, list(YOLO8_MODELS))
+    parser.add_argument("--pipeline", choices=["simple", "batched"], default="simple",
+                        help="Which pipeline to inspect (default: simple).")
     parser.add_argument("--load", metavar="PATH", type=Path, default=None,
                         help="Load a previously serialized result instead of running the pipeline.")
     group = parser.add_mutually_exclusive_group()
@@ -121,7 +169,10 @@ def main() -> int:
     print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(COCO_IMAGE_URL, image_path)
 
-    result = run_inspection(model_path, image_path, output_path)
+    if args.pipeline == "batched":
+        result = run_inspection_batched(assets_dir, image_path)
+    else:
+        result = run_inspection_simple(model_path, image_path, output_path)
     show_result(result, args)
     return 0
 

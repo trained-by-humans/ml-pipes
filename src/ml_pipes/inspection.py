@@ -82,6 +82,7 @@ class _StepView:
     operator_config: dict[str, Any]
     blocks: list[_Block]
     error: bool = False
+    children: list[_StepView] = field(default_factory=list)  # non-empty for Batch/Scatter regions
 
 
 # ---------------------------------------------------------------------------
@@ -102,12 +103,24 @@ def _image_to_rgb(value: ImagePayload) -> np.ndarray:
     return arr
 
 
-def _tensor_to_heatmap(value: TensorPayload) -> np.ndarray:
-    arr = value.array
-    if arr.ndim == 4:
-        ch = arr[0, 0] if value.layout.startswith("N") else arr[0, :, :, 0]
-    elif arr.ndim == 3:
-        ch = arr[0] if value.layout.startswith("C") else arr[:, :, 0]
+def _make_grid(images: list[np.ndarray]) -> np.ndarray:
+    """Tile a list of HxWx3 RGB images into a square-ish grid."""
+    import math
+    n = len(images)
+    cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    h, w = images[0].shape[:2]
+    grid = np.zeros((rows * h, cols * w, 3), dtype=np.uint8)
+    for idx, img in enumerate(images):
+        r, c = divmod(idx, cols)
+        grid[r * h:(r + 1) * h, c * w:(c + 1) * w] = img
+    return grid
+
+
+def _tensor_item_to_heatmap(arr: np.ndarray, layout: str) -> np.ndarray:
+    """Render a single (non-batched) tensor item as a false-colour heatmap."""
+    if arr.ndim == 3:
+        ch = arr[0] if layout.startswith("C") else arr[:, :, 0]
     else:
         ch = arr
     ch = ch.astype(np.float32)
@@ -131,6 +144,22 @@ def _tensor_to_heatmap(value: TensorPayload) -> np.ndarray:
 _BLOCK_RENDERERS: dict[type, Any] = {}
 
 
+def _block_summary(blocks: list[_Block]) -> str:
+    """Collapse a block list to a single short string for use as a list-item row value."""
+    parts = []
+    for b in blocks:
+        if isinstance(b, _ImageBlock):
+            parts.append(b.title)
+        else:
+            # title + first row value if present
+            summary = b.title
+            if b.rows:
+                k, v = b.rows[0]
+                summary += f"  {k} {v}".rstrip() if k else f"  {v}"
+            parts.append(summary)
+    return "  |  ".join(parts)
+
+
 def register_block_renderer(type_: type, renderer: Any) -> None:
     """Register a renderer for *type_* in the inspection block registry.
 
@@ -147,6 +176,14 @@ def _value_to_blocks(value: Any) -> list[_Block]:
         for item in value:
             blocks.extend(_value_to_blocks(item))
         return blocks
+
+    if isinstance(value, list) and value:
+        for type_, renderer in _BLOCK_RENDERERS.items():
+            if isinstance(value[0], type_):
+                rows = [(f"[{i}]", _block_summary(renderer(item))) for i, item in enumerate(value)]
+                return [_TextBlock(f"list  ×{len(value)}", rows)]
+        item_type = type(value[0]).__name__
+        return [_TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
 
     for type_, renderer in _BLOCK_RENDERERS.items():
         if isinstance(value, type_):
@@ -168,7 +205,15 @@ def _register_builtin_renderers() -> None:
 
     def _render_tensor(value: TensorPayload) -> list[_Block]:
         name = type(value).__name__
-        return [_ImageBlock(title=f"{name}  {value.array.shape}  {value.dtype}  ·  ch0 heatmap", array=_tensor_to_heatmap(value))]
+        arr = value.array
+        is_batched = arr.ndim == 4 and value.layout.startswith("N")
+        if is_batched:
+            n = arr.shape[0]
+            item_layout = value.layout[1:]
+            heatmaps = [_tensor_item_to_heatmap(arr[i], item_layout) for i in range(n)]
+            grid = _make_grid(heatmaps)
+            return [_ImageBlock(title=f"{name}  {arr.shape}  {value.dtype}", array=grid)]
+        return [_ImageBlock(title=f"{name}  {arr.shape}  {value.dtype}", array=_tensor_item_to_heatmap(arr, value.layout))]
 
     def _render_resize_transform(value: ResizeTransform) -> list[_Block]:
         name = type(value).__name__
@@ -223,15 +268,16 @@ _register_builtin_renderers()
 def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepView, np.ndarray | None]:
     """Convert a StepSpan to a _StepView and return the updated last_image."""
     if span.error:
-        return _StepView(span.label, span.operator_config, [], error=True), last_image
+        children, _ = _build_views_from_trace(span.child_trace, last_image)
+        return _StepView(span.label, span.operator_config, [], error=True, children=children), last_image
 
     val = span.output_value
     if val is None:
-        return _StepView(span.label, span.operator_config, []), last_image
+        children, _ = _build_views_from_trace(span.child_trace, last_image)
+        return _StepView(span.label, span.operator_config, [], children=children), last_image
 
     raw_blocks = _value_to_blocks(val)
 
-    # Find first image block to update last_image
     new_image: np.ndarray | None = None
     for b in raw_blocks:
         if isinstance(b, _ImageBlock):
@@ -243,13 +289,23 @@ def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepV
         last_image = new_image
         blocks = raw_blocks
     elif last_image is not None:
-        # Carry forward: prepend a dimmed image block, keep text blocks
         carry = _ImageBlock(title="↑ previous", array=last_image, dim=True)
         blocks = [carry] + raw_blocks
     else:
         blocks = raw_blocks
 
-    return _StepView(span.label, span.operator_config, blocks), last_image
+    children, _ = _build_views_from_trace(span.child_trace, last_image)
+    return _StepView(span.label, span.operator_config, blocks, children=children), last_image
+
+
+def _build_views_from_trace(trace: Any, last_image: np.ndarray | None) -> tuple[list[_StepView], np.ndarray | None]:
+    if trace is None:
+        return [], last_image
+    views = []
+    for span in trace.spans:
+        view, last_image = _to_step_view(span, last_image)
+        views.append(view)
+    return views, last_image
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +373,7 @@ _CSS = """
 #insp-cfg-popup td { padding: 1px 10px 1px 0; vertical-align: top; }
 .insp-cfg-key { color: #9cdcfe; }
 .insp-cfg-val { color: #ce9178; }
+
 </style>
 <div id="insp-cfg-popup"></div>
 <script>
@@ -356,8 +413,16 @@ class HtmlRenderer:
 
     def render(self, result: "InspectionResult") -> str:
         """Return a self-contained HTML string."""
-        cards = [self._card(v) for v in result.build_views()]
+        cards = [self._card(v) for v in self._flatten(result.build_views())]
         return f'{_CSS}<div class="insp-container">{"".join(cards)}</div>'
+
+    @staticmethod
+    def _flatten(views: list[_StepView]) -> list[_StepView]:
+        out = []
+        for v in views:
+            out.append(v)
+            out.extend(HtmlRenderer._flatten(v.children))
+        return out
 
     def save(self, result: "InspectionResult", path: str | Path) -> Path:
         """Write the HTML report to *path* and return it."""
@@ -446,34 +511,49 @@ class PlotRenderer:
         self.cell_w = cell_w
         self.cell_h = cell_h
 
+    @staticmethod
+    def _flatten_views(views: list[_StepView], depth: int = 0) -> list[tuple[_StepView, int]]:
+        flat = []
+        for v in views:
+            flat.append((v, depth))
+            flat.extend(PlotRenderer._flatten_views(v.children, depth + 1))
+        return flat
+
     def render(self, result: "InspectionResult") -> "matplotlib.figure.Figure":
         import matplotlib
         import matplotlib.pyplot as plt
 
-        views = result.build_views()
+        views = self._flatten_views(result.build_views())
         n = len(views)
         rows = max(1, (n + self.cols - 1) // self.cols)
         fig, axes = plt.subplots(rows, self.cols,
                                  figsize=(self.cols * self.cell_w, rows * self.cell_h))
         ax_flat: list[matplotlib.axes.Axes] = np.array(axes).flatten().tolist()
 
-        for i, view in enumerate(views):
-            self._axes(ax_flat[i], view)
+        for i, (view, depth) in enumerate(views):
+            self._axes(ax_flat[i], view, depth)
         for ax in ax_flat[n:]:
             ax.set_visible(False)
 
         fig.tight_layout(pad=0.5)
         return fig
 
-    def _axes(self, ax: "matplotlib.axes.Axes", view: _StepView) -> None:
+    def _axes(self, ax: "matplotlib.axes.Axes", view: _StepView, depth: int = 0) -> None:
         ax.set_xticks([])
         ax.set_yticks([])
+
+        if depth > 0:
+            for spine in ax.spines.values():
+                spine.set_edgecolor("#aaa")
+                spine.set_linewidth(0.8)
+                spine.set_linestyle("dashed")
 
         if view.error:
             for spine in ax.spines.values():
                 spine.set_edgecolor("#c00")
                 spine.set_linewidth(2)
-            ax.set_title(view.label, fontsize=7.5, fontweight="bold", pad=3, loc="left")
+                spine.set_linestyle("solid")
+            ax.set_title("  " * depth + view.label, fontsize=7.5, fontweight="bold", pad=3, loc="left")
             return
 
         for block in view.blocks:
@@ -498,7 +578,7 @@ class PlotRenderer:
             cfg_short = "\n" + (joined if len(joined) <= 30 else joined[:27] + "…")
 
         ax.set_title(
-            view.label + cfg_short,
+            "  " * depth + view.label + cfg_short,
             fontsize=7.5, fontweight="bold", pad=3, loc="left",
         )
 
@@ -563,6 +643,7 @@ class InspectionResult:
         """Convert spans to display-ready _StepView objects.
 
         Called by HtmlRenderer and PlotRenderer; also available for custom renderers.
+        Region spans (Batch, Scatter) produce a _StepView with .children populated.
         """
         views: list[_StepView] = []
         last_image: np.ndarray | None = None
@@ -573,11 +654,18 @@ class InspectionResult:
 
     def __repr__(self) -> str:
         lines = ["InspectionResult:"]
-        for span in self.spans:
+        self._repr_spans(self.spans, lines, indent=2)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _repr_spans(spans: list[StepSpan], lines: list[str], indent: int) -> None:
+        prefix = " " * indent
+        for span in spans:
             shape = span.output_shape or ""
             err = " [ERROR]" if span.error else ""
-            lines.append(f"  {span.label:35s}  {str(shape):20s}{err}")
-        return "\n".join(lines)
+            lines.append(f"{prefix}{span.label:35s}  {str(shape):20s}{err}")
+            if span.child_trace is not None:
+                InspectionResult._repr_spans(span.child_trace.spans, lines, indent + 2)
 
     def _repr_html_(self) -> str:
         return HtmlRenderer().render(self)
