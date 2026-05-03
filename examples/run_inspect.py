@@ -1,7 +1,7 @@
 """
 Inspection example: visualise the data at every pipeline step.
 
-Two pipelines are demonstrated:
+Three pipelines are demonstrated:
 
   simple   — single image through the full YOLOv8 detection pipeline.
 
@@ -9,9 +9,16 @@ Two pipelines are demonstrated:
              Batch groups them into batches of 4 for inference,
              UnBatch/Gather collect per-image detections.
 
+  tiled    — single image tiled into overlapping 240×240 patches,
+             each tile inferred independently via Scatter, results
+             stitched back and deduplicated with NMM.
+
 Usage:
     # Open result in the default web browser (default behaviour)
     python run_inspect.py
+
+    # Use the tiled pipeline
+    python run_inspect.py --pipeline tiled
 
     # Use the batched pipeline
     python run_inspect.py --pipeline batched
@@ -47,6 +54,7 @@ from common import (
     decode,
 )
 from common import COCO_CLASSES, build_output_path, visualize_detections_and_store
+from ml_pipes import DrawBoxes, SaveImage
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from run_batch_yolo8_onnx import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
 from ml_pipes import (
@@ -55,8 +63,14 @@ from ml_pipes import (
     Inline,
     InspectionResult,
     InspectionSerializer,
+    NMM,
+    Pick,
     Pipeline,
+    Recall,
     Scatter,
+    Stitch,
+    Store,
+    Tile,
 )
 
 
@@ -108,6 +122,31 @@ def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResu
     return result
 
 
+def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) -> InspectionResult:
+    """Single image → Tile → Scatter(infer per tile) → Gather → Stitch → NMM → DrawBoxes."""
+    infer = yolo8_inference_pipeline(model_path)
+    pipeline = Pipeline([
+        Inline(decode()),
+        Tile(slice_wh=(240, 240), overlap_wh=(80, 80)),
+        Store("tile_rects", index=1),
+        Pick(0),
+        Scatter(max_concurrency=4),
+        Inline(infer),
+        Gather(),
+        Recall("tile_rects"),
+        Stitch(),
+        NMM(iou_threshold=0.5),
+        Recall("source_image", index=0),
+        DrawBoxes(class_names=COCO_CLASSES),
+        SaveImage(output_path, at=0),
+        Pick(0),
+    ])
+    print("Running tiled inspection...", file=sys.stderr)
+    result = pipeline.inspect(image_path)
+    print(result)
+    return result
+
+
 def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
     if args.save:
         saved = HtmlRenderer().save(result, args.save)
@@ -133,7 +172,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_assets_dir_arg(parser)
     add_model_arg(parser, list(YOLO8_MODELS))
-    parser.add_argument("--pipeline", choices=["simple", "batched"], default="simple",
+    parser.add_argument("--pipeline", choices=["simple", "batched", "tiled"], default="simple",
                         help="Which pipeline to inspect (default: simple).")
     parser.add_argument("--load", metavar="PATH", type=Path, default=None,
                         help="Load a previously serialized result instead of running the pipeline.")
@@ -171,6 +210,8 @@ def main() -> int:
 
     if args.pipeline == "batched":
         result = run_inspection_batched(assets_dir, image_path)
+    elif args.pipeline == "tiled":
+        result = run_inspection_tiled(model_path, image_path, output_path)
     else:
         result = run_inspection_simple(model_path, image_path, output_path)
     show_result(result, args)
