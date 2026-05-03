@@ -19,7 +19,9 @@ from __future__ import annotations
 import base64
 import dataclasses
 import html as _html
+import io
 import os
+import pickle
 import tempfile
 import webbrowser
 from dataclasses import dataclass, field
@@ -305,11 +307,32 @@ _CSS = """
 
 
 class HtmlRenderer:
-    """Renders a list of _StepView objects as an HTML card strip."""
+    """Renders an InspectionResult as an HTML card strip.
 
-    def render(self, views: list[_StepView]) -> str:
-        cards = [self._card(v) for v in views]
+    Example::
+
+        result = pipeline.inspect(image_path)
+        renderer = HtmlRenderer()
+        html: str = renderer.render(result)          # HTML string — embed anywhere
+        renderer.save(result, "report.html")         # write to file
+    """
+
+    def render(self, result: "InspectionResult") -> str:
+        """Return a self-contained HTML string."""
+        cards = [self._card(v) for v in result.build_views()]
         return f'{_CSS}<div class="insp-container">{"".join(cards)}</div>'
+
+    def save(self, result: "InspectionResult", path: str | Path) -> Path:
+        """Write the HTML report to *path* and return it."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<title>Pipeline inspection</title></head><body>"
+            f"{self.render(result)}</body></html>",
+            encoding="utf-8",
+        )
+        return out
 
     def _card(self, view: _StepView) -> str:
         error_cls = " insp-card-error" if view.error else ""
@@ -371,17 +394,26 @@ class HtmlRenderer:
 # ---------------------------------------------------------------------------
 
 class PlotRenderer:
-    """Renders a list of _StepView objects as a matplotlib Figure."""
+    """Renders an InspectionResult as a matplotlib Figure.
+
+    Example::
+
+        result = pipeline.inspect(image_path)
+        fig = PlotRenderer(cols=4).render(result)
+        fig.savefig("steps.png", dpi=150)
+        fig.show()
+    """
 
     def __init__(self, cols: int = 6, cell_w: float = 2.6, cell_h: float = 3.2) -> None:
         self.cols = cols
         self.cell_w = cell_w
         self.cell_h = cell_h
 
-    def render(self, views: list[_StepView]) -> "matplotlib.figure.Figure":
+    def render(self, result: "InspectionResult") -> "matplotlib.figure.Figure":
         import matplotlib
         import matplotlib.pyplot as plt
 
+        views = result.build_views()
         n = len(views)
         rows = max(1, (n + self.cols - 1) // self.cols)
         fig, axes = plt.subplots(rows, self.cols,
@@ -435,6 +467,52 @@ class PlotRenderer:
 
 
 # ---------------------------------------------------------------------------
+# Serializer
+# ---------------------------------------------------------------------------
+
+class InspectionSerializer:
+    """Serializes / deserializes an InspectionResult to bytes via pickle.
+
+    Use this when you want to produce bytes in memory and decide yourself
+    where they go — S3, a database, a socket, a test fixture, etc.
+
+    Example::
+
+        # On the inference machine:
+        result = pipeline.inspect(image_path)
+        data: bytes = InspectionSerializer().dumps(result)
+        upload_to_s3(data, key="run42/inspection.pkl")
+
+        # On a dev laptop:
+        data = download_from_s3(key="run42/inspection.pkl")
+        result = InspectionSerializer().loads(data)
+        result.show()
+    """
+
+    def dumps(self, result: "InspectionResult") -> bytes:
+        """Serialize *result* to bytes."""
+        return pickle.dumps(result)
+
+    def loads(self, data: bytes) -> "InspectionResult":
+        """Deserialize bytes produced by :meth:`dumps` (in-memory counterpart to :meth:`load`)."""
+        obj = pickle.loads(data)
+        if not isinstance(obj, InspectionResult):
+            raise TypeError(f"Expected InspectionResult, got {type(obj).__name__}")
+        return obj
+
+    def dump(self, result: "InspectionResult", path: str | Path) -> Path:
+        """Serialize *result* to a file. Returns the path."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(self.dumps(result))
+        return out
+
+    def load(self, path: str | Path) -> "InspectionResult":
+        """Deserialize from a file produced by :meth:`dump`."""
+        return self.loads(Path(path).read_bytes())
+
+
+# ---------------------------------------------------------------------------
 # Public result class
 # ---------------------------------------------------------------------------
 
@@ -444,17 +522,17 @@ class InspectionResult:
     def __init__(self, spans: list[StepSpan]) -> None:
         self.spans = spans
 
-    # -- views (lazy, shared by both renderers) --
+    def build_views(self) -> list[_StepView]:
+        """Convert spans to display-ready _StepView objects.
 
-    def _build_views(self) -> list[_StepView]:
+        Called by HtmlRenderer and PlotRenderer; also available for custom renderers.
+        """
         views: list[_StepView] = []
         last_image: np.ndarray | None = None
         for span in self.spans:
             view, last_image = _to_step_view(span, last_image)
             views.append(view)
         return views
-
-    # -- text repr --
 
     def __repr__(self) -> str:
         lines = ["InspectionResult:"]
@@ -464,36 +542,51 @@ class InspectionResult:
             lines.append(f"  {span.label:35s}  {str(shape):20s}{err}")
         return "\n".join(lines)
 
-    # -- Jupyter HTML --
-
     def _repr_html_(self) -> str:
-        return HtmlRenderer().render(self._build_views())
-
-    # -- matplotlib --
+        return HtmlRenderer().render(self)
 
     def plot(self, cols: int = 6, cell_w: float = 2.6, cell_h: float = 3.2) -> "matplotlib.figure.Figure":
-        """Render each step as a matplotlib subplot. Returns the Figure."""
-        return PlotRenderer(cols=cols, cell_w=cell_w, cell_h=cell_h).render(self._build_views())
+        """Convenience: render with PlotRenderer. Returns the Figure."""
+        return PlotRenderer(cols=cols, cell_w=cell_w, cell_h=cell_h).render(self)
 
-    # -- save to file --
+    def show(self, cols: int = 6) -> None:
+        """Display the result immediately.
 
-    def save(self, path: str | Path | None = None, open_browser: bool = True) -> Path:
-        """Write the HTML report to a file. Prints the path. Opens browser unless open_browser=False."""
-        if path is None:
-            fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
-            os.close(fd)
-            out = Path(tmp)
+        In Jupyter: renders the HTML card strip inline (no browser needed).
+        In a script/terminal: opens a matplotlib window via plt.show().
+        """
+        try:
+            get_ipython  # type: ignore[name-defined]  # noqa: F821
+            in_jupyter = True
+        except NameError:
+            in_jupyter = False
+
+        if in_jupyter:
+            from IPython.display import HTML, display
+            display(HTML(self._repr_html_()))
         else:
-            out = Path(path)
-            out.parent.mkdir(parents=True, exist_ok=True)
+            import matplotlib.pyplot as plt
+            self.plot(cols=cols)
+            plt.show()
 
+    def show_in_browser(self) -> None:
+        """Open the HTML report in the default web browser via a temporary file."""
+        fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
+        os.close(fd)
+        out = Path(tmp)
         out.write_text(
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             "<title>Pipeline inspection</title></head><body>"
-            f"{self._repr_html_()}</body></html>",
+            f"{HtmlRenderer().render(self)}</body></html>",
             encoding="utf-8",
         )
-        print(f"Inspection report saved to: {out}")
-        if open_browser:
-            webbrowser.open(out.as_uri())
-        return out
+        webbrowser.open(out.as_uri())
+
+    def dump(self, path: str | Path) -> Path:
+        """Serialize this result to a file. Convenience for InspectionSerializer().dump()."""
+        return InspectionSerializer().dump(self, path)
+
+    @staticmethod
+    def load(path: str | Path) -> "InspectionResult":
+        """Load a serialized result from a file. Convenience for InspectionSerializer().load()."""
+        return InspectionSerializer().load(path)
