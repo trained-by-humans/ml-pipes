@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable
 _log = logging.getLogger(__name__)
 
 from .context import Context, ContextOp
+from .inspection import InspectionResult, _CaptureCollector
 from .region import RegionCloser, RegionOpener
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, operator_config, snapshot
 from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
@@ -71,10 +72,19 @@ class Pipeline:
         return Pipeline([*self.operators, *other.operators])
 
     def __call__(self, value: Any) -> Any:
-        cfg = self._tracing_config
+        return self._call_with_tracing(value, self._tracing_config)
+
+    def inspect(self, value: Any) -> InspectionResult:
+        """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
+        collector = _CaptureCollector()
+        cfg = TracingConfig(collector, capture_shapes=True, capture_outputs=True, capture_config=True)
+        self._call_with_tracing(value, cfg)
+        return InspectionResult(collector.trace.spans)
+
+    def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
         trace = InvocationTrace() if cfg is not None else _NoOpTrace()
         try:
-            result, trace = self._execute(value, trace=trace)
+            result, trace = self._execute(value, trace=trace, cfg=cfg)
         finally:
             if cfg is not None:
                 try:
@@ -82,18 +92,6 @@ class Pipeline:
                 except Exception:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
         return result
-
-    def inspect(self, value: Any) -> "InspectionResult":
-        """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
-        from .inspection import InspectionResult, _CaptureCollector
-        collector = _CaptureCollector()
-        old = self._tracing_config
-        self._tracing_config = TracingConfig(collector, capture_shapes=True, capture_outputs=True, capture_config=True)
-        try:
-            self(value)
-        finally:
-            self._tracing_config = old
-        return InspectionResult(collector.trace.spans)
 
     def validate(
         self,
@@ -122,8 +120,7 @@ class Pipeline:
             inference=inference,
         )
 
-    def _execute(self, value: Any, trace: Any, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
-        cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
+    def _execute(self, value: Any, trace: Any, cfg: TracingConfig | None, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
         start, end = region if region is not None else (0, len(self.operators))
         context = Context()
         current = value
@@ -149,7 +146,7 @@ class Pipeline:
         region_end = self._find_region_end(region_start, type(operator), operator.closing_type)
         # Bounded executor: the operator can only run operators within its own region.
         def execute_region(value: Any, child_trace: Any) -> Any:
-            return self._execute(value, trace=child_trace, region=(region_start, region_end))
+            return self._execute(value, trace=child_trace, cfg=cfg, region=(region_start, region_end))
         result = operator.run_region(current, label, execute_region, trace, cfg)
         return result, context
 
