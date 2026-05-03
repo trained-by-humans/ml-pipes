@@ -340,6 +340,53 @@ def test_concurrent_calls_each_get_own_trace():
 
 
 # ---------------------------------------------------------------------------
+# merge_traces — captured field preservation
+# ---------------------------------------------------------------------------
+
+def test_merge_traces_preserves_captured_fields():
+    from ml_pipes.tracing import StepSpan, InvocationTrace, merge_traces
+
+    span_a = StepSpan(
+        label="0:op", start_time=0.0, duration_s=0.01,
+        operator_config={"size": 640},
+        input_shape="ndarray (3, 4)",
+        output_shape="ndarray (3, 4)",
+        output_value=42,
+    )
+    span_b = StepSpan(
+        label="0:op", start_time=0.0, duration_s=0.03,
+        operator_config={"size": 640},
+        input_shape="ndarray (3, 4)",
+        output_shape="ndarray (3, 4)",
+        output_value=42,
+    )
+    trace_a = InvocationTrace(spans=[span_a], total_duration_s=0.01)
+    trace_b = InvocationTrace(spans=[span_b], total_duration_s=0.03)
+
+    merged = merge_traces([trace_a, trace_b])
+
+    assert len(merged.spans) == 1
+    s = merged.spans[0]
+    assert s.operator_config == {"size": 640}
+    assert s.input_shape == "ndarray (3, 4)"
+    assert s.output_shape == "ndarray (3, 4)"
+    assert s.output_value == 42
+    assert s.duration_s == pytest.approx(0.02)
+
+
+def test_merge_traces_propagates_error_flag():
+    from ml_pipes.tracing import StepSpan, InvocationTrace, merge_traces
+
+    ok   = StepSpan(label="0:op", start_time=0.0, duration_s=0.01, error=False)
+    fail = StepSpan(label="0:op", start_time=0.0, duration_s=0.01, error=True)
+    merged = merge_traces([
+        InvocationTrace(spans=[ok],   total_duration_s=0.01),
+        InvocationTrace(spans=[fail], total_duration_s=0.01),
+    ])
+    assert merged.spans[0].error is True
+
+
+# ---------------------------------------------------------------------------
 # PrintCollector smoke test
 # ---------------------------------------------------------------------------
 
