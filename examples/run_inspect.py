@@ -59,13 +59,13 @@ from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from run_batch_yolo8_onnx import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
 from ml_pipes import (
     Gather,
-    HtmlRenderer,
     Inline,
     InspectionResult,
     InspectionSerializer,
     NMM,
     Pick,
     Pipeline,
+    PipelineInspector,
     Recall,
     Scatter,
     Stitch,
@@ -148,20 +148,20 @@ def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) 
 
 
 def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
+    inspector = PipelineInspector()
     if args.save:
-        saved = HtmlRenderer().save(result, args.save)
+        saved = inspector.save_to_html(result, args.save)
         print(f"Inspection report saved to: {saved}", file=sys.stderr)
     elif args.plot:
-        fig = result.plot()
-        fig.savefig(args.plot, dpi=150, bbox_inches="tight")
-        print(f"Plot saved to: {args.plot}", file=sys.stderr)
+        saved = inspector.save_to_plot(result, args.plot)
+        print(f"Plot saved to: {saved}", file=sys.stderr)
     elif args.dump:
         saved = InspectionSerializer().dump(result, args.dump)
         print(f"Inspection result serialized to: {saved}", file=sys.stderr)
     elif args.print_only:
         pass
     else:
-        result.show_in_browser()
+        inspector.show_in_browser(result)
 
 
 # ---------------------------------------------------------------------------

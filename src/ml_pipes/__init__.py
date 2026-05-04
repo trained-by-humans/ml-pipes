@@ -1,5 +1,16 @@
 from .context import Context, Recall, Store
-from .inspection import HtmlRenderer, InspectionResult, InspectionSerializer, PlotRenderer, register_output_formatter, register_span_formatter
+from .inspection import (
+    HtmlRenderer,
+    ImageBlock,
+    InspectionResult,
+    InspectionSerializer,
+    OutputBlock,
+    PipelineInspector,
+    PlotRenderer,
+    Renderer,
+    StepView,
+    TextBlock,
+)
 from .core import Pipeline, Embed, embed, Inline, inline, Operator
 from .validation import PipelineValidationError, TypeContract
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
@@ -111,8 +122,12 @@ __all__ = [
     "InspectionResult",
     "InspectionSerializer",
     "PlotRenderer",
-    "register_output_formatter",
-    "register_span_formatter",
+    "ImageBlock",
+    "OutputBlock",
+    "PipelineInspector",
+    "Renderer",
+    "StepView",
+    "TextBlock",
     "Infer",
     "LoadFile",
     "LogDetections",
