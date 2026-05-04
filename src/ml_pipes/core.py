@@ -172,7 +172,8 @@ class Pipeline:
                 result = operator(*args)
                 ctx_out = context
         except Exception:
-            trace.spans.append(StepSpan(label, t, time.perf_counter() - t, error=True))
+            trace.spans.append(StepSpan(label, t, time.perf_counter() - t, error=True,
+                                        operator_type=type(operator)))
             raise
         trace.spans.append(StepSpan(
             label, t, time.perf_counter() - t,
@@ -180,6 +181,7 @@ class Pipeline:
             input_shape=_extract_shape(current) if capture else None,
             output_shape=_extract_shape(result) if capture else None,
             output_value=snapshot(result) if (cfg and cfg._capture_outputs) else None,
+            operator_type=type(operator),
         ))
         return result, ctx_out
 

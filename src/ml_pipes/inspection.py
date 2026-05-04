@@ -6,7 +6,9 @@ Architecture
        Converts a StepSpan into a _StepView — display-ready primitives:
        a list of _Block objects, where each block is either an image block
        (numpy RGB array) or a text block (title + key/value rows).
-       All type-specific logic lives here. Renderers are dumb.
+       Type-specific logic is dispatched via registries:
+         - _OUTPUT_FORMATTERS: type -> (value) -> list[_Block]
+         - _SPAN_FORMATTERS:   operator_type -> (span, last_image) -> (_StepView, last_image)
 
 2. HtmlRenderer / PlotRenderer
        Consume _StepView lists and produce HTML or a matplotlib Figure.
@@ -26,7 +28,7 @@ import tempfile
 import webbrowser
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -193,14 +195,22 @@ def _render_tiles_with_overlay(
 
 
 # ---------------------------------------------------------------------------
-# Block renderer registry
+# Formatter registries
 # ---------------------------------------------------------------------------
 
-# Maps a type to a callable (value) -> list[_Block].
+OutputFormatter = Callable[[Any], list[_Block]]
+SpanFormatter = Callable[["StepSpan", "np.ndarray | None"], "tuple[_StepView, np.ndarray | None]"]
+
+# Maps a value type to an OutputFormatter: (value) -> list[_Block].
 # Checked in registration order; first match wins (MRO not respected —
 # register subclasses before base classes if both need distinct handlers).
-# External code can extend this via register_block_renderer().
-_BLOCK_RENDERERS: dict[type, Any] = {}
+# External code can extend this via register_output_formatter().
+_OUTPUT_FORMATTERS: dict[type, OutputFormatter] = {}
+
+# Maps an operator type to a SpanFormatter: (span, last_image) -> (_StepView, last_image).
+# Checked before the default _to_step_view path.
+# External code can extend this via register_span_formatter().
+_SPAN_FORMATTERS: dict[type, SpanFormatter] = {}
 
 
 def _block_summary(blocks: list[_Block]) -> str:
@@ -219,13 +229,27 @@ def _block_summary(blocks: list[_Block]) -> str:
     return "  |  ".join(parts)
 
 
-def register_block_renderer(type_: type, renderer: Any) -> None:
-    """Register a renderer for *type_* in the inspection block registry.
+def register_output_formatter(type_: type, formatter: OutputFormatter) -> None:
+    """Register an output formatter for *type_* in the inspection registry.
 
-    *renderer* must be callable as ``renderer(value) -> list[_Block]``.
+    *formatter* must be callable as ``formatter(value) -> list[_Block]``.
     The new entry takes priority over existing entries for the same type.
     """
-    _BLOCK_RENDERERS[type_] = renderer
+    _OUTPUT_FORMATTERS[type_] = formatter
+
+
+def register_span_formatter(operator_type: type, formatter: SpanFormatter) -> None:
+    """Register a span-level formatter for *operator_type*.
+
+    *formatter* must be callable as::
+
+        formatter(span: StepSpan, last_image: np.ndarray | None)
+            -> tuple[_StepView, np.ndarray | None]
+
+    *operator_type* is the operator class (e.g. ``Tile``, ``Scatter``).
+    The new entry takes priority over any existing entry for the same type.
+    """
+    _SPAN_FORMATTERS[operator_type] = formatter
 
 
 def _is_tile_output(value: Any) -> bool:
@@ -246,9 +270,9 @@ def _value_to_blocks(value: Any) -> list[_Block]:
 
     if isinstance(value, list) and value:
         _LIST_MAX = 6
-        for type_, renderer in _BLOCK_RENDERERS.items():
+        for type_, formatter in _OUTPUT_FORMATTERS.items():
             if isinstance(value[0], type_):
-                all_blocks = [renderer(item) for item in value]
+                all_blocks = [formatter(item) for item in value]
                 first = all_blocks[0]
                 if first and isinstance(first[0], _ImageBlock):
                     grid = _make_grid([b.array for blocks in all_blocks for b in blocks if isinstance(b, _ImageBlock)], divider=2)
@@ -260,9 +284,9 @@ def _value_to_blocks(value: Any) -> list[_Block]:
         item_type = type(value[0]).__name__
         return [_TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
 
-    for type_, renderer in _BLOCK_RENDERERS.items():
+    for type_, formatter in _OUTPUT_FORMATTERS.items():
         if isinstance(value, type_):
-            return renderer(value)
+            return formatter(value)
 
     name = type(value).__name__
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
@@ -272,7 +296,9 @@ def _value_to_blocks(value: Any) -> list[_Block]:
     return [_TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
 
 
-def _register_builtin_renderers() -> None:
+def _register_builtin_formatters() -> None:
+    from .tiling import Tile
+
     def _render_image(value: ImagePayload) -> list[_Block]:
         h, w = value.array.shape[:2]
         name = type(value).__name__
@@ -327,18 +353,45 @@ def _register_builtin_renderers() -> None:
         return [_TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
 
     # Subclasses before base classes so isinstance matching is correct.
-    register_block_renderer(Segmentations, _render_segmentations)
-    register_block_renderer(Detections,    _render_detections)
-    register_block_renderer(ImagePayload,  _render_image)
-    register_block_renderer(TensorPayload, _render_tensor)
-    register_block_renderer(ResizeTransform,   _render_resize_transform)
-    register_block_renderer(RuntimeOutputs,    _render_runtime_outputs)
-    register_block_renderer(TensorRegistry,    _render_tensor_registry)
-    register_block_renderer(TileRect,          _render_tile_rect)
-    register_block_renderer(bytes,             _render_bytes)
+    register_output_formatter(Segmentations, _render_segmentations)
+    register_output_formatter(Detections,    _render_detections)
+    register_output_formatter(ImagePayload,  _render_image)
+    register_output_formatter(TensorPayload, _render_tensor)
+    register_output_formatter(ResizeTransform,   _render_resize_transform)
+    register_output_formatter(RuntimeOutputs,    _render_runtime_outputs)
+    register_output_formatter(TensorRegistry,    _render_tensor_registry)
+    register_output_formatter(TileRect,          _render_tile_rect)
+    register_output_formatter(bytes,             _render_bytes)
+
+    def _tile_span_formatter(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepView, np.ndarray | None]:
+        val = span.output_value
+        if val is not None and _is_tile_output(val):
+            raw_blocks = _render_tiles_with_overlay(val[0], val[1])
+        else:
+            raw_blocks = _value_to_blocks(val) if val is not None else []
+
+        new_image: np.ndarray | None = None
+        for b in raw_blocks:
+            if isinstance(b, _ImageBlock):
+                new_image = b.array
+                break
+
+        if new_image is not None:
+            last_image = new_image
+            blocks = raw_blocks
+        elif last_image is not None:
+            carry = _ImageBlock(title="↑ previous", array=last_image, dim=True)
+            blocks = [carry] + raw_blocks
+        else:
+            blocks = raw_blocks
+
+        children, _ = _build_views_from_trace(span.child_trace, last_image)
+        return _StepView(span.label, span.operator_config, blocks, children=children), last_image
+
+    register_span_formatter(Tile, _tile_span_formatter)
 
 
-_register_builtin_renderers()
+_register_builtin_formatters()
 
 
 def _region_summary_block(span: StepSpan) -> list[_Block]:
@@ -366,17 +419,16 @@ def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepV
         children, _ = _build_views_from_trace(span.child_trace, last_image)
         return _StepView(span.label, span.operator_config, [], error=True, children=children), last_image
 
+    if span.operator_type in _SPAN_FORMATTERS:
+        return _SPAN_FORMATTERS[span.operator_type](span, last_image)
+
     val = span.output_value
     if val is None:
         children, _ = _build_views_from_trace(span.child_trace, last_image)
         blocks = _region_summary_block(span) if span.child_trace is not None else []
         return _StepView(span.label, span.operator_config, blocks, children=children), last_image
 
-    is_tile_op = span.label.split(":", 1)[-1] == "Tile"
-    if is_tile_op and _is_tile_output(val):
-        raw_blocks = _render_tiles_with_overlay(val[0], val[1])
-    else:
-        raw_blocks = _value_to_blocks(val)
+    raw_blocks = _value_to_blocks(val)
 
     new_image: np.ndarray | None = None
     for b in raw_blocks:
@@ -511,7 +563,7 @@ class HtmlRenderer:
         renderer.save(result, "report.html")         # write to file
     """
 
-    def render(self, result: "InspectionResult") -> str:
+    def render(self, result: InspectionResult) -> str:
         """Return a self-contained HTML string."""
         cards = [self._card(v) for v in self._flatten(result.build_views())]
         return f'{_CSS}<div class="insp-container">{"".join(cards)}</div>'
@@ -524,7 +576,7 @@ class HtmlRenderer:
             out.extend(HtmlRenderer._flatten(v.children))
         return out
 
-    def save(self, result: "InspectionResult", path: str | Path) -> Path:
+    def save(self, result: InspectionResult, path: str | Path) -> Path:
         """Write the HTML report to *path* and return it."""
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -639,7 +691,7 @@ class PlotRenderer:
             flat.extend(PlotRenderer._flatten_views(v.children, depth + 1))
         return flat
 
-    def render(self, result: "InspectionResult") -> "matplotlib.figure.Figure":
+    def render(self, result: InspectionResult) -> "matplotlib.figure.Figure":
         import matplotlib
         import matplotlib.pyplot as plt
 
@@ -726,25 +778,25 @@ class InspectionSerializer:
         result.show()
     """
 
-    def dumps(self, result: "InspectionResult") -> bytes:
+    def dumps(self, result: InspectionResult) -> bytes:
         """Serialize *result* to bytes."""
         return pickle.dumps(result)
 
-    def loads(self, data: bytes) -> "InspectionResult":
+    def loads(self, data: bytes) -> InspectionResult:
         """Deserialize bytes produced by :meth:`dumps` (in-memory counterpart to :meth:`load`)."""
         obj = pickle.loads(data)
         if not isinstance(obj, InspectionResult):
             raise TypeError(f"Expected InspectionResult, got {type(obj).__name__}")
         return obj
 
-    def dump(self, result: "InspectionResult", path: str | Path) -> Path:
+    def dump(self, result: InspectionResult, path: str | Path) -> Path:
         """Serialize *result* to a file. Returns the path."""
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(self.dumps(result))
         return out
 
-    def load(self, path: str | Path) -> "InspectionResult":
+    def load(self, path: str | Path) -> InspectionResult:
         """Deserialize from a file produced by :meth:`dump`."""
         return self.loads(Path(path).read_bytes())
 
@@ -832,6 +884,6 @@ class InspectionResult:
         return InspectionSerializer().dump(self, path)
 
     @staticmethod
-    def load(path: str | Path) -> "InspectionResult":
+    def load(path: str | Path) -> InspectionResult:
         """Load a serialized result from a file. Convenience for InspectionSerializer().load()."""
         return InspectionSerializer().load(path)
