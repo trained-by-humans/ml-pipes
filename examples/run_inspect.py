@@ -127,7 +127,7 @@ def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) 
     infer = yolo8_inference_pipeline(model_path)
     pipeline = Pipeline([
         Inline(decode()),
-        Tile(slice_wh=(240, 240), overlap_wh=(80, 80)),
+        Tile(slice_wh=(200, 200), overlap_wh=(40, 40)),
         Store("tile_rects", index=1),
         Pick(0),
         Scatter(max_concurrency=4),
