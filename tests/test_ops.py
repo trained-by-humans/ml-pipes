@@ -6,12 +6,17 @@ import pytest
 
 from ml_pipes import Pipeline, PipelineValidationError
 from ml_pipes.ops import (
+    AsType,
     ArgMax,
-    Cast,
     ConvertBoxFormat,
     DrawBoxes,
     Extract,
-    FilterBy,
+    FilterPredictions,
+    FilterPredictionsByArea,
+    FilterPredictionsByClass,
+    FilterPredictionsByScore,
+    FilterTensors,
+    MaskTensors,
     GatherScores,
     Infer,
     LogDetections,
@@ -36,6 +41,7 @@ from ml_pipes.ops import (
 from ml_pipes.types import (
     Detections,
     ImagePayload,
+    Prediction,
     ResizeTransform,
     RuntimeOutputs,
     Segmentations,
@@ -63,18 +69,25 @@ class IntToPair:
 # Resize
 # ---------------------------------------------------------------------------
 
-def test_cast_does_not_silence_downstream_type_check():
-    pipeline = Pipeline([Cast("float32"), StringToFloat()])
+def test_as_type_does_not_silence_downstream_type_check():
+    pipeline = Pipeline([AsType("float32"), StringToFloat()])
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
 
 
-def test_cast_establishes_tensorpayload_input_contract():
-    contract = Pipeline([Cast("float32")]).validate()
+def test_as_type_establishes_tensor_like_input_contract():
+    contract = Pipeline([AsType("float32")]).validate()
 
     assert contract is not None
-    assert contract.input_type == (TensorPayload | tuple[TensorPayload, ...])
+    assert contract.input_type == (
+        TensorPayload
+        | np.ndarray
+        | tuple[TensorPayload, ...]
+        | tuple[np.ndarray, ...]
+        | list[TensorPayload]
+        | list[np.ndarray]
+    )
 
 
 class MakeTensor:
@@ -87,8 +100,8 @@ class AcceptTensor:
         return int(value.array[0])
 
 
-def test_cast_preserves_single_tensor_contract_for_typed_pipeline():
-    contract = Pipeline([MakeTensor(), Cast("float16"), AcceptTensor()]).validate()
+def test_as_type_preserves_single_tensor_contract_for_typed_pipeline():
+    contract = Pipeline([MakeTensor(), AsType("float16"), AcceptTensor()]).validate()
 
     assert contract is not None
     assert contract.input_type is int
@@ -348,10 +361,10 @@ def test_nms_suppresses_same_class_overlap():
 
 
 # ---------------------------------------------------------------------------
-# FilterBy
+# MaskTensors
 # ---------------------------------------------------------------------------
 
-def test_filter_by_synchronises_extra_tensor_with_nms_kept_indices():
+def test_mask_tensors_synchronises_extra_tensor_with_nms_kept_indices():
     registry = _make_registry(
         boxes=[[10, 10, 50, 50], [12, 12, 48, 48]],
         scores=[0.95, 0.85],
@@ -360,7 +373,7 @@ def test_filter_by_synchronises_extra_tensor_with_nms_kept_indices():
     registry["coefficients"] = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
 
     result = NMS(kept_as="kept")(registry)
-    result = FilterBy("coefficients", indices="kept")(result)
+    result = MaskTensors("coefficients", indices="kept")(result)
 
     assert result["coefficients"].shape == (1, 2)
     assert result["coefficients"].tolist() == [[1.0, 2.0]]
@@ -480,16 +493,16 @@ def test_to_segmentations_converts_registry_to_segmentations():
 
 
 # ---------------------------------------------------------------------------
-# Cast
+# AsType
 # ---------------------------------------------------------------------------
 
-def test_cast_tensor_op_can_cast_iterable_of_tensor_payloads():
+def test_as_type_can_cast_tuple_of_tensor_payloads():
     tensors = (
         TensorPayload(array=np.array([[1.0, 2.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
         TensorPayload(array=np.array([[3.0, 4.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
     )
 
-    result = Cast("float32")(tensors)
+    result = AsType("float32")(tensors)
 
     assert isinstance(result, tuple)
     assert result[0].array.dtype == np.float32
@@ -498,33 +511,60 @@ def test_cast_tensor_op_can_cast_iterable_of_tensor_payloads():
     assert result[1].dtype == "float32"
 
 
-def test_cast_tensor_op_can_cast_selected_dataclass_field():
-    runtime_outputs = RuntimeOutputs(
-        tensors=(
-            TensorPayload(array=np.array([[1.0, 2.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
-        ),
-        names=("output_0",),
-    )
+def test_as_type_can_cast_list_of_tensor_payloads():
+    tensors = [
+        TensorPayload(array=np.array([[1.0, 2.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
+        TensorPayload(array=np.array([[3.0, 4.0]], dtype=np.float16), layout="UNKNOWN", dtype="float16"),
+    ]
 
-    result = Cast("float32", field="tensors")(runtime_outputs)
+    result = AsType("float32")(tensors)
 
-    assert isinstance(result, RuntimeOutputs)
-    assert result.names == ("output_0",)
-    assert result.tensors[0].array.dtype == np.float32
-    assert result.tensors[0].dtype == "float32"
+    assert isinstance(result, list)
+    assert result[0].array.dtype == np.float32
+    assert result[0].dtype == "float32"
+    assert result[1].array.dtype == np.float32
+    assert result[1].dtype == "float32"
 
 
-def test_cast_tensor_op_can_cast_single_tensor_payload():
+def test_as_type_can_cast_single_tensor_payload():
     payload = TensorPayload(
         array=np.array([[1.0, 2.0]], dtype=np.float32),
         layout="NCHW",
         dtype="float32",
     )
 
-    result = Cast("float16")(payload)
+    result = AsType("float16")(payload)
 
     assert result.array.dtype == np.float16
     assert result.dtype == "float16"
+
+
+def test_as_type_can_cast_single_array() -> None:
+    array = np.array([[1.0, 2.0]], dtype=np.float16)
+
+    result = AsType("float32")(array)
+
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.float32
+
+
+def test_as_type_can_cast_named_registry_tensor_in_place() -> None:
+    registry = TensorRegistry({"density": np.array([[1.0, 2.0]], dtype=np.float16)})
+
+    result = AsType(src="density", dtype="float32")(registry)
+
+    assert result is registry
+    assert result["density"].dtype == np.float32
+
+
+def test_as_type_can_write_named_registry_tensor_to_new_key() -> None:
+    registry = TensorRegistry({"density": np.array([[1.0, 2.0]], dtype=np.float16)})
+
+    result = AsType(src="density", dtype="float32", as_="density_fp32")(registry)
+
+    assert result is registry
+    assert result["density"].dtype == np.float16
+    assert result["density_fp32"].dtype == np.float32
 
 
 # ---------------------------------------------------------------------------
@@ -666,3 +706,115 @@ def test_project_roi_masks_preserves_fractional_box():
     result = ProjectRoIMasks(mask_threshold=0.5)(registry, transform)
 
     assert np.any(result["masks"][0]), "mask was silently dropped due to truncation"
+
+
+# ---------------------------------------------------------------------------
+# MaskTensors / FilterTensors
+# ---------------------------------------------------------------------------
+
+def _registry(**arrays: np.ndarray) -> TensorRegistry:
+    r = TensorRegistry()
+    for k, v in arrays.items():
+        r[k] = v
+    return r
+
+
+def test_mask_tensors_applies_index_array():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        kept=np.array([0, 2]),
+    )
+    result = MaskTensors("scores", "kept")(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+
+
+def test_mask_tensors_writes_to_new_key():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        kept=np.array([1]),
+    )
+    result = MaskTensors("scores", "kept", as_="filtered_scores")(r)
+    assert result["filtered_scores"].tolist() == [0.5]
+    assert result["scores"].tolist() == [0.9, 0.5, 0.8]
+
+
+def test_filter_tensors_applies_predicate():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([0, 1, 0]),
+    )
+    result = FilterTensors("scores", predicate=lambda reg: reg["classes"] == 0)(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+
+
+def test_filter_tensors_applies_to_multiple_keys():
+    r = _registry(
+        boxes=np.array([[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]]),
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([0, 1, 0]),
+    )
+    result = FilterTensors("boxes", "scores", "classes", predicate=lambda reg: reg["classes"] == 0)(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+    assert result["classes"].tolist() == [0, 0]
+    assert len(result["boxes"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# FilterPredictions
+# ---------------------------------------------------------------------------
+
+def _detections(**kwargs) -> Detections:
+    defaults = dict(boxes=[[0,0,1,1],[1,1,2,2],[2,2,3,3]], scores=[0.9,0.5,0.8], classes=[0,1,0])
+    defaults.update(kwargs)
+    return Detections(**defaults)
+
+def _segmentations() -> Segmentations:
+    masks = [np.zeros((4,4), dtype=bool) for _ in range(3)]
+    return Segmentations(boxes=[[0,0,1,1],[1,1,2,2],[2,2,3,3]], scores=[0.9,0.5,0.8], classes=[0,1,0], masks=masks)
+
+
+def test_filter_predictions_generic_predicate():
+    d = _detections()
+    result = FilterPredictions(predicate=lambda p: [c == 0 for c in p.classes])(d)
+    assert result.classes == [0, 0]
+    assert result.scores == [0.9, 0.8]
+
+
+def test_filter_predictions_preserves_subclass_type():
+    s = _segmentations()
+    result = FilterPredictions(predicate=lambda p: [c == 0 for c in p.classes])(s)
+    assert type(result) is Segmentations
+
+
+def test_filter_predictions_slices_all_fields():
+    s = _segmentations()
+    result = FilterPredictions(predicate=lambda p: [c == 0 for c in p.classes])(s)
+    assert len(result.masks) == 2
+    assert len(result.boxes) == 2
+
+
+def test_filter_predictions_by_class():
+    d = _detections()
+    result = FilterPredictionsByClass({0})(d)
+    assert result.classes == [0, 0]
+
+
+def test_filter_predictions_by_score():
+    d = _detections()
+    result = FilterPredictionsByScore(min_score=0.7)(d)
+    assert result.scores == [0.9, 0.8]
+    assert result.classes == [0, 0]
+
+
+def test_filter_predictions_by_area_min():
+    d = Detections(boxes=[[0,0,5,5],[0,0,1,1]], scores=[0.9,0.8], classes=[0,0])
+    result = FilterPredictionsByArea(min_area=10)(d)
+    assert len(result.boxes) == 1
+    assert result.boxes[0] == [0,0,5,5]
+
+
+def test_filter_predictions_by_area_max():
+    d = Detections(boxes=[[0,0,5,5],[0,0,1,1]], scores=[0.9,0.8], classes=[0,0])
+    result = FilterPredictionsByArea(max_area=2)(d)
+    assert len(result.boxes) == 1
+    assert result.boxes[0] == [0,0,1,1]

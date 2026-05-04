@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any, Callable, get_args, get_origin, get_type_hints
+from typing import Any, Callable, TypeVar, get_args, get_origin, get_type_hints
 
 from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
@@ -287,7 +287,11 @@ class PipelineValidator:
                     static_boundary=static_boundary,
                 )
             )
-            previous_output_type = boundaries[-1].effective_output_type
+            previous_output_type = _resolve_typevar_output(
+                boundaries[-1].effective_output_type,
+                previous_output_type,
+                boundaries[-1].effective_input_types,
+            )
 
         return boundaries
 
@@ -608,6 +612,14 @@ def is_annotation_compatible(produced: Any, expected_inputs: tuple[Any, ...]) ->
 
 
 def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
+    if isinstance(expected, TypeVar):
+        bound = expected.__bound__
+        return bound is None or is_single_annotation_compatible(produced, bound)
+    if isinstance(produced, TypeVar):
+        bound = produced.__bound__
+        if bound is None:
+            return True
+        return is_single_annotation_compatible(bound, expected)
     if expected is Any or produced is Any:
         return True
     if produced == expected:
@@ -634,6 +646,17 @@ def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
         is_single_annotation_compatible(produced_arg, expected_arg)
         for produced_arg, expected_arg in zip(produced_args, expected_args, strict=True)
     )
+
+
+def _resolve_typevar_output(output_type: Any, input_type: Any, input_types: tuple[Any, ...]) -> Any:
+    if not isinstance(output_type, TypeVar):
+        return output_type
+    if len(input_types) != 1 or input_types[0] is not output_type:
+        return output_type
+    bound = output_type.__bound__
+    if bound is None or is_concrete_assignable(input_type, bound):
+        return input_type
+    return output_type
 
 
 def is_concrete_assignable(produced: Any, expected: Any) -> bool:

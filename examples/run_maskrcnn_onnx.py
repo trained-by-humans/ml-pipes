@@ -17,6 +17,8 @@ from common import (
 )
 from ml_pipes import (
     Infer,
+    MapTensor,
+    ThresholdTensors,
     Normalize,
     Pick,
     Pipeline,
@@ -27,7 +29,6 @@ from ml_pipes import (
     Extract,
     Squeeze,
     Store,
-    TensorRegistry,
     ToSegmentations,
 )
 
@@ -41,16 +42,6 @@ MODEL_NAME = "MaskRCNN-12-int8.onnx"
 # NMS is baked into the model — outputs are already filtered detections.
 _IMAGENET_MEAN_BGR = (102.9801, 115.9465, 122.7717)
 CONF_THRESHOLD = 0.7
-
-
-def _filter_detections(registry: TensorRegistry) -> TensorRegistry:
-    """Keep detections above confidence threshold; convert 1-indexed COCO labels to 0-indexed."""
-    kept = np.where(registry["scores"] >= CONF_THRESHOLD)[0]
-    registry["boxes"] = registry["boxes"][kept]
-    registry["scores"] = registry["scores"][kept]
-    registry["masks"] = registry["masks"][kept]
-    registry["classes"] = registry["labels"][kept].astype(np.int32) - 1  # COCO 1-indexed → 0-indexed
-    return registry
 
 
 def build_inference_pipeline(model_path: Path) -> Pipeline:
@@ -68,7 +59,8 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
             ),
             Infer(model_path, input_layout="CHW", dtype="float32", providers=("CPUExecutionProvider",)),
             Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
-            _filter_detections,
+            ThresholdTensors("boxes", "labels", "masks", score="scores", min_score=CONF_THRESHOLD),
+            MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes"),
             Recall("resize_transform"),
             ProjectBoxes(),  # model space → original image space
             Squeeze("masks", axis=1),  # (N, 1, 28, 28) → (N, 28, 28)
