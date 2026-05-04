@@ -17,6 +17,7 @@ class StepSpan:
     output_shape: tuple | str | None = None
     output_value: Any = None
     child_trace: InvocationTrace | None = None
+    operator_type: type | None = None
 
     def __repr__(self) -> str:
         parts = [f"{self.label} {self.duration_s * 1000:.2f}ms"]

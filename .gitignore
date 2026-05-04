@@ -35,3 +35,4 @@ examples/.example_assets/
 *.jpg
 *.png
 *.mp4
+*.pkl

@@ -135,7 +135,7 @@ def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) 
         Gather(),
         Recall("tile_rects"),
         Stitch(),
-        NMM(iou_threshold=0.5),
+        NMM(iou_threshold=0.4),
         Recall("source_image", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         SaveImage(output_path, at=0),

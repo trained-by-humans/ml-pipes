@@ -1447,12 +1447,12 @@ class Batch(RegionOpener):
         try:
             current, child_trace = execute_region(current, child_trace)
         except Exception as exc:
-            error_span = StepSpan(label, t_region, child_trace.total_duration_s, error=True, child_trace=child_trace if collecting else None)
+            error_span = StepSpan(label, t_region, child_trace.total_duration_s, error=True, child_trace=child_trace if collecting else None, operator_type=type(self))
             trace.spans.append(error_span)
             gate.distribute_exception(exc, batch_span=error_span if collecting else None)
             raise
 
-        batch_span = StepSpan(label, t_region, child_trace.total_duration_s, child_trace=child_trace if collecting else None)
+        batch_span = StepSpan(label, t_region, child_trace.total_duration_s, child_trace=child_trace if collecting else None, operator_type=type(self))
         trace.spans.append(batch_span)
         return gate.distribute(current, batch_span=batch_span if collecting else None)
 
@@ -1547,12 +1547,12 @@ class Scatter(RegionOpener):
         try:
             entries = gate.gather()
         except BaseException:
-            trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, error=True))
+            trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, error=True, operator_type=type(self)))
             raise
 
         child_traces = [e.child_trace for e in entries if e.child_trace is not None]
         child_trace = merge_traces(child_traces) if child_traces else None
-        trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, child_trace=child_trace if collecting else None))
+        trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, child_trace=child_trace if collecting else None, operator_type=type(self)))
         return [e.result for e in entries]
 
     def resolve_contract(
