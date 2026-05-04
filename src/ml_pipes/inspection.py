@@ -65,6 +65,7 @@ class _ImageBlock:
     title: str
     array: np.ndarray      # RGB, uint8, ready for imshow / imencode
     dim: bool = False      # True when carrying forward a previous step's image
+    overlay_array: np.ndarray | None = None  # click-to-toggle alternate view
 
 
 @dataclass
@@ -149,6 +150,48 @@ def _render_tile_rect(value: TileRect) -> list[_Block]:
     ])]
 
 
+def _render_tiles_with_overlay(
+    tiles: list[ImagePayload],
+    rects: list[TileRect],
+) -> list[_Block]:
+    """Tile grid with click-to-toggle coverage map.
+
+    Overlay: white background, single blue tint whose intensity multiplies
+    with each additional tile covering a pixel (Android overdraw style).
+    """
+    tile_arrays = [_image_to_rgb(t) for t in tiles]
+    grid = _make_grid(tile_arrays, divider=2)
+
+    h = max(r.y2 for r in rects)
+    w = max(r.x2 for r in rects)
+
+    # Reconstruct source by painting each tile back at its original position.
+    canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    for img, rect in zip(tile_arrays, rects):
+        rh, rw = rect.y2 - rect.y1, rect.x2 - rect.x1
+        canvas[rect.y1:rect.y2, rect.x1:rect.x2] = cv2.resize(img, (rw, rh))
+
+    coverage = np.zeros((h, w), dtype=np.int32)
+    for rect in rects:
+        coverage[rect.y1:rect.y2, rect.x1:rect.x2] += 1
+
+    # Multiply blend: pixels covered once are untouched; each additional layer
+    # multiplies in the tint color, growing progressively more saturated.
+    extra = (coverage - 1).clip(0, None).astype(np.float32)
+    mx = float(extra.max())
+    intensity = (extra / mx if mx > 0 else extra)[:, :, None]
+    _TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)   # blue channel dominates
+    mult = 1.0 - intensity * (1.0 - _TINT)
+    overlay = (canvas.astype(np.float32) * mult).clip(0, 255).astype(np.uint8)
+
+    n = len(tiles)
+    return [_ImageBlock(
+        title=f"ImagePayload  ×{n}  (click to toggle overlap map)",
+        array=grid,
+        overlay_array=overlay,
+    )]
+
+
 # ---------------------------------------------------------------------------
 # Block renderer registry
 # ---------------------------------------------------------------------------
@@ -183,6 +226,14 @@ def register_block_renderer(type_: type, renderer: Any) -> None:
     The new entry takes priority over existing entries for the same type.
     """
     _BLOCK_RENDERERS[type_] = renderer
+
+
+def _is_tile_output(value: Any) -> bool:
+    return (
+        isinstance(value, tuple) and len(value) == 2
+        and isinstance(value[0], list) and bool(value[0]) and isinstance(value[0][0], ImagePayload)
+        and isinstance(value[1], list) and bool(value[1]) and isinstance(value[1][0], TileRect)
+    )
 
 
 def _value_to_blocks(value: Any) -> list[_Block]:
@@ -321,7 +372,11 @@ def _to_step_view(span: StepSpan, last_image: np.ndarray | None) -> tuple[_StepV
         blocks = _region_summary_block(span) if span.child_trace is not None else []
         return _StepView(span.label, span.operator_config, blocks, children=children), last_image
 
-    raw_blocks = _value_to_blocks(val)
+    is_tile_op = span.label.split(":", 1)[-1] == "Tile"
+    if is_tile_op and _is_tile_output(val):
+        raw_blocks = _render_tiles_with_overlay(val[0], val[1])
+    else:
+        raw_blocks = _value_to_blocks(val)
 
     new_image: np.ndarray | None = None
     for b in raw_blocks:
@@ -512,7 +567,27 @@ class HtmlRenderer:
             _, buf = cv2.imencode(".png", cv2.cvtColor(block.array, cv2.COLOR_RGB2BGR))
             uri = "data:image/png;base64," + base64.b64encode(buf).decode()
             opacity = "0.2" if dim else "1"
-            img_html = f'<img src="{uri}" style="{_IMG_STYLE}opacity:{opacity};">'
+            if block.overlay_array is not None:
+                _, obuf = cv2.imencode(".png", cv2.cvtColor(block.overlay_array, cv2.COLOR_RGB2BGR))
+                overlay_uri = "data:image/png;base64," + base64.b64encode(obuf).decode()
+                _TOGGLE_STYLE = (
+                    f"{_IMG_STYLE}opacity:{opacity};cursor:pointer;"
+                    "border:2px dashed #7aaef5;border-radius:3px;"
+                    "transition:border-color .15s;"
+                    "box-sizing:border-box;"
+                )
+                img_html = (
+                    f'<img src="{uri}" data-primary="{uri}" data-overlay="{overlay_uri}"'
+                    f' style="{_TOGGLE_STYLE}"'
+                    f' title="Click to toggle overlap map"'
+                    f' onmouseover="this.style.borderColor=\'#3a7de0\';"'
+                    f' onmouseout="this.style.borderColor=\'#7aaef5\';"'
+                    f' onclick="var s=this.src===this.dataset.primary;'
+                    f'this.src=s?this.dataset.overlay:this.dataset.primary;'
+                    f'this.style.borderStyle=s?\'solid\':\'dashed\';">'
+                )
+            else:
+                img_html = f'<img src="{uri}" style="{_IMG_STYLE}opacity:{opacity};">'
             return f'<div style="margin-bottom:8px;">{title_html}{img_html}</div>'
 
         # _TextBlock
