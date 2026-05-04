@@ -16,54 +16,97 @@ if __name__ == "__main__" and __package__ is None:
 import cv2
 
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
-from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from ..run_yolo8_onnx import YOLO8_MODELS
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes import (
+    ArgMax,
+    ConvertBoxFormat,
     DrawBoxes,
-    Embed,
+    Extract,
+    FilterPredictionsByArea,
+    FilterPredictionsByClass,
+    FilterTensors,
     Gather,
+    GatherScores,
     ImagePayload,
+    Infer,
+    NMS,
+    NMM,
+    Normalize,
     Pick,
     Pipeline,
+    ProjectBoxes,
     Recall,
-    NMM,
+    Resize,
     Scatter,
+    Slice,
+    Squeeze,
     Stitch,
     Store,
     Tile,
     ThroughputCollector,
-    inline,
+    ToDetections,
+    Transpose,
+    Inline,
 )
+
+_KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella
+_MAX_HUMAN_AREA = 1_000  # px² — filters out cars and other large objects
+
+
+def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
+    return Pipeline([
+        Resize((640, 640)),
+        Store("resize_transform", index=1),
+        Pick(0),
+        Normalize(),
+        Infer(model_path),
+        Extract("output0", as_="preds"),
+        Squeeze("preds"),
+        Transpose("preds"),
+        Slice("preds", slice(None, 4), as_="boxes"),
+        Slice("preds", slice(4, None), as_="scores"),
+        ArgMax("scores", as_="classes"),
+        GatherScores("scores", "classes"),
+        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in _KEEP_CLASSES for c in r["classes"]]),
+        ConvertBoxFormat(from_="cxcywh"),
+        NMS(conf_threshold=conf_threshold),
+        Recall("resize_transform"),
+        ProjectBoxes(),
+        ToDetections(),
+    ])
 
 
 def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers: int = 1) -> Pipeline:
-    infer_pipe = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
-    if tile:
-        return Pipeline([
-            Store("source_frame"),
-            Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
-            Store("tile_rects", index=1),
-            Pick(0),
-            Scatter(max_concurrency=6),
-            inline(infer_pipe),
-            Gather(),
-            Recall("tile_rects"),
-            Stitch(),
-            NMM(iou_threshold=0.5),
-            Recall("source_frame", index=0),
-            DrawBoxes(class_names=COCO_CLASSES),
-            Pick(0),
-        ], auto_validate=True)
-    return Pipeline([
+    pre_process = Pipeline([
         Store("source_frame"),
-        Embed(infer_pipe),
+    ])
+
+    pipeline = Pipeline([
+        Tile(slice_wh=(240, 240), overlap_wh=(80, 80)),
+        Store("tile_rects", index=1),
+        Pick(0),
+        Scatter(max_concurrency=6),
+        Inline(_infer_pipeline(model_path, conf_threshold)),
+        Gather(),
+        Recall("tile_rects"),
+        Stitch(),
+        NMM(iou_threshold=0.5),
+    ], auto_validate=True) if tile else _infer_pipeline(model_path, conf_threshold)
+
+    post_process = Pipeline([
+        FilterPredictionsByClass(_KEEP_CLASSES),
+        FilterPredictionsByArea(max_area=_MAX_HUMAN_AREA),
         Recall("source_frame", index=0),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
-    ], auto_validate=True)
+    ])
+
+    return pre_process + pipeline + post_process
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool, conf_threshold: float) -> int:
+def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool,
+                 conf_threshold: float) -> int:
     model_name, model_url = YOLO8_MODELS[model]
     model_path = resolve_model_path(assets_dir, model_name, model_url, model)
     if model_path is None:
@@ -71,6 +114,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
     pipeline = build_pipeline(model_path, conf_threshold, tile, workers=workers)
+    pipeline.validate()
     pipeline.set_tracing(throughput)
 
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
@@ -84,7 +128,8 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
     throughput.target_fps = reader.stream_fps
     mode = "tiled" if tile else "standard"
-    print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
+    print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.",
+          file=sys.stderr)
 
     pending: collections.deque[Future] = collections.deque()
     stopped = False
@@ -94,6 +139,9 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         while True:
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                stopped = True
+
             while not stopped and len(pending) < workers:
                 ok, frame = reader.latest()
                 if not ok or frame is None:
@@ -104,10 +152,13 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
             if not pending:
                 break
 
-            result = pending.popleft().result()
-            cv2.imshow("Shibuya Crossing - YOLOv8", result.array)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                stopped = True
+            future = pending[0]
+            try:
+                result = future.result(timeout=0.05)
+                pending.popleft()
+                cv2.imshow("Shibuya Crossing - YOLOv8", result.array)
+            except TimeoutError:
+                pass
 
     reader.stop()
     cv2.destroyAllWindows()

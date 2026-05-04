@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
+from typing import Any, TypeVar
 
 import numpy as np
 
@@ -61,8 +63,27 @@ class ResizeTransform:
     resized_shape: tuple[int, int]
 
 
+PredictionT = TypeVar("PredictionT", bound="Prediction")
+
+
 @dataclass(frozen=True)
-class Detections:
+class Prediction:
+    """Base class for all typed prediction outputs.
+
+    All fields must be equal-length lists (one entry per detected instance).
+    The filter method slices every field by index, so it works generically for
+    any subclass without knowing its field names.
+    """
+
+    def filter(self: PredictionT, mask: list[Any]) -> PredictionT:
+        kept = [i for i, m in enumerate(mask) if m]
+        sliced = {f.name: [getattr(self, f.name)[i] for i in kept]
+                  for f in dataclasses.fields(self)}
+        return type(self)(**sliced)
+
+
+@dataclass(frozen=True)
+class Detections(Prediction):
     boxes: list[list[float]]
     scores: list[float]
     classes: list[int]

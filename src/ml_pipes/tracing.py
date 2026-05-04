@@ -20,7 +20,7 @@ class StepSpan:
 class InvocationTrace:
     spans: list[StepSpan] = field(default_factory=list)
     total_duration_s: float = 0.0
-    batch_size: int | None = None
+    batch_size: float | None = None
     workers: int | None = None
 
     def span_fractions(self) -> dict[str, float]:
@@ -64,6 +64,7 @@ def merge_traces(traces: list[InvocationTrace]) -> InvocationTrace:
     if not traces:
         return InvocationTrace()
     n = len(traces)
+    traces_with_batch_size = [t for t in traces if t.batch_size is not None]
     # Collect all span labels in first-seen order.
     seen: dict[str, list[StepSpan]] = {}
     for t in traces:
@@ -81,7 +82,8 @@ def merge_traces(traces: list[InvocationTrace]) -> InvocationTrace:
     return InvocationTrace(
         spans=spans,
         total_duration_s=sum(t.total_duration_s for t in traces) / n,
-        batch_size=traces[0].batch_size,
+        batch_size=sum(t.batch_size for t in traces_with_batch_size) / len(traces_with_batch_size)
+        if traces_with_batch_size else None,
         workers=traces[0].workers,
     )
 

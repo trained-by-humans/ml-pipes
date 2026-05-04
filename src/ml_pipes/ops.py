@@ -6,9 +6,8 @@ import sys
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import is_dataclass, replace
 from pathlib import Path
-from typing import Literal, Any, get_args, get_origin
+from typing import Literal, Any, TypeVar, get_args, get_origin
 from typing import TextIO
 
 import time
@@ -23,6 +22,7 @@ from .types import ResizeTransform
 from .types import (
     Detections,
     ImagePayload,
+    Prediction,
     RuntimeOutputs,
     Segmentations,
     TensorPayload,
@@ -205,41 +205,55 @@ class Normalize:
         return payload
 
 
-class Cast:
-    def __init__(self, dtype: str, field: str | None = None):
+class AsType:
+    def __init__(self, dtype: str, src: str | None = None, as_: str | None = None):
         self.dtype = np.dtype(dtype)
-        self.field = field
+        self.src = src
+        self.as_ = as_ or src
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        if self.field is not None:
-            # field= mode: receives a dataclass (e.g. RuntimeOutputs), returns the same type
-            t = current_output if current_output is not None else Any
-            return (t,), t
-        tensor_like = TensorPayload | tuple[TensorPayload, ...]
+        if self.src is not None:
+            return (TensorRegistry,), TensorRegistry
+        tensor_like = (
+            TensorPayload
+            | np.ndarray
+            | tuple[TensorPayload, ...]
+            | tuple[np.ndarray, ...]
+            | list[TensorPayload]
+            | list[np.ndarray]
+        )
         if current_output is not Any and is_annotation_compatible(current_output, (tensor_like,)):
             return (current_output,), current_output
         return (tensor_like,), tensor_like
 
     def __call__(self, value: object) -> object:
-        if self.field is not None:
-            selected = getattr(value, self.field)
-            casted = self._cast_tensor_value(selected)
-            if is_dataclass(value):
-                return replace(value, **{self.field: casted})
-            raise TypeError(
-                f"Cast field={self.field!r} requires a dataclass value, got {type(value)!r}"
-            )
-        return self._cast_tensor_value(value)
+        if self.src is not None:
+            if not isinstance(value, TensorRegistry):
+                raise TypeError(f"AsType src={self.src!r} requires TensorRegistry, got {type(value)!r}")
+            value[self.as_] = self._cast_array(value[self.src])
+            return value
+        return self._cast_value(value)
 
-    def _cast_tensor_value(self, value: object) -> TensorPayload | tuple[TensorPayload, ...]:
+    def _cast_value(self, value: object) -> object:
         if isinstance(value, TensorPayload):
-            return TensorPayload(array=value.array.astype(self.dtype), layout=value.layout, dtype=str(self.dtype))
-        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-            return tuple(
-                TensorPayload(array=tensor.array.astype(self.dtype), layout=tensor.layout, dtype=str(self.dtype))
-                for tensor in value
-            )
-        raise TypeError(f"Cast does not support value type {type(value)!r}")
+            return TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype))
+        if isinstance(value, np.ndarray):
+            return self._cast_array(value)
+        if isinstance(value, tuple):
+            return tuple(self._cast_sequence_item(item) for item in value)
+        if isinstance(value, list):
+            return [self._cast_sequence_item(item) for item in value]
+        raise TypeError(f"AsType does not support value type {type(value)!r}")
+
+    def _cast_sequence_item(self, value: object) -> TensorPayload | np.ndarray:
+        if isinstance(value, TensorPayload):
+            return TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype))
+        if isinstance(value, np.ndarray):
+            return self._cast_array(value)
+        raise TypeError(f"AsType does not support sequence item type {type(value)!r}")
+
+    def _cast_array(self, value: np.ndarray) -> np.ndarray:
+        return np.asarray(value).astype(self.dtype, copy=False)
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +603,7 @@ class NMS:
     """Non-Maximum Suppression on named tensors in a TensorRegistry.
 
     Filters boxes, scores, and classes in-place.
-    Optionally stores the kept indices under kept_as for use with FilterBy.
+    Optionally stores the kept indices under kept_as for use with MaskTensors.
     """
 
     def __init__(
@@ -748,8 +762,9 @@ class NMM:
         return Detections(boxes=merged_boxes, scores=merged_scores, classes=merged_classes)
 
 
-class FilterBy:
-    """Filters a tensor by an index array stored in the registry: as_ = src[indices].
+class MaskTensors:
+    """Applies a pre-existing index mask from the registry to a tensor:
+    registry[as_] = registry[src][registry[indices]]
 
     Pair with NMS(kept_as=...) to synchronise extra tensors (e.g. mask coefficients)
     with the boxes/scores/classes that NMS already filtered.
@@ -764,6 +779,61 @@ class FilterBy:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         registry[self.as_] = registry[self.src][registry[self.indices]]
+        return registry
+
+
+class MapTensor:
+    """Applies a function to a tensor and writes the result to as_ (defaults to src).
+
+    Example — convert 1-indexed COCO labels to 0-indexed classes:
+        MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes")
+    """
+
+    def __init__(self, src: str, fn: Callable[[Any], Any], as_: str | None = None):
+        self.src = src
+        self.fn = fn
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = self.fn(registry[self.src])
+        return registry
+
+
+class ThresholdTensors:
+    """Shorthand for FilterTensors with a score threshold predicate.
+
+    The score tensor is always filtered automatically; additional keys are listed as positional args.
+
+    Example:
+        ThresholdTensors("boxes", "masks", "classes", score="scores", min_score=0.7)
+    """
+
+    def __init__(self, *srcs: str, score: str, min_score: float):
+        all_srcs = (score,) + tuple(s for s in srcs if s != score)
+        self._inner = FilterTensors(*all_srcs, predicate=lambda r: r[score] >= min_score)
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
+class FilterTensors:
+    """Filters one or more tensors using a single user-supplied predicate.
+
+    The predicate is evaluated once and the resulting mask is applied to every
+    key. All keys are updated in-place.
+
+    Example — keep only person and car before NMS:
+        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in {0, 2} for c in r["classes"]])
+    """
+
+    def __init__(self, *srcs: str, predicate: Callable[[TensorRegistry], Any]):
+        self.srcs = srcs
+        self.predicate = predicate
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        mask = self.predicate(registry)
+        for src in self.srcs:
+            registry[src] = registry[src][mask]
         return registry
 
 
@@ -960,6 +1030,66 @@ class ToSegmentations:
             classes=registry[self.classes].tolist(),
             masks=list(masks_data) if isinstance(masks_data, np.ndarray) else masks_data,
         )
+
+
+# ---------------------------------------------------------------------------
+# Prediction filtering
+# ---------------------------------------------------------------------------
+
+PredictionT = TypeVar("PredictionT", bound=Prediction)
+
+
+class FilterPredictions:
+    """Filters a Prediction (or any subclass) using a user-supplied predicate.
+
+    The predicate receives the full Prediction and must return a bool list or
+    index array. Every field is sliced uniformly via Prediction.filter().
+
+    Example:
+        FilterPredictions(predicate=lambda p: [c in {0, 2} for c in p.classes])
+    """
+
+    def __init__(self, predicate: Callable[[Any], Any]):
+        self.predicate = predicate
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return prediction.filter(self.predicate(prediction))
+
+
+class FilterPredictionsByClass:
+    """Keep only predictions whose class is in the given set."""
+
+    def __init__(self, classes: set[int]):
+        self._inner = FilterPredictions(lambda p: [c in classes for c in p.classes])
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return self._inner(prediction)
+
+
+class FilterPredictionsByScore:
+    """Drop predictions below min_score."""
+
+    def __init__(self, min_score: float):
+        self._inner = FilterPredictions(lambda p: [s >= min_score for s in p.scores])
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return self._inner(prediction)
+
+
+class FilterPredictionsByArea:
+    """Drop predictions whose box area (xyxy) falls outside [min_area, max_area] pixel²."""
+
+    def __init__(self, min_area: float = 0, max_area: float | None = None):
+        def predicate(p: Any) -> list[bool]:
+            result = []
+            for x1, y1, x2, y2 in p.boxes:
+                area = (x2 - x1) * (y2 - y1)
+                result.append(area >= min_area and (max_area is None or area <= max_area))
+            return result
+        self._inner = FilterPredictions(predicate)
+
+    def __call__(self, prediction: PredictionT) -> PredictionT:
+        return self._inner(prediction)
 
 
 # ---------------------------------------------------------------------------

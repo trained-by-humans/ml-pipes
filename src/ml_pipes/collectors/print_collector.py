@@ -4,6 +4,14 @@ from ..tracing import InvocationTrace
 from .serial_collector import SerialCollector
 
 
+def _fmt_batch_size(batch_size: float | None) -> str:
+    if batch_size is None:
+        return "?"
+    if float(batch_size).is_integer():
+        return str(int(batch_size))
+    return f"{batch_size:.1f}"
+
+
 class PrintCollector(SerialCollector):
     """Prints each trace to stdout. Useful for development and debugging.
 
@@ -36,9 +44,9 @@ class PrintCollector(SerialCollector):
             if span.child_trace is not None:
                 ct = span.child_trace
                 if ct.workers is not None:
-                    annotation = f" [n_items={ct.batch_size}, concurrency={ct.workers}]"
+                    annotation = f" [n_items={_fmt_batch_size(ct.batch_size)}, concurrency={ct.workers}]"
                 elif ct.batch_size is not None:
-                    annotation = f" [batch_size={ct.batch_size}]"
+                    annotation = f" [batch_size={_fmt_batch_size(ct.batch_size)}]"
                 else:
                     annotation = ""
                 print(f"{prefix}    ↳ child trace{annotation}:")

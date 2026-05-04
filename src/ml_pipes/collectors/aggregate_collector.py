@@ -5,6 +5,14 @@ from .concurrent_collector import ConcurrentCollector
 from .print_collector import PrintCollector
 
 
+def _update_optional_mean(current: float | None, incoming: float | None, n: int) -> float | None:
+    if incoming is None:
+        return current
+    if current is None or n <= 1:
+        return incoming
+    return current + (incoming - current) / n
+
+
 def _aggregate_traces(avg: InvocationTrace, incoming: InvocationTrace, n: int) -> None:
     """Update *avg* in-place with a new *incoming* trace using an incremental mean.
 
@@ -12,6 +20,7 @@ def _aggregate_traces(avg: InvocationTrace, incoming: InvocationTrace, n: int) -
     avg = prev_avg + (incoming - prev_avg) / n.
     """
     avg.total_duration_s += (incoming.total_duration_s - avg.total_duration_s) / n
+    avg.batch_size = _update_optional_mean(avg.batch_size, incoming.batch_size, n)
 
     incoming_by_label = {s.label: s for s in incoming.spans}
 
@@ -21,7 +30,6 @@ def _aggregate_traces(avg: InvocationTrace, incoming: InvocationTrace, n: int) -
             continue
         span.duration_s += (inc.duration_s - span.duration_s) / n
         if span.child_trace is not None and inc.child_trace is not None:
-            span.child_trace.batch_size = inc.child_trace.batch_size
             span.child_trace.workers = inc.child_trace.workers
             _aggregate_traces(span.child_trace, inc.child_trace, n)
 
