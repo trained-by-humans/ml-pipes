@@ -1,5 +1,17 @@
 from .context import Context, Recall, Store
-from .core import Pipeline, Embed, embed, Inline, inline
+from .inspection import (
+    HtmlRenderer,
+    ImageBlock,
+    InspectionResult,
+    InspectionSerializer,
+    OutputBlock,
+    PipelineInspector,
+    PlotRenderer,
+    Renderer,
+    StepView,
+    TextBlock,
+)
+from .core import Pipeline, Embed, embed, Inline, inline, Operator
 from .validation import PipelineValidationError, TypeContract
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
 from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
@@ -105,12 +117,23 @@ __all__ = [
     "Gather",
     "GatherRows",
     "GatherScores",
+    "HtmlRenderer",
     "ImagePayload",
+    "InspectionResult",
+    "InspectionSerializer",
+    "PlotRenderer",
+    "ImageBlock",
+    "OutputBlock",
+    "PipelineInspector",
+    "Renderer",
+    "StepView",
+    "TextBlock",
     "Infer",
     "LoadFile",
     "LogDetections",
     "MapToObjects",
     "NMM",
+    "Operator",
     "NMS",
     "Normalize",
     "Pick",
