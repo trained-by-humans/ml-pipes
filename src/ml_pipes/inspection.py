@@ -481,9 +481,12 @@ class PipelineInspector:
             children, _ = self._trace_to_views(span.child_trace, last_image)
             return StepView(span.label, span.operator_config, [], error=True, children=children), last_image
 
-        formatter = self._span_fmts.get(span.operator_type) or next(
-            (f for t, f in self._span_fmts.items() if issubclass(span.operator_type, t)),
-            None,
+        op_type = span.operator_type
+        formatter = (
+            self._span_fmts.get(op_type) or (
+                next((f for t, f in self._span_fmts.items() if issubclass(op_type, t)), None)
+                if op_type is not None else None
+            )
         )
         if formatter is not None:
             view, image_to_carry = formatter(span, last_image)
@@ -876,7 +879,26 @@ class InspectionSerializer:
     """
 
     def dumps(self, result: InspectionResult) -> bytes:
-        return pickle.dumps(result)
+        return pickle.dumps(self._sanitize(result))
+
+    @staticmethod
+    def _sanitize(result: InspectionResult) -> InspectionResult:
+        """Return a copy with operator_type cleared so locally-defined classes don't break pickle."""
+        return InspectionResult(
+            [InspectionSerializer._sanitize_span(s) for s in result.spans]
+        )
+
+    @staticmethod
+    def _sanitize_span(span: StepSpan) -> StepSpan:
+        child = None
+        if span.child_trace is not None:
+            child = InvocationTrace(
+                spans=[InspectionSerializer._sanitize_span(s) for s in span.child_trace.spans],
+                total_duration_s=span.child_trace.total_duration_s,
+                batch_size=span.child_trace.batch_size,
+                workers=span.child_trace.workers,
+            )
+        return dataclasses.replace(span, operator_type=None, child_trace=child)
 
     def loads(self, data: bytes) -> InspectionResult:
         obj = pickle.loads(data)
