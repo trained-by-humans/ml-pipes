@@ -80,7 +80,10 @@ class Pipeline:
         """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
         collector = _CaptureCollector()
         cfg = TracingConfig(collector, capture_shapes=True, _capture_outputs=True, capture_config=True)
-        self._call_with_tracing(value, cfg)
+        try:
+            self._call_with_tracing(value, cfg)
+        except Exception:
+            pass
         return InspectionResult(collector.trace.spans)
 
     def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
