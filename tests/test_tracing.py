@@ -175,8 +175,8 @@ def test_shapes_recorded_for_ndarray():
     result = p(arr)
     assert result is arr
     span = cap.traces[0].spans[0]
-    assert span.input_shape == (3, 4)
-    assert span.output_shape == (3, 4)
+    assert span.input_shape == "ndarray (3, 4)"
+    assert span.output_shape == "ndarray (3, 4)"
 
 
 def test_shapes_recorded_for_tensor_payload():
@@ -188,7 +188,7 @@ def test_shapes_recorded_for_tensor_payload():
     p, cap = _make_pipeline([_passthrough], capture_shapes=True)
     result = p(payload)
     assert result is payload
-    assert cap.traces[0].spans[0].input_shape == (1, 3, 640, 640)
+    assert cap.traces[0].spans[0].input_shape == "TensorPayload (1, 3, 640, 640)"
 
 
 # ---------------------------------------------------------------------------
@@ -351,3 +351,76 @@ def test_print_collector_does_not_raise(capsys):
     assert "0:_double" in out
     assert "1:_add_one" in out
     assert "total" in out
+
+
+# ---------------------------------------------------------------------------
+# operator_config — pickle safety
+# ---------------------------------------------------------------------------
+
+def test_operator_config_callable_serializable():
+    import pickle
+    from ml_pipes.tracing import operator_config
+
+    class OpWithLambda:
+        def __init__(self):
+            self.threshold = 0.5
+            self.predicate = lambda x: x > 0  # not pickle-safe as raw value
+
+    cfg = operator_config(OpWithLambda())
+    assert cfg["threshold"] == 0.5
+    assert isinstance(cfg["predicate"], str)   # converted to repr
+    # must not raise
+    pickle.dumps(cfg)
+
+
+def test_merge_traces_preserves_captured_fields():
+    from ml_pipes.tracing import StepSpan, InvocationTrace, merge_traces
+
+    def make_trace(val: Any) -> InvocationTrace:
+        span = StepSpan(
+            label="1:op",
+            start_time=0.0,
+            duration_s=0.01,
+            error=False,
+            operator_config={"k": "v"},
+            input_shape="(1,)",
+            output_shape="(2,)",
+            output_value=val,
+        )
+        t = InvocationTrace()
+        t.spans.append(span)
+        return t
+
+    merged = merge_traces([make_trace("a"), make_trace("b")])
+    s = merged.spans[0]
+    assert s.output_value == "a"       # first worker's value is representative
+    assert s.output_shape == "(2,)"
+    assert s.input_shape == "(1,)"
+    assert s.operator_config == {"k": "v"}
+    assert not s.error
+
+
+def test_merge_traces_propagates_error_flag():
+    from ml_pipes.tracing import StepSpan, InvocationTrace, merge_traces
+
+    def make_trace(err: bool) -> InvocationTrace:
+        t = InvocationTrace()
+        t.spans.append(StepSpan(label="1:op", start_time=0.0, duration_s=0.01, error=err))
+        return t
+
+    merged = merge_traces([make_trace(False), make_trace(True)])
+    assert merged.spans[0].error is True
+
+
+def test_inspect_with_lambda_operator_is_serializable():
+    import pickle
+    from ml_pipes import FilterPredictions, InspectionSerializer
+    from ml_pipes.types import Detections
+
+    pred = Detections(boxes=[[0,0,1,1],[1,1,2,2]], scores=[0.9, 0.4], classes=[0, 1])
+    p = Pipeline([FilterPredictions(predicate=lambda d: [s > 0.5 for s in d.scores])])
+    result = p.inspect(pred)
+
+    data = InspectionSerializer().dumps(result)
+    restored = InspectionSerializer().loads(data)
+    assert len(restored.spans) == len(result.spans)

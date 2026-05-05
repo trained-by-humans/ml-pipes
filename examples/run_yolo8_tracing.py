@@ -58,12 +58,13 @@ def main() -> int:
 
     infer_pipe = yolo8_inference_pipeline(model_path)
     pipeline: Pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
+    pipeline.validate()
 
     # --- single detailed trace (warm-up run) ---
     print("\n=== Single invocation trace (warm-up run) ===\n")
-    pipeline.set_tracing(PrintCollector())
+    pipeline.set_tracing(PrintCollector(), capture_shapes=True)
     pipeline(image_path)
-    pipeline.set_tracing(None)
+    pipeline.set_tracing(None, capture_shapes=False)
 
     # --- aggregate over N runs ---
     print(f"\n=== Aggregate over {args.runs} runs ===\n")

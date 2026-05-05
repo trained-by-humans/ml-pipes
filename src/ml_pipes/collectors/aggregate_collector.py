@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ..tracing import InvocationTrace, StepSpan
 from .concurrent_collector import ConcurrentCollector
-from .print_collector import PrintCollector
 
 
 def _update_optional_mean(current: float | None, incoming: float | None, n: int) -> float | None:
@@ -66,7 +65,6 @@ class AggregateCollector(ConcurrentCollector):
         super().__init__()
         self._calls: int = 0
         self._avg_trace: InvocationTrace = InvocationTrace()
-        self._printer: PrintCollector = PrintCollector()
 
     def _collect(self, trace: InvocationTrace) -> None:
         self._calls += 1
@@ -95,4 +93,4 @@ class AggregateCollector(ConcurrentCollector):
         print(f"  Calls                : {self._calls}")
         print(f"  Latency Avg.         : {self.avg_pipeline_latency_ms:.2f}ms")
         print()
-        self._printer.print_trace(self.avg_trace)
+        print(self.avg_trace)

@@ -9,9 +9,14 @@ from typing import Any, Callable, Iterable
 _log = logging.getLogger(__name__)
 
 from .context import Context, ContextOp
+from .inspection import InspectionResult, _CaptureCollector
 from .region import RegionCloser, RegionOpener
-from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape
+from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, operator_config, snapshot
 from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
+
+# An operator is anything the pipeline can execute as a step.
+Operator = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
+
 
 
 @dataclass(frozen=True)
@@ -24,7 +29,7 @@ class Region:
 class Pipeline:
     def __init__(
         self,
-        operators: Iterable[Callable[..., Any] | ContextOp],
+        operators: Iterable[Operator],
         auto_validate: bool = False,
         tracing: TracingConfig | None = None,
     ):
@@ -38,12 +43,16 @@ class Pipeline:
         self,
         collector: TraceCollector | None,
         operator_labels: list[str] | None = None,
+        capture_config: bool = False,
         capture_shapes: bool = False,
     ) -> None:
         """Attach or replace tracing. Pass collector=None to disable."""
-        self._tracing_config = TracingConfig(collector, operator_labels, capture_shapes) if collector is not None else None
+        self._tracing_config = (
+            TracingConfig(collector, operator_labels, capture_config, capture_shapes)
+            if collector is not None else None
+        )
 
-    def extend(self, operators: Iterable[Callable[..., Any] | ContextOp]) -> Pipeline:
+    def extend(self, operators: Iterable[Operator]) -> Pipeline:
         """Append *operators* to this pipeline in place and return self."""
         self.operators.extend(self._flatten(list(operators)))
         if self._auto_validate:
@@ -65,10 +74,19 @@ class Pipeline:
         return Pipeline([*self.operators, *other.operators])
 
     def __call__(self, value: Any) -> Any:
-        cfg = self._tracing_config
+        return self._call_with_tracing(value, self._tracing_config)
+
+    def inspect(self, value: Any) -> InspectionResult:
+        """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
+        collector = _CaptureCollector()
+        cfg = TracingConfig(collector, capture_shapes=True, _capture_outputs=True, capture_config=True)
+        self._call_with_tracing(value, cfg)
+        return InspectionResult(collector.trace.spans)
+
+    def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
         trace = InvocationTrace() if cfg is not None else _NoOpTrace()
         try:
-            result, trace = self._execute(value, trace=trace)
+            result, trace = self._execute(value, trace=trace, cfg=cfg)
         finally:
             if cfg is not None:
                 try:
@@ -104,8 +122,7 @@ class Pipeline:
             inference=inference,
         )
 
-    def _execute(self, value: Any, trace: Any, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
-        cfg = self._tracing_config  # snapshot once — set_tracing() may race on another thread
+    def _execute(self, value: Any, trace: Any, cfg: TracingConfig | None, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
         start, end = region if region is not None else (0, len(self.operators))
         context = Context()
         current = value
@@ -131,7 +148,7 @@ class Pipeline:
         region_end = self._find_region_end(region_start, type(operator), operator.closing_type)
         # Bounded executor: the operator can only run operators within its own region.
         def execute_region(value: Any, child_trace: Any) -> Any:
-            return self._execute(value, trace=child_trace, region=(region_start, region_end))
+            return self._execute(value, trace=child_trace, cfg=cfg, region=(region_start, region_end))
         result = operator.run_region(current, label, execute_region, trace, cfg)
         return result, context
 
@@ -155,12 +172,16 @@ class Pipeline:
                 result = operator(*args)
                 ctx_out = context
         except Exception:
-            trace.spans.append(StepSpan(label, t, time.perf_counter() - t, error=True))
+            trace.spans.append(StepSpan(label, t, time.perf_counter() - t, error=True,
+                                        operator_type=type(operator)))
             raise
         trace.spans.append(StepSpan(
             label, t, time.perf_counter() - t,
+            operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
             input_shape=_extract_shape(current) if capture else None,
             output_shape=_extract_shape(result) if capture else None,
+            output_value=snapshot(result) if (cfg and cfg._capture_outputs) else None,
+            operator_type=type(operator),
         ))
         return result, ctx_out
 
@@ -176,7 +197,7 @@ class Pipeline:
         return j - 1
 
     @staticmethod
-    def _flatten(operators: list) -> list:
+    def _flatten(operators: list[Operator]) -> list[Operator]:
         flat = []
         for op in operators:
             if isinstance(op, Inline):

@@ -8,10 +8,10 @@ skip all collector calls, I/O, and synchronization.
 
 | Name | What it is |
 |---|---|
-| `StepSpan` | One operator step: label, start time, duration, error flag, optional input/output shapes |
+| `StepSpan` | One operator step: label, start time, duration, error flag, and optional captured data (shapes, output value, operator config) |
 | `InvocationTrace` | One complete pipeline call: ordered list of `StepSpan`s, total duration, optional `batch_size` and `workers` annotations |
 | `TraceCollector` | Interface with a single `on_trace(trace)` method — implement this to consume traces |
-| `TracingConfig` | Groups collector + optional operator labels + optional shape capture |
+| `TracingConfig` | Groups collector + operator labels + capture flags (`capture_shapes`, `capture_outputs`, `capture_config`) |
 | `merge_traces(traces)` | Averages a list of `InvocationTrace` objects into one, computing mean per-span duration. Recurses into child traces. Used internally to produce an average worker trace for Scatter regions. |
 
 ## How it works
@@ -79,7 +79,8 @@ from ml_pipes import TracingConfig, PrintCollector
 TracingConfig(
     collector=PrintCollector(),       # required — any TraceCollector implementation
     operator_labels=["resize", "infer", "nms"],  # override default "{i}:ClassName" labels
-    capture_shapes=True,              # record input/output shapes on each StepSpan
+    capture_config=True,    # record StepSpan.operator_config (constructor args)
+    capture_shapes=True,    # record StepSpan.input_shape / output_shape
 )
 ```
 
@@ -89,9 +90,19 @@ All options are also available directly on `set_tracing()`:
 pipeline.set_tracing(
     PrintCollector(),
     operator_labels=["resize", "infer", "nms"],
+    capture_config=True,
     capture_shapes=True,
 )
 ```
+
+`capture_config` and `capture_shapes` are intended for debugging — they give
+collectors access to how each operator is configured and what shapes it handles,
+without modifying the pipeline itself.
+
+`StepSpan.output_value` is also available on spans, populated by
+`Pipeline.inspect()`. It is not exposed via `set_tracing()` because
+deep-copying every step output on every call would be prohibitively expensive
+in production; inspection is a one-shot debugging tool.
 
 ## Attaching and detaching at runtime
 
