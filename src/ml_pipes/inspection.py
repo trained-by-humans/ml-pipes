@@ -19,9 +19,8 @@ Components
 2. SpanFormatter
        A span-level override keyed on operator type. When registered for an
        operator, it takes full control of how that operator's StepView is
-       built — receives the raw StepSpan and returns a (StepView, last_image)
-       pair. Use this when the step's card requires logic that goes beyond
-       simply displaying its output value.
+       built — receives the raw StepSpan and carry-forward last_image, and
+       returns a (StepView, last_image) pair.
        Register via: inspector.register_span_formatter(OpType, formatter)
 
 3. OutputFormatter
@@ -55,6 +54,9 @@ from typing import Any, Callable, Protocol
 import cv2
 import numpy as np
 
+_IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
+_TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)
+
 from .tracing import InvocationTrace, StepSpan, TraceCollector, _fmt_batch_size
 from .tiling import TileRect
 from .types import (
@@ -66,18 +68,6 @@ from .types import (
     TensorPayload,
     TensorRegistry,
 )
-
-
-# ---------------------------------------------------------------------------
-# Capture collector (used by Pipeline.inspect)
-# ---------------------------------------------------------------------------
-
-class _CaptureCollector(TraceCollector):
-    def __init__(self) -> None:
-        self.trace: InvocationTrace | None = None
-
-    def on_trace(self, trace: InvocationTrace) -> None:
-        self.trace = trace
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +111,18 @@ class Renderer(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Value → display primitives (internal helpers)
+# Formatter type aliases
+# ---------------------------------------------------------------------------
+
+OutputFormatter = Callable[[Any], list[OutputBlock]]
+SpanFormatter = Callable[
+    [StepSpan, np.ndarray | None],
+    tuple[StepView, np.ndarray | None],
+]
+
+
+# ---------------------------------------------------------------------------
+# Low-level array helpers (used by formatters)
 # ---------------------------------------------------------------------------
 
 def _fmt_floats(seq: Any, precision: int = 3) -> str:
@@ -174,7 +175,11 @@ def _tensor_item_to_heatmap(arr: np.ndarray, layout: str) -> np.ndarray:
     return cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
 
 
-def _render_tile_rect(value: TileRect) -> list[OutputBlock]:
+# ---------------------------------------------------------------------------
+# Output → blocks helpers (stateless, used by PipelineInspector._output_to_blocks)
+# ---------------------------------------------------------------------------
+
+def _format_tile_rect(value: TileRect) -> list[OutputBlock]:
     w = value.x2 - value.x1
     h = value.y2 - value.y1
     return [TextBlock("TileRect", [
@@ -183,7 +188,7 @@ def _render_tile_rect(value: TileRect) -> list[OutputBlock]:
     ])]
 
 
-def _render_tiles_with_overlay(
+def _format_tiles_with_overlay(
     tiles: list[ImagePayload],
     rects: list[TileRect],
 ) -> list[OutputBlock]:
@@ -210,7 +215,6 @@ def _render_tiles_with_overlay(
     extra = (coverage - 1).clip(0, None).astype(np.float32)
     mx = float(extra.max())
     intensity = (extra / mx if mx > 0 else extra)[:, :, None]
-    _TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)
     mult = 1.0 - intensity * (1.0 - _TINT)
     overlay = (canvas.astype(np.float32) * mult).clip(0, 255).astype(np.uint8)
 
@@ -221,26 +225,6 @@ def _render_tiles_with_overlay(
         overlay_array=overlay,
     )]
 
-
-# ---------------------------------------------------------------------------
-# Formatter type aliases and read-only default registries
-# ---------------------------------------------------------------------------
-
-OutputFormatter = Callable[[Any], list[OutputBlock]]
-SpanFormatter = Callable[
-    [StepSpan, "np.ndarray | None", dict, dict],
-    "tuple[StepView, np.ndarray | None]",
-]
-
-# Populated once at module load by _register_builtin_formatters(). Never mutated
-# after that — PipelineInspector copies these dicts on construction.
-_OUTPUT_FORMATTERS: dict[type, OutputFormatter] = {}
-_SPAN_FORMATTERS: dict[type, SpanFormatter] = {}
-
-
-# ---------------------------------------------------------------------------
-# Internal span → view conversion helpers
-# ---------------------------------------------------------------------------
 
 def _block_summary(blocks: list[OutputBlock]) -> str:
     """Collapse a block list to a single short string for list-item rows."""
@@ -257,151 +241,33 @@ def _block_summary(blocks: list[OutputBlock]) -> str:
     return "  |  ".join(parts)
 
 
-def _is_tile_output(value: Any) -> bool:
-    return (
-        isinstance(value, tuple) and len(value) == 2
-        and isinstance(value[0], list) and bool(value[0]) and isinstance(value[0][0], ImagePayload)
-        and isinstance(value[1], list) and bool(value[1]) and isinstance(value[1][0], TileRect)
-    )
+def _apply_image_carry(
+    raw_blocks: list[OutputBlock],
+    last_image: np.ndarray | None,
+) -> tuple[list[OutputBlock], np.ndarray | None]:
+    """Prepend a dimmed carry-forward image when the step has no image output.
+
+    Returns the blocks and the image to carry forward to the next step.
+    """
+    image_to_carry = next((b.array for b in raw_blocks if isinstance(b, ImageBlock)), None)
+    if image_to_carry is not None:
+        return raw_blocks, image_to_carry
+    if last_image is not None:
+        return [ImageBlock(title="↑ previous", array=last_image, dim=True)] + raw_blocks, last_image
+    return raw_blocks, None
 
 
-def _value_to_blocks(value: Any, output_fmts: dict[type, OutputFormatter]) -> list[OutputBlock]:
-    """Convert a pipeline output value to a list of display blocks."""
-    if isinstance(value, tuple):
-        blocks: list[OutputBlock] = []
-        for item in value:
-            blocks.extend(_value_to_blocks(item, output_fmts))
-        return blocks
-
-    if isinstance(value, list) and value:
-        _LIST_MAX = 6
-        for type_, formatter in output_fmts.items():
-            if isinstance(value[0], type_):
-                all_blocks = [formatter(item) for item in value]
-                first = all_blocks[0]
-                if first and isinstance(first[0], ImageBlock):
-                    grid = _make_grid(
-                        [b.array for blocks in all_blocks for b in blocks if isinstance(b, ImageBlock)],
-                        divider=2,
-                    )
-                    return [ImageBlock(title=f"{first[0].title.split('  ')[0]}  ×{len(value)}", array=grid)]
-                rows = [(f"[{i}]", _block_summary(blocks)) for i, blocks in enumerate(all_blocks[:_LIST_MAX])]
-                if len(value) > _LIST_MAX:
-                    rows.append(("…", f"+{len(value) - _LIST_MAX} more"))
-                return [TextBlock(f"list  ×{len(value)}", rows)]
-        item_type = type(value[0]).__name__
-        return [TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
-
-    for type_, formatter in output_fmts.items():
-        if isinstance(value, type_):
-            return formatter(value)
-
-    name = type(value).__name__
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return [TextBlock(name, [(f.name, str(getattr(value, f.name))) for f in dataclasses.fields(value)])]
-
-    text = repr(value)
-    return [TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
-
-
-def _register_builtin_formatters() -> None:
-    from .tiling import Tile
-
-    def _render_image(value: ImagePayload) -> list[OutputBlock]:
-        h, w = value.array.shape[:2]
-        return [ImageBlock(title=f"{type(value).__name__}  {w}×{h}  {value.color_space}", array=_image_to_rgb(value))]
-
-    def _render_tensor(value: TensorPayload) -> list[OutputBlock]:
-        name = type(value).__name__
-        arr = value.array
-        if arr.ndim == 4 and value.layout.startswith("N"):
-            n = arr.shape[0]
-            item_layout = value.layout[1:]
-            heatmaps = [_tensor_item_to_heatmap(arr[i], item_layout) for i in range(n)]
-            return [ImageBlock(title=f"{name}  {arr.shape}  {value.dtype}", array=_make_grid(heatmaps))]
-        return [ImageBlock(title=f"{name}  {arr.shape}  {value.dtype}", array=_tensor_item_to_heatmap(arr, value.layout))]
-
-    def _render_resize_transform(value: ResizeTransform) -> list[OutputBlock]:
-        return [TextBlock(type(value).__name__, [
-            ("scale",    _fmt_floats(value.scale)),
-            ("pad",      _fmt_floats(value.pad)),
-            ("original", str(value.original_shape)),
-            ("resized",  str(value.resized_shape)),
-        ])]
-
-    def _render_runtime_outputs(value: RuntimeOutputs) -> list[OutputBlock]:
-        return [TextBlock(type(value).__name__, [(n, str(t.array.shape)) for n, t in zip(value.names, value.tensors)])]
-
-    def _render_tensor_registry(value: TensorRegistry) -> list[OutputBlock]:
-        return [TextBlock(type(value).__name__, [(k, str(v.shape)) for k, v in value._tensors.items()])]
-
-    def _render_segmentations(value: Segmentations) -> list[OutputBlock]:
-        name = type(value).__name__
-        n = len(value.boxes)
-        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}  mask✓") for i in range(min(n, 6))]
-        if n > 6:
-            rows.append(("…", f"+{n - 6} more"))
-        return [TextBlock(f"{name} ({n})", rows)]
-
-    def _render_detections(value: Detections) -> list[OutputBlock]:
-        name = type(value).__name__
-        n = len(value.boxes)
-        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}") for i in range(min(n, 6))]
-        if n > 6:
-            rows.append(("…", f"+{n - 6} more"))
-        return [TextBlock(f"{name} ({n})", rows)]
-
-    def _render_bytes(value: bytes) -> list[OutputBlock]:
-        return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
-
-    # Subclasses before base classes so isinstance matching is correct.
-    _OUTPUT_FORMATTERS[Segmentations]   = _render_segmentations
-    _OUTPUT_FORMATTERS[Detections]      = _render_detections
-    _OUTPUT_FORMATTERS[ImagePayload]    = _render_image
-    _OUTPUT_FORMATTERS[TensorPayload]   = _render_tensor
-    _OUTPUT_FORMATTERS[ResizeTransform] = _render_resize_transform
-    _OUTPUT_FORMATTERS[RuntimeOutputs]  = _render_runtime_outputs
-    _OUTPUT_FORMATTERS[TensorRegistry]  = _render_tensor_registry
-    _OUTPUT_FORMATTERS[TileRect]        = _render_tile_rect
-    _OUTPUT_FORMATTERS[bytes]           = _render_bytes
-
-    def _tile_span_formatter(
-        span: StepSpan,
-        last_image: np.ndarray | None,
-        output_fmts: dict,
-        span_fmts: dict,
-    ) -> tuple[StepView, np.ndarray | None]:
-        val = span.output_value
-        if val is not None and _is_tile_output(val):
-            raw_blocks = _render_tiles_with_overlay(val[0], val[1])
-        else:
-            raw_blocks = _value_to_blocks(val, output_fmts) if val is not None else []
-
-        new_image: np.ndarray | None = None
-        for b in raw_blocks:
-            if isinstance(b, ImageBlock):
-                new_image = b.array
-                break
-
-        if new_image is not None:
-            last_image = new_image
-            blocks = raw_blocks
-        elif last_image is not None:
-            blocks = [ImageBlock(title="↑ previous", array=last_image, dim=True)] + raw_blocks
-        else:
-            blocks = raw_blocks
-
-        children, _ = _build_views_from_trace(span.child_trace, last_image, output_fmts, span_fmts)
-        return StepView(span.label, span.operator_config, blocks, children=children), last_image
-
-    _SPAN_FORMATTERS[Tile] = _tile_span_formatter
-
-
-_register_builtin_formatters()
+def _flatten_step_views(views: list[StepView], depth: int = 0) -> list[tuple[StepView, int]]:
+    """Pre-order traversal of a StepView tree, each entry paired with its depth."""
+    flat = []
+    for v in views:
+        flat.append((v, depth))
+        flat.extend(_flatten_step_views(v.children, depth + 1))
+    return flat
 
 
 def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
-    """Text block summarising a region opener (Scatter/Batch) from its child_trace metadata."""
+    """Text block summarising a region opener from its child_trace metadata."""
     ct = span.child_trace
     rows: list[tuple[str, str]] = []
     if ct.workers is not None:
@@ -419,58 +285,298 @@ def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
     return [TextBlock(span.label.split(":", 1)[-1], rows)]
 
 
-def _to_step_view(
-    span: StepSpan,
-    last_image: np.ndarray | None,
-    output_fmts: dict[type, OutputFormatter],
-    span_fmts: dict[type, SpanFormatter],
-) -> tuple[StepView, np.ndarray | None]:
-    if span.error:
-        children, _ = _build_views_from_trace(span.child_trace, last_image, output_fmts, span_fmts)
-        return StepView(span.label, span.operator_config, [], error=True, children=children), last_image
+# ---------------------------------------------------------------------------
+# Formatter registries and builtin registration
+# ---------------------------------------------------------------------------
 
-    if span.operator_type in span_fmts:
-        return span_fmts[span.operator_type](span, last_image, output_fmts, span_fmts)
-
-    val = span.output_value
-    if val is None:
-        children, _ = _build_views_from_trace(span.child_trace, last_image, output_fmts, span_fmts)
-        blocks = _region_summary_block(span) if span.child_trace is not None else []
-        return StepView(span.label, span.operator_config, blocks, children=children), last_image
-
-    raw_blocks = _value_to_blocks(val, output_fmts)
-
-    new_image: np.ndarray | None = None
-    for b in raw_blocks:
-        if isinstance(b, ImageBlock):
-            new_image = b.array
-            break
-
-    if new_image is not None:
-        last_image = new_image
-        blocks = raw_blocks
-    elif last_image is not None:
-        blocks = [ImageBlock(title="↑ previous", array=last_image, dim=True)] + raw_blocks
-    else:
-        blocks = raw_blocks
-
-    children, _ = _build_views_from_trace(span.child_trace, last_image, output_fmts, span_fmts)
-    return StepView(span.label, span.operator_config, blocks, children=children), last_image
+# Populated once at module load by _register_builtin_formatters(). Never mutated
+# after that — PipelineInspector copies these dicts on construction.
+_OUTPUT_FORMATTERS: dict[type, OutputFormatter] = {}
+_SPAN_FORMATTERS: dict[type, SpanFormatter] = {}
 
 
-def _build_views_from_trace(
-    trace: Any,
-    last_image: np.ndarray | None,
-    output_fmts: dict[type, OutputFormatter],
-    span_fmts: dict[type, SpanFormatter],
-) -> tuple[list[StepView], np.ndarray | None]:
-    if trace is None:
-        return [], last_image
-    views = []
-    for span in trace.spans:
-        view, last_image = _to_step_view(span, last_image, output_fmts, span_fmts)
-        views.append(view)
-    return views, last_image
+def _register_builtin_formatters() -> None:
+    from .tiling import Tile
+    from .region import RegionOpener
+
+    # --- Output formatters (subclasses before base classes) ---
+
+    def _format_segmentations(value: Segmentations) -> list[OutputBlock]:
+        name = type(value).__name__
+        n = len(value.boxes)
+        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}  mask✓") for i in range(min(n, 6))]
+        if n > 6:
+            rows.append(("…", f"+{n - 6} more"))
+        return [TextBlock(f"{name} ({n})", rows)]
+
+    def _format_detections(value: Detections) -> list[OutputBlock]:
+        name = type(value).__name__
+        n = len(value.boxes)
+        rows = [(f"[{i}]", f"cls={value.classes[i]}  score={value.scores[i]:.2f}") for i in range(min(n, 6))]
+        if n > 6:
+            rows.append(("…", f"+{n - 6} more"))
+        return [TextBlock(f"{name} ({n})", rows)]
+
+    def _format_image(value: ImagePayload) -> list[OutputBlock]:
+        h, w = value.array.shape[:2]
+        return [ImageBlock(title=f"{type(value).__name__}  {w}×{h}  {value.color_space}", array=_image_to_rgb(value))]
+
+    def _format_tensor(value: TensorPayload) -> list[OutputBlock]:
+        name = type(value).__name__
+        arr = value.array
+        if arr.ndim == 4 and value.layout.startswith("N"):
+            n = arr.shape[0]
+            item_layout = value.layout[1:]
+            heatmaps = [_tensor_item_to_heatmap(arr[i], item_layout) for i in range(n)]
+            return [ImageBlock(title=f"{name}  {arr.shape}  {value.dtype}", array=_make_grid(heatmaps))]
+        return [ImageBlock(title=f"{name}  {arr.shape}  {value.dtype}", array=_tensor_item_to_heatmap(arr, value.layout))]
+
+    def _format_resize_transform(value: ResizeTransform) -> list[OutputBlock]:
+        return [TextBlock(type(value).__name__, [
+            ("scale",    _fmt_floats(value.scale)),
+            ("pad",      _fmt_floats(value.pad)),
+            ("original", str(value.original_shape)),
+            ("resized",  str(value.resized_shape)),
+        ])]
+
+    def _format_runtime_outputs(value: RuntimeOutputs) -> list[OutputBlock]:
+        return [TextBlock(type(value).__name__, [(n, str(t.array.shape)) for n, t in zip(value.names, value.tensors)])]
+
+    def _format_tensor_registry(value: TensorRegistry) -> list[OutputBlock]:
+        return [TextBlock(type(value).__name__, [(k, str(v.shape)) for k, v in value._tensors.items()])]
+
+    def _format_bytes(value: bytes) -> list[OutputBlock]:
+        return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
+
+    _OUTPUT_FORMATTERS[Segmentations]   = _format_segmentations
+    _OUTPUT_FORMATTERS[Detections]      = _format_detections
+    _OUTPUT_FORMATTERS[ImagePayload]    = _format_image
+    _OUTPUT_FORMATTERS[TensorPayload]   = _format_tensor
+    _OUTPUT_FORMATTERS[ResizeTransform] = _format_resize_transform
+    _OUTPUT_FORMATTERS[RuntimeOutputs]  = _format_runtime_outputs
+    _OUTPUT_FORMATTERS[TensorRegistry]  = _format_tensor_registry
+    _OUTPUT_FORMATTERS[TileRect]        = _format_tile_rect
+    _OUTPUT_FORMATTERS[bytes]           = _format_bytes
+
+    # --- Span formatters (base classes before specific) ---
+
+    def _region_span_formatter(
+        span: StepSpan,
+        last_image: np.ndarray | None,
+    ) -> tuple[StepView, np.ndarray | None]:
+        return StepView(span.label, span.operator_config, _region_summary_block(span)), last_image
+
+    def _tile_span_formatter(
+        span: StepSpan,
+        last_image: np.ndarray | None,
+    ) -> tuple[StepView, np.ndarray | None]:
+        val = span.output_value
+        raw_blocks = _format_tiles_with_overlay(val[0], val[1]) if val is not None else []
+        blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
+        return StepView(span.label, span.operator_config, blocks), image_to_carry
+
+    _SPAN_FORMATTERS[RegionOpener] = _region_span_formatter
+    _SPAN_FORMATTERS[Tile]         = _tile_span_formatter
+
+
+_register_builtin_formatters()
+
+
+# ---------------------------------------------------------------------------
+# PipelineInspector — fluent display object
+# ---------------------------------------------------------------------------
+
+class PipelineInspector:
+    """Converts an InspectionResult into views and renders them.
+
+    Starts with all built-in formatters pre-registered. Additional formatters
+    can be added via the fluent API before calling a terminal method.
+
+    Example::
+
+        result = pipeline.inspect(image)
+
+        # Default display
+        PipelineInspector().show(result)
+
+        # Fluent config
+        PipelineInspector()
+            .register_output_formatter(MyType, my_formatter)
+            .register_span_formatter(MyOp, my_span_formatter)
+            .save_to_html(result, "report.html")
+
+        # Custom renderer
+        PipelineInspector().render(result, MyRenderer())
+    """
+
+    def __init__(self) -> None:
+        self._output_fmts: dict[type, OutputFormatter] = dict(_OUTPUT_FORMATTERS)
+        self._span_fmts: dict[type, SpanFormatter] = dict(_SPAN_FORMATTERS)
+
+    def register_output_formatter(self, type_: type, formatter: OutputFormatter) -> PipelineInspector:
+        """Register a formatter for *type_* output values. Returns self for chaining."""
+        self._output_fmts[type_] = formatter
+        return self
+
+    def register_span_formatter(self, operator_type: type, formatter: SpanFormatter) -> PipelineInspector:
+        """Register a span-level formatter for *operator_type*. Returns self for chaining.
+
+        *formatter* signature::
+
+            formatter(span, last_image) -> (StepView, last_image)
+        """
+        self._span_fmts[operator_type] = formatter
+        return self
+
+    def _find_output_formatter(self, value: Any) -> OutputFormatter | None:
+        t = type(value)
+        return self._output_fmts.get(t) or next(
+            (f for rt, f in self._output_fmts.items() if issubclass(t, rt)),
+            None,
+        )
+
+    def _output_to_blocks(self, value: Any) -> list[OutputBlock]:
+        if isinstance(value, tuple):
+            blocks: list[OutputBlock] = []
+            for item in value:
+                blocks.extend(self._output_to_blocks(item))
+            return blocks
+
+        if isinstance(value, list) and value:
+            _LIST_MAX = 6
+            formatter = self._find_output_formatter(value[0])
+            if formatter is not None:
+                all_blocks = [formatter(item) for item in value]
+                first = all_blocks[0]
+                if first and isinstance(first[0], ImageBlock):
+                    grid = _make_grid(
+                        [b.array for blocks in all_blocks for b in blocks if isinstance(b, ImageBlock)],
+                        divider=2,
+                    )
+                    return [ImageBlock(title=f"{first[0].title.split('  ')[0]}  ×{len(value)}", array=grid)]
+                rows = [(f"[{i}]", _block_summary(blocks)) for i, blocks in enumerate(all_blocks[:_LIST_MAX])]
+                if len(value) > _LIST_MAX:
+                    rows.append(("…", f"+{len(value) - _LIST_MAX} more"))
+                return [TextBlock(f"list  ×{len(value)}", rows)]
+            item_type = type(value[0]).__name__
+            return [TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
+
+        formatter = self._find_output_formatter(value)
+        if formatter is not None:
+            return formatter(value)
+
+        name = type(value).__name__
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            return [TextBlock(name, [(f.name, str(getattr(value, f.name))) for f in dataclasses.fields(value)])]
+
+        text = repr(value)
+        return [TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
+
+    def _span_to_view(
+        self,
+        span: StepSpan,
+        last_image: np.ndarray | None,
+    ) -> tuple[StepView, np.ndarray | None]:
+        if span.error:
+            children, _ = self._trace_to_views(span.child_trace, last_image)
+            return StepView(span.label, span.operator_config, [], error=True, children=children), last_image
+
+        formatter = self._span_fmts.get(span.operator_type) or next(
+            (f for t, f in self._span_fmts.items() if issubclass(span.operator_type, t)),
+            None,
+        )
+        if formatter is not None:
+            view, image_to_carry = formatter(span, last_image)
+            children, _ = self._trace_to_views(span.child_trace, image_to_carry)
+            return dataclasses.replace(view, children=children), image_to_carry
+
+        raw_blocks = self._output_to_blocks(span.output_value)
+        blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
+        children, _ = self._trace_to_views(span.child_trace, image_to_carry)
+        return StepView(span.label, span.operator_config, blocks, children=children), image_to_carry
+
+    def _trace_to_views(
+        self,
+        trace: Any,
+        last_image: np.ndarray | None,
+    ) -> tuple[list[StepView], np.ndarray | None]:
+        if trace is None:
+            return [], last_image
+        views = []
+        for span in trace.spans:
+            view, last_image = self._span_to_view(span, last_image)
+            views.append(view)
+        return views, last_image
+
+    def build_views(self, result: InspectionResult) -> list[StepView]:
+        """Convert spans to a display-ready StepView tree."""
+        views, _ = self._trace_to_views(result, None)
+        return views
+
+    def render(self, result: InspectionResult, renderer: Renderer) -> Any:
+        """Pass the view tree to *renderer* and return its output."""
+        return renderer.render(self.build_views(result))
+
+    def to_html(self, result: InspectionResult) -> str:
+        """Return a self-contained HTML string."""
+        return HtmlRenderer().render(self.build_views(result))
+
+    def save_to_html(self, result: InspectionResult, path: str | Path) -> Path:
+        """Write an HTML report to *path* and return it."""
+        return HtmlRenderer().save(self.build_views(result), path)
+
+    def to_plot(
+        self,
+        result: InspectionResult,
+        cols: int = 6,
+        cell_w: float = 2.6,
+        cell_h: float = 3.2,
+    ) -> "matplotlib.figure.Figure":
+        """Return a matplotlib Figure."""
+        return PlotRenderer(cols=cols, cell_w=cell_w, cell_h=cell_h).render(self.build_views(result))
+
+    def save_to_plot(
+        self,
+        result: InspectionResult,
+        path: str | Path,
+        cols: int = 6,
+        cell_w: float = 2.6,
+        cell_h: float = 3.2,
+        dpi: int = 150,
+    ) -> Path:
+        """Save a matplotlib figure to *path* (e.g. "report.png") and return it."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fig = self.to_plot(result, cols=cols, cell_w=cell_w, cell_h=cell_h)
+        fig.savefig(out, dpi=dpi, bbox_inches="tight")
+        return out
+
+    def show(self, result: InspectionResult, cols: int = 6) -> None:
+        """Display the result.
+
+        In Jupyter: renders the HTML card strip inline.
+        In a script/terminal: opens a matplotlib window via plt.show().
+        """
+        if _IN_JUPYTER:
+            from IPython.display import HTML, display
+            display(HTML(self.to_html(result)))
+        else:
+            import matplotlib.pyplot as plt
+            self.to_plot(result, cols=cols)
+            plt.show()
+
+    def show_in_browser(self, result: InspectionResult) -> None:
+        """Open the HTML report in the default web browser via a temporary file."""
+        fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
+        os.close(fd)
+        out = Path(tmp)
+        out.write_text(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<title>Pipeline inspection</title></head><body>"
+            f"{self.to_html(result)}</body></html>",
+            encoding="utf-8",
+        )
+        webbrowser.open(out.as_uri())
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +683,7 @@ class HtmlRenderer:
 
     def render(self, views: list[StepView]) -> str:
         """Return a self-contained HTML string."""
-        cards = [self._card(v) for v in self._flatten(views)]
+        cards = [self._render_card(v) for v, _ in _flatten_step_views(views)]
         return f'{_CSS}<div class="insp-container">{"".join(cards)}</div>'
 
     def save(self, views: list[StepView], path: str | Path) -> Path:
@@ -592,18 +698,10 @@ class HtmlRenderer:
         )
         return out
 
-    @staticmethod
-    def _flatten(views: list[StepView]) -> list[StepView]:
-        out = []
-        for v in views:
-            out.append(v)
-            out.extend(HtmlRenderer._flatten(v.children))
-        return out
-
-    def _card(self, view: StepView) -> str:
+    def _render_card(self, view: StepView) -> str:
         error_cls = " insp-card-error" if view.error else ""
-        tooltip = self._config_tooltip(view.operator_config)
-        body = self._body(view)
+        tooltip = self._render_config_tooltip(view.operator_config)
+        body = self._render_body(view)
         return (
             f'<div class="insp-card{error_cls}">'
             f'<div class="insp-card-head">'
@@ -615,14 +713,14 @@ class HtmlRenderer:
             f'</div>'
         )
 
-    def _body(self, view: StepView) -> str:
+    def _render_body(self, view: StepView) -> str:
         if view.error:
             return '<div style="font-size:12px;color:#c00;padding:4px 0;">Error during execution</div>'
         if not view.blocks:
             return "<em style='font-size:11px;color:#aaa;'>no value captured</em>"
-        return "".join(self._block(b) for b in view.blocks)
+        return "".join(self._render_block(b) for b in view.blocks)
 
-    def _block(self, block: OutputBlock) -> str:
+    def _render_block(self, block: OutputBlock) -> str:
         dim = block.dim
         title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
         title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
@@ -662,7 +760,7 @@ class HtmlRenderer:
         tbl = f'<table style="{_TBL_STYLE}">{inner}</table>'
         return f'<div style="margin-bottom:8px;">{title_html}{tbl}</div>'
 
-    def _config_tooltip(self, cfg: dict) -> str:
+    def _render_config_tooltip(self, cfg: dict) -> str:
         if not cfg:
             return ""
         rows = "".join(
@@ -697,7 +795,7 @@ class PlotRenderer:
         import matplotlib
         import matplotlib.pyplot as plt
 
-        flat = self._flatten_views(views)
+        flat = _flatten_step_views(views)
         n = len(flat)
         rows = max(1, (n + self.cols - 1) // self.cols)
         fig, axes = plt.subplots(rows, self.cols,
@@ -705,22 +803,14 @@ class PlotRenderer:
         ax_flat: list[matplotlib.axes.Axes] = np.array(axes).flatten().tolist()
 
         for i, (view, depth) in enumerate(flat):
-            self._axes(ax_flat[i], view, depth)
+            self._render_axes(ax_flat[i], view, depth)
         for ax in ax_flat[n:]:
             ax.set_visible(False)
 
         fig.tight_layout(pad=0.5)
         return fig
 
-    @staticmethod
-    def _flatten_views(views: list[StepView], depth: int = 0) -> list[tuple[StepView, int]]:
-        flat = []
-        for v in views:
-            flat.append((v, depth))
-            flat.extend(PlotRenderer._flatten_views(v.children, depth + 1))
-        return flat
-
-    def _axes(self, ax: "matplotlib.axes.Axes", view: StepView, depth: int = 0) -> None:
+    def _render_axes(self, ax: "matplotlib.axes.Axes", view: StepView, depth: int = 0) -> None:
         ax.set_xticks([])
         ax.set_yticks([])
 
@@ -763,133 +853,6 @@ class PlotRenderer:
             "  " * depth + view.label + cfg_short,
             fontsize=7.5, fontweight="bold", pad=3, loc="left",
         )
-
-
-# ---------------------------------------------------------------------------
-# PipelineInspector — fluent display object
-# ---------------------------------------------------------------------------
-
-class PipelineInspector:
-    """Converts an InspectionResult into views and renders them.
-
-    Starts with all built-in formatters pre-registered. Additional formatters
-    can be added via the fluent API before calling a terminal method.
-
-    Example::
-
-        result = pipeline.inspect(image)
-
-        # Default display
-        PipelineInspector().show(result)
-
-        # Fluent config
-        PipelineInspector()
-            .register_output_formatter(MyType, my_formatter)
-            .register_span_formatter(MyOp, my_span_formatter)
-            .save_to_html(result, "report.html")
-
-        # Custom renderer
-        PipelineInspector().render(result, MyRenderer())
-    """
-
-    def __init__(self) -> None:
-        self._output_fmts: dict[type, OutputFormatter] = dict(_OUTPUT_FORMATTERS)
-        self._span_fmts: dict[type, SpanFormatter] = dict(_SPAN_FORMATTERS)
-
-    def register_output_formatter(self, type_: type, formatter: OutputFormatter) -> PipelineInspector:
-        """Register a formatter for *type_* output values. Returns self for chaining."""
-        self._output_fmts[type_] = formatter
-        return self
-
-    def register_span_formatter(self, operator_type: type, formatter: SpanFormatter) -> PipelineInspector:
-        """Register a span-level formatter for *operator_type*. Returns self for chaining.
-
-        *formatter* signature::
-
-            formatter(span, last_image, output_fmts, span_fmts) -> (StepView, last_image)
-        """
-        self._span_fmts[operator_type] = formatter
-        return self
-
-    def build_views(self, result: InspectionResult) -> list[StepView]:
-        """Convert spans to a display-ready StepView tree."""
-        views: list[StepView] = []
-        last_image: np.ndarray | None = None
-        for span in result.spans:
-            view, last_image = _to_step_view(span, last_image, self._output_fmts, self._span_fmts)
-            views.append(view)
-        return views
-
-    def render(self, result: InspectionResult, renderer: Renderer) -> Any:
-        """Pass the view tree to *renderer* and return its output."""
-        return renderer.render(self.build_views(result))
-
-    def to_html(self, result: InspectionResult) -> str:
-        """Return a self-contained HTML string."""
-        return HtmlRenderer().render(self.build_views(result))
-
-    def save_to_html(self, result: InspectionResult, path: str | Path) -> Path:
-        """Write an HTML report to *path* and return it."""
-        return HtmlRenderer().save(self.build_views(result), path)
-
-    def to_plot(
-        self,
-        result: InspectionResult,
-        cols: int = 6,
-        cell_w: float = 2.6,
-        cell_h: float = 3.2,
-    ) -> "matplotlib.figure.Figure":
-        """Return a matplotlib Figure."""
-        return PlotRenderer(cols=cols, cell_w=cell_w, cell_h=cell_h).render(self.build_views(result))
-
-    def save_to_plot(
-        self,
-        result: InspectionResult,
-        path: str | Path,
-        cols: int = 6,
-        cell_w: float = 2.6,
-        cell_h: float = 3.2,
-        dpi: int = 150,
-    ) -> Path:
-        """Save a matplotlib figure to *path* (e.g. "report.png") and return it."""
-        out = Path(path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        fig = self.to_plot(result, cols=cols, cell_w=cell_w, cell_h=cell_h)
-        fig.savefig(out, dpi=dpi, bbox_inches="tight")
-        return out
-
-    def show(self, result: InspectionResult, cols: int = 6) -> None:
-        """Display the result.
-
-        In Jupyter: renders the HTML card strip inline.
-        In a script/terminal: opens a matplotlib window via plt.show().
-        """
-        try:
-            get_ipython  # type: ignore[name-defined]  # noqa: F821
-            in_jupyter = True
-        except NameError:
-            in_jupyter = False
-
-        if in_jupyter:
-            from IPython.display import HTML, display
-            display(HTML(self.to_html(result)))
-        else:
-            import matplotlib.pyplot as plt
-            self.to_plot(result, cols=cols)
-            plt.show()
-
-    def show_in_browser(self, result: InspectionResult) -> None:
-        """Open the HTML report in the default web browser via a temporary file."""
-        fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
-        os.close(fd)
-        out = Path(tmp)
-        out.write_text(
-            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-            "<title>Pipeline inspection</title></head><body>"
-            f"{self.to_html(result)}</body></html>",
-            encoding="utf-8",
-        )
-        webbrowser.open(out.as_uri())
 
 
 # ---------------------------------------------------------------------------
@@ -975,3 +938,15 @@ class InspectionResult:
     def load(path: str | Path) -> InspectionResult:
         """Load a serialized result from a file."""
         return InspectionSerializer().load(path)
+
+
+# ---------------------------------------------------------------------------
+# Internal — used by Pipeline.inspect
+# ---------------------------------------------------------------------------
+
+class _CaptureCollector(TraceCollector):
+    def __init__(self) -> None:
+        self.trace: InvocationTrace | None = None
+
+    def on_trace(self, trace: InvocationTrace) -> None:
+        self.trace = trace
