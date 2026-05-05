@@ -102,9 +102,13 @@ def operator_config(op: Any) -> dict[str, Any]:
     Non-serializable values (callables, arbitrary objects) are converted to
     their repr() so the result is always safe to pickle.
     """
+    try:
+        attrs = vars(op)
+    except TypeError:
+        return {}
     return {
         k: v if isinstance(v, _PICKLE_SAFE) else repr(v)
-        for k, v in vars(op).items()
+        for k, v in attrs.items()
         if not k.startswith("_") and k != "pipeline"
     }
 
