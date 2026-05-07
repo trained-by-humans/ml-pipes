@@ -27,7 +27,7 @@ from .mask2former_infer import (
 
 def stable_sigmoid(array: np.ndarray) -> np.ndarray:
     positive = array >= 0
-    result = np.empty_like(array, dtype=np.float32)
+    result = np.empty_like(array)
     result[positive] = 1.0 / (1.0 + np.exp(-array[positive]))
     exp_values = np.exp(array[~positive])
     result[~positive] = exp_values / (1.0 + exp_values)
@@ -35,28 +35,18 @@ def stable_sigmoid(array: np.ndarray) -> np.ndarray:
 
 
 class ResizeMasksToImage:
-    def __init__(self, image_shape: tuple[int, int], src: str = "masks_queries_logits", as_: str | None = None):
-        self.image_shape = image_shape
-        self.src = src
-        self.as_ = as_ or src
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        import cv2
-
-        height, width = self.image_shape
-        masks = registry[self.src]
-        resized = [cv2.resize(mask.astype(np.float32), (width, height), interpolation=cv2.INTER_LINEAR) for mask in masks]
-        registry[self.as_] = np.stack(resized, axis=0) if resized else np.zeros((0, height, width), dtype=np.float32)
-        return registry
-
-
-class ResizeMasksToStoredImage:
     def __init__(self, src: str = "masks_queries_logits", as_: str | None = None):
         self.src = src
         self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry, image_shape: tuple[int, int]) -> TensorRegistry:
-        return ResizeMasksToImage(image_shape=image_shape, src=self.src, as_=self.as_)(registry)
+        import cv2
+
+        height, width = image_shape
+        masks = registry[self.src]
+        resized = [cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR) for mask in masks]
+        registry[self.as_] = np.stack(resized, axis=0) if resized else np.zeros((0, height, width), dtype=masks.dtype)
+        return registry
 
 
 class ClassProbabilities:
@@ -69,7 +59,7 @@ class ClassProbabilities:
         shifted = logits - logits.max(axis=-1, keepdims=True)
         probs = np.exp(shifted)
         probs = probs / probs.sum(axis=-1, keepdims=True)
-        registry[self.as_] = probs[..., :-1].astype(np.float32, copy=False)
+        registry[self.as_] = probs[..., :-1]
         return registry
 
 
@@ -83,22 +73,25 @@ class MaskProbabilities:
         return registry
 
 
-def _empty_numpy_segments(image_shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _empty_numpy_segments(
+    image_shape: tuple[int, int],
+    score_dtype: np.dtype = np.dtype(np.float32),
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     height, width = image_shape
     return (
         np.zeros((0, height, width), dtype=bool),
-        np.zeros((0,), dtype=np.float32),
+        np.zeros((0,), dtype=score_dtype),
         np.zeros((0,), dtype=np.int64),
     )
 
 
 def _append_or_merge_numpy_panoptic_segment(
     merged_masks: list[np.ndarray],
-    merged_scores: list[float],
+    merged_scores: list[np.generic],
     merged_classes: list[int],
     stuff_lookup: dict[int, int],
     class_id: int,
-    score: float,
+    score: np.generic,
     mask: np.ndarray,
     thing_class_ids: frozenset[int],
 ) -> None:
@@ -117,20 +110,21 @@ def _append_or_merge_numpy_panoptic_segment(
         return
 
     merged_masks[existing] = merged_masks[existing] | mask
-    merged_scores[existing] = max(merged_scores[existing], score)
+    merged_scores[existing] = np.maximum(merged_scores[existing], score)
 
 
 def _finalize_numpy_segments(
     merged_masks: list[np.ndarray],
-    merged_scores: list[float],
+    merged_scores: list[np.generic],
     merged_classes: list[int],
     image_shape: tuple[int, int],
+    score_dtype: np.dtype,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if not merged_masks:
-        return _empty_numpy_segments(image_shape)
+        return _empty_numpy_segments(image_shape, score_dtype=score_dtype)
     return (
         np.stack(merged_masks, axis=0).astype(bool, copy=False),
-        np.asarray(merged_scores, dtype=np.float32),
+        np.asarray(merged_scores, dtype=score_dtype),
         np.asarray(merged_classes, dtype=np.int64),
     )
 
@@ -148,7 +142,7 @@ class PanopticQueryPredictions:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         class_probs = registry[self.class_probs]
-        registry[self.scores_as] = class_probs.max(axis=-1).astype(np.float32, copy=False)
+        registry[self.scores_as] = class_probs.max(axis=-1)
         registry[self.classes_as] = class_probs.argmax(axis=-1).astype(np.int64, copy=False)
         return registry
 
@@ -175,9 +169,9 @@ class PanopticKeepQueries:
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         query_scores = registry[self.scores]
         keep = query_scores >= self.score_threshold
-        registry[self.kept_scores_as] = query_scores[keep].astype(np.float32, copy=False)
+        registry[self.kept_scores_as] = query_scores[keep]
         registry[self.kept_classes_as] = registry[self.classes][keep].astype(np.int64, copy=False)
-        registry[self.kept_masks_as] = registry[self.masks][keep].astype(np.float32, copy=False)
+        registry[self.kept_masks_as] = registry[self.masks][keep]
         return registry
 
 
@@ -230,7 +224,7 @@ class PanopticSegmentsFromQueries:
         image_shape = tuple(int(dim) for dim in kept_masks.shape[-2:])
 
         if kept_scores.size == 0:
-            masks, scores, classes = _empty_numpy_segments(image_shape)
+            masks, scores, classes = _empty_numpy_segments(image_shape, score_dtype=kept_scores.dtype)
             registry["masks"] = masks
             registry["scores"] = scores
             registry["classes"] = classes
@@ -238,7 +232,7 @@ class PanopticSegmentsFromQueries:
 
         winner_ids = registry[self.winner_ids]
         merged_masks: list[np.ndarray] = []
-        merged_scores: list[float] = []
+        merged_scores: list[np.generic] = []
         merged_classes: list[int] = []
         stuff_lookup: dict[int, int] = {}
 
@@ -260,7 +254,7 @@ class PanopticSegmentsFromQueries:
                 merged_classes=merged_classes,
                 stuff_lookup=stuff_lookup,
                 class_id=class_id,
-                score=float(kept_scores[index]),
+                score=kept_scores[index],
                 mask=final_mask,
                 thing_class_ids=self.thing_class_ids,
             )
@@ -270,6 +264,7 @@ class PanopticSegmentsFromQueries:
             merged_scores=merged_scores,
             merged_classes=merged_classes,
             image_shape=image_shape,
+            score_dtype=kept_scores.dtype,
         )
         registry["masks"] = masks
         registry["scores"] = scores
@@ -299,9 +294,9 @@ class InstanceTopKPredictions:
         mask_probs = registry[self.mask_probs]
         num_queries, num_classes = class_probs.shape
         if num_queries == 0 or num_classes == 0:
-            registry[self.top_scores_as] = np.zeros((0,), dtype=np.float32)
+            registry[self.top_scores_as] = np.zeros((0,), dtype=class_probs.dtype)
             registry[self.class_ids_as] = np.zeros((0,), dtype=np.int64)
-            registry[self.selected_masks_as] = mask_probs[:0].astype(np.float32, copy=False)
+            registry[self.selected_masks_as] = mask_probs[:0]
             return registry
 
         flat_scores = class_probs.reshape(-1)
@@ -309,10 +304,10 @@ class InstanceTopKPredictions:
         top_indices = np.argpartition(flat_scores, -top_k)[-top_k:]
         order = np.argsort(flat_scores[top_indices])[::-1]
         top_indices = top_indices[order]
-        registry[self.top_scores_as] = flat_scores[top_indices].astype(np.float32, copy=False)
+        registry[self.top_scores_as] = flat_scores[top_indices]
         query_indices = top_indices // num_classes
         registry[self.class_ids_as] = (top_indices % num_classes).astype(np.int64, copy=False)
-        registry[self.selected_masks_as] = mask_probs[query_indices].astype(np.float32, copy=False)
+        registry[self.selected_masks_as] = mask_probs[query_indices]
         return registry
 
 
@@ -337,9 +332,9 @@ class InstanceScoreMasks:
         binary_masks = selected_masks >= self.mask_threshold
         areas = binary_masks.reshape(binary_masks.shape[0], -1).sum(axis=1)
         mask_sums = (selected_masks * binary_masks).reshape(selected_masks.shape[0], -1).sum(axis=1)
-        mean_mask_scores = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0).astype(np.float32, copy=False)
+        mean_mask_scores = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
         registry[self.binary_masks_as] = binary_masks
-        registry[self.final_scores_as] = (top_scores * mean_mask_scores).astype(np.float32, copy=False)
+        registry[self.final_scores_as] = top_scores * mean_mask_scores
         return registry
 
 
@@ -365,10 +360,10 @@ class InstanceSegmentsFromPredictions:
         keep = (areas > 0) & (final_scores >= self.score_threshold)
 
         if not np.any(keep):
-            masks, scores, classes = _empty_numpy_segments(image_shape)
+            masks, scores, classes = _empty_numpy_segments(image_shape, score_dtype=final_scores.dtype)
         else:
             masks = binary_masks[keep].astype(bool, copy=False)
-            scores = final_scores[keep].astype(np.float32, copy=False)
+            scores = final_scores[keep]
             classes = class_ids[keep]
             order = np.argsort(scores)[::-1]
             masks = masks[order]
@@ -453,7 +448,7 @@ def main() -> int:
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 ToNumpyRegistry(),
                 Recall("image_shape"),
-                ResizeMasksToStoredImage(),
+                ResizeMasksToImage(),
                 ClassProbabilities(),
                 MaskProbabilities(),
                 PanopticQueryPredictions(),
@@ -475,7 +470,7 @@ def main() -> int:
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 ToNumpyRegistry(),
                 Recall("image_shape"),
-                ResizeMasksToStoredImage(),
+                ResizeMasksToImage(),
                 ClassProbabilities(),
                 MaskProbabilities(),
                 InstanceTopKPredictions(top_k=args.top_k),

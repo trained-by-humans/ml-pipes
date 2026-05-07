@@ -25,25 +25,15 @@ from .mask2former_infer import (
 
 
 class TorchResizeMasksToImage:
-    def __init__(self, image_shape: tuple[int, int], src: str = "masks_queries_logits", as_: str | None = None):
-        self.image_shape = image_shape
-        self.src = src
-        self.as_ = as_ or src
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        masks = registry[self.src]
-        resized = F.interpolate(masks[:, None, :, :], size=self.image_shape, mode="bilinear", align_corners=False)[:, 0]
-        registry[self.as_] = resized
-        return registry
-
-
-class TorchResizeMasksToStoredImage:
     def __init__(self, src: str = "masks_queries_logits", as_: str | None = None):
         self.src = src
         self.as_ = as_ or src
 
     def __call__(self, registry: TorchTensorRegistry, image_shape: tuple[int, int]) -> TorchTensorRegistry:
-        return TorchResizeMasksToImage(image_shape=image_shape, src=self.src, as_=self.as_)(registry)
+        masks = registry[self.src]
+        resized = F.interpolate(masks[:, None, :, :], size=image_shape, mode="bilinear", align_corners=False)[:, 0]
+        registry[self.as_] = resized
+        return registry
 
 
 class TorchClassProbabilities:
@@ -66,11 +56,15 @@ class TorchMaskProbabilities:
         return registry
 
 
-def _empty_torch_segments(device: torch.device | str, image_shape: tuple[int, int]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def _empty_torch_segments(
+    device: torch.device | str,
+    image_shape: tuple[int, int],
+    score_dtype: torch.dtype = torch.float32,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     height, width = image_shape
     return (
         torch.zeros((0, height, width), dtype=torch.bool, device=device),
-        torch.zeros((0,), dtype=torch.float32, device=device),
+        torch.zeros((0,), dtype=score_dtype, device=device),
         torch.zeros((0,), dtype=torch.int64, device=device),
     )
 
@@ -87,7 +81,7 @@ def _append_or_merge_torch_panoptic_segment(
 ) -> None:
     if class_id in thing_class_ids:
         merged_masks.append(mask)
-        merged_scores.append(score.to(dtype=torch.float32))
+        merged_scores.append(score)
         merged_classes.append(class_id)
         return
 
@@ -95,12 +89,12 @@ def _append_or_merge_torch_panoptic_segment(
     if existing is None:
         stuff_lookup[class_id] = len(merged_masks)
         merged_masks.append(mask)
-        merged_scores.append(score.to(dtype=torch.float32))
+        merged_scores.append(score)
         merged_classes.append(class_id)
         return
 
     merged_masks[existing] = merged_masks[existing] | mask
-    merged_scores[existing] = torch.maximum(merged_scores[existing], score.to(dtype=torch.float32))
+    merged_scores[existing] = torch.maximum(merged_scores[existing], score)
 
 
 def _finalize_torch_segments(
@@ -109,12 +103,13 @@ def _finalize_torch_segments(
     merged_classes: list[int],
     device: torch.device,
     image_shape: tuple[int, int],
+    score_dtype: torch.dtype,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not merged_masks:
-        return _empty_torch_segments(device, image_shape)
+        return _empty_torch_segments(device, image_shape, score_dtype=score_dtype)
     return (
         torch.stack(merged_masks, dim=0).to(dtype=torch.bool),
-        torch.stack(merged_scores, dim=0).to(dtype=torch.float32),
+        torch.stack(merged_scores, dim=0),
         torch.tensor(merged_classes, dtype=torch.int64, device=device),
     )
 
@@ -214,7 +209,7 @@ class TorchPanopticSegmentsFromQueries:
         image_shape = tuple(int(dim) for dim in kept_masks.shape[-2:])
 
         if kept_scores.numel() == 0:
-            masks, scores, classes = _empty_torch_segments(kept_masks.device, image_shape)
+            masks, scores, classes = _empty_torch_segments(kept_masks.device, image_shape, score_dtype=kept_scores.dtype)
             registry["masks"] = masks
             registry["scores"] = scores
             registry["classes"] = classes
@@ -255,6 +250,7 @@ class TorchPanopticSegmentsFromQueries:
             merged_classes=merged_classes,
             device=kept_masks.device,
             image_shape=image_shape,
+            score_dtype=kept_scores.dtype,
         )
         registry["masks"] = masks
         registry["scores"] = scores
@@ -284,7 +280,7 @@ class TorchInstanceTopKPredictions:
         mask_probs = registry[self.mask_probs]
         num_queries, num_classes = class_probs.shape
         if num_queries == 0 or num_classes == 0:
-            registry[self.top_scores_as] = torch.zeros((0,), dtype=torch.float32, device=mask_probs.device)
+            registry[self.top_scores_as] = torch.zeros((0,), dtype=class_probs.dtype, device=mask_probs.device)
             registry[self.class_ids_as] = torch.zeros((0,), dtype=torch.int64, device=mask_probs.device)
             registry[self.selected_masks_as] = mask_probs[:0]
             return registry
@@ -293,7 +289,7 @@ class TorchInstanceTopKPredictions:
         top_k = min(self.top_k, int(flat_scores.numel()))
         top_scores, top_indices = torch.topk(flat_scores, k=top_k)
         query_indices = torch.div(top_indices, num_classes, rounding_mode="floor")
-        registry[self.top_scores_as] = top_scores.to(dtype=torch.float32)
+        registry[self.top_scores_as] = top_scores
         registry[self.class_ids_as] = (top_indices % num_classes).to(torch.int64)
         registry[self.selected_masks_as] = mask_probs[query_indices]
         return registry
@@ -351,10 +347,10 @@ class TorchInstanceSegmentsFromPredictions:
         keep = (areas > 0) & (final_scores >= self.score_threshold)
 
         if keep.sum().item() == 0:
-            masks, scores, classes = _empty_torch_segments(binary_masks.device, image_shape)
+            masks, scores, classes = _empty_torch_segments(binary_masks.device, image_shape, score_dtype=final_scores.dtype)
         else:
             masks = binary_masks[keep].to(dtype=torch.bool)
-            scores = final_scores[keep].to(dtype=torch.float32)
+            scores = final_scores[keep]
             classes = class_ids[keep]
             order = torch.argsort(scores, descending=True)
             masks = masks[order]
@@ -438,7 +434,7 @@ def main() -> int:
             pipeline = Pipeline([
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 Recall("image_shape"),
-                TorchResizeMasksToStoredImage(),
+                TorchResizeMasksToImage(),
                 TorchClassProbabilities(),
                 TorchMaskProbabilities(),
                 TorchPanopticQueryPredictions(),
@@ -460,7 +456,7 @@ def main() -> int:
             pipeline = Pipeline([
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 Recall("image_shape"),
-                TorchResizeMasksToStoredImage(),
+                TorchResizeMasksToImage(),
                 TorchClassProbabilities(),
                 TorchMaskProbabilities(),
                 TorchInstanceTopKPredictions(top_k=args.top_k),
