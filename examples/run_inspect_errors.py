@@ -40,7 +40,6 @@ import numpy as np
 from ml_pipes import Gather, Inline, Pipeline, PipelineInspector, Scatter
 
 
-
 # ---------------------------------------------------------------------------
 # Tiny operators — no model, no file IO, fully self-contained
 # ---------------------------------------------------------------------------
@@ -50,7 +49,7 @@ class MakeArray:
         return np.full((4, 4, 3), value, dtype=np.uint8)
 
 
-class Scale:
+class _ScaleArray:
     def __init__(self, factor: float) -> None:
         self.factor = factor
 
@@ -77,24 +76,21 @@ class AddOne:
 # ---------------------------------------------------------------------------
 
 def run_mid_pipeline() -> Any:
-    """Error in the middle: MakeArray → Scale → Fail → AddOne."""
-    pipeline = Pipeline([MakeArray(), Scale(2.0), Fail(), AddOne()])
+    pipeline = Pipeline([MakeArray(), _ScaleArray(2.0), Fail(), AddOne()])
     result = pipeline.inspect(100)
     print(result)
     return result
 
 
 def run_first_step() -> Any:
-    """Error on the very first step: Fail → Scale → AddOne."""
-    pipeline = Pipeline([Fail("bad input"), Scale(1.5), AddOne()])
+    pipeline = Pipeline([Fail("bad input"), _ScaleArray(1.5), AddOne()])
     result = pipeline.inspect(42)
     print(result)
     return result
 
 
 def run_nested() -> Any:
-    """Error inside a Scatter region — Scatter fans out each array, one inner step fails."""
-    inner = Pipeline([Scale(3.0), Fail("inner failure"), AddOne()])
+    inner = Pipeline([_ScaleArray(3.0), Fail("inner failure"), AddOne()])
     pipeline = Pipeline([
         Scatter(max_concurrency=2),
         Inline(inner),
@@ -139,11 +135,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     result = _SCENARIOS[args.scenario]()
-
-    if result is None:
-        print("No inspection result captured.", file=sys.stderr)
-        return 1
-
     inspector = PipelineInspector()
     if args.save:
         saved = inspector.save_to_html(result, args.save)
