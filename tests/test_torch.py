@@ -14,12 +14,20 @@ from ml_pipes.torch import (
     ToNumpyRegistry,
     ToTorch,
     ToTorchRegistry,
+    TorchArgMax,
     TorchAsType,
     TorchCollate,
     TorchDistribute,
     TorchExtract,
+    TorchGatherScores,
     TorchInfer,
+    TorchMultiplyTensors,
     TorchNMS,
+    TorchSigmoid,
+    TorchSlice,
+    TorchSoftmax,
+    TorchThresholdTensors,
+    TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
 
@@ -161,6 +169,77 @@ def test_torch_as_type_supports_payload_registry_and_sequence_forms():
 
     sequence = TorchAsType("float16")([torch.ones((1,), dtype=torch.float32)])
     assert sequence[0].dtype == torch.float16
+
+
+def test_torch_argmax_and_multiply_tensors_work_on_registry():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([[0.1, 0.9], [0.8, 0.2]], dtype=torch.float32),
+            "left": torch.tensor([[1.0], [2.0]], dtype=torch.float32),
+            "right": torch.tensor([[10.0, 20.0]], dtype=torch.float32),
+        }
+    )
+
+    TorchArgMax("scores", as_="classes")(registry)
+    TorchMultiplyTensors("left", "right", as_="product")(registry)
+
+    assert registry["classes"].tolist() == [1, 0]
+    assert torch.allclose(registry["product"], torch.tensor([[10.0, 20.0], [20.0, 40.0]]))
+
+
+def test_torch_softmax_slice_gather_and_threshold_tensors_work_on_registry():
+    registry = TorchTensorRegistry(
+        {
+            "class_logits": torch.tensor([[1.0, 2.0, 0.0], [3.0, 0.5, -1.0]], dtype=torch.float32),
+            "mask_logits": torch.tensor(
+                [
+                    [[0.0, 1.0], [2.0, 3.0]],
+                    [[4.0, 5.0], [6.0, 7.0]],
+                ],
+                dtype=torch.float32,
+            ),
+        }
+    )
+
+    TorchSoftmax("class_logits", as_="class_probs")(registry)
+    TorchSlice("class_probs", slice(None, -1))(registry)
+    TorchSigmoid("mask_logits", as_="mask_probs")(registry)
+    TorchArgMax("class_probs", as_="query_classes")(registry)
+    TorchGatherScores("class_probs", "query_classes", as_="query_scores")(registry)
+    TorchThresholdTensors("query_classes", "mask_probs", score="query_scores", min_score=0.2)(registry)
+
+    assert registry["class_probs"].shape == (2, 2)
+    assert registry["mask_probs"].shape == (2, 2, 2)
+    assert registry["query_classes"].dtype == torch.int64
+    assert registry["query_scores"].shape == (2,)
+
+
+def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.5, 2.0], dtype=torch.float32),
+            "masks": torch.tensor(
+                [
+                    [[1.0, 2.0], [3.0, 4.0]],
+                    [[5.0, 6.0], [7.0, 8.0]],
+                ],
+                dtype=torch.float32,
+            ),
+        }
+    )
+
+    result = TorchWeightMasksByScores()(registry)
+
+    assert torch.allclose(
+        result["weighted_masks"],
+        torch.tensor(
+            [
+                [[0.5, 1.0], [1.5, 2.0]],
+                [[10.0, 12.0], [14.0, 16.0]],
+            ],
+            dtype=torch.float32,
+        ),
+    )
 
 
 def test_to_device_updates_payload_and_registry_devices():

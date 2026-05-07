@@ -12,7 +12,8 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.torch"
 
 from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
-from ml_pipes import LogDetections, MapToObjects, Pipeline, Recall, Sigmoid, ToSegmentations, inline
+from ml_pipes import ArgMax, GatherScores, LogDetections, MapToObjects, Pipeline, Recall, Sigmoid, Slice, Softmax, \
+    ThresholdTensors, ToSegmentations, WeightMasksByScores, Inline
 from ml_pipes.torch import ToNumpyRegistry
 from ml_pipes.types import TensorRegistry
 
@@ -25,7 +26,7 @@ from .mask2former_infer import (
 )
 
 class ResizeMasksToImage:
-    def __init__(self, src: str = "masks_queries_logits", as_: str | None = None):
+    def __init__(self, src: str, as_: str | None = None):
         self.src = src
         self.as_ = as_ or src
 
@@ -36,20 +37,6 @@ class ResizeMasksToImage:
         masks = registry[self.src]
         resized = [cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR) for mask in masks]
         registry[self.as_] = np.stack(resized, axis=0) if resized else np.zeros((0, height, width), dtype=masks.dtype)
-        return registry
-
-
-class ClassProbabilities:
-    def __init__(self, src: str = "class_queries_logits", as_: str = "class_probs"):
-        self.src = src
-        self.as_ = as_
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        logits = registry[self.src]
-        shifted = logits - logits.max(axis=-1, keepdims=True)
-        probs = np.exp(shifted)
-        probs = probs / probs.sum(axis=-1, keepdims=True)
-        registry[self.as_] = probs[..., :-1]
         return registry
 
 
@@ -109,83 +96,14 @@ def _finalize_numpy_segments(
     )
 
 
-class PanopticQueryPredictions:
-    def __init__(
-        self,
-        class_probs: str = "class_probs",
-        scores_as: str = "query_scores",
-        classes_as: str = "query_classes",
-    ):
-        self.class_probs = class_probs
-        self.scores_as = scores_as
-        self.classes_as = classes_as
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        class_probs = registry[self.class_probs]
-        registry[self.scores_as] = class_probs.max(axis=-1)
-        registry[self.classes_as] = class_probs.argmax(axis=-1).astype(np.int64, copy=False)
-        return registry
-
-
-class PanopticKeepQueries:
-    def __init__(
-        self,
-        score_threshold: float = 0.5,
-        scores: str = "query_scores",
-        classes: str = "query_classes",
-        masks: str = "mask_probs",
-        kept_scores_as: str = "kept_scores",
-        kept_classes_as: str = "kept_classes",
-        kept_masks_as: str = "kept_masks",
-    ):
-        self.score_threshold = score_threshold
-        self.scores = scores
-        self.classes = classes
-        self.masks = masks
-        self.kept_scores_as = kept_scores_as
-        self.kept_classes_as = kept_classes_as
-        self.kept_masks_as = kept_masks_as
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        query_scores = registry[self.scores]
-        keep = query_scores >= self.score_threshold
-        registry[self.kept_scores_as] = query_scores[keep]
-        registry[self.kept_classes_as] = registry[self.classes][keep].astype(np.int64, copy=False)
-        registry[self.kept_masks_as] = registry[self.masks][keep]
-        return registry
-
-
-class PanopticWinnerIds:
-    def __init__(
-        self,
-        scores: str = "kept_scores",
-        masks: str = "kept_masks",
-        as_: str = "winner_ids",
-    ):
-        self.scores = scores
-        self.masks = masks
-        self.as_ = as_
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        kept_scores = registry[self.scores]
-        kept_masks = registry[self.masks]
-        if kept_scores.size == 0:
-            height, width = kept_masks.shape[-2:]
-            registry[self.as_] = np.zeros((height, width), dtype=np.int64)
-            return registry
-        weighted_masks = kept_scores[:, None, None] * kept_masks
-        registry[self.as_] = weighted_masks.argmax(axis=0).astype(np.int64, copy=False)
-        return registry
-
-
 class PanopticSegmentsFromQueries:
     def __init__(
         self,
         thing_class_ids: frozenset[int],
-        scores: str = "kept_scores",
-        classes: str = "kept_classes",
-        masks: str = "kept_masks",
-        winner_ids: str = "winner_ids",
+        scores: str,
+        classes: str,
+        masks: str,
+        winner_ids: str,
         mask_threshold: float = 0.5,
         overlap_threshold: float = 0.8,
     ):
@@ -428,20 +346,27 @@ def main() -> int:
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 ToNumpyRegistry(),
                 Recall("image_shape"),
-                ResizeMasksToImage(),
-                ClassProbabilities(),
+                ResizeMasksToImage(src="masks_queries_logits"),
+                Softmax("class_queries_logits", as_="class_probs"),
+                Slice("class_probs", slice(None, -1)),
                 Sigmoid("masks_queries_logits", as_="mask_probs"),
-                PanopticQueryPredictions(),
-                PanopticKeepQueries(score_threshold=args.score_threshold),
-                PanopticWinnerIds(),
+                ArgMax("class_probs", as_="query_classes"),
+                GatherScores("class_probs", "query_classes", as_="query_scores"),
+                ThresholdTensors("query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold),
+                WeightMasksByScores("query_scores", "mask_probs"),
+                ArgMax("weighted_masks", axis=0, as_="winner_ids"),
                 PanopticSegmentsFromQueries(
                     thing_class_ids=bundle.thing_class_ids,
+                    scores="query_scores",
+                    classes="query_classes",
+                    masks="mask_probs",
+                    winner_ids="winner_ids",
                     mask_threshold=args.mask_threshold,
                     overlap_threshold=args.overlap_threshold,
                 ),
                 MasksToBoxes(),
                 ToSegmentations(),
-                inline(visualize_and_store(output_path, bundle.class_names)),
+                Inline(visualize_and_store(output_path, bundle.class_names)),
                 MapToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
@@ -450,15 +375,16 @@ def main() -> int:
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 ToNumpyRegistry(),
                 Recall("image_shape"),
-                ResizeMasksToImage(),
-                ClassProbabilities(),
+                ResizeMasksToImage(src="masks_queries_logits"),
+                Softmax("class_queries_logits", as_="class_probs"),
+                Slice("class_probs", slice(None, -1)),
                 Sigmoid("masks_queries_logits", as_="mask_probs"),
                 InstanceTopKPredictions(top_k=args.top_k),
                 InstanceScoreMasks(mask_threshold=args.mask_threshold),
                 InstanceSegmentsFromPredictions(score_threshold=args.score_threshold),
                 MasksToBoxes(),
                 ToSegmentations(),
-                inline(visualize_and_store(output_path, bundle.class_names)),
+                Inline(visualize_and_store(output_path, bundle.class_names)),
                 MapToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])

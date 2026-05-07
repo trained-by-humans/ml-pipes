@@ -8,6 +8,12 @@ except ImportError as exc:  # pragma: no cover - exercised only when torch is ab
     ) from exc
 
 from .ops import (
+    TorchArgMax,
+    TorchGatherScores,
+    TorchSigmoid,
+    TorchSlice,
+    TorchSoftmax,
+    TorchThresholdTensors,
     ToDevice,
     ToNumpy,
     ToNumpyRegistry,
@@ -18,12 +24,20 @@ from .ops import (
     TorchDistribute,
     TorchExtract,
     TorchInfer,
+    TorchMultiplyTensors,
     TorchNMS,
+    TorchWeightMasksByScores,
 )
 from .types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
 
 __all__ = [
     "ToDevice",
+    "TorchArgMax",
+    "TorchGatherScores",
+    "TorchSigmoid",
+    "TorchSlice",
+    "TorchSoftmax",
+    "TorchThresholdTensors",
     "ToNumpy",
     "ToNumpyRegistry",
     "ToTorch",
@@ -33,7 +47,9 @@ __all__ = [
     "TorchDistribute",
     "TorchExtract",
     "TorchInfer",
+    "TorchMultiplyTensors",
     "TorchNMS",
+    "TorchWeightMasksByScores",
     "TorchRuntimeOutputs",
     "TorchTensorPayload",
     "TorchTensorRegistry",

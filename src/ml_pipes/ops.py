@@ -512,6 +512,44 @@ class Sigmoid:
         return registry
 
 
+class MultiplyTensors:
+    """Multiplies two registry tensors elementwise using NumPy broadcasting.
+
+    Defaults to in-place on the left-hand tensor when as_ is not provided.
+    """
+
+    def __init__(self, left: str, right: str, as_: str | None = None):
+        self.left = left
+        self.right = right
+        self.as_ = as_ or left
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = registry[self.left] * registry[self.right]
+        return registry
+
+
+class WeightMasksByScores:
+    """Weights each mask by its corresponding 1D score.
+
+    Common panoptic step:
+      scores: (N,)
+      masks:  (N, H, W) or any tensor with leading query dimension N
+      result: scores broadcast across the remaining mask dimensions
+    """
+
+    def __init__(self, scores: str = "scores", masks: str = "masks", as_: str = "weighted_masks"):
+        self.scores = scores
+        self.masks = masks
+        self.as_ = as_
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        scores = registry[self.scores]
+        masks = registry[self.masks]
+        expanded_scores = scores.reshape((scores.shape[0],) + (1,) * (masks.ndim - 1))
+        registry[self.as_] = expanded_scores * masks
+        return registry
+
+
 # ---------------------------------------------------------------------------
 # Geometry
 # ---------------------------------------------------------------------------

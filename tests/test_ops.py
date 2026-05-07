@@ -21,6 +21,7 @@ from ml_pipes.ops import (
     Infer,
     LogDetections,
     MapToObjects,
+    MultiplyTensors,
     NMS,
     Normalize,
     ProjectBoxes,
@@ -37,6 +38,7 @@ from ml_pipes.ops import (
     ToDetections,
     ToSegmentations,
     Transpose,
+    WeightMasksByScores,
 )
 from ml_pipes.types import (
     Detections,
@@ -317,6 +319,44 @@ def test_sigmoid_is_stable_for_large_magnitude_values():
     assert np.isfinite(result["x"]).all()
     assert result["x"].dtype == np.float32
     assert np.allclose(result["x"], [[0.0, 1.0]])
+
+
+def test_multiply_tensors_uses_numpy_broadcasting():
+    registry = TensorRegistry(
+        {
+            "left": np.array([[1.0], [2.0]], dtype=np.float32),
+            "right": np.array([[10.0, 20.0]], dtype=np.float32),
+        }
+    )
+
+    result = MultiplyTensors("left", "right", as_="product")(registry)
+
+    assert np.allclose(result["product"], [[10.0, 20.0], [20.0, 40.0]])
+
+
+def test_weight_masks_by_scores_broadcasts_scores_over_masks():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.5, 2.0], dtype=np.float32),
+            "masks": np.array(
+                [
+                    [[1.0, 2.0], [3.0, 4.0]],
+                    [[5.0, 6.0], [7.0, 8.0]],
+                ],
+                dtype=np.float32,
+            ),
+        }
+    )
+
+    result = WeightMasksByScores()(registry)
+
+    assert np.allclose(
+        result["weighted_masks"],
+        [
+            [[0.5, 1.0], [1.5, 2.0]],
+            [[10.0, 12.0], [14.0, 16.0]],
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
