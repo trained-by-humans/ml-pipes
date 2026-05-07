@@ -37,6 +37,7 @@ from .ops import (
     FilterTensors,
     MapTensor,
     MaskTensors,
+    MultiplyTensors,
     ThresholdTensors,
     Infer,
     LogDetections,
@@ -63,6 +64,7 @@ from .ops import (
     ToSegmentations,
     Transpose,
     UnBatch,
+    WeightMasksByScores,
 )
 from .region import RegionCloser, RegionOpener
 from .tiling import Stitch, Tile, TileRect
@@ -112,6 +114,7 @@ __all__ = [
     "FilterTensors",
     "MapTensor",
     "MaskTensors",
+    "MultiplyTensors",
     "ThresholdTensors",
     "Prediction",
     "Gather",
@@ -173,4 +176,5 @@ __all__ = [
     "ToSegmentations",
     "Transpose",
     "UnBatch",
+    "WeightMasksByScores",
 ]

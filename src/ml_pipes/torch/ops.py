@@ -172,6 +172,101 @@ class TorchAsType:
         return value.to(dtype=self._torch_dtype)
 
 
+class TorchArgMax:
+    def __init__(self, src: str, axis: int = -1, as_: str | None = None):
+        self.src = src
+        self.axis = axis
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        registry[self.as_] = torch.argmax(registry[self.src], dim=self.axis)
+        return registry
+
+
+class TorchGatherScores:
+    def __init__(self, scores: str, classes: str, as_: str | None = None):
+        self.scores = scores
+        self.classes = classes
+        self.as_ = as_ or scores
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        scores = registry[self.scores]
+        classes = registry[self.classes]
+        registry[self.as_] = scores[torch.arange(scores.shape[0], device=scores.device), classes]
+        return registry
+
+
+class TorchSlice:
+    def __init__(self, src: str, at: slice, as_: str | None = None):
+        self.src = src
+        self.at = at
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        registry[self.as_] = registry[self.src][:, self.at]
+        return registry
+
+
+class TorchSoftmax:
+    def __init__(self, src: str, axis: int = -1, as_: str | None = None):
+        self.src = src
+        self.axis = axis
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        registry[self.as_] = torch.softmax(registry[self.src], dim=self.axis)
+        return registry
+
+
+class TorchSigmoid:
+    def __init__(self, src: str, as_: str | None = None):
+        self.src = src
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        registry[self.as_] = torch.sigmoid(registry[self.src])
+        return registry
+
+
+class TorchMultiplyTensors:
+    def __init__(self, left: str, right: str, as_: str | None = None):
+        self.left = left
+        self.right = right
+        self.as_ = as_ or left
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        registry[self.as_] = registry[self.left] * registry[self.right]
+        return registry
+
+
+class TorchThresholdTensors:
+    def __init__(self, *srcs: str, score: str, min_score: float):
+        all_srcs = (score,) + tuple(src for src in srcs if src != score)
+        self.srcs = all_srcs
+        self.score = score
+        self.min_score = min_score
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        keep = registry[self.score] >= self.min_score
+        for src in self.srcs:
+            registry[src] = registry[src][keep]
+        return registry
+
+
+class TorchWeightMasksByScores:
+    def __init__(self, scores: str = "scores", masks: str = "masks", as_: str = "weighted_masks"):
+        self.scores = scores
+        self.masks = masks
+        self.as_ = as_
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        scores = registry[self.scores]
+        masks = registry[self.masks]
+        expanded_scores = scores.reshape((scores.shape[0],) + (1,) * (masks.ndim - 1))
+        registry[self.as_] = expanded_scores * masks
+        return registry
+
+
 class TorchInfer:
     def __init__(
         self,

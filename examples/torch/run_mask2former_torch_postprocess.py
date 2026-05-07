@@ -13,7 +13,16 @@ if __name__ == "__main__" and __package__ is None:
 
 from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
 from ml_pipes import LogDetections, MapToObjects, Pipeline, Recall, ToSegmentations, inline
-from ml_pipes.torch import ToNumpyRegistry
+from ml_pipes.torch import (
+    ToNumpyRegistry,
+    TorchArgMax,
+    TorchGatherScores,
+    TorchSigmoid,
+    TorchSlice,
+    TorchSoftmax,
+    TorchThresholdTensors,
+    TorchWeightMasksByScores,
+)
 from ml_pipes.torch.types import TorchTensorRegistry
 from .mask2former_infer import (
     Mask2FormerInfer,
@@ -25,7 +34,7 @@ from .mask2former_infer import (
 
 
 class TorchResizeMasksToImage:
-    def __init__(self, src: str = "masks_queries_logits", as_: str | None = None):
+    def __init__(self, src: str, as_: str | None = None):
         self.src = src
         self.as_ = as_ or src
 
@@ -33,26 +42,6 @@ class TorchResizeMasksToImage:
         masks = registry[self.src]
         resized = F.interpolate(masks[:, None, :, :], size=image_shape, mode="bilinear", align_corners=False)[:, 0]
         registry[self.as_] = resized
-        return registry
-
-
-class TorchClassProbabilities:
-    def __init__(self, src: str = "class_queries_logits", as_: str = "class_probs"):
-        self.src = src
-        self.as_ = as_
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        registry[self.as_] = registry[self.src].softmax(dim=-1)[..., :-1]
-        return registry
-
-
-class TorchMaskProbabilities:
-    def __init__(self, src: str = "masks_queries_logits", as_: str = "mask_probs"):
-        self.src = src
-        self.as_ = as_
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        registry[self.as_] = torch.sigmoid(registry[self.src])
         return registry
 
 
@@ -114,82 +103,13 @@ def _finalize_torch_segments(
     )
 
 
-class TorchPanopticQueryPredictions:
-    def __init__(
-        self,
-        class_probs: str = "class_probs",
-        scores_as: str = "query_scores",
-        classes_as: str = "query_classes",
-    ):
-        self.class_probs = class_probs
-        self.scores_as = scores_as
-        self.classes_as = classes_as
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        query_scores, query_classes = registry[self.class_probs].max(dim=-1)
-        registry[self.scores_as] = query_scores
-        registry[self.classes_as] = query_classes.to(torch.int64)
-        return registry
-
-
-class TorchPanopticKeepQueries:
-    def __init__(
-        self,
-        score_threshold: float = 0.5,
-        scores: str = "query_scores",
-        classes: str = "query_classes",
-        masks: str = "mask_probs",
-        kept_scores_as: str = "kept_scores",
-        kept_classes_as: str = "kept_classes",
-        kept_masks_as: str = "kept_masks",
-    ):
-        self.score_threshold = score_threshold
-        self.scores = scores
-        self.classes = classes
-        self.masks = masks
-        self.kept_scores_as = kept_scores_as
-        self.kept_classes_as = kept_classes_as
-        self.kept_masks_as = kept_masks_as
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        query_scores = registry[self.scores]
-        keep = query_scores >= self.score_threshold
-        registry[self.kept_scores_as] = query_scores[keep]
-        registry[self.kept_classes_as] = registry[self.classes][keep].to(torch.int64)
-        registry[self.kept_masks_as] = registry[self.masks][keep]
-        return registry
-
-
-class TorchPanopticWinnerIds:
-    def __init__(
-        self,
-        scores: str = "kept_scores",
-        masks: str = "kept_masks",
-        as_: str = "winner_ids",
-    ):
-        self.scores = scores
-        self.masks = masks
-        self.as_ = as_
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        kept_scores = registry[self.scores]
-        kept_masks = registry[self.masks]
-        if kept_scores.numel() == 0:
-            height, width = kept_masks.shape[-2:]
-            registry[self.as_] = torch.zeros((height, width), dtype=torch.int64, device=kept_masks.device)
-            return registry
-        weighted_masks = kept_scores[:, None, None] * kept_masks
-        registry[self.as_] = weighted_masks.argmax(dim=0)
-        return registry
-
-
 class TorchPanopticSegmentsFromQueries:
     def __init__(
         self,
         thing_class_ids: frozenset[int],
-        scores: str = "kept_scores",
-        classes: str = "kept_classes",
-        masks: str = "kept_masks",
+        scores: str = "query_scores",
+        classes: str = "query_classes",
+        masks: str = "mask_probs",
         winner_ids: str = "winner_ids",
         mask_threshold: float = 0.5,
         overlap_threshold: float = 0.8,
@@ -261,23 +181,23 @@ class TorchPanopticSegmentsFromQueries:
 class TorchInstanceTopKPredictions:
     def __init__(
         self,
-        class_probs: str = "class_probs",
-        mask_probs: str = "mask_probs",
+        class_logits: str,
+        mask_logits: str,
         top_k: int = 100,
         top_scores_as: str = "top_scores",
         class_ids_as: str = "class_ids",
         selected_masks_as: str = "selected_masks",
     ):
-        self.class_probs = class_probs
-        self.mask_probs = mask_probs
+        self.class_logits = class_logits
+        self.mask_logits = mask_logits
         self.top_k = top_k
         self.top_scores_as = top_scores_as
         self.class_ids_as = class_ids_as
         self.selected_masks_as = selected_masks_as
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        class_probs = registry[self.class_probs]
-        mask_probs = registry[self.mask_probs]
+        class_probs = registry[self.class_logits].softmax(dim=-1)[..., :-1]
+        mask_probs = torch.sigmoid(registry[self.mask_logits])
         num_queries, num_classes = class_probs.shape
         if num_queries == 0 or num_classes == 0:
             registry[self.top_scores_as] = torch.zeros((0,), dtype=class_probs.dtype, device=mask_probs.device)
@@ -434,14 +354,21 @@ def main() -> int:
             pipeline = Pipeline([
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 Recall("image_shape"),
-                TorchResizeMasksToImage(),
-                TorchClassProbabilities(),
-                TorchMaskProbabilities(),
-                TorchPanopticQueryPredictions(),
-                TorchPanopticKeepQueries(score_threshold=args.score_threshold),
-                TorchPanopticWinnerIds(),
+                TorchResizeMasksToImage(src="masks_queries_logits"),
+                TorchSoftmax("class_queries_logits", as_="class_probs"),
+                TorchSlice("class_probs", slice(None, -1)),
+                TorchSigmoid("masks_queries_logits", as_="mask_probs"),
+                TorchArgMax("class_probs", as_="query_classes"),
+                TorchGatherScores("class_probs", "query_classes", as_="query_scores"),
+                TorchThresholdTensors("query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold),
+                TorchWeightMasksByScores("query_scores", "mask_probs"),
+                TorchArgMax("weighted_masks", axis=0, as_="winner_ids"),
                 TorchPanopticSegmentsFromQueries(
                     thing_class_ids=bundle.thing_class_ids,
+                    scores="query_scores",
+                    classes="query_classes",
+                    masks="mask_probs",
+                    winner_ids="winner_ids",
                     mask_threshold=args.mask_threshold,
                     overlap_threshold=args.overlap_threshold,
                 ),
@@ -456,10 +383,12 @@ def main() -> int:
             pipeline = Pipeline([
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 Recall("image_shape"),
-                TorchResizeMasksToImage(),
-                TorchClassProbabilities(),
-                TorchMaskProbabilities(),
-                TorchInstanceTopKPredictions(top_k=args.top_k),
+                TorchResizeMasksToImage(src="masks_queries_logits"),
+                TorchInstanceTopKPredictions(
+                    class_logits="class_queries_logits",
+                    mask_logits="masks_queries_logits",
+                    top_k=args.top_k,
+                ),
                 TorchInstanceScoreMasks(mask_threshold=args.mask_threshold),
                 TorchInstanceSegmentsFromPredictions(score_threshold=args.score_threshold),
                 TorchMasksToBoxes(),
