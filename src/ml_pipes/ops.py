@@ -502,7 +502,13 @@ class Sigmoid:
         self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = 1.0 / (1.0 + np.exp(-registry[self.src]))
+        x = registry[self.src]
+        positive = x >= 0
+        result = np.empty_like(x)
+        result[positive] = 1.0 / (1.0 + np.exp(-x[positive]))
+        exp_values = np.exp(x[~positive])
+        result[~positive] = exp_values / (1.0 + exp_values)
+        registry[self.as_] = result
         return registry
 
 
