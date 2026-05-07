@@ -12,7 +12,7 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.torch"
 
 from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
-from ml_pipes import LogDetections, MapToObjects, Pipeline, Recall, ToSegmentations, inline
+from ml_pipes import LogDetections, MapToObjects, Pipeline, Recall, Sigmoid, ToSegmentations, inline
 from ml_pipes.torch import ToNumpyRegistry
 from ml_pipes.types import TensorRegistry
 
@@ -23,16 +23,6 @@ from .mask2former_infer import (
     resolve_output_path,
     resolve_task_list,
 )
-
-
-def stable_sigmoid(array: np.ndarray) -> np.ndarray:
-    positive = array >= 0
-    result = np.empty_like(array)
-    result[positive] = 1.0 / (1.0 + np.exp(-array[positive]))
-    exp_values = np.exp(array[~positive])
-    result[~positive] = exp_values / (1.0 + exp_values)
-    return result
-
 
 class ResizeMasksToImage:
     def __init__(self, src: str = "masks_queries_logits", as_: str | None = None):
@@ -60,16 +50,6 @@ class ClassProbabilities:
         probs = np.exp(shifted)
         probs = probs / probs.sum(axis=-1, keepdims=True)
         registry[self.as_] = probs[..., :-1]
-        return registry
-
-
-class MaskProbabilities:
-    def __init__(self, src: str = "masks_queries_logits", as_: str = "mask_probs"):
-        self.src = src
-        self.as_ = as_
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = stable_sigmoid(registry[self.src])
         return registry
 
 
@@ -450,7 +430,7 @@ def main() -> int:
                 Recall("image_shape"),
                 ResizeMasksToImage(),
                 ClassProbabilities(),
-                MaskProbabilities(),
+                Sigmoid("masks_queries_logits", as_="mask_probs"),
                 PanopticQueryPredictions(),
                 PanopticKeepQueries(score_threshold=args.score_threshold),
                 PanopticWinnerIds(),
@@ -472,7 +452,7 @@ def main() -> int:
                 Recall("image_shape"),
                 ResizeMasksToImage(),
                 ClassProbabilities(),
-                MaskProbabilities(),
+                Sigmoid("masks_queries_logits", as_="mask_probs"),
                 InstanceTopKPredictions(top_k=args.top_k),
                 InstanceScoreMasks(mask_threshold=args.mask_threshold),
                 InstanceSegmentsFromPredictions(score_threshold=args.score_threshold),

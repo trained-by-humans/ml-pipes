@@ -309,6 +309,16 @@ def test_sigmoid_maps_zero_to_half():
     assert np.allclose(result["x"], [[0.5]])
 
 
+def test_sigmoid_is_stable_for_large_magnitude_values():
+    registry = TensorRegistry({"x": np.array([[-1000.0, 1000.0]], dtype=np.float32)})
+
+    result = Sigmoid("x")(registry)
+
+    assert np.isfinite(result["x"]).all()
+    assert result["x"].dtype == np.float32
+    assert np.allclose(result["x"], [[0.0, 1.0]])
+
+
 # ---------------------------------------------------------------------------
 # ConvertBoxFormat
 # ---------------------------------------------------------------------------
