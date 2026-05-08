@@ -15,18 +15,25 @@ from ml_pipes.torch import (
     ToTorch,
     ToTorchRegistry,
     TorchArgMax,
+    TorchApplyTensorMask,
     TorchAsType,
+    TorchBinarizeTensor,
     TorchCollate,
+    TorchCreateTensorMask,
     TorchDistribute,
     TorchExtract,
+    TorchFilterTensorsByMasksArea,
+    TorchFilterTensorsByScore,
+    TorchGatherRows,
     TorchGatherScores,
     TorchInfer,
     TorchMultiplyTensors,
     TorchNMS,
+    TorchSelectTensors,
     TorchSigmoid,
     TorchSlice,
+    TorchSortTensorsBy,
     TorchSoftmax,
-    TorchThresholdTensors,
     TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
@@ -206,7 +213,7 @@ def test_torch_softmax_slice_gather_and_threshold_tensors_work_on_registry():
     TorchSigmoid("mask_logits", as_="mask_probs")(registry)
     TorchArgMax("class_probs", as_="query_classes")(registry)
     TorchGatherScores("class_probs", "query_classes", as_="query_scores")(registry)
-    TorchThresholdTensors("query_classes", "mask_probs", score="query_scores", min_score=0.2)(registry)
+    TorchFilterTensorsByScore("query_classes", "mask_probs", score="query_scores", min_score=0.2)(registry)
 
     assert registry["class_probs"].shape == (2, 2)
     assert registry["mask_probs"].shape == (2, 2, 2)
@@ -240,6 +247,81 @@ def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
             dtype=torch.float32,
         ),
     )
+
+
+def test_torch_filter_masks_by_area_and_sort_tensors_by_work_on_registry():
+    registry = TorchTensorRegistry(
+        {
+            "masks": torch.tensor(
+                [
+                    [[1, 0], [0, 0]],
+                    [[1, 1], [1, 0]],
+                ],
+                dtype=torch.bool,
+            ),
+            "scores": torch.tensor([0.5, 0.9], dtype=torch.float32),
+            "classes": torch.tensor([5, 9], dtype=torch.int64),
+        }
+    )
+
+    TorchFilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
+    TorchSortTensorsBy("classes", by="scores", descending=True)(registry)
+
+    assert registry["masks"].shape[0] == 1
+    assert torch.allclose(registry["scores"], torch.tensor([0.9]))
+    assert registry["classes"].tolist() == [9]
+
+
+def test_torch_create_tensor_mask_writes_boolean_mask_from_predicate():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.2, 0.8, 0.5], dtype=torch.float32),
+        }
+    )
+
+    result = TorchCreateTensorMask("keep", predicate=lambda reg: reg["scores"] >= 0.5)(registry)
+
+    assert result["keep"].dtype == torch.bool
+    assert result["keep"].tolist() == [False, True, True]
+
+
+def test_torch_binarize_tensor_writes_boolean_mask():
+    registry = TorchTensorRegistry(
+        {
+            "masks": torch.tensor(
+                [
+                    [[0.4, 0.7], [0.9, 0.1]],
+                    [[0.2, 0.3], [0.8, 0.6]],
+                ],
+                dtype=torch.float32,
+            )
+        }
+    )
+
+    result = TorchBinarizeTensor("masks", threshold=0.5, as_="binary_masks")(registry)
+
+    assert result["binary_masks"].dtype == torch.bool
+    assert result["binary_masks"].tolist() == [
+        [[False, True], [True, False]],
+        [[False, False], [True, True]],
+    ]
+
+
+def test_torch_select_tensors_and_apply_tensor_mask_work_on_registry():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([4, 5, 6], dtype=torch.int64),
+            "indices": torch.tensor([2, 0], dtype=torch.int64),
+            "keep": torch.tensor([True, False], dtype=torch.bool),
+        }
+    )
+
+    TorchSelectTensors("scores", "classes", indices="indices")(registry)
+    TorchApplyTensorMask("scores", "classes", mask="keep")(registry)
+
+    assert torch.allclose(registry["scores"], torch.tensor([0.8]))
+    assert registry["classes"].tolist() == [6]
 
 
 def test_to_device_updates_payload_and_registry_devices():

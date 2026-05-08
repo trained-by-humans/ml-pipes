@@ -183,17 +183,20 @@ class TorchArgMax:
         return registry
 
 
-class TorchGatherScores:
-    def __init__(self, scores: str, classes: str, as_: str | None = None):
-        self.scores = scores
-        self.classes = classes
-        self.as_ = as_ or scores
+class TorchGatherRows:
+    def __init__(self, src: str, indices: str, as_: str | None = None):
+        self.src = src
+        self.indices = indices
+        self.as_ = as_ or src
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        scores = registry[self.scores]
-        classes = registry[self.classes]
-        registry[self.as_] = scores[torch.arange(scores.shape[0], device=scores.device), classes]
+        src = registry[self.src]
+        idx = registry[self.indices]
+        registry[self.as_] = src[torch.arange(src.shape[0], device=src.device), idx]
         return registry
+
+
+TorchGatherScores = TorchGatherRows
 
 
 class TorchSlice:
@@ -239,7 +242,57 @@ class TorchMultiplyTensors:
         return registry
 
 
-class TorchThresholdTensors:
+class TorchCreateTensorMask:
+    def __init__(self, as_: str, predicate: Callable[[TorchTensorRegistry], Any]):
+        self.as_ = as_
+        self.predicate = predicate
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        mask = self.predicate(registry)
+        registry[self.as_] = (
+            mask.to(dtype=torch.bool)
+            if isinstance(mask, torch.Tensor)
+            else torch.as_tensor(mask, dtype=torch.bool)
+        )
+        return registry
+
+
+class TorchBinarizeTensor:
+    def __init__(self, src: str, threshold: float, as_: str | None = None):
+        self._inner = TorchCreateTensorMask(
+            as_=as_ or src,
+            predicate=lambda registry: registry[src] >= threshold,
+        )
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        return self._inner(registry)
+
+
+class TorchApplyTensorMask:
+    def __init__(self, *srcs: str, mask: str):
+        self.srcs = srcs
+        self.mask = mask
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        mask = registry[self.mask]
+        for src in self.srcs:
+            registry[src] = registry[src][mask]
+        return registry
+
+
+class TorchSelectTensors:
+    def __init__(self, *srcs: str, indices: str):
+        self.srcs = srcs
+        self.indices = indices
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        indices = registry[self.indices]
+        for src in self.srcs:
+            registry[src] = registry[src][indices]
+        return registry
+
+
+class TorchFilterTensorsByScore:
     def __init__(self, *srcs: str, score: str, min_score: float):
         all_srcs = (score,) + tuple(src for src in srcs if src != score)
         self.srcs = all_srcs
@@ -253,10 +306,40 @@ class TorchThresholdTensors:
         return registry
 
 
-class TorchWeightMasksByScores:
-    def __init__(self, scores: str = "scores", masks: str = "masks", as_: str = "weighted_masks"):
-        self.scores = scores
+class TorchFilterTensorsByMasksArea:
+    def __init__(self, *srcs: str, masks: str = "masks", min_area: int = 1):
+        all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
+        self.srcs = all_srcs
         self.masks = masks
+        self.min_area = min_area
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        masks = registry[self.masks]
+        areas = masks.to(dtype=torch.bool).flatten(1).sum(dim=1)
+        keep = areas >= self.min_area
+        for src in self.srcs:
+            registry[src] = registry[src][keep]
+        return registry
+
+
+class TorchSortTensorsBy:
+    def __init__(self, *srcs: str, by: str, descending: bool = True):
+        all_srcs = (by,) + tuple(src for src in srcs if src != by)
+        self.srcs = all_srcs
+        self.by = by
+        self.descending = descending
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        order = torch.argsort(registry[self.by], descending=self.descending)
+        for src in self.srcs:
+            registry[src] = registry[src][order]
+        return registry
+
+
+class TorchWeightMasksByScores:
+    def __init__(self, masks: str = "masks", scores: str = "scores", as_: str = "weighted_masks"):
+        self.masks = masks
+        self.scores = scores
         self.as_ = as_
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
