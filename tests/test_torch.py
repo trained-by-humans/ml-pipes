@@ -44,6 +44,7 @@ from ml_pipes.torch import (
     TorchTopKIndices2D,
     TorchWeightMasksByScores,
 )
+from ml_pipes.torch.ops import _numpy_conversion_can_alias_torch_source, _torch_conversion_can_alias_numpy_source
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
 
 
@@ -125,6 +126,50 @@ def test_torch_infer_extract_and_registry_conversion_round_trip():
     result = pipeline(payload)
 
     assert np.array_equal(result["scores"], np.full((1, 2, 2), 3.0, dtype=np.float32))
+
+
+def test_to_torch_copy_false_shares_cpu_numpy_storage():
+    payload = TensorPayload(
+        array=np.array([1.0, 2.0], dtype=np.float32),
+        layout="N",
+        dtype="float32",
+    )
+
+    result = ToTorch(copy=False)(payload)
+    payload.array[0] = 9.0
+
+    assert result.array.tolist() == [9.0, 2.0]
+
+
+def test_to_torch_copy_true_isolates_cpu_numpy_storage():
+    payload = TensorPayload(
+        array=np.array([1.0, 2.0], dtype=np.float32),
+        layout="N",
+        dtype="float32",
+    )
+
+    result = ToTorch(copy=True)(payload)
+    payload.array[0] = 9.0
+
+    assert result.array.tolist() == [1.0, 2.0]
+
+
+def test_to_numpy_copy_false_shares_cpu_torch_storage():
+    payload = _torch_payload(torch.tensor([1.0, 2.0], dtype=torch.float32), layout="N")
+
+    result = ToNumpy(copy=False)(payload)
+    payload.array[0] = 9.0
+
+    assert result.array.tolist() == [9.0, 2.0]
+
+
+def test_to_numpy_copy_true_isolates_cpu_torch_storage():
+    payload = _torch_payload(torch.tensor([1.0, 2.0], dtype=torch.float32), layout="N")
+
+    result = ToNumpy(copy=True)(payload)
+    payload.array[0] = 9.0
+
+    assert result.array.tolist() == [1.0, 2.0]
 
 
 def test_torch_infer_defaults_output_names_and_layouts():
@@ -648,6 +693,26 @@ def test_torch_registry_conversion_handoff_back_to_numpy():
     assert np.array_equal(result["scores"], np.array([2.0, 3.0], dtype=np.float32))
 
 
+def test_to_torch_registry_copy_false_shares_cpu_numpy_storage():
+    from ml_pipes.types import TensorRegistry
+
+    registry = TensorRegistry({"scores": np.array([1.0, 2.0], dtype=np.float32)})
+
+    result = ToTorchRegistry(copy=False)(registry)
+    registry["scores"][0] = 9.0
+
+    assert result["scores"].tolist() == [9.0, 2.0]
+
+
+def test_to_numpy_registry_copy_true_isolates_cpu_torch_storage():
+    registry = TorchTensorRegistry({"scores": torch.tensor([1.0, 2.0], dtype=torch.float32)})
+
+    result = ToNumpyRegistry(copy=True)(registry)
+    registry["scores"][0] = 9.0
+
+    assert result["scores"].tolist() == [1.0, 2.0]
+
+
 def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry():
     registry = TorchTensorRegistry(
         {
@@ -744,3 +809,26 @@ def test_cuda_smoke_for_to_torch_and_to_device():
 
     assert result.device == "cuda:0"
     assert result.array.is_cuda
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_to_numpy_copy_true_from_cuda_does_not_need_alias_breaking_copy():
+    payload = _torch_payload(torch.ones((2,), dtype=torch.float32, device="cuda:0"), layout="N")
+
+    assert not _numpy_conversion_can_alias_torch_source(
+        source_device_type=payload.array.device.type,
+        source_dtype=np.dtype("float32"),
+        target_dtype=None,
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_to_torch_copy_true_to_cuda_does_not_need_alias_breaking_copy():
+    array = np.ones((2,), dtype=np.float32)
+    source_dtype = torch.as_tensor(array).dtype
+
+    assert not _torch_conversion_can_alias_numpy_source(
+        device="cuda:0",
+        source_dtype=source_dtype,
+        target_dtype=None,
+    )
