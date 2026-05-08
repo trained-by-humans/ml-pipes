@@ -13,6 +13,44 @@ class ImagePayload:
     color_space: str = "BGR"
     layout: str = "HWC"
 
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return tuple(int(dim) for dim in self.array.shape)
+
+    @property
+    def spatial_shape(self) -> tuple[int, int]:
+        if len(self.array.shape) < 2:
+            raise ValueError(f"ImagePayload expects at least 2 dimensions, got shape {self.array.shape}")
+        return int(self.array.shape[0]), int(self.array.shape[1])
+
+    @property
+    def height(self) -> int:
+        return self.spatial_shape[0]
+
+    @property
+    def width(self) -> int:
+        return self.spatial_shape[1]
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return self.width, self.height
+
+    @property
+    def dtype(self) -> str:
+        return str(self.array.dtype)
+
+    @property
+    def ndim(self) -> int:
+        return int(self.array.ndim)
+
+    @property
+    def channels(self) -> int | None:
+        if self.array.ndim < 3:
+            return 1
+        if "C" in self.layout and len(self.layout) == self.array.ndim:
+            return int(self.array.shape[self.layout.index("C")])
+        return int(self.array.shape[-1])
+
 
 @dataclass(frozen=True)
 class TensorPayload:
