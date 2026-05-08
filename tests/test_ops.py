@@ -518,7 +518,7 @@ def test_create_tensor_mask_writes_boolean_mask_from_predicate():
         }
     )
 
-    result = CreateTensorMask("keep", predicate=lambda reg: reg["scores"] >= 0.5)(registry)
+    result = CreateTensorMask("scores", predicate=lambda tensor: tensor >= 0.5, as_="keep")(registry)
 
     assert result["keep"].dtype == np.bool_
     assert result["keep"].tolist() == [False, True, True]

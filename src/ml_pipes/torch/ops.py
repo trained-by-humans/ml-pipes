@@ -301,16 +301,18 @@ class TorchMultiplyTensors:
 
 
 class TorchCreateTensorMask:
-    def __init__(self, as_: str, predicate: Callable[[TorchTensorRegistry], Any]):
+    def __init__(self, src: str, predicate: Callable[[torch.Tensor], Any], as_: str):
+        self.src = src
         self.as_ = as_
         self.predicate = predicate
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        mask = self.predicate(registry)
+        src = registry[self.src]
+        mask = self.predicate(src)
         registry[self.as_] = (
-            mask.to(dtype=torch.bool)
+            mask.to(device=src.device, dtype=torch.bool)
             if isinstance(mask, torch.Tensor)
-            else torch.as_tensor(mask, dtype=torch.bool)
+            else torch.as_tensor(mask, dtype=torch.bool, device=src.device)
         )
         return registry
 
@@ -318,8 +320,9 @@ class TorchCreateTensorMask:
 class TorchBinarizeTensor:
     def __init__(self, src: str, threshold: float, as_: str | None = None):
         self._inner = TorchCreateTensorMask(
+            src=src,
             as_=as_ or src,
-            predicate=lambda registry: registry[src] >= threshold,
+            predicate=lambda tensor: tensor >= threshold,
         )
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:

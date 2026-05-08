@@ -834,14 +834,15 @@ class NMM:
 
 
 class CreateTensorMask:
-    """Creates a boolean mask tensor from a registry predicate."""
+    """Creates a boolean mask tensor from one source tensor."""
 
-    def __init__(self, as_: str, predicate: Callable[[TensorRegistry], Any]):
+    def __init__(self, src: str, predicate: Callable[[Any], Any], as_: str):
+        self.src = src
         self.as_ = as_
         self.predicate = predicate
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = np.asarray(self.predicate(registry), dtype=bool)
+        registry[self.as_] = np.asarray(self.predicate(registry[self.src]), dtype=bool)
         return registry
 
 
@@ -850,8 +851,9 @@ class BinarizeTensor:
 
     def __init__(self, src: str, threshold: float, as_: str | None = None):
         self._inner = CreateTensorMask(
+            src=src,
             as_=as_ or src,
-            predicate=lambda registry: registry[src] >= threshold,
+            predicate=lambda tensor: tensor >= threshold,
         )
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:

@@ -441,9 +441,27 @@ def test_torch_create_tensor_mask_writes_boolean_mask_from_predicate():
         }
     )
 
-    result = TorchCreateTensorMask("keep", predicate=lambda reg: reg["scores"] >= 0.5)(registry)
+    result = TorchCreateTensorMask("scores", predicate=lambda tensor: tensor >= 0.5, as_="keep")(registry)
 
     assert result["keep"].dtype == torch.bool
+    assert result["keep"].tolist() == [False, True, True]
+
+
+def test_torch_create_tensor_mask_places_numpy_predicate_output_on_source_device():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.2, 0.8, 0.5], dtype=torch.float32),
+        }
+    )
+
+    result = TorchCreateTensorMask(
+        "scores",
+        predicate=lambda tensor: tensor.detach().cpu().numpy() >= 0.5,
+        as_="keep",
+    )(registry)
+
+    assert result["keep"].dtype == torch.bool
+    assert result["keep"].device == result["scores"].device
     assert result["keep"].tolist() == [False, True, True]
 
 
