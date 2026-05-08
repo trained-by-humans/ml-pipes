@@ -55,6 +55,8 @@ print(detections.boxes, detections.scores, detections.classes)
 Torch support is intentionally isolated under `ml_pipes.torch`. Core
 `ml_pipes` stays NumPy/ONNX-oriented, and domain crossings stay explicit.
 
+For the full guide, see [TORCH.md](TORCH.md).
+
 ```python
 import torch
 
@@ -99,18 +101,17 @@ pipeline = Pipeline([
 ])
 ```
 
-For a fuller Torch-native example, see
-[examples/torch/run_mask2former_torch_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_torch_postprocess.py:1),
-which runs a real Mask2Former checkpoint and keeps mask upsampling, query
-filtering, pixel ownership, stuff merging, and mask-to-box conversion in
-Torch before handing the result back to NumPy.
+For fuller Torch examples, see:
 
-The matching NumPy postprocess version lives at
-[examples/torch/run_mask2former_numpy_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_numpy_postprocess.py:1),
-and
-[examples/torch/compare_mask2former_torch_vs_numpy_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/compare_mask2former_torch_vs_numpy_postprocess.py:1)
-benchmarks the Torch and NumPy postprocess paths on the same cached
-Mask2Former raw outputs. These example scripts also require `transformers`
+- [TORCH.md](TORCH.md) for execution-domain rules, copy semantics, and common patterns
+- [examples/torch/run_mask2former_torch_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_torch_postprocess.py:1)
+  for a Torch-heavy Mask2Former postprocess pipeline
+- [examples/torch/run_mask2former_numpy_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_numpy_postprocess.py:1)
+  for the matching NumPy handoff version
+
+The Torch Mask2Former example keeps mask upsampling, query filtering, pixel
+ownership, stuff merging, and mask-to-box conversion in Torch before handing
+the result back to NumPy. These example scripts also require `transformers`
 and `safetensors` in the environment.
 
 Switching to a different model family (RF-DETR, Mask R-CNN, YOLO11) means
