@@ -318,8 +318,24 @@ def _register_builtin_formatters() -> None:
         return [TextBlock(f"{name} ({n})", rows)]
 
     def _format_image(value: ImagePayload) -> list[OutputBlock]:
-        h, w = value.array.shape[:2]
-        return [ImageBlock(title=f"{type(value).__name__}  {w}×{h}  {value.color_space}", array=_image_to_rgb(value))]
+        return [
+            ImageBlock(
+                title=f"{type(value).__name__}  {value.width}×{value.height}  {value.color_space}  {value.layout}",
+                array=_image_to_rgb(value),
+            ),
+            TextBlock(
+                type(value).__name__,
+                [
+                    ("shape", str(value.shape)),
+                    ("spatial_shape", str(value.spatial_shape)),
+                    ("size", str(value.size)),
+                    ("dtype", value.dtype),
+                    ("layout", value.layout),
+                    ("color_space", value.color_space),
+                    ("channels", str(value.channels)),
+                ],
+            ),
+        ]
 
     def _format_tensor(value: TensorPayload) -> list[OutputBlock]:
         name = type(value).__name__

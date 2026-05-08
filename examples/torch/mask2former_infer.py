@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from examples.common import COCO_IMAGE_NAME, build_output_path
-from ml_pipes import Decode, ImagePayload, LoadFile, Pick, Pipeline, Store
+from ml_pipes import Decode, ImagePayload, LoadFile, Pipeline, Store
 from ml_pipes.torch.types import TorchTensorRegistry
 
 MASK2FORMER_MODEL_IDS: dict[str, str] = {
@@ -86,23 +86,13 @@ class Mask2FormerInfer:
         raise ValueError(f"Mask2FormerInfer expects BGR or RGB input, got {image.color_space}")
 
 
-class SplitImageAndShape:
-    def __call__(self, image: ImagePayload) -> tuple[ImagePayload, tuple[int, int]]:
-        if image.layout != "HWC":
-            raise ValueError(f"SplitImageAndShape expects HWC image layout, got {image.layout}")
-        height, width = image.array.shape[:2]
-        return image, (height, width)
-
-
 def build_mask2former_preprocess_pipeline() -> Pipeline:
     return Pipeline(
         [
             LoadFile(),
             Decode(),
             Store("source_image"),
-            SplitImageAndShape(),
-            Store("image_shape", index=1),
-            Pick(0),
+            Store("image_shape", select="spatial_shape"),
         ]
     )
 

@@ -172,6 +172,19 @@ def test_resize_op_can_do_plain_resize_without_padding():
     assert transform.resized_shape == (40, 40)
 
 
+def test_image_payload_exposes_derived_shape_properties():
+    payload = ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+    assert payload.shape == (10, 20, 3)
+    assert payload.spatial_shape == (10, 20)
+    assert payload.height == 10
+    assert payload.width == 20
+    assert payload.size == (20, 10)
+    assert payload.dtype == "uint8"
+    assert payload.ndim == 3
+    assert payload.channels == 3
+
+
 # ---------------------------------------------------------------------------
 # Normalize
 # ---------------------------------------------------------------------------
