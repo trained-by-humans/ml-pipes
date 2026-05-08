@@ -5,7 +5,6 @@ from pathlib import Path
 import sys
 
 import torch
-import torch.nn.functional as F
 
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -20,7 +19,10 @@ from ml_pipes.torch import (
     TorchFilterTensorsByMasksArea,
     TorchFilterTensorsByScore,
     TorchGatherScores,
+    TorchMasksToBoxes,
+    TorchMeanMaskScores,
     TorchMultiplyTensors,
+    TorchResizeMasks,
     TorchSelectTensors,
     TorchSigmoid,
     TorchSlice,
@@ -37,18 +39,6 @@ from .mask2former_infer import (
     resolve_output_path,
     resolve_task_list,
 )
-
-
-class TorchResizeMasksToImage:
-    def __init__(self, src: str, as_: str | None = None):
-        self.src = src
-        self.as_ = as_ or src
-
-    def __call__(self, registry: TorchTensorRegistry, image_shape: tuple[int, int]) -> TorchTensorRegistry:
-        masks = registry[self.src]
-        resized = F.interpolate(masks[:, None, :, :], size=image_shape, mode="bilinear", align_corners=False)[:, 0]
-        registry[self.as_] = resized
-        return registry
 
 
 def _empty_torch_segments(
@@ -184,65 +174,6 @@ class TorchPanopticSegmentsFromQueries:
         return registry
 
 
-class TorchMeanMaskScores:
-    """Computes one mean score per mask from dense mask values.
-
-    If `binary_masks` is provided, the mean is computed only over pixels where
-    the binary mask is True. If `binary_masks` is None, the mean is computed
-    over all pixels in each dense mask.
-    """
-
-    def __init__(
-        self,
-        selected_masks: str = "selected_masks",
-        binary_masks: str | None = "binary_masks",
-        *,
-        as_: str,
-    ):
-        self.selected_masks = selected_masks
-        self.binary_masks = binary_masks
-        self.as_ = as_
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        selected_masks = registry[self.selected_masks]
-        if self.binary_masks is None:
-            registry[self.as_] = selected_masks.flatten(1).mean(dim=1)
-            return registry
-
-        binary_masks = registry[self.binary_masks]
-        areas = binary_masks.flatten(1).sum(dim=1)
-        registry[self.as_] = torch.where(
-            areas > 0,
-            (selected_masks * binary_masks).flatten(1).sum(dim=1) / areas.clamp_min(1).to(selected_masks.dtype),
-            torch.zeros((selected_masks.shape[0],), dtype=selected_masks.dtype, device=selected_masks.device),
-        )
-        return registry
-
-
-class TorchMasksToBoxes:
-    def __init__(self, masks: str = "masks", *, as_: str):
-        self.masks = masks
-        self.as_ = as_
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        masks = registry[self.masks]
-        count = masks.shape[0]
-        if count == 0:
-            registry[self.as_] = torch.zeros((0, 4), dtype=torch.float32, device=masks.device)
-            return registry
-
-        _, height, width = masks.shape
-        xs = torch.arange(width, dtype=torch.float32, device=masks.device).view(1, 1, width)
-        ys = torch.arange(height, dtype=torch.float32, device=masks.device).view(1, height, 1)
-        x1 = torch.where(masks, xs, float(width)).amin(dim=(-2, -1))
-        y1 = torch.where(masks, ys, float(height)).amin(dim=(-2, -1))
-        x2 = torch.where(masks, xs, -1.0).amax(dim=(-2, -1)) + 1.0
-        y2 = torch.where(masks, ys, -1.0).amax(dim=(-2, -1)) + 1.0
-        boxes = torch.stack([x1, y1, x2, y2], dim=-1)
-        empty = ~masks.any(dim=(-2, -1))
-        boxes[empty] = 0.0
-        registry[self.as_] = boxes
-        return registry
 
 
 def parse_args() -> argparse.Namespace:
@@ -290,7 +221,7 @@ def main() -> int:
             pipeline = Pipeline([
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 Recall("image_shape"),
-                TorchResizeMasksToImage(src="masks_queries_logits"),
+                TorchResizeMasks(masks="masks_queries_logits"),
                 TorchSoftmax("class_queries_logits", as_="class_probs"),
                 TorchSlice("class_probs", slice(None, -1)),
                 TorchSigmoid("masks_queries_logits", as_="mask_probs"),
@@ -321,7 +252,7 @@ def main() -> int:
             pipeline = Pipeline([
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 Recall("image_shape"),
-                TorchResizeMasksToImage(src="masks_queries_logits"),
+                TorchResizeMasks(masks="masks_queries_logits"),
                 TorchSoftmax("class_queries_logits", as_="class_probs"),
                 TorchSlice("class_probs", slice(None, -1)),
                 TorchSigmoid("masks_queries_logits", as_="mask_probs"),
@@ -334,7 +265,7 @@ def main() -> int:
                 ),
                 TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
                 TorchBinarizeTensor("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
-                TorchMeanMaskScores(selected_masks="selected_masks", as_="mean_mask_scores"),
+                TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
                 TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
                 TorchFilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
                 TorchFilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=args.score_threshold),

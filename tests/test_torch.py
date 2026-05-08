@@ -27,8 +27,11 @@ from ml_pipes.torch import (
     TorchGatherRows,
     TorchGatherScores,
     TorchInfer,
+    TorchMasksToBoxes,
+    TorchMeanMaskScores,
     TorchMultiplyTensors,
     TorchNMS,
+    TorchResizeMasks,
     TorchSelectTensors,
     TorchSigmoid,
     TorchSlice,
@@ -279,6 +282,68 @@ def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
             dtype=torch.float32,
         ),
     )
+
+
+def test_torch_resize_masks_to_image_resizes_mask_stack():
+    registry = TorchTensorRegistry(
+        {
+            "masks": torch.tensor(
+                [
+                    [[0.0, 1.0], [1.0, 0.0]],
+                ],
+                dtype=torch.float32,
+            )
+        }
+    )
+
+    TorchResizeMasks(masks="masks", as_="resized_masks")(registry, (4, 6))
+
+    assert registry["resized_masks"].shape == (1, 4, 6)
+    assert registry["resized_masks"].dtype == torch.float32
+
+
+def test_torch_mean_mask_scores_computes_mean_over_binary_support():
+    registry = TorchTensorRegistry(
+        {
+            "selected_masks": torch.tensor(
+                [
+                    [[0.0, 1.0], [0.5, 0.0]],
+                    [[0.2, 0.4], [0.6, 0.8]],
+                ],
+                dtype=torch.float32,
+            ),
+            "binary_masks": torch.tensor(
+                [
+                    [[False, True], [True, False]],
+                    [[True, False], [False, True]],
+                ],
+                dtype=torch.bool,
+            ),
+        }
+    )
+
+    TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+
+    assert torch.allclose(registry["mean_mask_scores"], torch.tensor([0.75, 0.5]))
+
+
+def test_torch_masks_to_boxes_converts_masks_to_xyxy():
+    registry = TorchTensorRegistry(
+        {
+            "masks": torch.tensor(
+                [
+                    [[False, True, True], [False, True, False]],
+                    [[False, False, False], [False, False, False]],
+                ],
+                dtype=torch.bool,
+            )
+        }
+    )
+
+    TorchMasksToBoxes(as_="boxes")(registry)
+
+    assert torch.allclose(registry["boxes"][0], torch.tensor([1.0, 0.0, 3.0, 2.0]))
+    assert torch.allclose(registry["boxes"][1], torch.tensor([0.0, 0.0, 0.0, 0.0]))
 
 
 def test_torch_filter_masks_by_area_and_sort_tensors_by_work_on_registry():

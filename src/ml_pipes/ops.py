@@ -1056,6 +1056,88 @@ class WeightMasksByScores:
 # Segmentation
 # ---------------------------------------------------------------------------
 
+
+class ResizeMasks:
+    """Resizes a stack of masks to a target shape."""
+
+    def __init__(self, masks: str = "masks", as_: str | None = None):
+        self.masks = masks
+        self.as_ = as_ or masks
+
+    def __call__(self, registry: TensorRegistry, image_shape: tuple[int, int]) -> TensorRegistry:
+        import cv2
+
+        height, width = image_shape
+        masks = registry[self.masks]
+        resized = [cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR) for mask in masks]
+        registry[self.as_] = (
+            np.stack(resized, axis=0)
+            if resized
+            else np.zeros((0, height, width), dtype=masks.dtype)
+        )
+        return registry
+
+
+class MeanMaskScores:
+    """Computes one mean score per mask from dense mask values.
+
+    If `binary_masks` is provided, the mean is computed only over pixels where
+    the binary mask is True. If `binary_masks` is None, the mean is computed
+    over all pixels in each dense mask.
+    """
+
+    def __init__(
+        self,
+        masks: str = "masks",
+        binary_masks: str | None = "binary_masks",
+        *,
+        as_: str,
+    ):
+        self.masks = masks
+        self.binary_masks = binary_masks
+        self.as_ = as_
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        masks = registry[self.masks]
+        if self.binary_masks is None:
+            registry[self.as_] = masks.reshape(masks.shape[0], -1).mean(axis=1)
+            return registry
+
+        binary_masks = registry[self.binary_masks]
+        areas = binary_masks.reshape(binary_masks.shape[0], -1).sum(axis=1)
+        mask_sums = (masks * binary_masks).reshape(masks.shape[0], -1).sum(axis=1)
+        registry[self.as_] = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
+        return registry
+
+
+class MasksToBoxes:
+    """Converts binary masks into xyxy boxes."""
+
+    def __init__(self, masks: str = "masks", *, as_: str):
+        self.masks = masks
+        self.as_ = as_
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        masks = registry[self.masks]
+        count = masks.shape[0]
+        if count == 0:
+            registry[self.as_] = np.zeros((0, 4), dtype=np.float32)
+            return registry
+
+        _, height, width = masks.shape
+        xs = np.arange(width, dtype=np.float32).reshape(1, 1, width)
+        ys = np.arange(height, dtype=np.float32).reshape(1, height, 1)
+        x1 = np.where(masks, xs, float(width)).min(axis=(-2, -1))
+        y1 = np.where(masks, ys, float(height)).min(axis=(-2, -1))
+        x2 = np.where(masks, xs, -1.0).max(axis=(-2, -1)) + 1.0
+        y2 = np.where(masks, ys, -1.0).max(axis=(-2, -1)) + 1.0
+        boxes = np.stack([x1, y1, x2, y2], axis=-1).astype(np.float32, copy=False)
+        empty = ~masks.any(axis=(-2, -1))
+        boxes[empty] = 0.0
+        registry[self.as_] = boxes
+        return registry
+
+
 class ReconstructMasks:
     """Reconstructs raw segmentation masks from coefficients and prototypes.
 

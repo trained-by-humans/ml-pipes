@@ -26,6 +26,8 @@ from ml_pipes.ops import (
     LogDetections,
     MapToObjects,
     MultiplyTensors,
+    MeanMaskScores,
+    MasksToBoxes,
     NMS,
     Normalize,
     ProjectBoxes,
@@ -33,6 +35,7 @@ from ml_pipes.ops import (
     ProjectRoIMasks,
     ReconstructMasks,
     Resize,
+    ResizeMasks,
     SaveImage,
     SelectTensors,
     Sigmoid,
@@ -413,6 +416,66 @@ def test_weight_masks_by_scores_broadcasts_scores_over_masks():
             [[10.0, 12.0], [14.0, 16.0]],
         ],
     )
+
+
+def test_resize_masks_to_image_resizes_mask_stack():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[0.0, 1.0], [1.0, 0.0]],
+                ],
+                dtype=np.float32,
+            )
+        }
+    )
+
+    result = ResizeMasks(masks="masks", as_="resized_masks")(registry, (4, 6))
+
+    assert result["resized_masks"].shape == (1, 4, 6)
+    assert result["resized_masks"].dtype == np.float32
+
+
+def test_mean_mask_scores_computes_mean_over_binary_support():
+    registry = TensorRegistry(
+        {
+            "selected_masks": np.array(
+                [
+                    [[0.0, 1.0], [0.5, 0.0]],
+                    [[0.2, 0.4], [0.6, 0.8]],
+                ],
+                dtype=np.float32,
+            ),
+            "binary_masks": np.array(
+                [
+                    [[False, True], [True, False]],
+                    [[True, False], [False, True]],
+                ]
+            ),
+        }
+    )
+
+    result = MeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+
+    assert np.allclose(result["mean_mask_scores"], [0.75, 0.5])
+
+
+def test_masks_to_boxes_converts_masks_to_xyxy():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[False, True, True], [False, True, False]],
+                    [[False, False, False], [False, False, False]],
+                ]
+            )
+        }
+    )
+
+    result = MasksToBoxes(as_="boxes")(registry)
+
+    assert np.allclose(result["boxes"][0], [1.0, 0.0, 3.0, 2.0])
+    assert np.allclose(result["boxes"][1], [0.0, 0.0, 0.0, 0.0])
 
 
 def test_filter_masks_by_area_filters_parallel_tensors():

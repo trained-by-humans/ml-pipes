@@ -34,7 +34,10 @@ from .ops import (
     TorchExtract,
     TorchInfer,
     TorchMultiplyTensors,
+    TorchMeanMaskScores,
+    TorchMasksToBoxes,
     TorchNMS,
+    TorchResizeMasks,
     TorchWeightMasksByScores,
 )
 from .types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
@@ -66,7 +69,10 @@ __all__ = [
     "TorchExtract",
     "TorchInfer",
     "TorchMultiplyTensors",
+    "TorchMeanMaskScores",
+    "TorchMasksToBoxes",
     "TorchNMS",
+    "TorchResizeMasks",
     "TorchWeightMasksByScores",
     "TorchRuntimeOutputs",
     "TorchTensorPayload",
