@@ -453,23 +453,7 @@ class ArgMax:
         return registry
 
 
-class GatherScores:
-    """Reduces a 2D score matrix to 1D by picking each row's value at its class index.
-
-    Equivalent to: scores[arange(N), classes]
-    Writes result back to scores (or as_) in the registry.
-    """
-
-    def __init__(self, scores: str, classes: str, as_: str | None = None):
-        self.scores = scores
-        self.classes = classes
-        self.as_ = as_ or scores
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        scores = registry[self.scores]
-        classes = registry[self.classes]
-        registry[self.as_] = scores[np.arange(scores.shape[0]), classes].astype(scores.dtype)
-        return registry
+GatherScores = GatherRows
 
 
 class Softmax:
@@ -525,28 +509,6 @@ class MultiplyTensors:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         registry[self.as_] = registry[self.left] * registry[self.right]
-        return registry
-
-
-class WeightMasksByScores:
-    """Weights each mask by its corresponding 1D score.
-
-    Common panoptic step:
-      scores: (N,)
-      masks:  (N, H, W) or any tensor with leading query dimension N
-      result: scores broadcast across the remaining mask dimensions
-    """
-
-    def __init__(self, scores: str = "scores", masks: str = "masks", as_: str = "weighted_masks"):
-        self.scores = scores
-        self.masks = masks
-        self.as_ = as_
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        scores = registry[self.scores]
-        masks = registry[self.masks]
-        expanded_scores = scores.reshape((scores.shape[0],) + (1,) * (masks.ndim - 1))
-        registry[self.as_] = expanded_scores * masks
         return registry
 
 
@@ -647,7 +609,7 @@ class NMS:
     """Non-Maximum Suppression on named tensors in a TensorRegistry.
 
     Filters boxes, scores, and classes in-place.
-    Optionally stores the kept indices under kept_as for use with MaskTensors.
+    Optionally stores the kept indices under kept_as for use with SelectTensors.
     """
 
     def __init__(
@@ -806,58 +768,57 @@ class NMM:
         return Detections(boxes=merged_boxes, scores=merged_scores, classes=merged_classes)
 
 
-class MaskTensors:
-    """Applies a pre-existing index mask from the registry to a tensor:
-    registry[as_] = registry[src][registry[indices]]
+class CreateTensorMask:
+    """Creates a boolean mask tensor from a registry predicate."""
 
-    Pair with NMS(kept_as=...) to synchronise extra tensors (e.g. mask coefficients)
-    with the boxes/scores/classes that NMS already filtered.
-
-    Defaults to in-place (overwrites src) when as_ is not provided.
-    """
-
-    def __init__(self, src: str, indices: str, as_: str | None = None):
-        self.src = src
-        self.indices = indices
-        self.as_ = as_ or src
+    def __init__(self, as_: str, predicate: Callable[[TensorRegistry], Any]):
+        self.as_ = as_
+        self.predicate = predicate
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = registry[self.src][registry[self.indices]]
+        registry[self.as_] = np.asarray(self.predicate(registry), dtype=bool)
         return registry
 
 
-class MapTensor:
-    """Applies a function to a tensor and writes the result to as_ (defaults to src).
+class BinarizeTensor:
+    """Creates a boolean mask tensor by thresholding one source tensor."""
 
-    Example — convert 1-indexed COCO labels to 0-indexed classes:
-        MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes")
-    """
-
-    def __init__(self, src: str, fn: Callable[[Any], Any], as_: str | None = None):
-        self.src = src
-        self.fn = fn
-        self.as_ = as_ or src
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = self.fn(registry[self.src])
-        return registry
-
-
-class ThresholdTensors:
-    """Shorthand for FilterTensors with a score threshold predicate.
-
-    The score tensor is always filtered automatically; additional keys are listed as positional args.
-
-    Example:
-        ThresholdTensors("boxes", "masks", "classes", score="scores", min_score=0.7)
-    """
-
-    def __init__(self, *srcs: str, score: str, min_score: float):
-        all_srcs = (score,) + tuple(s for s in srcs if s != score)
-        self._inner = FilterTensors(*all_srcs, predicate=lambda r: r[score] >= min_score)
+    def __init__(self, src: str, threshold: float, as_: str | None = None):
+        self._inner = CreateTensorMask(
+            as_=as_ or src,
+            predicate=lambda registry: registry[src] >= threshold,
+        )
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
+
+
+class ApplyTensorMask:
+    """Applies one boolean mask to one or more tensors in-place."""
+
+    def __init__(self, *srcs: str, mask: str):
+        self.srcs = srcs
+        self.mask = mask
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        mask = registry[self.mask]
+        for src in self.srcs:
+            registry[src] = registry[src][mask]
+        return registry
+
+
+class SelectTensors:
+    """Applies one integer index tensor to one or more tensors in-place."""
+
+    def __init__(self, *srcs: str, indices: str):
+        self.srcs = srcs
+        self.indices = indices
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        indices = registry[self.indices]
+        for src in self.srcs:
+            registry[src] = registry[src][indices]
+        return registry
 
 
 class FilterTensors:
@@ -878,6 +839,98 @@ class FilterTensors:
         mask = self.predicate(registry)
         for src in self.srcs:
             registry[src] = registry[src][mask]
+        return registry
+
+
+class FilterTensorsByScore:
+    """Shorthand for FilterTensors with a score threshold predicate.
+
+    The score tensor is always filtered automatically; additional keys are listed as positional args.
+
+    Example:
+        FilterTensorsByScore("boxes", "masks", "classes", score="scores", min_score=0.7)
+    """
+
+    def __init__(self, *srcs: str, score: str, min_score: float):
+        all_srcs = (score,) + tuple(s for s in srcs if s != score)
+        self._inner = FilterTensors(*all_srcs, predicate=lambda r: r[score] >= min_score)
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
+class FilterTensorsByMasksArea:
+    """Filters tensors by the minimum foreground area of one masks tensor."""
+
+    def __init__(self, *srcs: str, masks: str = "masks", min_area: int = 1):
+        all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
+        self.srcs = all_srcs
+        self.masks = masks
+        self.min_area = min_area
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        masks = registry[self.masks]
+        areas = np.asarray(masks, dtype=bool).reshape(masks.shape[0], -1).sum(axis=1)
+        keep = areas >= self.min_area
+        for src in self.srcs:
+            registry[src] = registry[src][keep]
+        return registry
+
+
+class MapTensor:
+    """Applies a function to a tensor and writes the result to as_ (defaults to src).
+
+    Example — convert 1-indexed COCO labels to 0-indexed classes:
+        MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes")
+    """
+
+    def __init__(self, src: str, fn: Callable[[Any], Any], as_: str | None = None):
+        self.src = src
+        self.fn = fn
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = self.fn(registry[self.src])
+        return registry
+
+
+class SortTensorsBy:
+    """Sorts one or more registry tensors by the values of a key tensor."""
+
+    def __init__(self, *srcs: str, by: str, descending: bool = True):
+        all_srcs = (by,) + tuple(src for src in srcs if src != by)
+        self.srcs = all_srcs
+        self.by = by
+        self.descending = descending
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        order = np.argsort(registry[self.by])
+        if self.descending:
+            order = order[::-1]
+        for src in self.srcs:
+            registry[src] = registry[src][order]
+        return registry
+
+
+class WeightMasksByScores:
+    """Weights each mask by its corresponding 1D score.
+
+    Common panoptic step:
+      scores: (N,)
+      masks:  (N, H, W) or any tensor with leading query dimension N
+      result: scores broadcast across the remaining mask dimensions
+    """
+
+    def __init__(self, masks: str = "masks", scores: str = "scores", as_: str = "weighted_masks"):
+        self.masks = masks
+        self.scores = scores
+        self.as_ = as_
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        scores = registry[self.scores]
+        masks = registry[self.masks]
+        expanded_scores = scores.reshape((scores.shape[0],) + (1,) * (masks.ndim - 1))
+        registry[self.as_] = expanded_scores * masks
         return registry
 
 
