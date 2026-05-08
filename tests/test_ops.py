@@ -188,6 +188,17 @@ def test_image_payload_exposes_derived_shape_properties():
     assert payload.channels == 3
 
 
+def test_image_payload_spatial_shape_uses_layout_for_chw():
+    payload = ImagePayload(array=np.zeros((3, 10, 20), dtype=np.uint8), color_space="BGR", layout="CHW")
+
+    assert payload.shape == (3, 10, 20)
+    assert payload.spatial_shape == (10, 20)
+    assert payload.height == 10
+    assert payload.width == 20
+    assert payload.size == (20, 10)
+    assert payload.channels == 3
+
+
 # ---------------------------------------------------------------------------
 # Normalize
 # ---------------------------------------------------------------------------
