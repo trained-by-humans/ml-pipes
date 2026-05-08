@@ -21,6 +21,31 @@ from .types import (
 )
 
 
+def _synchronize_torch_device(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+        return
+    if device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+        torch.mps.synchronize()
+
+
+def _collect_torch_devices(value: object) -> set[torch.device]:
+    if isinstance(value, TorchTensorPayload):
+        return {value.array.device}
+    if isinstance(value, TorchTensorRegistry):
+        return {tensor.device for tensor in value._tensors.values()}
+    if isinstance(value, TorchRuntimeOutputs):
+        return {tensor.array.device for tensor in value.tensors}
+    if isinstance(value, torch.Tensor):
+        return {value.device}
+    if isinstance(value, tuple | list):
+        devices: set[torch.device] = set()
+        for item in value:
+            devices.update(_collect_torch_devices(item))
+        return devices
+    return set()
+
+
 def _torch_conversion_can_alias_numpy_source(
     device: str,
     source_dtype: torch.dtype,
@@ -161,6 +186,31 @@ class ToDevice:
                 value[name] = tensor.to(device=self.device)
             return value
         raise TypeError(f"ToDevice does not support value type {type(value)!r}")
+
+
+class TorchSynchronizeTensors:
+    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
+        torch_like = (
+            TorchTensorPayload
+            | TorchTensorRegistry
+            | TorchRuntimeOutputs
+            | torch.Tensor
+            | tuple[TorchTensorPayload, ...]
+            | tuple[torch.Tensor, ...]
+            | list[TorchTensorPayload]
+            | list[torch.Tensor]
+        )
+        if current_output is not Any and is_annotation_compatible(current_output, (torch_like,)):
+            return (current_output,), current_output
+        return (torch_like,), torch_like
+
+    def __call__(self, value: object) -> object:
+        devices = _collect_torch_devices(value)
+        if not devices:
+            raise TypeError(f"TorchSynchronizeTensors does not support value type {type(value)!r}")
+        for device in sorted(devices, key=str):
+            _synchronize_torch_device(device)
+        return value
 
 
 class TorchAsType:
