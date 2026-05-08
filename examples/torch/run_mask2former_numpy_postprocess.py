@@ -12,8 +12,27 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.torch"
 
 from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
-from ml_pipes import ArgMax, GatherScores, LogDetections, MapToObjects, Pipeline, Recall, Sigmoid, Slice, Softmax, \
-    ThresholdTensors, ToSegmentations, WeightMasksByScores, Inline
+from ml_pipes import (
+    ArgMax,
+    BinarizeTensor,
+    FilterTensorsByMasksArea,
+    FilterTensorsByScore,
+    GatherScores,
+    LogDetections,
+    MapToObjects,
+    MultiplyTensors,
+    Pipeline,
+    Recall,
+    SelectTensors,
+    Sigmoid,
+    Slice,
+    Softmax,
+    SortTensorsBy,
+    TopKIndices2D,
+    ToSegmentations,
+    WeightMasksByScores,
+    inline,
+)
 from ml_pipes.torch import ToNumpyRegistry
 from ml_pipes.types import TensorRegistry
 
@@ -170,112 +189,40 @@ class PanopticSegmentsFromQueries:
         return registry
 
 
-class InstanceTopKPredictions:
+class MeanMaskScores:
+    """Computes one mean score per mask from dense mask values.
+
+    If `binary_masks` is provided, the mean is computed only over pixels where
+    the binary mask is True. If `binary_masks` is None, the mean is computed
+    over all pixels in each dense mask.
+    """
+
     def __init__(
         self,
-        class_probs: str = "class_probs",
-        mask_probs: str = "mask_probs",
-        top_k: int = 100,
-        top_scores_as: str = "top_scores",
-        class_ids_as: str = "class_ids",
-        selected_masks_as: str = "selected_masks",
+        selected_masks: str = "selected_masks",
+        binary_masks: str | None = "binary_masks",
+        *,
+        as_: str,
     ):
-        self.class_probs = class_probs
-        self.mask_probs = mask_probs
-        self.top_k = top_k
-        self.top_scores_as = top_scores_as
-        self.class_ids_as = class_ids_as
-        self.selected_masks_as = selected_masks_as
+        self.selected_masks = selected_masks
+        self.binary_masks = binary_masks
+        self.as_ = as_
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        class_probs = registry[self.class_probs]
-        mask_probs = registry[self.mask_probs]
-        num_queries, num_classes = class_probs.shape
-        if num_queries == 0 or num_classes == 0:
-            registry[self.top_scores_as] = np.zeros((0,), dtype=class_probs.dtype)
-            registry[self.class_ids_as] = np.zeros((0,), dtype=np.int64)
-            registry[self.selected_masks_as] = mask_probs[:0]
+        selected_masks = registry[self.selected_masks]
+        if self.binary_masks is None:
+            registry[self.as_] = selected_masks.reshape(selected_masks.shape[0], -1).mean(axis=1)
             return registry
 
-        flat_scores = class_probs.reshape(-1)
-        top_k = min(self.top_k, int(flat_scores.size))
-        top_indices = np.argpartition(flat_scores, -top_k)[-top_k:]
-        order = np.argsort(flat_scores[top_indices])[::-1]
-        top_indices = top_indices[order]
-        registry[self.top_scores_as] = flat_scores[top_indices]
-        query_indices = top_indices // num_classes
-        registry[self.class_ids_as] = (top_indices % num_classes).astype(np.int64, copy=False)
-        registry[self.selected_masks_as] = mask_probs[query_indices]
-        return registry
-
-
-class InstanceScoreMasks:
-    def __init__(
-        self,
-        mask_threshold: float = 0.5,
-        top_scores: str = "top_scores",
-        selected_masks: str = "selected_masks",
-        binary_masks_as: str = "binary_masks",
-        final_scores_as: str = "final_scores",
-    ):
-        self.mask_threshold = mask_threshold
-        self.top_scores = top_scores
-        self.selected_masks = selected_masks
-        self.binary_masks_as = binary_masks_as
-        self.final_scores_as = final_scores_as
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        top_scores = registry[self.top_scores]
-        selected_masks = registry[self.selected_masks]
-        binary_masks = selected_masks >= self.mask_threshold
+        binary_masks = registry[self.binary_masks]
         areas = binary_masks.reshape(binary_masks.shape[0], -1).sum(axis=1)
         mask_sums = (selected_masks * binary_masks).reshape(selected_masks.shape[0], -1).sum(axis=1)
-        mean_mask_scores = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
-        registry[self.binary_masks_as] = binary_masks
-        registry[self.final_scores_as] = top_scores * mean_mask_scores
-        return registry
-
-
-class InstanceSegmentsFromPredictions:
-    def __init__(
-        self,
-        score_threshold: float = 0.5,
-        binary_masks: str = "binary_masks",
-        final_scores: str = "final_scores",
-        class_ids: str = "class_ids",
-    ):
-        self.score_threshold = score_threshold
-        self.binary_masks = binary_masks
-        self.final_scores = final_scores
-        self.class_ids = class_ids
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        binary_masks = registry[self.binary_masks]
-        final_scores = registry[self.final_scores]
-        class_ids = registry[self.class_ids]
-        image_shape = tuple(int(dim) for dim in binary_masks.shape[-2:])
-        areas = binary_masks.reshape(binary_masks.shape[0], -1).sum(axis=1)
-        keep = (areas > 0) & (final_scores >= self.score_threshold)
-
-        if not np.any(keep):
-            masks, scores, classes = _empty_numpy_segments(image_shape, score_dtype=final_scores.dtype)
-        else:
-            masks = binary_masks[keep].astype(bool, copy=False)
-            scores = final_scores[keep]
-            classes = class_ids[keep]
-            order = np.argsort(scores)[::-1]
-            masks = masks[order]
-            scores = scores[order]
-            classes = classes[order]
-
-        registry["masks"] = masks
-        registry["scores"] = scores
-        registry["classes"] = classes
+        registry[self.as_] = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
         return registry
 
 
 class MasksToBoxes:
-    def __init__(self, masks: str = "masks", as_: str = "boxes"):
+    def __init__(self, masks: str = "masks", *, as_: str):
         self.masks = masks
         self.as_ = as_
 
@@ -352,8 +299,8 @@ def main() -> int:
                 Sigmoid("masks_queries_logits", as_="mask_probs"),
                 ArgMax("class_probs", as_="query_classes"),
                 GatherScores("class_probs", "query_classes", as_="query_scores"),
-                ThresholdTensors("query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold),
-                WeightMasksByScores("query_scores", "mask_probs"),
+                FilterTensorsByScore("query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold),
+                WeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
                 ArgMax("weighted_masks", axis=0, as_="winner_ids"),
                 PanopticSegmentsFromQueries(
                     thing_class_ids=bundle.thing_class_ids,
@@ -364,9 +311,9 @@ def main() -> int:
                     mask_threshold=args.mask_threshold,
                     overlap_threshold=args.overlap_threshold,
                 ),
-                MasksToBoxes(),
+                MasksToBoxes(as_="boxes"),
                 ToSegmentations(),
-                Inline(visualize_and_store(output_path, bundle.class_names)),
+                inline(visualize_and_store(output_path, bundle.class_names)),
                 MapToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
@@ -379,12 +326,23 @@ def main() -> int:
                 Softmax("class_queries_logits", as_="class_probs"),
                 Slice("class_probs", slice(None, -1)),
                 Sigmoid("masks_queries_logits", as_="mask_probs"),
-                InstanceTopKPredictions(top_k=args.top_k),
-                InstanceScoreMasks(mask_threshold=args.mask_threshold),
-                InstanceSegmentsFromPredictions(score_threshold=args.score_threshold),
-                MasksToBoxes(),
-                ToSegmentations(),
-                Inline(visualize_and_store(output_path, bundle.class_names)),
+                TopKIndices2D(
+                    "class_probs",
+                    k=args.top_k,
+                    values_as="top_scores",
+                    row_indices_as="query_indices",
+                    col_indices_as="class_ids",
+                ),
+                SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+                BinarizeTensor("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
+                MeanMaskScores(selected_masks="selected_masks", as_="mean_mask_scores"),
+                MultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
+                FilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
+                FilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=args.score_threshold),
+                SortTensorsBy("binary_masks", "class_ids", by="final_scores"),
+                MasksToBoxes(masks="binary_masks", as_="boxes"),
+                ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
+                inline(visualize_and_store(output_path, bundle.class_names)),
                 MapToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])

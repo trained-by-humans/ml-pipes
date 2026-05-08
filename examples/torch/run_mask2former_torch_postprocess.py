@@ -16,11 +16,17 @@ from ml_pipes import LogDetections, MapToObjects, Pipeline, Recall, ToSegmentati
 from ml_pipes.torch import (
     ToNumpyRegistry,
     TorchArgMax,
+    TorchBinarizeTensor,
+    TorchFilterTensorsByMasksArea,
+    TorchFilterTensorsByScore,
     TorchGatherScores,
+    TorchMultiplyTensors,
+    TorchSelectTensors,
     TorchSigmoid,
     TorchSlice,
+    TorchSortTensorsBy,
     TorchSoftmax,
-    TorchThresholdTensors,
+    TorchTopKIndices2D,
     TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchTensorRegistry
@@ -178,113 +184,43 @@ class TorchPanopticSegmentsFromQueries:
         return registry
 
 
-class TorchInstanceTopKPredictions:
+class TorchMeanMaskScores:
+    """Computes one mean score per mask from dense mask values.
+
+    If `binary_masks` is provided, the mean is computed only over pixels where
+    the binary mask is True. If `binary_masks` is None, the mean is computed
+    over all pixels in each dense mask.
+    """
+
     def __init__(
         self,
-        class_logits: str,
-        mask_logits: str,
-        top_k: int = 100,
-        top_scores_as: str = "top_scores",
-        class_ids_as: str = "class_ids",
-        selected_masks_as: str = "selected_masks",
+        selected_masks: str = "selected_masks",
+        binary_masks: str | None = "binary_masks",
+        *,
+        as_: str,
     ):
-        self.class_logits = class_logits
-        self.mask_logits = mask_logits
-        self.top_k = top_k
-        self.top_scores_as = top_scores_as
-        self.class_ids_as = class_ids_as
-        self.selected_masks_as = selected_masks_as
+        self.selected_masks = selected_masks
+        self.binary_masks = binary_masks
+        self.as_ = as_
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        class_probs = registry[self.class_logits].softmax(dim=-1)[..., :-1]
-        mask_probs = torch.sigmoid(registry[self.mask_logits])
-        num_queries, num_classes = class_probs.shape
-        if num_queries == 0 or num_classes == 0:
-            registry[self.top_scores_as] = torch.zeros((0,), dtype=class_probs.dtype, device=mask_probs.device)
-            registry[self.class_ids_as] = torch.zeros((0,), dtype=torch.int64, device=mask_probs.device)
-            registry[self.selected_masks_as] = mask_probs[:0]
+        selected_masks = registry[self.selected_masks]
+        if self.binary_masks is None:
+            registry[self.as_] = selected_masks.flatten(1).mean(dim=1)
             return registry
 
-        flat_scores = class_probs.reshape(-1)
-        top_k = min(self.top_k, int(flat_scores.numel()))
-        top_scores, top_indices = torch.topk(flat_scores, k=top_k)
-        query_indices = torch.div(top_indices, num_classes, rounding_mode="floor")
-        registry[self.top_scores_as] = top_scores
-        registry[self.class_ids_as] = (top_indices % num_classes).to(torch.int64)
-        registry[self.selected_masks_as] = mask_probs[query_indices]
-        return registry
-
-
-class TorchInstanceScoreMasks:
-    def __init__(
-        self,
-        mask_threshold: float = 0.5,
-        top_scores: str = "top_scores",
-        selected_masks: str = "selected_masks",
-        binary_masks_as: str = "binary_masks",
-        final_scores_as: str = "final_scores",
-    ):
-        self.mask_threshold = mask_threshold
-        self.top_scores = top_scores
-        self.selected_masks = selected_masks
-        self.binary_masks_as = binary_masks_as
-        self.final_scores_as = final_scores_as
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        top_scores = registry[self.top_scores]
-        selected_masks = registry[self.selected_masks]
-        binary_masks = selected_masks >= self.mask_threshold
+        binary_masks = registry[self.binary_masks]
         areas = binary_masks.flatten(1).sum(dim=1)
-        mean_mask_scores = torch.where(
+        registry[self.as_] = torch.where(
             areas > 0,
             (selected_masks * binary_masks).flatten(1).sum(dim=1) / areas.clamp_min(1).to(selected_masks.dtype),
-            torch.zeros_like(top_scores),
+            torch.zeros((selected_masks.shape[0],), dtype=selected_masks.dtype, device=selected_masks.device),
         )
-        registry[self.binary_masks_as] = binary_masks
-        registry[self.final_scores_as] = top_scores * mean_mask_scores
-        return registry
-
-
-class TorchInstanceSegmentsFromPredictions:
-    def __init__(
-        self,
-        score_threshold: float = 0.5,
-        binary_masks: str = "binary_masks",
-        final_scores: str = "final_scores",
-        class_ids: str = "class_ids",
-    ):
-        self.score_threshold = score_threshold
-        self.binary_masks = binary_masks
-        self.final_scores = final_scores
-        self.class_ids = class_ids
-
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        binary_masks = registry[self.binary_masks]
-        final_scores = registry[self.final_scores]
-        class_ids = registry[self.class_ids]
-        image_shape = tuple(int(dim) for dim in binary_masks.shape[-2:])
-        areas = binary_masks.flatten(1).sum(dim=1)
-        keep = (areas > 0) & (final_scores >= self.score_threshold)
-
-        if keep.sum().item() == 0:
-            masks, scores, classes = _empty_torch_segments(binary_masks.device, image_shape, score_dtype=final_scores.dtype)
-        else:
-            masks = binary_masks[keep].to(dtype=torch.bool)
-            scores = final_scores[keep]
-            classes = class_ids[keep]
-            order = torch.argsort(scores, descending=True)
-            masks = masks[order]
-            scores = scores[order]
-            classes = classes[order]
-
-        registry["masks"] = masks
-        registry["scores"] = scores
-        registry["classes"] = classes
         return registry
 
 
 class TorchMasksToBoxes:
-    def __init__(self, masks: str = "masks", as_: str = "boxes"):
+    def __init__(self, masks: str = "masks", *, as_: str):
         self.masks = masks
         self.as_ = as_
 
@@ -360,8 +296,10 @@ def main() -> int:
                 TorchSigmoid("masks_queries_logits", as_="mask_probs"),
                 TorchArgMax("class_probs", as_="query_classes"),
                 TorchGatherScores("class_probs", "query_classes", as_="query_scores"),
-                TorchThresholdTensors("query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold),
-                TorchWeightMasksByScores("query_scores", "mask_probs"),
+                TorchFilterTensorsByScore(
+                    "query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold
+                ),
+                TorchWeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
                 TorchArgMax("weighted_masks", axis=0, as_="winner_ids"),
                 TorchPanopticSegmentsFromQueries(
                     thing_class_ids=bundle.thing_class_ids,
@@ -372,7 +310,7 @@ def main() -> int:
                     mask_threshold=args.mask_threshold,
                     overlap_threshold=args.overlap_threshold,
                 ),
-                TorchMasksToBoxes(),
+                TorchMasksToBoxes(as_="boxes"),
                 ToNumpyRegistry(),
                 ToSegmentations(),
                 inline(visualize_and_store(output_path, bundle.class_names)),
@@ -384,16 +322,26 @@ def main() -> int:
                 Mask2FormerInfer(bundle=bundle, device=args.device),
                 Recall("image_shape"),
                 TorchResizeMasksToImage(src="masks_queries_logits"),
-                TorchInstanceTopKPredictions(
-                    class_logits="class_queries_logits",
-                    mask_logits="masks_queries_logits",
-                    top_k=args.top_k,
+                TorchSoftmax("class_queries_logits", as_="class_probs"),
+                TorchSlice("class_probs", slice(None, -1)),
+                TorchSigmoid("masks_queries_logits", as_="mask_probs"),
+                TorchTopKIndices2D(
+                    "class_probs",
+                    k=args.top_k,
+                    values_as="top_scores",
+                    row_indices_as="query_indices",
+                    col_indices_as="class_ids",
                 ),
-                TorchInstanceScoreMasks(mask_threshold=args.mask_threshold),
-                TorchInstanceSegmentsFromPredictions(score_threshold=args.score_threshold),
-                TorchMasksToBoxes(),
+                TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+                TorchBinarizeTensor("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
+                TorchMeanMaskScores(selected_masks="selected_masks", as_="mean_mask_scores"),
+                TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
+                TorchFilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
+                TorchFilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=args.score_threshold),
+                TorchSortTensorsBy("binary_masks", "class_ids", by="final_scores"),
+                TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
                 ToNumpyRegistry(),
-                ToSegmentations(),
+                ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
                 inline(visualize_and_store(output_path, bundle.class_names)),
                 MapToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
