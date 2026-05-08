@@ -14,7 +14,7 @@ if __name__ == "__main__" and __package__ is None:
 from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
 from ml_pipes import (
     ArgMax,
-    BinarizeTensor,
+    BinarizeTensorByThreshold,
     FilterTensorsByMasksArea,
     FilterTensorsByScore,
     GatherScores,
@@ -267,7 +267,7 @@ def main() -> int:
                     col_indices_as="class_ids",
                 ),
                 SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
-                BinarizeTensor("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
+                BinarizeTensorByThreshold("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
                 MeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
                 MultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
                 FilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),

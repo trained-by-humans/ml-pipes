@@ -10,7 +10,9 @@ from ml_pipes.ops import (
     AsType,
     ArgMax,
     BinarizeTensor,
+    BinarizeTensorByThreshold,
     CreateTensorMask,
+    CreateTensorMaskByThreshold,
     ConvertBoxFormat,
     DrawBoxes,
     Extract,
@@ -524,7 +526,7 @@ def test_create_tensor_mask_writes_boolean_mask_from_predicate():
     assert result["keep"].tolist() == [False, True, True]
 
 
-def test_binarize_tensor_writes_boolean_mask():
+def test_create_tensor_mask_by_threshold_writes_boolean_mask():
     registry = TensorRegistry(
         {
             "masks": np.array(
@@ -537,13 +539,21 @@ def test_binarize_tensor_writes_boolean_mask():
         }
     )
 
-    result = BinarizeTensor("masks", threshold=0.5, as_="binary_masks")(registry)
+    result = CreateTensorMaskByThreshold("masks", threshold=0.5, as_="binary_masks")(registry)
 
     assert result["binary_masks"].dtype == np.bool_
     assert result["binary_masks"].tolist() == [
         [[False, True], [True, False]],
         [[False, False], [True, True]],
     ]
+
+
+def test_binarize_tensor_by_threshold_is_alias():
+    assert BinarizeTensorByThreshold is CreateTensorMaskByThreshold
+
+
+def test_binarize_tensor_is_alias():
+    assert BinarizeTensor is CreateTensorMask
 
 
 def test_sort_tensors_by_sorts_parallel_tensors():
