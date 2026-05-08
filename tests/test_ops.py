@@ -39,6 +39,8 @@ from ml_pipes.ops import (
     Slice,
     Softmax,
     SortTensorsBy,
+    TopK,
+    TopKIndices2D,
     Squeeze,
     Pick,
     ToDetections,
@@ -297,6 +299,41 @@ def test_gather_scores_picks_class_score():
     assert np.allclose(result["scores"], [0.9, 0.8])
 
 
+def test_topk_picks_highest_values_and_indices():
+    registry = TensorRegistry({"scores": np.array([0.1, 0.7, 0.2, 0.8], dtype=np.float32)})
+
+    result = TopK("scores", k=3, values_as="top_scores", indices_as="top_indices")(registry)
+
+    assert np.allclose(result["top_scores"], [0.8, 0.7, 0.2])
+    assert result["top_indices"].tolist() == [3, 1, 2]
+
+
+def test_topk_indices_2d_returns_values_and_row_col_indices():
+    registry = TensorRegistry(
+        {
+            "class_probs": np.array(
+                [
+                    [0.1, 0.7, 0.2],
+                    [0.8, 0.3, 0.6],
+                ],
+                dtype=np.float32,
+            )
+        }
+    )
+
+    result = TopKIndices2D(
+        "class_probs",
+        k=3,
+        values_as="top_scores",
+        row_indices_as="query_indices",
+        col_indices_as="class_ids",
+    )(registry)
+
+    assert np.allclose(result["top_scores"], [0.8, 0.7, 0.6])
+    assert result["query_indices"].tolist() == [1, 0, 1]
+    assert result["class_ids"].tolist() == [0, 1, 2]
+
+
 # ---------------------------------------------------------------------------
 # Softmax / Sigmoid
 # ---------------------------------------------------------------------------
@@ -354,7 +391,7 @@ def test_weight_masks_by_scores_broadcasts_scores_over_masks():
         }
     )
 
-    result = WeightMasksByScores()(registry)
+    result = WeightMasksByScores(as_="weighted_masks")(registry)
 
     assert np.allclose(
         result["weighted_masks"],
@@ -434,6 +471,94 @@ def test_sort_tensors_by_sorts_parallel_tensors():
 
     assert np.allclose(result["scores"], [0.9, 0.5, 0.1])
     assert result["classes"].tolist() == [9, 5, 1]
+
+
+def test_filter_tensors_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.9, 0.5, 0.8], dtype=np.float32),
+            "classes": np.array([0, 1, 0], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensors(
+        "scores",
+        "classes",
+        predicate=lambda reg: reg["classes"] == 0,
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert np.allclose(result["selected_scores"], [0.9, 0.8])
+    assert result["selected_classes"].tolist() == [0, 0]
+    assert np.allclose(result["scores"], [0.9, 0.5, 0.8])
+
+
+def test_filter_tensors_by_score_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.9, 0.5, 0.8], dtype=np.float32),
+            "classes": np.array([0, 1, 0], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByScore(
+        "classes",
+        score="scores",
+        min_score=0.75,
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert np.allclose(result["selected_scores"], [0.9, 0.8])
+    assert result["selected_classes"].tolist() == [0, 0]
+    assert np.allclose(result["scores"], [0.9, 0.5, 0.8])
+
+
+def test_filter_tensors_by_masks_area_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[1, 0], [0, 0]],
+                    [[1, 1], [1, 0]],
+                ],
+                dtype=bool,
+            ),
+            "scores": np.array([0.2, 0.9], dtype=np.float32),
+            "classes": np.array([1, 2], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByMasksArea(
+        "scores",
+        "classes",
+        masks="masks",
+        min_area=2,
+        as_=("selected_masks", "selected_scores", "selected_classes"),
+    )(registry)
+
+    assert result["selected_masks"].shape[0] == 1
+    assert np.allclose(result["selected_scores"], [0.9])
+    assert result["selected_classes"].tolist() == [2]
+    assert np.allclose(result["scores"], [0.2, 0.9])
+
+
+def test_sort_tensors_by_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.5, 0.9, 0.1], dtype=np.float32),
+            "classes": np.array([5, 9, 1], dtype=np.int64),
+        }
+    )
+
+    result = SortTensorsBy(
+        "classes",
+        by="scores",
+        as_=("sorted_scores", "sorted_classes"),
+    )(registry)
+
+    assert np.allclose(result["sorted_scores"], [0.9, 0.5, 0.1])
+    assert result["sorted_classes"].tolist() == [9, 5, 1]
+    assert np.allclose(result["scores"], [0.5, 0.9, 0.1])
 
 
 # ---------------------------------------------------------------------------
@@ -855,6 +980,33 @@ def test_select_tensors_applies_index_array():
     assert result["scores"].tolist() == [0.9, 0.8]
 
 
+def test_select_tensors_writes_to_new_key():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        kept=np.array([1]),
+    )
+    result = SelectTensors("scores", indices="kept", as_="selected_scores")(r)
+    assert result["selected_scores"].tolist() == [0.5]
+    assert result["scores"].tolist() == [0.9, 0.5, 0.8]
+
+
+def test_select_tensors_can_write_multiple_outputs():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([4, 5, 6]),
+        kept=np.array([2, 0]),
+    )
+    result = SelectTensors(
+        "scores",
+        "classes",
+        indices="kept",
+        as_=("selected_scores", "selected_classes"),
+    )(r)
+    assert result["selected_scores"].tolist() == [0.8, 0.9]
+    assert result["selected_classes"].tolist() == [6, 4]
+    assert result["scores"].tolist() == [0.9, 0.5, 0.8]
+
+
 def test_apply_tensor_mask_applies_boolean_mask():
     r = _registry(
         scores=np.array([0.9, 0.5, 0.8]),
@@ -864,6 +1016,18 @@ def test_apply_tensor_mask_applies_boolean_mask():
     result = ApplyTensorMask("scores", "classes", mask="keep")(r)
     assert result["scores"].tolist() == [0.9, 0.8]
     assert result["classes"].tolist() == [4, 6]
+
+
+def test_apply_tensor_mask_can_write_to_new_keys():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        keep=np.array([True, False, True]),
+        classes=np.array([4, 5, 6]),
+    )
+    result = ApplyTensorMask("scores", "classes", mask="keep", as_=("selected_scores", "selected_classes"))(r)
+    assert result["selected_scores"].tolist() == [0.9, 0.8]
+    assert result["selected_classes"].tolist() == [4, 6]
+    assert result["scores"].tolist() == [0.9, 0.5, 0.8]
 
 
 def test_filter_tensors_applies_predicate():

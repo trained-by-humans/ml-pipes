@@ -433,6 +433,71 @@ class GatherRows:
         return registry
 
 
+class TopK:
+    """Selects the top-k values and indices from a 1D named tensor."""
+
+    def __init__(self, src: str, k: int, values_as: str = "top_values", indices_as: str = "top_indices"):
+        self.src = src
+        self.k = k
+        self.values_as = values_as
+        self.indices_as = indices_as
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        values = registry[self.src]
+        if values.ndim != 1:
+            raise ValueError(f"TopK expects a 1D tensor, got shape {values.shape}")
+        size = int(values.shape[0])
+        top_k = min(self.k, size)
+        if top_k == 0:
+            registry[self.values_as] = values[:0]
+            registry[self.indices_as] = np.zeros((0,), dtype=np.int64)
+            return registry
+        top_indices = np.argpartition(values, -top_k)[-top_k:]
+        order = np.argsort(values[top_indices])[::-1]
+        top_indices = top_indices[order].astype(np.int64, copy=False)
+        registry[self.values_as] = values[top_indices]
+        registry[self.indices_as] = top_indices
+        return registry
+
+
+class TopKIndices2D:
+    """Selects top-k values from a 2D named tensor and returns row/column indices."""
+
+    def __init__(
+        self,
+        src: str,
+        k: int,
+        values_as: str = "top_values",
+        row_indices_as: str = "row_indices",
+        col_indices_as: str = "col_indices",
+    ):
+        self.src = src
+        self.k = k
+        self.values_as = values_as
+        self.row_indices_as = row_indices_as
+        self.col_indices_as = col_indices_as
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        values = registry[self.src]
+        if values.ndim != 2:
+            raise ValueError(f"TopKIndices2D expects a 2D tensor, got shape {values.shape}")
+        rows, cols = values.shape
+        flat = values.reshape(-1)
+        top_k = min(self.k, int(flat.shape[0]))
+        if top_k == 0:
+            registry[self.values_as] = flat[:0]
+            registry[self.row_indices_as] = np.zeros((0,), dtype=np.int64)
+            registry[self.col_indices_as] = np.zeros((0,), dtype=np.int64)
+            return registry
+        top_indices = np.argpartition(flat, -top_k)[-top_k:]
+        order = np.argsort(flat[top_indices])[::-1]
+        top_indices = top_indices[order].astype(np.int64, copy=False)
+        registry[self.values_as] = flat[top_indices]
+        registry[self.row_indices_as] = (top_indices // cols).astype(np.int64, copy=False)
+        registry[self.col_indices_as] = (top_indices % cols).astype(np.int64, copy=False)
+        return registry
+
+
 # ---------------------------------------------------------------------------
 # Math / activations
 # ---------------------------------------------------------------------------
@@ -793,31 +858,54 @@ class BinarizeTensor:
         return self._inner(registry)
 
 
+def _resolve_multi_output_names(
+    operator_name: str,
+    srcs: Sequence[str],
+    as_: str | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    if not srcs:
+        raise ValueError(f"{operator_name} requires at least one source tensor")
+    if len(srcs) == 1:
+        src = srcs[0]
+        if as_ is not None and not isinstance(as_, str):
+            raise ValueError(f"{operator_name} as_ must be a string when operating on one tensor")
+        return (as_ or src,)
+    if as_ is None:
+        return tuple(srcs)
+    if isinstance(as_, str):
+        raise ValueError(f"{operator_name} as_ must be a tuple when operating on more than one tensor")
+    if len(as_) != len(srcs):
+        raise ValueError(f"{operator_name} as_ tuple must match the number of source tensors")
+    return tuple(as_)
+
+
 class ApplyTensorMask:
     """Applies one boolean mask to one or more tensors in-place."""
 
-    def __init__(self, *srcs: str, mask: str):
+    def __init__(self, *srcs: str, mask: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
         self.mask = mask
+        self.dst_names = _resolve_multi_output_names("ApplyTensorMask", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         mask = registry[self.mask]
-        for src in self.srcs:
-            registry[src] = registry[src][mask]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][mask]
         return registry
 
 
 class SelectTensors:
     """Applies one integer index tensor to one or more tensors in-place."""
 
-    def __init__(self, *srcs: str, indices: str):
+    def __init__(self, *srcs: str, indices: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
         self.indices = indices
+        self.dst_names = _resolve_multi_output_names("SelectTensors", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         indices = registry[self.indices]
-        for src in self.srcs:
-            registry[src] = registry[src][indices]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][indices]
         return registry
 
 
@@ -831,14 +919,20 @@ class FilterTensors:
         FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in {0, 2} for c in r["classes"]])
     """
 
-    def __init__(self, *srcs: str, predicate: Callable[[TensorRegistry], Any]):
+    def __init__(
+        self,
+        *srcs: str,
+        predicate: Callable[[TensorRegistry], Any],
+        as_: str | tuple[str, ...] | None = None,
+    ):
         self.srcs = srcs
         self.predicate = predicate
+        self.dst_names = _resolve_multi_output_names("FilterTensors", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         mask = self.predicate(registry)
-        for src in self.srcs:
-            registry[src] = registry[src][mask]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][mask]
         return registry
 
 
@@ -851,9 +945,19 @@ class FilterTensorsByScore:
         FilterTensorsByScore("boxes", "masks", "classes", score="scores", min_score=0.7)
     """
 
-    def __init__(self, *srcs: str, score: str, min_score: float):
+    def __init__(
+        self,
+        *srcs: str,
+        score: str,
+        min_score: float,
+        as_: str | tuple[str, ...] | None = None,
+    ):
         all_srcs = (score,) + tuple(s for s in srcs if s != score)
-        self._inner = FilterTensors(*all_srcs, predicate=lambda r: r[score] >= min_score)
+        self._inner = FilterTensors(
+            *all_srcs,
+            predicate=lambda r: r[score] >= min_score,
+            as_=as_,
+        )
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
@@ -862,18 +966,25 @@ class FilterTensorsByScore:
 class FilterTensorsByMasksArea:
     """Filters tensors by the minimum foreground area of one masks tensor."""
 
-    def __init__(self, *srcs: str, masks: str = "masks", min_area: int = 1):
+    def __init__(
+        self,
+        *srcs: str,
+        masks: str = "masks",
+        min_area: int = 1,
+        as_: str | tuple[str, ...] | None = None,
+    ):
         all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
         self.srcs = all_srcs
         self.masks = masks
         self.min_area = min_area
+        self.dst_names = _resolve_multi_output_names("FilterTensorsByMasksArea", all_srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         masks = registry[self.masks]
         areas = np.asarray(masks, dtype=bool).reshape(masks.shape[0], -1).sum(axis=1)
         keep = areas >= self.min_area
-        for src in self.srcs:
-            registry[src] = registry[src][keep]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][keep]
         return registry
 
 
@@ -897,18 +1008,25 @@ class MapTensor:
 class SortTensorsBy:
     """Sorts one or more registry tensors by the values of a key tensor."""
 
-    def __init__(self, *srcs: str, by: str, descending: bool = True):
+    def __init__(
+        self,
+        *srcs: str,
+        by: str,
+        descending: bool = True,
+        as_: str | tuple[str, ...] | None = None,
+    ):
         all_srcs = (by,) + tuple(src for src in srcs if src != by)
         self.srcs = all_srcs
         self.by = by
         self.descending = descending
+        self.dst_names = _resolve_multi_output_names("SortTensorsBy", all_srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         order = np.argsort(registry[self.by])
         if self.descending:
             order = order[::-1]
-        for src in self.srcs:
-            registry[src] = registry[src][order]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][order]
         return registry
 
 
@@ -921,7 +1039,7 @@ class WeightMasksByScores:
       result: scores broadcast across the remaining mask dimensions
     """
 
-    def __init__(self, masks: str = "masks", scores: str = "scores", as_: str = "weighted_masks"):
+    def __init__(self, masks: str = "masks", scores: str = "scores", *, as_: str):
         self.masks = masks
         self.scores = scores
         self.as_ = as_
