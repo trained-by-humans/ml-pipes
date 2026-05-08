@@ -452,6 +452,86 @@ class TorchWeightMasksByScores:
         return registry
 
 
+class TorchResizeMasks:
+    """Resizes a stack of masks to a target shape."""
+
+    def __init__(self, masks: str = "masks", as_: str | None = None):
+        self.masks = masks
+        self.as_ = as_ or masks
+
+    def __call__(self, registry: TorchTensorRegistry, image_shape: tuple[int, int]) -> TorchTensorRegistry:
+        masks = registry[self.masks]
+        resized = torch.nn.functional.interpolate(
+            masks[:, None, :, :],
+            size=image_shape,
+            mode="bilinear",
+            align_corners=False,
+        )[:, 0]
+        registry[self.as_] = resized
+        return registry
+
+
+class TorchMeanMaskScores:
+    """Computes one mean score per mask from dense mask values.
+
+    If `binary_masks` is provided, the mean is computed only over pixels where
+    the binary mask is True. If `binary_masks` is None, the mean is computed
+    over all pixels in each dense mask.
+    """
+
+    def __init__(
+        self,
+        masks: str = "masks",
+        binary_masks: str | None = "binary_masks",
+        *,
+        as_: str,
+    ):
+        self.masks = masks
+        self.binary_masks = binary_masks
+        self.as_ = as_
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        masks = registry[self.masks]
+        if self.binary_masks is None:
+            registry[self.as_] = masks.flatten(1).mean(dim=1)
+            return registry
+
+        binary_masks = registry[self.binary_masks]
+        areas = binary_masks.flatten(1).sum(dim=1)
+        registry[self.as_] = torch.where(
+            areas > 0,
+            (masks * binary_masks).flatten(1).sum(dim=1) / areas.clamp_min(1).to(masks.dtype),
+            torch.zeros((masks.shape[0],), dtype=masks.dtype, device=masks.device),
+        )
+        return registry
+
+
+class TorchMasksToBoxes:
+    def __init__(self, masks: str = "masks", *, as_: str):
+        self.masks = masks
+        self.as_ = as_
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        masks = registry[self.masks]
+        count = masks.shape[0]
+        if count == 0:
+            registry[self.as_] = torch.zeros((0, 4), dtype=torch.float32, device=masks.device)
+            return registry
+
+        _, height, width = masks.shape
+        xs = torch.arange(width, dtype=torch.float32, device=masks.device).view(1, 1, width)
+        ys = torch.arange(height, dtype=torch.float32, device=masks.device).view(1, height, 1)
+        x1 = torch.where(masks, xs, float(width)).amin(dim=(-2, -1))
+        y1 = torch.where(masks, ys, float(height)).amin(dim=(-2, -1))
+        x2 = torch.where(masks, xs, -1.0).amax(dim=(-2, -1)) + 1.0
+        y2 = torch.where(masks, ys, -1.0).amax(dim=(-2, -1)) + 1.0
+        boxes = torch.stack([x1, y1, x2, y2], dim=-1)
+        empty = ~masks.any(dim=(-2, -1))
+        boxes[empty] = 0.0
+        registry[self.as_] = boxes
+        return registry
+
+
 class TorchInfer:
     def __init__(
         self,
