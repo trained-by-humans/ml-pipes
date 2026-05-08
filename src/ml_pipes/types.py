@@ -19,9 +19,12 @@ class ImagePayload:
 
     @property
     def spatial_shape(self) -> tuple[int, int]:
-        if len(self.array.shape) < 2:
-            raise ValueError(f"ImagePayload expects at least 2 dimensions, got shape {self.array.shape}")
-        return int(self.array.shape[0]), int(self.array.shape[1])
+        try:
+            h_axis = self.layout.index("H")
+            w_axis = self.layout.index("W")
+        except ValueError as exc:
+            raise ValueError(f"ImagePayload layout must contain H and W, got {self.layout!r}") from exc
+        return int(self.array.shape[h_axis]), int(self.array.shape[w_axis])
 
     @property
     def height(self) -> int:
@@ -45,11 +48,9 @@ class ImagePayload:
 
     @property
     def channels(self) -> int | None:
-        if self.array.ndim < 3:
-            return 1
-        if "C" in self.layout and len(self.layout) == self.array.ndim:
-            return int(self.array.shape[self.layout.index("C")])
-        return int(self.array.shape[-1])
+        if "C" not in self.layout:
+            return None
+        return int(self.array.shape[self.layout.index("C")])
 
 
 @dataclass(frozen=True)
