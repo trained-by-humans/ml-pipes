@@ -40,6 +40,7 @@ from ml_pipes.torch import (
     TorchSlice,
     TorchSortTensorsBy,
     TorchSoftmax,
+    TorchSynchronizeTensors,
     TorchTopK,
     TorchTopKIndices2D,
     TorchWeightMasksByScores,
@@ -625,6 +626,40 @@ def test_to_device_updates_payload_and_registry_devices():
     assert moved_registry["scores"].device.type == "cpu"
 
 
+def test_torch_synchronize_tensors_passthrough_on_payload():
+    payload = _torch_payload(torch.ones((1, 2), dtype=torch.float32))
+
+    result = TorchSynchronizeTensors()(payload)
+
+    assert result is payload
+
+
+def test_torch_synchronize_tensors_collects_devices_from_runtime_outputs(monkeypatch):
+    outputs = TorchRuntimeOutputs(
+        tensors=(
+            _torch_payload(torch.ones((1, 2), dtype=torch.float32)),
+            _torch_payload(torch.ones((1, 3), dtype=torch.float32)),
+        ),
+        names=("a", "b"),
+    )
+    seen: list[str] = []
+
+    monkeypatch.setattr(
+        "ml_pipes.torch.ops._synchronize_torch_device",
+        lambda device: seen.append(str(device)),
+    )
+
+    result = TorchSynchronizeTensors()(outputs)
+
+    assert result is outputs
+    assert seen == ["cpu"]
+
+
+def test_torch_synchronize_tensors_rejects_non_torch_values():
+    with pytest.raises(TypeError, match="TorchSynchronizeTensors"):
+        TorchSynchronizeTensors()(123)
+
+
 def test_torch_nms_filters_and_stores_indices():
     pytest.importorskip("torchvision")
     registry = TorchTensorRegistry(
@@ -788,6 +823,7 @@ def test_torch_validation_accepts_to_device_and_torch_as_type_boundaries():
     contract = Pipeline([
         ToTorch(),
         ToDevice("cpu"),
+        TorchSynchronizeTensors(),
         TorchAsType("float16"),
         _TorchIdentity(),
     ]).validate(inference=True)

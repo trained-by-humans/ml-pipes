@@ -99,6 +99,12 @@ pipeline = Pipeline([
 ])
 ```
 
+> [!WARNING]
+> Torch GPU work can be asynchronous. For profiling or step-level latency
+> attribution, insert `TorchSynchronizeTensors()` at the boundary you want to
+> measure. Without it, time may appear on a later operator that forces
+> synchronization.
+
 ## Guide + Patterns
 
 ### Pattern 1: NumPy Preprocess -> Torch Inference -> NumPy Postprocess
