@@ -69,6 +69,11 @@ from .types import (
     TensorRegistry,
 )
 
+try:
+    from .torch.types import TorchTensorRegistry
+except ImportError:  # pragma: no cover - exercised only when torch extra is absent
+    TorchTensorRegistry = None
+
 
 # ---------------------------------------------------------------------------
 # Public IR — display primitives
@@ -234,11 +239,20 @@ def _block_summary(blocks: list[OutputBlock]) -> str:
             parts.append(b.title)
         else:
             summary = b.title
-            if b.rows:
-                k, v = b.rows[0]
-                summary += f"  {k} {v}".rstrip() if k else f"  {v}"
+            rows = b.rows[:3] if b.title == "dict" else b.rows[:1]
+            if rows:
+                row_summaries = [
+                    (f"{k} {v}".rstrip() if k else f"{v}")
+                    for k, v in rows
+                ]
+                summary += "  " + "  |  ".join(row_summaries)
             parts.append(summary)
     return "  |  ".join(parts)
+
+
+def _is_primitive_tuple(value: tuple[Any, ...]) -> bool:
+    primitive_types = (bool, int, float, str, bytes, type(None), np.generic)
+    return bool(value) and all(isinstance(item, primitive_types) for item in value)
 
 
 def _apply_image_carry(
@@ -359,7 +373,18 @@ def _register_builtin_formatters() -> None:
         return [TextBlock(type(value).__name__, [(n, str(t.array.shape)) for n, t in zip(value.names, value.tensors)])]
 
     def _format_tensor_registry(value: TensorRegistry) -> list[OutputBlock]:
-        return [TextBlock(type(value).__name__, [(k, str(v.shape)) for k, v in value._tensors.items()])]
+        rows = []
+        for name, tensor in value._tensors.items():
+            shape = str(tuple(tensor.shape)) if hasattr(tensor, "device") else str(tensor.shape)
+            device = getattr(tensor, "device", None)
+            rows.append((name, f"{shape}@{device}" if device is not None else shape))
+        return [TextBlock(type(value).__name__, rows)]
+
+    def _format_dict(value: dict[Any, Any]) -> list[OutputBlock]:
+        rows = [(str(key), str(item)) for key, item in list(value.items())[:6]]
+        if len(value) > 6:
+            rows.append(("…", f"+{len(value) - 6} more"))
+        return [TextBlock("dict", rows)]
 
     def _format_bytes(value: bytes) -> list[OutputBlock]:
         return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
@@ -371,6 +396,9 @@ def _register_builtin_formatters() -> None:
     _OUTPUT_FORMATTERS[ResizeTransform] = _format_resize_transform
     _OUTPUT_FORMATTERS[RuntimeOutputs]  = _format_runtime_outputs
     _OUTPUT_FORMATTERS[TensorRegistry]  = _format_tensor_registry
+    if TorchTensorRegistry is not None:
+        _OUTPUT_FORMATTERS[TorchTensorRegistry] = _format_tensor_registry
+    _OUTPUT_FORMATTERS[dict]            = _format_dict
     _OUTPUT_FORMATTERS[TileRect]        = _format_tile_rect
     _OUTPUT_FORMATTERS[bytes]           = _format_bytes
 
@@ -453,6 +481,8 @@ class PipelineInspector:
 
     def _output_to_blocks(self, value: Any) -> list[OutputBlock]:
         if isinstance(value, tuple):
+            if _is_primitive_tuple(value):
+                return [TextBlock(type(value).__name__, [("", str(value))])]
             blocks: list[OutputBlock] = []
             for item in value:
                 blocks.extend(self._output_to_blocks(item))
