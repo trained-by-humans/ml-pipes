@@ -34,6 +34,8 @@ from ml_pipes.torch import (
     TorchSlice,
     TorchSortTensorsBy,
     TorchSoftmax,
+    TorchTopK,
+    TorchTopKIndices2D,
     TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
@@ -221,6 +223,36 @@ def test_torch_softmax_slice_gather_and_threshold_tensors_work_on_registry():
     assert registry["query_scores"].shape == (2,)
 
 
+def test_torch_topk_and_topk_indices_2d_return_expected_values_and_indices():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.1, 0.7, 0.2, 0.8], dtype=torch.float32),
+            "class_probs": torch.tensor(
+                [
+                    [0.1, 0.7, 0.2],
+                    [0.8, 0.3, 0.6],
+                ],
+                dtype=torch.float32,
+            ),
+        }
+    )
+
+    TorchTopK("scores", k=3, values_as="top_scores", indices_as="top_indices")(registry)
+    TorchTopKIndices2D(
+        "class_probs",
+        k=3,
+        values_as="pair_scores",
+        row_indices_as="query_indices",
+        col_indices_as="class_ids",
+    )(registry)
+
+    assert torch.allclose(registry["top_scores"], torch.tensor([0.8, 0.7, 0.2]))
+    assert registry["top_indices"].tolist() == [3, 1, 2]
+    assert torch.allclose(registry["pair_scores"], torch.tensor([0.8, 0.7, 0.6]))
+    assert registry["query_indices"].tolist() == [1, 0, 1]
+    assert registry["class_ids"].tolist() == [0, 1, 2]
+
+
 def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
     registry = TorchTensorRegistry(
         {
@@ -235,7 +267,7 @@ def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
         }
     )
 
-    result = TorchWeightMasksByScores()(registry)
+    result = TorchWeightMasksByScores(as_="weighted_masks")(registry)
 
     assert torch.allclose(
         result["weighted_masks"],
@@ -270,6 +302,70 @@ def test_torch_filter_masks_by_area_and_sort_tensors_by_work_on_registry():
     assert registry["masks"].shape[0] == 1
     assert torch.allclose(registry["scores"], torch.tensor([0.9]))
     assert registry["classes"].tolist() == [9]
+
+
+def test_torch_filter_tensors_by_score_can_write_to_new_keys():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
+        }
+    )
+
+    TorchFilterTensorsByScore(
+        "classes",
+        score="scores",
+        min_score=0.75,
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert torch.allclose(registry["selected_scores"], torch.tensor([0.9, 0.8]))
+    assert registry["selected_classes"].tolist() == [0, 0]
+    assert torch.allclose(registry["scores"], torch.tensor([0.9, 0.5, 0.8]))
+
+
+def test_torch_filter_tensors_by_masks_area_can_write_to_new_keys():
+    registry = TorchTensorRegistry(
+        {
+            "masks": torch.tensor(
+                [
+                    [[1, 0], [0, 0]],
+                    [[1, 1], [1, 0]],
+                ],
+                dtype=torch.bool,
+            ),
+            "scores": torch.tensor([0.2, 0.9], dtype=torch.float32),
+            "classes": torch.tensor([1, 2], dtype=torch.int64),
+        }
+    )
+
+    TorchFilterTensorsByMasksArea(
+        "scores",
+        "classes",
+        masks="masks",
+        min_area=2,
+        as_=("selected_masks", "selected_scores", "selected_classes"),
+    )(registry)
+
+    assert registry["selected_masks"].shape[0] == 1
+    assert torch.allclose(registry["selected_scores"], torch.tensor([0.9]))
+    assert registry["selected_classes"].tolist() == [2]
+    assert torch.allclose(registry["scores"], torch.tensor([0.2, 0.9]))
+
+
+def test_torch_sort_tensors_by_can_write_to_new_keys():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.5, 0.9, 0.1], dtype=torch.float32),
+            "classes": torch.tensor([5, 9, 1], dtype=torch.int64),
+        }
+    )
+
+    TorchSortTensorsBy("classes", by="scores", as_=("sorted_scores", "sorted_classes"))(registry)
+
+    assert torch.allclose(registry["sorted_scores"], torch.tensor([0.9, 0.5, 0.1]))
+    assert registry["sorted_classes"].tolist() == [9, 5, 1]
+    assert torch.allclose(registry["scores"], torch.tensor([0.5, 0.9, 0.1]))
 
 
 def test_torch_create_tensor_mask_writes_boolean_mask_from_predicate():
@@ -322,6 +418,62 @@ def test_torch_select_tensors_and_apply_tensor_mask_work_on_registry():
 
     assert torch.allclose(registry["scores"], torch.tensor([0.8]))
     assert registry["classes"].tolist() == [6]
+
+
+def test_torch_apply_tensor_mask_can_write_to_new_keys():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([4, 5, 6], dtype=torch.int64),
+            "keep": torch.tensor([True, False, True], dtype=torch.bool),
+        }
+    )
+
+    TorchApplyTensorMask(
+        "scores",
+        "classes",
+        mask="keep",
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert torch.allclose(registry["selected_scores"], torch.tensor([0.9, 0.8]))
+    assert registry["selected_classes"].tolist() == [4, 6]
+    assert torch.allclose(registry["scores"], torch.tensor([0.9, 0.5, 0.8]))
+
+
+def test_torch_select_tensors_writes_to_new_key():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "indices": torch.tensor([1], dtype=torch.int64),
+        }
+    )
+
+    TorchSelectTensors("scores", indices="indices", as_="selected_scores")(registry)
+
+    assert torch.allclose(registry["selected_scores"], torch.tensor([0.5]))
+    assert torch.allclose(registry["scores"], torch.tensor([0.9, 0.5, 0.8]))
+
+
+def test_torch_select_tensors_can_write_multiple_outputs():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([4, 5, 6], dtype=torch.int64),
+            "indices": torch.tensor([2, 0], dtype=torch.int64),
+        }
+    )
+
+    TorchSelectTensors(
+        "scores",
+        "classes",
+        indices="indices",
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert torch.allclose(registry["selected_scores"], torch.tensor([0.8, 0.9]))
+    assert registry["selected_classes"].tolist() == [6, 4]
+    assert torch.allclose(registry["scores"], torch.tensor([0.9, 0.5, 0.8]))
 
 
 def test_to_device_updates_payload_and_registry_devices():
