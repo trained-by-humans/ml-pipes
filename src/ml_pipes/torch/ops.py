@@ -317,7 +317,10 @@ class TorchCreateTensorMask:
         return registry
 
 
-class TorchBinarizeTensor:
+TorchBinarizeTensor = TorchCreateTensorMask
+
+
+class TorchCreateTensorMaskByThreshold:
     def __init__(self, src: str, threshold: float, as_: str | None = None):
         self._inner = TorchCreateTensorMask(
             src=src,
@@ -327,6 +330,9 @@ class TorchBinarizeTensor:
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         return self._inner(registry)
+
+
+TorchBinarizeTensorByThreshold = TorchCreateTensorMaskByThreshold
 
 
 def _resolve_multi_output_names(

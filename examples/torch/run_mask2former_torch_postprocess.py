@@ -15,7 +15,7 @@ from ml_pipes import LogDetections, MapToObjects, Pipeline, Recall, ToSegmentati
 from ml_pipes.torch import (
     ToNumpyRegistry,
     TorchArgMax,
-    TorchBinarizeTensor,
+    TorchBinarizeTensorByThreshold,
     TorchFilterTensorsByMasksArea,
     TorchFilterTensorsByScore,
     TorchGatherScores,
@@ -264,7 +264,7 @@ def main() -> int:
                     col_indices_as="class_ids",
                 ),
                 TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
-                TorchBinarizeTensor("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
+                TorchBinarizeTensorByThreshold("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
                 TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
                 TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
                 TorchFilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),

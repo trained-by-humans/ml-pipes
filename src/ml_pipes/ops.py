@@ -846,7 +846,10 @@ class CreateTensorMask:
         return registry
 
 
-class BinarizeTensor:
+BinarizeTensor = CreateTensorMask
+
+
+class CreateTensorMaskByThreshold:
     """Creates a boolean mask tensor by thresholding one source tensor."""
 
     def __init__(self, src: str, threshold: float, as_: str | None = None):
@@ -858,6 +861,9 @@ class BinarizeTensor:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
+
+
+BinarizeTensorByThreshold = CreateTensorMaskByThreshold
 
 
 def _resolve_multi_output_names(

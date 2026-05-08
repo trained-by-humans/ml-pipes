@@ -19,8 +19,10 @@ from ml_pipes.torch import (
     TorchApplyTensorMask,
     TorchAsType,
     TorchBinarizeTensor,
+    TorchBinarizeTensorByThreshold,
     TorchCollate,
     TorchCreateTensorMask,
+    TorchCreateTensorMaskByThreshold,
     TorchDistribute,
     TorchExtract,
     TorchFilterTensorsByMasksArea,
@@ -465,7 +467,7 @@ def test_torch_create_tensor_mask_places_numpy_predicate_output_on_source_device
     assert result["keep"].tolist() == [False, True, True]
 
 
-def test_torch_binarize_tensor_writes_boolean_mask():
+def test_torch_create_tensor_mask_by_threshold_writes_boolean_mask():
     registry = TorchTensorRegistry(
         {
             "masks": torch.tensor(
@@ -478,13 +480,21 @@ def test_torch_binarize_tensor_writes_boolean_mask():
         }
     )
 
-    result = TorchBinarizeTensor("masks", threshold=0.5, as_="binary_masks")(registry)
+    result = TorchCreateTensorMaskByThreshold("masks", threshold=0.5, as_="binary_masks")(registry)
 
     assert result["binary_masks"].dtype == torch.bool
     assert result["binary_masks"].tolist() == [
         [[False, True], [True, False]],
         [[False, False], [True, True]],
     ]
+
+
+def test_torch_binarize_tensor_by_threshold_is_alias():
+    assert TorchBinarizeTensorByThreshold is TorchCreateTensorMaskByThreshold
+
+
+def test_torch_binarize_tensor_is_alias():
+    assert TorchBinarizeTensor is TorchCreateTensorMask
 
 
 def test_torch_select_tensors_and_apply_tensor_mask_work_on_registry():
