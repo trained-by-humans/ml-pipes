@@ -1,8 +1,8 @@
 # Torch Execution Domain
 
-`ml_pipes.torch` is the explicit Torch execution domain for pipelines that want
-Torch-native inference, Torch-native postprocess, or both. Core `ml_pipes`
-stays NumPy-oriented. Crossing between the two domains is always explicit.
+`ml_pipes.torch` adds the primitive building blocks for Torch-oriented
+pipelines and the boundary operators needed to compose mixed NumPy + Torch
+pipelines explicitly.
 
 ## Install
 
@@ -10,80 +10,38 @@ stays NumPy-oriented. Crossing between the two domains is always explicit.
 pip install -e .[torch]
 ```
 
-## Mental Model
+After installing the torch extra, the package layout looks like this:
 
-There are two first-class tensor domains in the library:
+```text
+ml_pipes
+├─ NumPy-oriented core
+│  ├─ NumPy Tensor operators
+│  ├─ ONNX inference
+│  ├─ Projection / Visualization
+│  └─ And many more...
+└─ ml_pipes.torch
+   ├─ Torch inference
+   ├─ Torch tensor operators (Postprocess)
+   └─ Torch boundary operators (Conversion)
+```
 
-- NumPy under `ml_pipes`
-- Torch under `ml_pipes.torch`
+## Runtime Types
 
-Use NumPy when your pipeline is primarily preprocessing, ONNX inference,
-projection, visualization, or general Python postprocess. Use Torch when you
-want model execution or postprocess to stay in Torch tensors and, when
-possible, stay on-device.
+The Torch domain introduces Torch-backed runtime values alongside the NumPy
+ones in core `ml_pipes`.
 
-Torch-specific runtime values are:
+The Torch-specific runtime values are:
 
 - `TorchTensorPayload`: one tensor plus layout, dtype, and device metadata
 - `TorchTensorRegistry`: mutable named store for intermediate Torch tensors
 - `TorchRuntimeOutputs`: named multi-output Torch inference result
 
-## Domain Boundaries
+Compared to the NumPy-side runtime values, the important addition is `device`.
+That metadata is part of the value itself, which means a pipeline can control
+where the current Torch-backed data sits and can move whole Torch stages
+between CPU, CUDA, or other supported Torch devices explicitly.
 
-The main boundary operators are:
-
-- `ToTorch` / `ToTorchRegistry`
-- `ToNumpy` / `ToNumpyRegistry`
-- `ToDevice`
-
-Typical boundary crossings look like this:
-
-```python
-from ml_pipes import Normalize, Pipeline
-from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
-
-pipeline = Pipeline([
-    Normalize(),
-    ToTorch(device="cuda:0"),
-    TorchInfer(model, input_layout="NCHW", output_names=("logits",), output_layouts=("NCHW",)),
-    TorchExtract("logits", as_="scores"),
-    ToNumpyRegistry(),
-])
-```
-
-> [!WARNING]
-> Mixing NumPy and Torch operators requires an explicit conversion step.
-
-### Conversion And Copy Semantics
-
-`copy` exists on the conversion operators:
-
-- `ToTorch(copy=False)`
-- `ToTorchRegistry(copy=False)`
-- `ToNumpy(copy=False)`
-- `ToNumpyRegistry(copy=False)`
-
-The default is `copy=False`:
-
-- share storage when safe and possible
-- avoid redundant copies when conversion already detached the result from the source
-
-With `copy=True`:
-
-- the converted result is isolated from the source
-- redundant extra copies are still skipped when device transfer or dtype conversion
-  already detached the result from the source
-
-`ToNumpy` and `ToNumpyRegistry` always materialize NumPy arrays on CPU.
-
-> [!WARNING]
-> `ToNumpy` converts to CPU. It does not move or mutate the original Torch tensor.
-
-> [!NOTE]
-> `copy=True` means the converted result is isolated from the source. It does not
-> mean "preserve device" or "clone the original Torch tensor in place".
-
-### Device Movement
+## Device Placement
 
 Use `ToDevice` when you want to move Torch payloads or Torch registries without
 leaving the Torch domain:
@@ -99,15 +57,119 @@ pipeline = Pipeline([
 ])
 ```
 
+`ToDevice` is intentionally coarse-grained:
+
+- for `TorchTensorPayload`, it moves the payload tensor
+- for `TorchTensorRegistry`, it moves all tensors currently stored in the registry
+
+That means `ToDevice` effectively moves all upstream Torch tensors that are
+still part of the flowing value. It is useful for stage-level device placement,
+not for fine-grained per-tensor placement inside one registry.
+
+## Crossing Domains
+
+The important design choice is still that NumPy and Torch remain separate
+domains. A pipeline crosses from one to the other only when you add a boundary
+operator.
+
+The boundary operators are:
+
+- `ToTorch` / `ToTorchRegistry`
+- `ToNumpy` / `ToNumpyRegistry`
+- `ToDevice`
+
+At a high level, mixed pipelines would look like this:
+
+```text
+┌─────────────────────────────────────────────┐
+│ NumPy Domain                                │
+├─ Decode -> Resize -> Normalize -> ...       │
+└───────┬─────────────────────────────────────┘
+        |
+        | ToTorch / ToTorchRegistry
+        ▼
+┌─────────────────────────────────────────────┐
+│ Torch Domain                                │
+├─ TorchInfer -> Torch... -> Torch... -> ...  │
+└───────┬─────────────────────────────────────┘
+        |
+        | ToNumpy / ToNumpyRegistry
+        ▼
+┌─────────────────────────────────────────────┐
+│ NumPy Domain                                │
+├─ ToDetections / Visualization / Logging     │
+└─────────────────────────────────────────────┘
+```
+
+Example boundary crossing:
+
+```python
+from ml_pipes import ArgMax, Decode, GatherScores, MapToObjects, Normalize, Pipeline, Resize, Slice, ToDetections
+from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
+
+pipeline = Pipeline([
+    Decode(),
+    Resize((640, 640)),
+    Normalize(),
+    ToTorch(device="cuda:0"),
+    TorchInfer(model, input_layout="NCHW", output_names=("logits",), output_layouts=("NCHW",)),
+    TorchExtract("logits", as_="preds"),
+    ToNumpyRegistry(),
+    Slice("preds", slice(None, 4), as_="boxes"),
+    Slice("preds", slice(4, None), as_="class_scores"),
+    ArgMax("class_scores", as_="classes"),
+    GatherScores("class_scores", "classes", as_="scores"),
+    ToDetections(boxes="boxes", scores="scores", classes="classes"),
+    MapToObjects(fields={"score": "scores", "class_id": "classes", "box": "boxes"}),
+])
+```
+
+This keeps the Torch stage focused on inference, then hands the outputs back to
+NumPy for the remaining detection logic.
+
+> [!TIP]
+> Use `copy=False` when you want the cheapest boundary crossing and shared
+> storage is acceptable. Use `copy=True` when you want the converted result to
+> be isolated from the source.
+
+> [!NOTE]
+> `ToNumpy` and `ToNumpyRegistry` materialize NumPy arrays on CPU. Once data
+> crosses into the NumPy boundary, device placement is no longer part of the
+> value model.
+
+## Timing Boundaries
+
+Torch GPU work can be asynchronous. A step may queue device work and return
+before the device has finished. If a later operator forces synchronization,
+the time can appear there instead.
+
+Use `TorchSynchronizeTensors()` when you want to force synchronization at a
+chosen boundary:
+
+```python
+from ml_pipes import Pipeline
+from ml_pipes.torch import TorchArgMax, TorchInfer, TorchSynchronizeTensors
+
+pipeline = Pipeline([
+    ...,
+    TorchInfer(model),
+    TorchSynchronizeTensors(),
+    TorchArgMax("logits", as_="classes"),
+])
+```
+
+`TorchSynchronizeTensors()` is a pass-through operator. It synchronizes the
+Torch device work associated with the current Torch-backed value so the next
+timed step sees completed work instead of queued work.
+
 > [!WARNING]
-> Torch GPU work can be asynchronous. For profiling or step-level latency
-> attribution, insert `TorchSynchronizeTensors()` at the boundary you want to
-> measure. Without it, time may appear on a later operator that forces
-> synchronization.
+> Without `TorchSynchronizeTensors()`, per-operator GPU timings are only
+> suggestive. End-to-end wall-clock time is still real, but step attribution
+> may drift to the next operator that forces synchronization.
 
-## Guide + Patterns
+## Common Pipeline Shapes
 
-### Pattern 1: NumPy Preprocess -> Torch Inference -> NumPy Postprocess
+### Pattern 1: Inference In Torch
 
 This is the simplest handoff. Keep image decode / resize / normalize in NumPy,
 run the model in Torch, then hand the outputs back to NumPy.
@@ -127,20 +189,16 @@ pipeline = Pipeline([
 ])
 ```
 
-Use this when the model is Torch-native but the rest of the pipeline is already
-clear and standardized in NumPy operators.
+> [!TIP]
+> Use this when the model is Torch-native but the rest of the pipeline is
+> already clear and standardized in NumPy.
 
-### Pattern 2: NumPy Preprocess -> Torch Inference + Torch Postprocess -> NumPy Output
+### Pattern 2: Postprocess In Torch
 
-This is the right shape when the postprocess is tensor-heavy and benefits from
-staying in Torch.
+You can keep postprocess in Torch when it gives you a concrete benefit. The two common reasons are:
 
-The canonical example in this repo is
-[`examples/torch/run_mask2former_torch_postprocess.py`](examples/torch/run_mask2former_torch_postprocess.py),
-which keeps mask resizing, query scoring, filtering, winner assignment, and
-mask-to-box conversion in Torch before converting back to NumPy segmentations.
-
-Key shape:
+- Avoiding device transfers for large intermediate tensors
+- Leveraging Torch operators that already map well to the target device
 
 ```python
 from ml_pipes import Pipeline, ToSegmentations
@@ -165,47 +223,57 @@ pipeline = Pipeline([
 ```
 
 > [!TIP]
-> Keep postprocess in Torch when the needed operators already exist and you want
-> to stay on-device for the heavy tensor work.
+> Apply this when you want postprocess stages like NMS, mask processing, top-k
+> filtering, or large reductions to stay on-device.
+>
+> The canonical example is
+[`examples/torch/run_mask2former_torch_postprocess.py`](examples/torch/run_mask2former_torch_postprocess.py),
+which keeps mask resizing, query scoring, filtering, winner assignment, and
+mask-to-box conversion in Torch before converting back to NumPy segmentations.
 
-### Pattern 3: Torch Registry Handoff Around A Specific Step
 
-Sometimes only one step is better in Torch. In that case, convert the registry,
-run the Torch step, and hand it back.
+### Pattern 3: Mid-Stage Torch Handoff
+
+Sometimes only part of the computation benefits from Torch. In that case,
+convert the registry, run the Torch-specific part, and hand the remaining
+computation back to NumPy.
 
 ```python
-from ml_pipes import Extract, Infer, Pipeline
-from ml_pipes.torch import ToNumpyRegistry, ToTorchRegistry, TorchNMS
+from ml_pipes import MasksToBoxes, Pipeline
+from ml_pipes.torch import ToNumpyRegistry, TorchResizeMasks, TorchSigmoid, TorchSoftmax
 
 pipeline = Pipeline([
-    Infer("detector.onnx"),
-    Extract("boxes", "scores", "classes"),
-    ToTorchRegistry(device="cpu"),
-    TorchNMS(),
+    ...,
+    TorchResizeMasks(masks="masks_queries_logits"),
+    TorchSoftmax("class_queries_logits", as_="class_probs"),
+    TorchSigmoid("masks_queries_logits", as_="mask_probs"),
+    ...,
     ToNumpyRegistry(),
+    MasksToBoxes(masks="binary_masks", as_="boxes"),
 ])
 ```
 
-This keeps the rest of the pipeline unchanged while letting one postprocess
-operator run in Torch.
+This keeps the rest of the pipeline unchanged while inserting a Torch stage
+midway through an otherwise NumPy-oriented flow.
 
-### When To Keep Postprocess In Torch vs Hand Off To NumPy
+### Choosing Where A Stage Runs
 
-Keep postprocess in Torch when:
+Run a stage in Torch when Torch gives that stage a real advantage:
 
-- the operators already exist under `ml_pipes.torch`
-- the work is tensor-heavy enough that staying on-device matters
-- the pipeline reads more clearly as a Torch-native tensor flow
+- the needed convenience operators already exist under `ml_pipes.torch`
+- keeping the stage on-device meaningfully improves throughput or latency
+- the stage reads more clearly as a Torch tensor pipeline
 
-Hand off to NumPy when:
+Run a stage in NumPy when NumPy is the better fit:
 
 - the remaining steps are already implemented and tested in NumPy
 - you need projection, visualization, or other NumPy-oriented utilities
-- readability matters more than squeezing out one more Torch-only stage
+- staying in Torch would add conversion or device complexity without a payoff
 
-> [!TIP]
-> Hand off to NumPy when downstream steps are simpler, more mature, or already
-> standardized there. Do not keep a pipeline in Torch just for symmetry.
+> [!WARNING]
+> Frequent domain crossing can erase the benefit of using Torch in the first
+> place. If a stage only gains a small benefit from Torch, repeated
+> `ToTorch...` / `ToNumpy...` boundaries can cost more than they save.
 
 The paired Mask2Former examples are the best concrete reference:
 
@@ -214,15 +282,14 @@ The paired Mask2Former examples are the best concrete reference:
 
 ## Quick Reference
 
-This page is not a full operator catalog. Use it for orientation, and use the
-package exports plus tests as the detailed source of truth.
-
 Torch operator groups:
 
 - conversion / boundary:
   `ToTorch`, `ToTorchRegistry`, `ToNumpy`, `ToNumpyRegistry`, `ToDevice`
 - execution / runtime:
   `TorchInfer`, `TorchExtract`, `TorchCollate`, `TorchDistribute`, `TorchAsType`
+- synchronization:
+  `TorchSynchronizeTensors`
 - tensor math / indexing / filtering:
   `TorchArgMax`, `TorchGatherRows`, `TorchGatherScores`, `TorchTopK`,
   `TorchTopKIndices2D`, `TorchSlice`, `TorchSoftmax`, `TorchSigmoid`,
@@ -233,30 +300,30 @@ Torch operator groups:
   `TorchWeightMasksByScores`, `TorchResizeMasks`, `TorchMeanMaskScores`,
   `TorchMasksToBoxes`, `TorchNMS`
 
-Look here for the current exported surface:
+Implementation and exports live in:
 
 - [`src/ml_pipes/torch/__init__.py`](src/ml_pipes/torch/__init__.py)
+- [`src/ml_pipes/torch/ops.py`](src/ml_pipes/torch/ops.py)
 
-Look here for behavioral edge cases and usage patterns:
+Behavioral examples live in:
 
 - [`tests/test_torch.py`](tests/test_torch.py)
 
-Use [`OPERATORS.md`](OPERATORS.md) for the general operator model and
-composition style. Use this page for Torch-specific runtime and boundary rules.
+## Why Torch Is A Separate Domain
 
-## Rationale
+In ml-pipes Torch is a separate, explicit execution domain. A common alternative is a polymorphic tensor layer where the same pipeline
+value can silently be backed by NumPy, Torch, TensorRT-style buffers, or some
+other runtime tensor object. This repo does not take that route.
 
-Torch support is isolated under `ml_pipes.torch` so that:
+Instead, NumPy and Torch stay as explicit domains with explicit crossings.
 
-- core `ml_pipes` stays lightweight and NumPy-oriented
-- Torch remains an optional dependency
-- domain crossings stay visible in the pipeline list
+That choice keeps the system simpler:
 
-NumPy and Torch both remain first-class because they serve different strengths:
+- the active runtime is visible in the pipeline list
+- optional dependencies stay optional
+- library behavior does not depend on hidden backend dispatch
+- NumPy-oriented utilities do not need to pretend to be generic tensor kernels
+- Torch-oriented stages can still be added where they help
 
-- NumPy is a natural fit for generic preprocessing, projection, visualization,
-  and framework-agnostic pipelines
-- Torch is a natural fit for model execution and Torch-native tensor postprocess
-
-That split keeps the pipeline readable. You can choose Torch where it helps
-without making the whole library Torch-only.
+The goal is not to hide backend differences behind one polymorphic tensor type.
+The goal is to make those differences composable and explicit.
