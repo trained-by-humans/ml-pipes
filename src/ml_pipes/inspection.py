@@ -71,7 +71,7 @@ from .types import (
 
 try:
     from .torch.types import TorchTensorRegistry
-except ImportError:  # pragma: no cover - exercised only when torch extra is absent
+except Exception:  # pragma: no cover - ImportError: torch absent; other: torch present but C extension not fully initialised
     TorchTensorRegistry = None
 
 
