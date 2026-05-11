@@ -496,6 +496,7 @@ class BenchmarkSweep:
     factory: Callable[[dict], Pipeline]
     configs: list[dict]
     input_fns: list[InputFn]
+    input_labels: list[str] | None = None
     measurement: MeasurementConfig = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -504,9 +505,8 @@ class BenchmarkSweep:
 
     def run(self) -> list[BenchmarkResult]:
         results: list[BenchmarkResult] = []
-        for input_fn in self.input_fns:
-            _id, value, _tag, _meta = input_fn()
-            input_label = _id
+        for i, input_fn in enumerate(self.input_fns):
+            input_label = self.input_labels[i] if self.input_labels else f"input{i}"
             for pipeline_config in self.configs:
                 pipeline = self.factory(pipeline_config)
                 config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
@@ -517,7 +517,7 @@ class BenchmarkSweep:
                     input_fn=input_fn,
                     measurement=self.measurement,
                     label=label,
-                    metadata={"pipeline_config": pipeline_config, "input": input_label},
+                    metadata={"pipeline_config": pipeline_config},
                 ).run()
                 results.append(result)
         return results
@@ -553,6 +553,7 @@ class BenchmarkMatrix:
     factory: Callable[[dict], Pipeline]
     axes: dict[str, list]
     input_fns: list[InputFn]
+    input_labels: list[str] | None = None
     filter: Callable[[dict], bool] | None = None
     measurement: MeasurementConfig = None  # type: ignore[assignment]
 
@@ -656,6 +657,7 @@ class BenchmarkMatrix:
             factory=self.factory,
             configs=self.prepare_configs(),
             input_fns=self.input_fns,
+            input_labels=self.input_labels,
             measurement=self.measurement,
         ).run()
 
