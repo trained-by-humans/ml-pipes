@@ -3,18 +3,18 @@ Inspection example: visualise the data at every pipeline step.
 
 Three pipelines are demonstrated:
 
-  simple   — single image through the full YOLOv8 detection pipeline.
+  Simple   — single image through the full YOLOv8 detection pipeline.
 
-  batched  — 8 image paths in, Scatter decodes them concurrently,
+  Batched  — 8 image paths in, Scatter decodes them concurrently,
              Batch groups them into batches of 4 for inference,
              UnBatch/Gather collect per-image detections.
 
-  tiled    — single image tiled into overlapping 200×200 patches,
+  Tiled    — single image tiled into overlapping 200×200 patches,
              each tile inferred independently via Scatter, results
              stitched back and deduplicated with NMM.
 
 Usage:
-    # Open result in the default web browser (default behaviour)
+    # Open result in the default web browser (default behavior)
     python run_inspect.py
 
     # Use the tiled pipeline
@@ -95,13 +95,13 @@ def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResu
         print(f"Exporting dynamic-batch model → {model_path}", file=sys.stderr)
         _export_dynamic_model(model_path)
 
-    per_image = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
+    inference_pipeline = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
     pipeline = Pipeline([
         Scatter(max_concurrency=4),
-        Inline(per_image),
+        Inline(inference_pipeline),
         Gather(),
     ])
-
+    pipeline.validate()
     print("Running batched inspection...", file=sys.stderr)
     result = pipeline.inspect([image_path] * 8)
     print(result)
@@ -114,6 +114,7 @@ def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) 
         + yolo8_tiled_pipeline(model_path)
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
+    pipeline.validate()
     print("Running tiled inspection...", file=sys.stderr)
     result = pipeline.inspect(image_path)
     print(result)
