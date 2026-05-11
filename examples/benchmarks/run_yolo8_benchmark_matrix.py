@@ -1,25 +1,21 @@
 """
-Matrix benchmark example: sweep batch_size × serialize axes for the batched YOLOv8 pipeline.
+Matrix benchmark: sweep slice_wh × overlap_wh axes for the tiled YOLOv8 pipeline.
 
 BenchmarkMatrix expands the cartesian product of all axes automatically and
-delegates each cell to BenchmarkSweep → Benchmark. Mirrors run_yolo8_batch_benchmark.py
-but uses the ml-pipes benchmarking layer for per-operator latency breakdown
-instead of raw wall-clock throughput.
-
-Each cell runs a fresh pipeline (batch_size, serialize) with warmup + N measured
-single-threaded requests. Because calls are sequential, Batch always fires via
-timeout (batch of 1 per request). This measures per-request latency through the
-full operator chain — a different view from the concurrent throughput in
-run_yolo8_batch_benchmark.py.
+delegates each cell to BenchmarkSweep → Benchmark. Useful for finding the
+tile size / overlap combination that best balances latency and detection quality.
 
 Axes swept:
-  batch_size  — controls the Batch operator buffer size
-  serialize   — controls whether concurrent session.run() calls are serialized
+  slice_wh   — tile size in pixels (width × height)
+  overlap_wh — overlap between adjacent tiles in pixels
+
+A filter drops combinations where overlap >= half the slice size, as those
+would produce more than 2× tile coverage and hurt latency with little gain.
 
 Usage:
-    python run_yolo8_matrix_benchmark.py
-    python run_yolo8_matrix_benchmark.py --runs 20 --warmup 3
-    python run_yolo8_matrix_benchmark.py --save results/
+    python run_yolo8_benchmark_matrix.py
+    python run_yolo8_benchmark_matrix.py --runs 20 --warmup 3
+    python run_yolo8_benchmark_matrix.py --model s --save results/
 """
 from __future__ import annotations
 
@@ -34,24 +30,34 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.benchmarks"
 
 from examples.common import (
+    COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
     add_assets_dir_arg,
+    add_model_arg,
+    build_output_path,
+    decode,
     download_if_missing,
+    resolve_model_path,
+    visualize_detections_and_store,
 )
-from examples.run_yolo8_batch import MODEL_NAME, _export_dynamic_model, build_pipeline
+from examples.run_yolo8_onnx import YOLO8_MODELS
+from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
 from ml_pipes import Pipeline
 from ml_pipes.benchmark import BenchmarkMatrix, MeasurementConfig
 
 
-def _make_pipeline(model_path: Path):
+def _make_pipeline(model_path: Path, output_path: Path, coco_classes: list[str]):
     def factory(config: dict) -> Pipeline:
-        return build_pipeline(
-            model_path,
-            batch_size=config["batch_size"],
-            timeout=0.05,
-            serialize=config["serialize"],
+        return (
+            decode()
+            + yolo8_tiled_pipeline(
+                model_path,
+                slice_wh=config["slice_wh"],
+                overlap_wh=config["overlap_wh"],
+            )
+            + visualize_detections_and_store(output_path, coco_classes)
         )
     return factory
 
@@ -65,42 +71,43 @@ def _input_fn(image_path: Path):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_assets_dir_arg(parser)
+    add_model_arg(parser, list(YOLO8_MODELS))
     parser.add_argument("--runs", type=int, default=20, help="Measured runs per cell (default: 20).")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup runs per cell (default: 3).")
     parser.add_argument("--save", type=Path, default=None, help="Directory to save per-cell result JSON files.")
     args = parser.parse_args()
 
     assets_dir: Path = args.assets_dir
-    model_path = assets_dir / MODEL_NAME
-
-    if not model_path.exists():
-        print(f"Exporting YOLOv8n nano (dynamic batch) → {model_path}", file=sys.stderr)
-        _export_dynamic_model(model_path)
+    model_name, model_url = YOLO8_MODELS[args.model]
+    model_path = resolve_model_path(assets_dir, model_name, model_url, args.model)
+    if model_path is None:
+        return 1
 
     image_path = assets_dir / COCO_IMAGE_NAME
     print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
     download_if_missing(COCO_IMAGE_URL, image_path)
 
+    output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
+
     axes = {
-        "batch_size": [1, 2, 4, 8],
-        "serialize":  [True, False],
+        "slice_wh":   [(240, 240), (320, 320), (480, 480)],
+        "overlap_wh": [(40, 40), (80, 80), (120, 120)],
     }
 
-    # Skip configs where batch_size exceeds the number of concurrent callers (1
-    # in this single-threaded benchmark) — those batches would never fill and
-    # only add timeout latency without any throughput benefit.
+    # Overlap >= half the slice size produces excessive tile coverage.
     def _valid(c: dict) -> bool:
-        return c["batch_size"] == 1 or not c["serialize"]
+        return c["overlap_wh"][0] < c["slice_wh"][0] // 2
 
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
 
     matrix = BenchmarkMatrix(
-        pipeline_factory=_make_pipeline(model_path),
+        pipeline_factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
         axes=axes,
         filter=_valid,
         inputs=[_input_fn(image_path)],
         config=config,
     )
+
     print(f"\n{matrix.to_plan()}\n", file=sys.stderr)
     print(matrix.to_grid(), file=sys.stderr)
     print(file=sys.stderr)
