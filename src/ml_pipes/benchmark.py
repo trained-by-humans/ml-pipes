@@ -13,9 +13,13 @@ from .core import Pipeline
 from .tracing import InvocationTrace
 
 
-@dataclass(frozen=True)
+@dataclass
 class InvocationStat:
-    """Latency statistics for one operator or the whole pipeline across N runs."""
+    """Latency statistics for one operator or the whole pipeline across N runs.
+
+    Children mirror StepSpan.child_trace: present when the operator is a region
+    (e.g. Scatter) and child spans were collected.
+    """
 
     label: str
     count: int
@@ -24,9 +28,10 @@ class InvocationStat:
     min_ms: float
     max_ms: float
     percentiles: dict[float, float]  # keys mirror MeasurementConfig.percentiles exactly
+    children: list[InvocationStat] = field(default_factory=list)
 
 
-def _compute_span(label: str, samples_s: list[float], percentiles: tuple[float, ...]) -> InvocationStat:
+def _compute_stat(label: str, samples_s: list[float], percentiles: tuple[float, ...]) -> InvocationStat:
     arr = np.array(samples_s) * 1000.0
     return InvocationStat(
         label=label,
@@ -46,16 +51,23 @@ class BenchmarkResult:
     label: str
     metadata: dict                   # user-managed: env, device, git sha, config, dataset, etc.
     total: InvocationStat             # aggregate pipeline latency
-    operators: list[InvocationStat]   # per-operator latency breakdown — only ml-pipes can produce this
-    child_labels: set[str] = field(default_factory=set)  # labels originating from child/region traces
+    operators: list[InvocationStat]   # per-operator latency; each may have .children for region spans
 
     def to_table(self, expand_regions: bool = True) -> str:
-        visible = [op for op in self.operators if expand_regions or op.label not in self.child_labels]
-        rows = [self.total, *visible]
         pct_keys = sorted(self.total.percentiles)
         pct_headers = [f"p{int(p * 100)}" for p in pct_keys]
 
-        col_label = max(len(r.label) for r in rows)
+        def _flat(stats: list[InvocationStat], depth: int = 0) -> list[tuple[int, InvocationStat]]:
+            rows: list[tuple[int, InvocationStat]] = []
+            for s in stats:
+                rows.append((depth, s))
+                if expand_regions and s.children:
+                    rows.extend(_flat(s.children, depth + 1))
+            return rows
+
+        flat = [(0, self.total)] + _flat(self.operators)
+
+        col_label = max(len("  " * d + s.label) for d, s in flat)
         col_w = 9
 
         header = (
@@ -66,24 +78,27 @@ class BenchmarkResult:
         sep = "-" * len(header)
 
         lines = [header, sep]
-        for r in rows:
+        for depth, s in flat:
+            indent = "  " * depth
+            label = indent + s.label
             line = (
-                f"{r.label:<{col_label}}  {r.mean_ms:>{col_w}.2f}"
-                + "".join(f"  {r.percentiles[p]:>{col_w}.2f}" for p in pct_keys)
-                + f"  {r.stddev_ms:>{col_w}.2f}  {r.min_ms:>{col_w}.2f}  {r.max_ms:>{col_w}.2f}"
+                f"{label:<{col_label}}  {s.mean_ms:>{col_w}.2f}"
+                + "".join(f"  {s.percentiles[p]:>{col_w}.2f}" for p in pct_keys)
+                + f"  {s.stddev_ms:>{col_w}.2f}  {s.min_ms:>{col_w}.2f}  {s.max_ms:>{col_w}.2f}"
             )
             lines.append(line)
         lines.append(sep)
+
+        n_children = sum(1 for s in self.operators if s.children)
         footer = f"runs: {self.total.count}  (all values in ms)"
-        n_hidden = len(self.operators) - len(visible)
-        if not expand_regions and n_hidden:
-            footer += f"  ({n_hidden} child spans hidden)"
+        if not expand_regions and n_children:
+            footer += f"  ({n_children} region{'s' if n_children != 1 else ''} collapsed)"
         lines.append(footer)
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
-        def _span(s: InvocationStat) -> dict:
-            return {
+        def _stat(s: InvocationStat) -> dict:
+            d: dict = {
                 "label": s.label,
                 "count": s.count,
                 "mean_ms": s.mean_ms,
@@ -92,13 +107,15 @@ class BenchmarkResult:
                 "max_ms": s.max_ms,
                 "percentiles": {str(k): v for k, v in s.percentiles.items()},
             }
+            if s.children:
+                d["children"] = [_stat(c) for c in s.children]
+            return d
 
         return {
             "label": self.label,
             "metadata": self.metadata,
-            "total": _span(self.total),
-            "operators": [_span(s) for s in self.operators],
-            "child_labels": list(self.child_labels),
+            "total": _stat(self.total),
+            "operators": [_stat(s) for s in self.operators],
         }
 
     def slug(self, ext: str = "") -> str:
@@ -119,7 +136,7 @@ class BenchmarkResult:
         with open(path) as f:
             d = json.load(f)
 
-        def _span(s: dict) -> InvocationStat:
+        def _stat(s: dict) -> InvocationStat:
             return InvocationStat(
                 label=s["label"],
                 count=s["count"],
@@ -128,14 +145,14 @@ class BenchmarkResult:
                 min_ms=s["min_ms"],
                 max_ms=s["max_ms"],
                 percentiles={float(k): v for k, v in s["percentiles"].items()},
+                children=[_stat(c) for c in s.get("children", [])],
             )
 
         return cls(
             label=d["label"],
             metadata=d.get("metadata", {}),
-            total=_span(d["total"]),
-            operators=[_span(s) for s in d["operators"]],
-            child_labels=set(d.get("child_labels", [])),
+            total=_stat(d["total"]),
+            operators=[_stat(s) for s in d["operators"]],
         )
 
     def diff(self, other: BenchmarkResult) -> BenchmarkDiff:
@@ -256,6 +273,14 @@ class MeasurementConfig:
     percentiles: tuple[float, ...] = (0.50, 0.95, 0.99)
 
 
+@dataclass
+class _SpanAccum:
+    """Mutable accumulator node — mirrors the StepSpan tree during collection."""
+    label: str
+    samples: list[float] = field(default_factory=list)
+    children: list[_SpanAccum] = field(default_factory=list)
+
+
 class BenchmarkCollector(ConcurrentCollector):
     """Accumulates per-operator raw latency samples across runs, skipping warmup.
 
@@ -268,45 +293,57 @@ class BenchmarkCollector(ConcurrentCollector):
         self._config = config
         self._calls = 0
         self._total_samples: list[float] = []
-        self._op_samples: dict[str, list[float]] = {}
-        self._child_labels: set[str] = set()  # labels that originate from child traces
+        # Tree-shaped accumulator: mirrors InvocationTrace structure.
+        # Each node is (label, samples_list, children_dict).
+        # We use an ordered dict keyed by label to preserve insertion order.
+        self._span_tree: list[_SpanAccum] = []
 
-    def _collect_spans(self, spans: list, depth: int = 0) -> None:
-        indent = "  " * depth
+    def _collect_spans(self, spans: list, accum_list: list[_SpanAccum]) -> None:
+        # Build / update accumulator nodes in-place, preserving order.
+        accum_by_label: dict[str, _SpanAccum] = {a.label: a for a in accum_list}
         for span in spans:
-            lbl = indent + span.label
-            self._op_samples.setdefault(lbl, []).append(span.duration_s)
-            if depth > 0:
-                self._child_labels.add(lbl)
+            if span.label not in accum_by_label:
+                node: _SpanAccum = _SpanAccum(span.label)
+                accum_list.append(node)
+                accum_by_label[span.label] = node
+            node = accum_by_label[span.label]
+            node.samples.append(span.duration_s)
             if span.child_trace is not None:
-                self._collect_spans(span.child_trace.spans, depth + 1)
+                self._collect_spans(span.child_trace.spans, node.children)
 
     def _collect(self, trace: InvocationTrace) -> None:
         self._calls += 1
         if self._calls <= self._config.warmup:
             return
         self._total_samples.append(trace.total_duration_s)
-        self._collect_spans(trace.spans)
+        self._collect_spans(trace.spans, self._span_tree)
 
     def report(self, label: str = "", metadata: dict | None = None) -> BenchmarkResult:
         self.flush()
         pct = self._config.percentiles
-        total = _compute_span("total", self._total_samples, pct) if self._total_samples else _compute_span("total", [0.0], pct)
-        operators = [_compute_span(lbl, samples, pct) for lbl, samples in self._op_samples.items()]
+
+        def _build(accum_list: list[_SpanAccum]) -> list[InvocationStat]:
+            stats = []
+            for node in accum_list:
+                stat = _compute_stat(node.label, node.samples, pct)
+                stat.children = _build(node.children)
+                stats.append(stat)
+            return stats
+
+        total = _compute_stat("total", self._total_samples, pct) if self._total_samples else _compute_stat("total", [0.0], pct)
+        operators = _build(self._span_tree)
         return BenchmarkResult(
             label=label,
             metadata=metadata or {},
             total=total,
             operators=operators,
-            child_labels=set(self._child_labels),
         )
 
     def reset(self) -> None:
         self.flush()
         self._calls = 0
         self._total_samples.clear()
-        self._op_samples.clear()
-        self._child_labels.clear()
+        self._span_tree.clear()
 
 
 # InputFn returns (id, value, tag, metadata).
@@ -409,25 +446,27 @@ class BenchmarkSweep:
         if not results:
             return "(no results)"
 
-        # Union of child labels across all results — used to filter when not expanding
-        all_child_labels: set[str] = set()
-        for r in results:
-            all_child_labels |= r.child_labels
+        # Flatten operators into (depth, label) rows, respecting expand_regions.
+        def _flat_labels(stats: list[InvocationStat], depth: int = 0) -> list[tuple[int, str]]:
+            rows: list[tuple[int, str]] = []
+            for s in stats:
+                rows.append((depth, s.label))
+                if expand_regions and s.children:
+                    rows.extend(_flat_labels(s.children, depth + 1))
+            return rows
 
-        # Collect all operator labels in first-seen order
-        all_labels: list[str] = ["total"]
+        # Union of label rows across all results in first-seen order.
+        all_rows: list[tuple[int, str]] = [(0, "total")]
         seen: set[str] = {"total"}
         for r in results:
-            for op in r.operators:
-                if op.label not in seen:
-                    if expand_regions or op.label not in all_child_labels:
-                        all_labels.append(op.label)
-                        seen.add(op.label)
+            for depth, lbl in _flat_labels(r.operators):
+                if lbl not in seen:
+                    all_rows.append((depth, lbl))
+                    seen.add(lbl)
 
-        # Determine shared percentile keys
         pct_keys = sorted(results[0].total.percentiles)
 
-        col_label = max(len(lbl) for lbl in all_labels)
+        col_label = max(len("  " * d + lbl) for d, lbl in all_rows)
         col_w = 9
         cols_per_result = 1 + len(pct_keys)  # mean + percentiles
         result_col_w = cols_per_result * (col_w + 2)
@@ -436,7 +475,6 @@ class BenchmarkSweep:
             label = r.label
             w = result_col_w - 1
             if len(label) > w:
-                # Prefer keeping the config portion (after first |); truncate the input prefix.
                 if "|" in label:
                     input_part, config_part = label.split("|", 1)
                     if len(config_part) <= w - 2:
@@ -463,36 +501,44 @@ class BenchmarkSweep:
                 row += f"  {stat.percentiles.get(p, 0.0):>{col_w}.2f}"
             return row
 
-        # Build lookup: result index → {label: InvocationStat}
+        # Build flat label→stat lookup per result (includes child stats).
+        def _flat_lookup(stats: list[InvocationStat]) -> dict[str, InvocationStat]:
+            out: dict[str, InvocationStat] = {}
+            for s in stats:
+                out[s.label] = s
+                if s.children:
+                    out.update(_flat_lookup(s.children))
+            return out
+
         lookups: list[dict[str, InvocationStat]] = []
         for r in results:
             d: dict[str, InvocationStat] = {"total": r.total}
-            for op in r.operators:
-                d[op.label] = op
+            d.update(_flat_lookup(r.operators))
             lookups.append(d)
 
         sep_width = col_label + 2 + len(results) * (result_col_w + 2)
         sep = "-" * sep_width
 
         lines = [sep]
-        # Result labels row
         header_row = " " * (col_label + 2) + "  ".join(_header_for(r) for r in results)
         lines.append(header_row)
-        # Subheader: mean / p50 / p95 / p99 per result
         sub_row = " " * (col_label + 2) + "  ".join(_subheader() for _ in results)
         lines.append(sub_row)
         lines.append(sep)
 
-        for lbl in all_labels:
-            row = f"{lbl:<{col_label}}  "
+        for depth, lbl in all_rows:
+            indent = "  " * depth
+            display = indent + lbl
+            row = f"{display:<{col_label}}  "
             row += "  ".join(_row_for(lookup.get(lbl)) for lookup in lookups)
             lines.append(row)
 
         lines.append(sep)
         footer = f"runs: {results[0].total.count}  (all values in ms)"
-        if not expand_regions and all_child_labels:
-            n_hidden = len(all_child_labels)
-            footer += f"  ({n_hidden} child spans hidden)"
+        if not expand_regions:
+            n_collapsed = sum(1 for r in results for op in r.operators if op.children)
+            if n_collapsed:
+                footer += f"  ({n_collapsed} region{'s' if n_collapsed != 1 else ''} collapsed)"
         lines.append(footer)
         return "\n".join(lines)
 

@@ -138,27 +138,32 @@ def test_result_to_table_renders():
 
 def test_result_to_table_expand_regions_false_hides_child_spans():
     result = _make_result()
-    # Simulate child labels by marking one operator as a child
-    child_label = result.operators[0].label
-    result.child_labels.add(child_label)
+    # Inject a child stat into the first operator to simulate a Scatter region
+    child_stat = InvocationStat(label="region:0", count=10, mean_ms=1.0, stddev_ms=0.1,
+                                min_ms=0.8, max_ms=1.2, percentiles={0.50: 1.0, 0.95: 1.1})
+    result.operators[0].children.append(child_stat)
     table = result.to_table(expand_regions=False)
     assert "total" in table
-    assert "child spans hidden" in table
-    assert child_label not in table
+    assert "collapsed" in table
+    assert "region:0" not in table
 
 
-def test_result_to_table_expand_regions_true_shows_operators():
+def test_result_to_table_expand_regions_true_shows_children():
     result = _make_result()
+    child_stat = InvocationStat(label="region:0", count=10, mean_ms=1.0, stddev_ms=0.1,
+                                min_ms=0.8, max_ms=1.2, percentiles={0.50: 1.0, 0.95: 1.1})
+    result.operators[0].children.append(child_stat)
     table = result.to_table(expand_regions=True)
+    assert "region:0" in table
     for op in result.operators:
         assert op.label in table
 
 
 def test_result_to_table_expand_regions_false_no_children_no_note():
     result = _make_result()
-    # No child labels — footer note should not appear
+    # No children — footer note should not appear
     table = result.to_table(expand_regions=False)
-    assert "child spans hidden" not in table
+    assert "collapsed" not in table
     for op in result.operators:
         assert op.label in table
 
