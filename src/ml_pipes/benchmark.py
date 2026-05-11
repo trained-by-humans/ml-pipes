@@ -31,6 +31,17 @@ class InvocationStat:
     children: list[InvocationStat] = field(default_factory=list)
 
 
+def _flat_stats(
+    stats: list[InvocationStat], expand_regions: bool = True, depth: int = 0
+) -> list[tuple[int, InvocationStat]]:
+    rows: list[tuple[int, InvocationStat]] = []
+    for s in stats:
+        rows.append((depth, s))
+        if expand_regions and s.children:
+            rows.extend(_flat_stats(s.children, expand_regions, depth + 1))
+    return rows
+
+
 def _compute_stat(label: str, samples_s: list[float], percentiles: tuple[float, ...]) -> InvocationStat:
     arr = np.array(samples_s) * 1000.0
     return InvocationStat(
@@ -57,15 +68,7 @@ class BenchmarkResult:
         pct_keys = sorted(self.total.percentiles)
         pct_headers = [f"p{int(p * 100)}" for p in pct_keys]
 
-        def _flat(stats: list[InvocationStat], depth: int = 0) -> list[tuple[int, InvocationStat]]:
-            rows: list[tuple[int, InvocationStat]] = []
-            for s in stats:
-                rows.append((depth, s))
-                if expand_regions and s.children:
-                    rows.extend(_flat(s.children, depth + 1))
-            return rows
-
-        flat = [(0, self.total)] + _flat(self.operators)
+        flat = [(0, self.total)] + _flat_stats(self.operators, expand_regions)
 
         col_label = max(len("  " * d + s.label) for d, s in flat)
         col_w = 9
@@ -121,11 +124,6 @@ class BenchmarkResult:
         }
 
     def slug(self, ext: str = "") -> str:
-        """Filesystem-safe version of the label, suitable for use as a filename.
-
-        Characters illegal on common filesystems (/ \\ : * ? " < > |) are replaced
-        with underscores. An optional extension (e.g. '.json') can be appended.
-        """
         safe = re.sub(r'[/\\:*?"<>|]', "_", self.label)
         return safe + ext
 
@@ -166,21 +164,13 @@ class BenchmarkResult:
         if not results:
             return "(no results)"
 
-        def _flat_labels(stats: list[InvocationStat], depth: int = 0) -> list[tuple[int, str]]:
-            rows: list[tuple[int, str]] = []
-            for s in stats:
-                rows.append((depth, s.label))
-                if expand_regions and s.children:
-                    rows.extend(_flat_labels(s.children, depth + 1))
-            return rows
-
         all_rows: list[tuple[int, str]] = [(0, "total")]
         seen: set[str] = {"total"}
         for r in results:
-            for depth, lbl in _flat_labels(r.operators):
-                if lbl not in seen:
-                    all_rows.append((depth, lbl))
-                    seen.add(lbl)
+            for depth, s in _flat_stats(r.operators, expand_regions):
+                if s.label not in seen:
+                    all_rows.append((depth, s.label))
+                    seen.add(s.label)
 
         pct_keys = sorted(results[0].total.percentiles)
 
@@ -219,18 +209,10 @@ class BenchmarkResult:
                 row += f"  {stat.percentiles.get(p, 0.0):>{col_w}.2f}"
             return row
 
-        def _flat_lookup(stats: list[InvocationStat]) -> dict[str, InvocationStat]:
-            out: dict[str, InvocationStat] = {}
-            for s in stats:
-                out[s.label] = s
-                if s.children:
-                    out.update(_flat_lookup(s.children))
-            return out
-
         lookups: list[dict[str, InvocationStat]] = []
         for r in results:
             d: dict[str, InvocationStat] = {"total": r.total}
-            d.update(_flat_lookup(r.operators))
+            d.update({s.label: s for _, s in _flat_stats(r.operators, expand_regions=True)})
             lookups.append(d)
 
         sep_width = col_label + 3 + len(results) * (result_col_w + 2)
@@ -397,13 +379,9 @@ class BenchmarkCollector(ConcurrentCollector):
         self._config = config
         self._calls = 0
         self._total_samples: list[float] = []
-        # Tree-shaped accumulator: mirrors InvocationTrace structure.
-        # Each node is (label, samples_list, children_dict).
-        # We use an ordered dict keyed by label to preserve insertion order.
         self._span_tree: list[_SpanAccum] = []
 
     def _collect_spans(self, spans: list, accum_list: list[_SpanAccum]) -> None:
-        # Build / update accumulator nodes in-place, preserving order.
         accum_by_label: dict[str, _SpanAccum] = {a.label: a for a in accum_list}
         for span in spans:
             if span.label not in accum_by_label:
@@ -512,7 +490,7 @@ class BenchmarkSweep:
             measurement=MeasurementConfig(runs=30),
         )
         results = sweep.run()
-        print(BenchmarkSweep.to_table(results))
+        print(BenchmarkResult.to_comparison_table(results))
     """
 
     factory: Callable[[dict], Pipeline]
@@ -569,7 +547,7 @@ class BenchmarkMatrix:
             measurement=MeasurementConfig(runs=30),
         )
         results = matrix.run()
-        print(BenchmarkSweep.to_table(results))
+        print(BenchmarkResult.to_comparison_table(results))
     """
 
     factory: Callable[[dict], Pipeline]
@@ -592,7 +570,7 @@ class BenchmarkMatrix:
     def to_plan(self) -> str:
         keys = list(self.axes.keys())
         all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
-        active = set(frozenset(c.items()) for c in self.prepare_configs())
+        active = set(frozenset(c.items()) for c in all_combos if self.filter is None or self.filter(c))
         col_w = max(len(f"{k}={v}") for c in all_combos for k, v in c.items())
         rows = []
         for combo in all_combos:
