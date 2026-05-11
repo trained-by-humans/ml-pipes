@@ -144,7 +144,8 @@ def test_result_to_table_expand_regions_false_hides_child_spans():
     result.operators[0].children.append(child_stat)
     table = result.to_table(expand_regions=False)
     assert "total" in table
-    assert "collapsed" in table
+    assert "* Child spans are collapsed" in table
+    assert result.operators[0].label + "*" in table
     assert "region:0" not in table
 
 
@@ -161,9 +162,9 @@ def test_result_to_table_expand_regions_true_shows_children():
 
 def test_result_to_table_expand_regions_false_no_children_no_note():
     result = _make_result()
-    # No children — footer note should not appear
+    # No children — footnote should not appear
     table = result.to_table(expand_regions=False)
-    assert "collapsed" not in table
+    assert "* Child spans are collapsed" not in table
     for op in result.operators:
         assert op.label in table
 

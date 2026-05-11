@@ -71,16 +71,20 @@ class BenchmarkResult:
         col_w = 9
 
         header = (
-            f"{'operator':<{col_label}}  {'mean':>{col_w}}"
+            f"{'operator':<{col_label}}   {'mean':>{col_w}}"
             + "".join(f"  {h:>{col_w}}" for h in pct_headers)
             + f"  {'stddev':>{col_w}}  {'min':>{col_w}}  {'max':>{col_w}}"
         )
         sep = "-" * len(header)
 
         lines = [header, sep]
+        any_collapsed = False
         for depth, s in flat:
             indent = "  " * depth
-            label = indent + s.label
+            collapsed = not expand_regions and bool(s.children)
+            if collapsed:
+                any_collapsed = True
+            label = indent + s.label + ("*" if collapsed else "")
             line = (
                 f"{label:<{col_label}}  {s.mean_ms:>{col_w}.2f}"
                 + "".join(f"  {s.percentiles[p]:>{col_w}.2f}" for p in pct_keys)
@@ -88,11 +92,9 @@ class BenchmarkResult:
             )
             lines.append(line)
         lines.append(sep)
-
-        n_children = sum(1 for s in self.operators if s.children)
         footer = f"runs: {self.total.count}  (all values in ms)"
-        if not expand_regions and n_children:
-            footer += f"  ({n_children} region{'s' if n_children != 1 else ''} collapsed)"
+        if any_collapsed:
+            footer += "\n* Child spans are collapsed"
         lines.append(footer)
         return "\n".join(lines)
 
@@ -516,29 +518,34 @@ class BenchmarkSweep:
             d.update(_flat_lookup(r.operators))
             lookups.append(d)
 
-        sep_width = col_label + 2 + len(results) * (result_col_w + 2)
+        sep_width = col_label + 3 + len(results) * (result_col_w + 2)
         sep = "-" * sep_width
 
         lines = [sep]
-        header_row = " " * (col_label + 2) + "  ".join(_header_for(r) for r in results)
+        header_row = " " * (col_label + 3) + "  ".join(_header_for(r) for r in results)
         lines.append(header_row)
-        sub_row = " " * (col_label + 2) + "  ".join(_subheader() for _ in results)
+        sub_row = " " * (col_label + 3) + "  ".join(_subheader() for _ in results)
         lines.append(sub_row)
         lines.append(sep)
 
+        any_collapsed = False
         for depth, lbl in all_rows:
             indent = "  " * depth
-            display = indent + lbl
+            collapsed = not expand_regions and any(
+                (s := lookup.get(lbl)) is not None and bool(s.children)
+                for lookup in lookups
+            )
+            if collapsed:
+                any_collapsed = True
+            display = indent + lbl + ("*" if collapsed else "")
             row = f"{display:<{col_label}}  "
             row += "  ".join(_row_for(lookup.get(lbl)) for lookup in lookups)
             lines.append(row)
 
         lines.append(sep)
         footer = f"runs: {results[0].total.count}  (all values in ms)"
-        if not expand_regions:
-            n_collapsed = sum(1 for r in results for op in r.operators if op.children)
-            if n_collapsed:
-                footer += f"  ({n_collapsed} region{'s' if n_collapsed != 1 else ''} collapsed)"
+        if any_collapsed:
+            footer += "\n* Child spans are collapsed"
         lines.append(footer)
         return "\n".join(lines)
 
