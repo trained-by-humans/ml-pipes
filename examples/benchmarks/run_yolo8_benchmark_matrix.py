@@ -2,7 +2,7 @@
 Matrix benchmark example: sweep batch_size × serialize axes for the batched YOLOv8 pipeline.
 
 BenchmarkMatrix expands the cartesian product of all axes automatically and
-delegates each cell to BenchmarkSweep → Benchmark. Mirrors benchmark_batch.py
+delegates each cell to BenchmarkSweep → Benchmark. Mirrors run_yolo8_batch_benchmark.py
 but uses the ml-pipes benchmarking layer for per-operator latency breakdown
 instead of raw wall-clock throughput.
 
@@ -10,7 +10,7 @@ Each cell runs a fresh pipeline (batch_size, serialize) with warmup + N measured
 single-threaded requests. Because calls are sequential, Batch always fires via
 timeout (batch of 1 per request). This measures per-request latency through the
 full operator chain — a different view from the concurrent throughput in
-benchmark_batch.py.
+run_yolo8_batch_benchmark.py.
 
 Axes swept:
   batch_size  — controls the Batch operator buffer size
@@ -39,7 +39,7 @@ from examples.common import (
     add_assets_dir_arg,
     download_if_missing,
 )
-from examples.run_batch_yolo8_onnx import MODEL_NAME, _export_dynamic_model, build_pipeline
+from examples.run_yolo8_batch import MODEL_NAME, _export_dynamic_model, build_pipeline
 
 from ml_pipes import Pipeline
 from ml_pipes.benchmark import BenchmarkMatrix, MeasurementConfig

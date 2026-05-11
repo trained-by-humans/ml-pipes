@@ -56,7 +56,7 @@ from common import (
 from common import COCO_CLASSES, build_output_path, visualize_detections_and_store
 from ml_pipes import DrawBoxes, SaveImage
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
-from run_batch_yolo8_onnx import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
+from run_yolo8_batch import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
 from ml_pipes import (
     Gather,
     Inline,
@@ -99,7 +99,7 @@ def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResu
     batch size. Scatter fans the list out to worker threads; Gather collects
     preprocessed tensors; the Batch region runs batched inference.
     """
-    from run_batch_yolo8_onnx import _export_dynamic_model
+    from run_yolo8_batch import _export_dynamic_model
 
     model_path = assets_dir / BATCH_MODEL_NAME
     if not model_path.exists():
