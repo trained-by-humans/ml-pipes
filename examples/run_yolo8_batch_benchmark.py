@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 from common import add_assets_dir_arg, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
-from run_batch_yolo8_onnx import MODEL_NAME, _export_dynamic_model, build_pipeline
+from run_yolo8_batch import MODEL_NAME, _export_dynamic_model, build_pipeline
 
 
 # Throughput benchmark for the Batch/UnBatch pipeline.
@@ -18,9 +18,9 @@ from run_batch_yolo8_onnx import MODEL_NAME, _export_dynamic_model, build_pipeli
 # the script runs the full cartesian product and prints one row per config.
 #
 # Usage:
-#   python benchmark_batch.py                         # defaults
-#   python benchmark_batch.py --batch-size 4 8 --workers 8 --lock on off
-#   python benchmark_batch.py --batch-size 1 2 4 8 --workers 1 4 8 --lock on off
+#   python run_yolo8_batch_benchmark.py                         # defaults
+#   python run_yolo8_batch_benchmark.py --batch-size 4 8 --workers 8 --lock on off
+#   python run_yolo8_batch_benchmark.py --batch-size 1 2 4 8 --workers 1 4 8 --lock on off
 #
 # Options:
 #   --batch-size  INT [INT ...]   batch sizes to sweep   (default: 1 2 4 8)
