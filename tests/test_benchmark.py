@@ -383,3 +383,24 @@ def test_matrix_to_table_delegates_to_sweep():
         config=MeasurementConfig(runs=3, warmup=1),
     ).run()
     assert BenchmarkMatrix.to_table(results) == BenchmarkSweep.to_table(results)
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkResult.slug
+# ---------------------------------------------------------------------------
+
+def test_slug_no_illegal_chars():
+    result = _make_result(label="coco.jpg|batch_size:4|serialize:True")
+    slug = result.slug()
+    for ch in r'/\:*?"<>|':
+        assert ch not in slug
+
+
+def test_slug_with_extension():
+    result = _make_result(label="run_a")
+    assert result.slug(".json") == "run_a.json"
+
+
+def test_slug_colon_replaced():
+    result = _make_result(label="img|batch_size:4")
+    assert ":" not in result.slug()

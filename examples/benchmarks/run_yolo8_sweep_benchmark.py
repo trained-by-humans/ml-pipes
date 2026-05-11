@@ -127,8 +127,7 @@ def main() -> int:
         save_dir = args.save
         save_dir.mkdir(parents=True, exist_ok=True)
         for result in results:
-            safe_label = result.label.replace(" | ", "_").replace("{", "").replace("}", "").replace("'", "").replace(": ", "=").replace(", ", "_")
-            result.save(str(save_dir / f"{safe_label}.json"))
+            result.save(str(save_dir / result.slug(".json")))
         print(f"\nResults saved to {save_dir}/", file=sys.stderr)
 
     return 0
