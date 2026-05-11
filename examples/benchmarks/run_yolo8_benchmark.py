@@ -23,7 +23,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from common import (
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+if __name__ == "__main__" and __package__ is None:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    __package__ = "examples.benchmarks"
+
+from examples.common import (
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
@@ -35,7 +41,7 @@ from common import (
     resolve_model_path,
     visualize_detections_and_store,
 )
-from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 
 from ml_pipes import Pipeline
 from ml_pipes.benchmark import Benchmark, BenchmarkResult, MeasurementConfig

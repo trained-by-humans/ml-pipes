@@ -10,6 +10,7 @@ from ml_pipes import Pipeline
 from ml_pipes.benchmark import (
     Benchmark,
     BenchmarkCollector,
+    BenchmarkSweep,
     BenchmarkResult,
     InvocationStat,
     InvocationStatDiff,
@@ -245,3 +246,81 @@ def test_benchmark_per_operator_spans_present():
     labels = {s.label for s in result.operators}
     assert any("AddOne" in lbl or "0:" in lbl for lbl in labels)
     assert any("Double" in lbl or "1:" in lbl for lbl in labels)
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkSweep
+# ---------------------------------------------------------------------------
+
+def _make_pipeline_from_config(config: dict) -> Pipeline:
+    return _make_pipeline()
+
+
+def test_matrix_run_produces_correct_count():
+    configs = [{"workers": 1}, {"workers": 2}]
+    inputs = [lambda: _static_input(0), lambda: _static_input(1)]
+    matrix = BenchmarkSweep(
+        pipeline_factory=_make_pipeline_from_config,
+        pipeline_configs=configs,
+        inputs=inputs,
+        config=MeasurementConfig(runs=3, warmup=1),
+    )
+    results = matrix.run()
+    assert len(results) == 4  # 2 configs × 2 inputs
+
+
+def test_matrix_result_labels_contain_input_and_config():
+    configs = [{"mode": "fast"}]
+    inputs = [lambda: ("my_input", 0, None, None)]
+    matrix = BenchmarkSweep(
+        pipeline_factory=_make_pipeline_from_config,
+        pipeline_configs=configs,
+        inputs=inputs,
+        config=MeasurementConfig(runs=3, warmup=1),
+    )
+    results = matrix.run()
+    assert len(results) == 1
+    assert "my_input" in results[0].label
+    assert "fast" in results[0].label
+
+
+def test_matrix_default_config():
+    matrix = BenchmarkSweep(
+        pipeline_factory=_make_pipeline_from_config,
+        pipeline_configs=[{}],
+        inputs=[lambda: _static_input(0)],
+    )
+    assert matrix.config is not None
+    assert matrix.config.runs == 100
+
+
+def test_matrix_to_table_renders():
+    configs = [{"a": 1}, {"a": 2}]
+    inputs = [lambda: _static_input(0)]
+    results = BenchmarkSweep(
+        pipeline_factory=_make_pipeline_from_config,
+        pipeline_configs=configs,
+        inputs=inputs,
+        config=MeasurementConfig(runs=3, warmup=1),
+    ).run()
+    table = BenchmarkSweep.to_table(results)
+    assert "total" in table
+    assert "mean" in table
+
+
+def test_matrix_to_table_empty():
+    assert BenchmarkSweep.to_table([]) == "(no results)"
+
+
+def test_matrix_metadata_records_config_and_input():
+    configs = [{"batch": 4}]
+    inputs = [lambda: ("img.jpg", 0, None, None)]
+    results = BenchmarkSweep(
+        pipeline_factory=_make_pipeline_from_config,
+        pipeline_configs=configs,
+        inputs=inputs,
+        config=MeasurementConfig(runs=3, warmup=1),
+    ).run()
+    meta = results[0].metadata
+    assert meta["pipeline_config"] == {"batch": 4}
+    assert meta["input"] == "img.jpg"
