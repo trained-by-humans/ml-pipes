@@ -97,7 +97,7 @@ def main() -> int:
 
     output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
 
-    pipeline_configs = [
+    configs = [
         {"tiled": False, "conf_threshold": 0.25},
         {"tiled": True,  "conf_threshold": 0.25, "slice_wh": (320, 320), "overlap_wh": (80, 80)},
         {"tiled": True,  "conf_threshold": 0.25, "slice_wh": (480, 480), "overlap_wh": (80, 80)},
@@ -106,17 +106,17 @@ def main() -> int:
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
 
     sweep = BenchmarkSweep(
-        pipeline_factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
-        pipeline_configs=pipeline_configs,
+        factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
+        configs=configs,
         inputs=[_input_fn(image_path, label="coco_sample")],
         config=config,
     )
 
-    print(f"\nRunning {len(pipeline_configs)} configs "
+    print(f"\nRunning {len(configs)} configs "
           f"({args.warmup} warmup + {args.runs} measured each)\n", file=sys.stderr)
 
     results = sweep.run()
-    print(BenchmarkSweep.to_table(results, expand_regions=False))
+    print(BenchmarkResult.to_comparison_table(results, expand_regions=False))
 
     if args.save:
         save_dir = args.save
