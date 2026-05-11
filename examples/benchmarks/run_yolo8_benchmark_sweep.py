@@ -116,7 +116,7 @@ def main() -> int:
           f"({args.warmup} warmup + {args.runs} measured each)\n", file=sys.stderr)
 
     results = sweep.run()
-    print(BenchmarkSweep.to_table(results))
+    print(BenchmarkSweep.to_table(results, expand_regions=False))
 
     if args.save:
         save_dir = args.save

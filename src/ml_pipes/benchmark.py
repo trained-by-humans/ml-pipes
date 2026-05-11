@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import numpy as np
@@ -47,9 +47,11 @@ class BenchmarkResult:
     metadata: dict                   # user-managed: env, device, git sha, config, dataset, etc.
     total: InvocationStat             # aggregate pipeline latency
     operators: list[InvocationStat]   # per-operator latency breakdown — only ml-pipes can produce this
+    child_labels: set[str] = field(default_factory=set)  # labels originating from child/region traces
 
-    def to_table(self) -> str:
-        rows = [self.total, *self.operators]
+    def to_table(self, expand_regions: bool = True) -> str:
+        visible = [op for op in self.operators if expand_regions or op.label not in self.child_labels]
+        rows = [self.total, *visible]
         pct_keys = sorted(self.total.percentiles)
         pct_headers = [f"p{int(p * 100)}" for p in pct_keys]
 
@@ -72,7 +74,11 @@ class BenchmarkResult:
             )
             lines.append(line)
         lines.append(sep)
-        lines.append(f"runs: {self.total.count}  (all values in ms)")
+        footer = f"runs: {self.total.count}  (all values in ms)"
+        n_hidden = len(self.operators) - len(visible)
+        if not expand_regions and n_hidden:
+            footer += f"  ({n_hidden} child spans hidden)"
+        lines.append(footer)
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
@@ -92,6 +98,7 @@ class BenchmarkResult:
             "metadata": self.metadata,
             "total": _span(self.total),
             "operators": [_span(s) for s in self.operators],
+            "child_labels": list(self.child_labels),
         }
 
     def slug(self, ext: str = "") -> str:
@@ -128,6 +135,7 @@ class BenchmarkResult:
             metadata=d.get("metadata", {}),
             total=_span(d["total"]),
             operators=[_span(s) for s in d["operators"]],
+            child_labels=set(d.get("child_labels", [])),
         )
 
     def diff(self, other: BenchmarkResult) -> BenchmarkDiff:
@@ -261,14 +269,24 @@ class BenchmarkCollector(ConcurrentCollector):
         self._calls = 0
         self._total_samples: list[float] = []
         self._op_samples: dict[str, list[float]] = {}
+        self._child_labels: set[str] = set()  # labels that originate from child traces
+
+    def _collect_spans(self, spans: list, depth: int = 0) -> None:
+        indent = "  " * depth
+        for span in spans:
+            lbl = indent + span.label
+            self._op_samples.setdefault(lbl, []).append(span.duration_s)
+            if depth > 0:
+                self._child_labels.add(lbl)
+            if span.child_trace is not None:
+                self._collect_spans(span.child_trace.spans, depth + 1)
 
     def _collect(self, trace: InvocationTrace) -> None:
         self._calls += 1
         if self._calls <= self._config.warmup:
             return
         self._total_samples.append(trace.total_duration_s)
-        for span in trace.spans:
-            self._op_samples.setdefault(span.label, []).append(span.duration_s)
+        self._collect_spans(trace.spans)
 
     def report(self, label: str = "", metadata: dict | None = None) -> BenchmarkResult:
         self.flush()
@@ -280,6 +298,7 @@ class BenchmarkCollector(ConcurrentCollector):
             metadata=metadata or {},
             total=total,
             operators=operators,
+            child_labels=set(self._child_labels),
         )
 
     def reset(self) -> None:
@@ -287,6 +306,7 @@ class BenchmarkCollector(ConcurrentCollector):
         self._calls = 0
         self._total_samples.clear()
         self._op_samples.clear()
+        self._child_labels.clear()
 
 
 # InputFn returns (id, value, tag, metadata).
@@ -384,10 +404,15 @@ class BenchmarkSweep:
         return results
 
     @staticmethod
-    def to_table(results: list[BenchmarkResult]) -> str:
+    def to_table(results: list[BenchmarkResult], expand_regions: bool = True) -> str:
         """Render a multi-column comparison table: one column per result, rows are operators."""
         if not results:
             return "(no results)"
+
+        # Union of child labels across all results — used to filter when not expanding
+        all_child_labels: set[str] = set()
+        for r in results:
+            all_child_labels |= r.child_labels
 
         # Collect all operator labels in first-seen order
         all_labels: list[str] = ["total"]
@@ -395,8 +420,9 @@ class BenchmarkSweep:
         for r in results:
             for op in r.operators:
                 if op.label not in seen:
-                    all_labels.append(op.label)
-                    seen.add(op.label)
+                    if expand_regions or op.label not in all_child_labels:
+                        all_labels.append(op.label)
+                        seen.add(op.label)
 
         # Determine shared percentile keys
         pct_keys = sorted(results[0].total.percentiles)
@@ -410,8 +436,17 @@ class BenchmarkSweep:
             label = r.label
             w = result_col_w - 1
             if len(label) > w:
-                half = (w - 1) // 2
-                label = label[:half] + "…" + label[len(label) - (w - half - 1):]
+                # Prefer keeping the config portion (after first |); truncate the input prefix.
+                if "|" in label:
+                    input_part, config_part = label.split("|", 1)
+                    if len(config_part) <= w - 2:
+                        keep = w - len(config_part) - 1
+                        label = input_part[:keep] + "…|" + config_part
+                    else:
+                        label = config_part[-(w):]
+                else:
+                    half = (w - 1) // 2
+                    label = label[:half] + "…" + label[len(label) - (w - half - 1):]
             return f"{label:<{result_col_w}}"
 
         def _subheader() -> str:
@@ -454,7 +489,11 @@ class BenchmarkSweep:
             lines.append(row)
 
         lines.append(sep)
-        lines.append(f"runs: {results[0].total.count}  (all values in ms)")
+        footer = f"runs: {results[0].total.count}  (all values in ms)"
+        if not expand_regions and all_child_labels:
+            n_hidden = len(all_child_labels)
+            footer += f"  ({n_hidden} child spans hidden)"
+        lines.append(footer)
         return "\n".join(lines)
 
 
@@ -595,5 +634,5 @@ class BenchmarkMatrix:
         ).run()
 
     @staticmethod
-    def to_table(results: list[BenchmarkResult]) -> str:
-        return BenchmarkSweep.to_table(results)
+    def to_table(results: list[BenchmarkResult], expand_regions: bool = True) -> str:
+        return BenchmarkSweep.to_table(results, expand_regions=expand_regions)
