@@ -85,24 +85,25 @@ def main() -> int:
         "batch_size": [1, 2, 4, 8],
         "serialize":  [True, False],
     }
-    total_cells = 1
-    for v in axes.values():
-        total_cells *= len(v)
+
+    # Skip configs where batch_size exceeds the number of concurrent callers (1
+    # in this single-threaded benchmark) — those batches would never fill and
+    # only add timeout latency without any throughput benefit.
+    def _valid(c: dict) -> bool:
+        return c["batch_size"] == 1 or not c["serialize"]
 
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
-
-    print(
-        f"\nAxes: { {k: len(v) for k, v in axes.items()} } → {total_cells} cells"
-        f" ({args.warmup} warmup + {args.runs} measured each)\n",
-        file=sys.stderr,
-    )
 
     matrix = BenchmarkMatrix(
         pipeline_factory=_make_pipeline(model_path),
         axes=axes,
+        filter=_valid,
         inputs=[_input_fn(image_path)],
         config=config,
     )
+    print(f"\n{matrix.to_plan()}\n", file=sys.stderr)
+    print(matrix.to_grid(), file=sys.stderr)
+    print(file=sys.stderr)
 
     results = matrix.run()
     print(BenchmarkMatrix.to_table(results))
