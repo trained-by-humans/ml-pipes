@@ -160,6 +160,108 @@ class BenchmarkResult:
     def diff(self, other: BenchmarkResult) -> BenchmarkDiff:
         return _make_diff(self, other)
 
+    @staticmethod
+    def to_comparison_table(results: list[BenchmarkResult], expand_regions: bool = True) -> str:
+        """Render a multi-column comparison table: one column per result, rows are operators."""
+        if not results:
+            return "(no results)"
+
+        def _flat_labels(stats: list[InvocationStat], depth: int = 0) -> list[tuple[int, str]]:
+            rows: list[tuple[int, str]] = []
+            for s in stats:
+                rows.append((depth, s.label))
+                if expand_regions and s.children:
+                    rows.extend(_flat_labels(s.children, depth + 1))
+            return rows
+
+        all_rows: list[tuple[int, str]] = [(0, "total")]
+        seen: set[str] = {"total"}
+        for r in results:
+            for depth, lbl in _flat_labels(r.operators):
+                if lbl not in seen:
+                    all_rows.append((depth, lbl))
+                    seen.add(lbl)
+
+        pct_keys = sorted(results[0].total.percentiles)
+
+        col_label = max(len("  " * d + lbl) for d, lbl in all_rows)
+        col_w = 9
+        cols_per_result = 1 + len(pct_keys)
+        result_col_w = cols_per_result * (col_w + 2)
+
+        def _header_for(r: BenchmarkResult) -> str:
+            label = r.label
+            w = result_col_w - 1
+            if len(label) > w:
+                if "|" in label:
+                    input_part, config_part = label.split("|", 1)
+                    if len(config_part) <= w - 2:
+                        keep = w - len(config_part) - 1
+                        label = input_part[:keep] + "…|" + config_part
+                    else:
+                        label = config_part[-(w):]
+                else:
+                    half = (w - 1) // 2
+                    label = label[:half] + "…" + label[len(label) - (w - half - 1):]
+            return f"{label:<{result_col_w}}"
+
+        def _subheader() -> str:
+            sub = f"{'mean':>{col_w}}"
+            for p in pct_keys:
+                sub += f"  {f'p{int(p * 100)}':>{col_w}}"
+            return sub
+
+        def _row_for(stat: InvocationStat | None) -> str:
+            if stat is None:
+                return " " * col_w + "  " + "  ".join("-" * col_w for _ in pct_keys)
+            row = f"{stat.mean_ms:>{col_w}.2f}"
+            for p in pct_keys:
+                row += f"  {stat.percentiles.get(p, 0.0):>{col_w}.2f}"
+            return row
+
+        def _flat_lookup(stats: list[InvocationStat]) -> dict[str, InvocationStat]:
+            out: dict[str, InvocationStat] = {}
+            for s in stats:
+                out[s.label] = s
+                if s.children:
+                    out.update(_flat_lookup(s.children))
+            return out
+
+        lookups: list[dict[str, InvocationStat]] = []
+        for r in results:
+            d: dict[str, InvocationStat] = {"total": r.total}
+            d.update(_flat_lookup(r.operators))
+            lookups.append(d)
+
+        sep_width = col_label + 3 + len(results) * (result_col_w + 2)
+        sep = "-" * sep_width
+
+        lines = [sep]
+        lines.append(" " * (col_label + 3) + "  ".join(_header_for(r) for r in results))
+        lines.append(" " * (col_label + 3) + "  ".join(_subheader() for _ in results))
+        lines.append(sep)
+
+        any_collapsed = False
+        for depth, lbl in all_rows:
+            indent = "  " * depth
+            collapsed = not expand_regions and any(
+                (s := lookup.get(lbl)) is not None and bool(s.children)
+                for lookup in lookups
+            )
+            if collapsed:
+                any_collapsed = True
+            display = indent + lbl + ("*" if collapsed else "")
+            row = f"{display:<{col_label}}  "
+            row += "  ".join(_row_for(lookup.get(lbl)) for lookup in lookups)
+            lines.append(row)
+
+        lines.append(sep)
+        footer = f"runs: {results[0].total.count}  (all values in ms)"
+        if any_collapsed:
+            footer += "\n* Child spans are collapsed"
+        lines.append(footer)
+        return "\n".join(lines)
+
 
 @dataclass(frozen=True)
 class InvocationStatDiff:
@@ -366,22 +468,22 @@ class Benchmark:
         self,
         pipeline: Pipeline,
         input_fn: InputFn,
-        config: MeasurementConfig = MeasurementConfig(),
+        measurement: MeasurementConfig = MeasurementConfig(),
         label: str = "",
         metadata: dict | None = None,
     ) -> None:
         self._pipeline = pipeline
         self._input_fn = input_fn
-        self._config = config
+        self._measurement = measurement
         self._label = label
         self._metadata = metadata or {}
 
     def run(self) -> BenchmarkResult:
         prior_tracing = self._pipeline._tracing_config
-        collector = BenchmarkCollector(self._config)
+        collector = BenchmarkCollector(self._measurement)
         self._pipeline.set_tracing(collector)
         try:
-            total_runs = self._config.warmup + self._config.runs
+            total_runs = self._measurement.warmup + self._measurement.runs
             for _ in range(total_runs):
                 _id, value, _tag, _meta = self._input_fn()
                 self._pipeline(value)
@@ -396,166 +498,60 @@ class Benchmark:
 class BenchmarkSweep:
     """Run an explicit list of pipeline configs × inputs and collect all results.
 
-    pipeline_factory is called once per config to produce a fresh Pipeline.
-    Each (config, input) combination is run as an independent Benchmark.
-    Results are labelled "{input_label} | {config}" where config is the
-    str representation of the pipeline_config dict.
+    factory is called once per config to produce a fresh Pipeline.
+    Each (config, input_fn) combination is run as an independent Benchmark.
+    Results are labelled "{input_label}|{config}" where config is the
+    str representation of the pipeline config dict.
 
     Example::
 
         sweep = BenchmarkSweep(
-            pipeline_factory=make_pipeline,
-            pipeline_configs=[{"workers": 1}, {"workers": 4}],
-            inputs=[input_fn_a, input_fn_b],
-            config=MeasurementConfig(runs=30),
+            factory=make_pipeline,
+            configs=[{"workers": 1}, {"workers": 4}],
+            input_fns=[input_fn_a, input_fn_b],
+            measurement=MeasurementConfig(runs=30),
         )
         results = sweep.run()
         print(BenchmarkSweep.to_table(results))
     """
 
-    pipeline_factory: Callable[[dict], Pipeline]
-    pipeline_configs: list[dict]
-    inputs: list[InputFn]
-    config: MeasurementConfig = None  # type: ignore[assignment]
+    factory: Callable[[dict], Pipeline]
+    configs: list[dict]
+    input_fns: list[InputFn]
+    measurement: MeasurementConfig = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
-        if self.config is None:
-            self.config = MeasurementConfig()
+        if self.measurement is None:
+            self.measurement = MeasurementConfig()
 
     def run(self) -> list[BenchmarkResult]:
         results: list[BenchmarkResult] = []
-        for input_fn in self.inputs:
+        for input_fn in self.input_fns:
             _id, value, _tag, _meta = input_fn()
             input_label = _id
-            for pipeline_config in self.pipeline_configs:
-                pipeline = self.pipeline_factory(pipeline_config)
+            for pipeline_config in self.configs:
+                pipeline = self.factory(pipeline_config)
                 config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
                 label = f"{input_label}|{config_str}" if config_str else input_label
 
                 result = Benchmark(
                     pipeline=pipeline,
                     input_fn=input_fn,
-                    config=self.config,
+                    measurement=self.measurement,
                     label=label,
                     metadata={"pipeline_config": pipeline_config, "input": input_label},
                 ).run()
                 results.append(result)
         return results
 
-    @staticmethod
-    def to_table(results: list[BenchmarkResult], expand_regions: bool = True) -> str:
-        """Render a multi-column comparison table: one column per result, rows are operators."""
-        if not results:
-            return "(no results)"
-
-        # Flatten operators into (depth, label) rows, respecting expand_regions.
-        def _flat_labels(stats: list[InvocationStat], depth: int = 0) -> list[tuple[int, str]]:
-            rows: list[tuple[int, str]] = []
-            for s in stats:
-                rows.append((depth, s.label))
-                if expand_regions and s.children:
-                    rows.extend(_flat_labels(s.children, depth + 1))
-            return rows
-
-        # Union of label rows across all results in first-seen order.
-        all_rows: list[tuple[int, str]] = [(0, "total")]
-        seen: set[str] = {"total"}
-        for r in results:
-            for depth, lbl in _flat_labels(r.operators):
-                if lbl not in seen:
-                    all_rows.append((depth, lbl))
-                    seen.add(lbl)
-
-        pct_keys = sorted(results[0].total.percentiles)
-
-        col_label = max(len("  " * d + lbl) for d, lbl in all_rows)
-        col_w = 9
-        cols_per_result = 1 + len(pct_keys)  # mean + percentiles
-        result_col_w = cols_per_result * (col_w + 2)
-
-        def _header_for(r: BenchmarkResult) -> str:
-            label = r.label
-            w = result_col_w - 1
-            if len(label) > w:
-                if "|" in label:
-                    input_part, config_part = label.split("|", 1)
-                    if len(config_part) <= w - 2:
-                        keep = w - len(config_part) - 1
-                        label = input_part[:keep] + "…|" + config_part
-                    else:
-                        label = config_part[-(w):]
-                else:
-                    half = (w - 1) // 2
-                    label = label[:half] + "…" + label[len(label) - (w - half - 1):]
-            return f"{label:<{result_col_w}}"
-
-        def _subheader() -> str:
-            sub = f"{'mean':>{col_w}}"
-            for p in pct_keys:
-                sub += f"  {f'p{int(p * 100)}':>{col_w}}"
-            return sub
-
-        def _row_for(stat: InvocationStat | None) -> str:
-            if stat is None:
-                return " " * col_w + "  " + "  ".join("-" * col_w for _ in pct_keys)
-            row = f"{stat.mean_ms:>{col_w}.2f}"
-            for p in pct_keys:
-                row += f"  {stat.percentiles.get(p, 0.0):>{col_w}.2f}"
-            return row
-
-        # Build flat label→stat lookup per result (includes child stats).
-        def _flat_lookup(stats: list[InvocationStat]) -> dict[str, InvocationStat]:
-            out: dict[str, InvocationStat] = {}
-            for s in stats:
-                out[s.label] = s
-                if s.children:
-                    out.update(_flat_lookup(s.children))
-            return out
-
-        lookups: list[dict[str, InvocationStat]] = []
-        for r in results:
-            d: dict[str, InvocationStat] = {"total": r.total}
-            d.update(_flat_lookup(r.operators))
-            lookups.append(d)
-
-        sep_width = col_label + 3 + len(results) * (result_col_w + 2)
-        sep = "-" * sep_width
-
-        lines = [sep]
-        header_row = " " * (col_label + 3) + "  ".join(_header_for(r) for r in results)
-        lines.append(header_row)
-        sub_row = " " * (col_label + 3) + "  ".join(_subheader() for _ in results)
-        lines.append(sub_row)
-        lines.append(sep)
-
-        any_collapsed = False
-        for depth, lbl in all_rows:
-            indent = "  " * depth
-            collapsed = not expand_regions and any(
-                (s := lookup.get(lbl)) is not None and bool(s.children)
-                for lookup in lookups
-            )
-            if collapsed:
-                any_collapsed = True
-            display = indent + lbl + ("*" if collapsed else "")
-            row = f"{display:<{col_label}}  "
-            row += "  ".join(_row_for(lookup.get(lbl)) for lookup in lookups)
-            lines.append(row)
-
-        lines.append(sep)
-        footer = f"runs: {results[0].total.count}  (all values in ms)"
-        if any_collapsed:
-            footer += "\n* Child spans are collapsed"
-        lines.append(footer)
-        return "\n".join(lines)
 
 
 @dataclass
 class BenchmarkMatrix:
     """Expand N named axes into a cartesian product of configs and delegate to BenchmarkSweep.
 
-    Each key in `axes` becomes a key in the pipeline_config dict passed to
-    pipeline_factory. All combinations are generated automatically.
+    Each key in `axes` becomes a key in the pipeline config dict passed to
+    factory. All combinations are generated automatically.
 
     An optional `filter` predicate receives each config dict and returns False
     to skip that combination:
@@ -563,40 +559,40 @@ class BenchmarkMatrix:
     Example::
 
         matrix = BenchmarkMatrix(
-            pipeline_factory=make_pipeline,
+            factory=make_pipeline,
             axes={
                 "workers":    [1, 2, 4, 8, 16],
                 "batch_size": [1, 2, 4, 8],
             },
             filter=lambda c: c["workers"] >= c["batch_size"],
-            inputs=[input_fn],
-            config=MeasurementConfig(runs=30),
+            input_fns=[input_fn],
+            measurement=MeasurementConfig(runs=30),
         )
         results = matrix.run()
         print(BenchmarkSweep.to_table(results))
     """
 
-    pipeline_factory: Callable[[dict], Pipeline]
+    factory: Callable[[dict], Pipeline]
     axes: dict[str, list]
-    inputs: list[InputFn]
+    input_fns: list[InputFn]
     filter: Callable[[dict], bool] | None = None
-    config: MeasurementConfig = None  # type: ignore[assignment]
+    measurement: MeasurementConfig = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
-        if self.config is None:
-            self.config = MeasurementConfig()
+        if self.measurement is None:
+            self.measurement = MeasurementConfig()
 
-    def pipeline_configs(self) -> list[dict]:
+    def prepare_configs(self) -> list[dict]:
         keys = list(self.axes.keys())
-        configs = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
+        all_configs = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
         if self.filter is not None:
-            configs = [c for c in configs if self.filter(c)]
-        return configs
+            all_configs = [c for c in all_configs if self.filter(c)]
+        return all_configs
 
     def to_plan(self) -> str:
         keys = list(self.axes.keys())
         all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
-        active = set(frozenset(c.items()) for c in self.pipeline_configs())
+        active = set(frozenset(c.items()) for c in self.prepare_configs())
         col_w = max(len(f"{k}={v}") for c in all_combos for k, v in c.items())
         rows = []
         for combo in all_combos:
@@ -622,8 +618,7 @@ class BenchmarkMatrix:
         if n < 2 or n > 3:
             raise ValueError(f"to_grid() requires 2 or 3 axes, got {n}")
 
-        all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
-        active = set(frozenset(c.items()) for c in self.pipeline_configs())
+        active = set(frozenset(c.items()) for c in self.prepare_configs())
 
         row_key = keys[0]
         col_key = keys[1]
@@ -680,12 +675,9 @@ class BenchmarkMatrix:
 
     def run(self) -> list[BenchmarkResult]:
         return BenchmarkSweep(
-            pipeline_factory=self.pipeline_factory,
-            pipeline_configs=self.pipeline_configs(),
-            inputs=self.inputs,
-            config=self.config,
+            factory=self.factory,
+            configs=self.prepare_configs(),
+            input_fns=self.input_fns,
+            measurement=self.measurement,
         ).run()
 
-    @staticmethod
-    def to_table(results: list[BenchmarkResult], expand_regions: bool = True) -> str:
-        return BenchmarkSweep.to_table(results, expand_regions=expand_regions)

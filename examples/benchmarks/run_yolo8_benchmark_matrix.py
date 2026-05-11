@@ -101,7 +101,7 @@ def main() -> int:
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
 
     matrix = BenchmarkMatrix(
-        pipeline_factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
+        factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
         axes=axes,
         filter=_valid,
         inputs=[_input_fn(image_path)],
@@ -113,7 +113,7 @@ def main() -> int:
     print(file=sys.stderr)
 
     results = matrix.run()
-    print(BenchmarkMatrix.to_table(results, expand_regions=True))
+    print(BenchmarkResult.to_comparison_table(results, expand_regions=False))
 
     if args.save:
         save_dir = args.save
