@@ -10,6 +10,7 @@ from ml_pipes import Pipeline
 from ml_pipes.benchmark import (
     Benchmark,
     BenchmarkCollector,
+    BenchmarkMatrix,
     BenchmarkSweep,
     BenchmarkResult,
     InvocationStat,
@@ -324,3 +325,61 @@ def test_matrix_metadata_records_config_and_input():
     meta = results[0].metadata
     assert meta["pipeline_config"] == {"batch": 4}
     assert meta["input"] == "img.jpg"
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkMatrix
+# ---------------------------------------------------------------------------
+
+def test_matrix_pipeline_configs_cartesian_product():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"a": [1, 2], "b": ["x", "y"], "c": [True]},
+        inputs=[lambda: _static_input(0)],
+    )
+    configs = matrix.pipeline_configs()
+    assert len(configs) == 4  # 2 × 2 × 1
+    assert {"a": 1, "b": "x", "c": True} in configs
+    assert {"a": 2, "b": "y", "c": True} in configs
+
+
+def test_matrix_run_produces_correct_count():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"workers": [1, 2], "mode": ["fast", "slow"]},
+        inputs=[lambda: _static_input(0), lambda: _static_input(1)],
+        config=MeasurementConfig(runs=3, warmup=1),
+    )
+    results = matrix.run()
+    assert len(results) == 8  # 2 axes × 2 values each × 2 inputs
+
+
+def test_matrix_single_axis():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"conf": [0.1, 0.5, 0.9]},
+        inputs=[lambda: _static_input(0)],
+        config=MeasurementConfig(runs=3, warmup=1),
+    )
+    results = matrix.run()
+    assert len(results) == 3
+
+
+def test_matrix_default_config():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"a": [1]},
+        inputs=[lambda: _static_input(0)],
+    )
+    assert matrix.config is not None
+    assert matrix.config.runs == 100
+
+
+def test_matrix_to_table_delegates_to_sweep():
+    results = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"a": [1, 2]},
+        inputs=[lambda: _static_input(0)],
+        config=MeasurementConfig(runs=3, warmup=1),
+    ).run()
+    assert BenchmarkMatrix.to_table(results) == BenchmarkSweep.to_table(results)

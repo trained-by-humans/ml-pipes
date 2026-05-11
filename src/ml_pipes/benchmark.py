@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -359,7 +360,8 @@ class BenchmarkSweep:
             input_label = _id
             for pipeline_config in self.pipeline_configs:
                 pipeline = self.pipeline_factory(pipeline_config)
-                label = f"{input_label} | {pipeline_config}"
+                config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
+                label = f"{input_label}|{config_str}" if config_str else input_label
 
                 result = Benchmark(
                     pipeline=pipeline,
@@ -395,7 +397,11 @@ class BenchmarkSweep:
         result_col_w = cols_per_result * (col_w + 2)
 
         def _header_for(r: BenchmarkResult) -> str:
-            label = r.label[:result_col_w - 1]
+            label = r.label
+            w = result_col_w - 1
+            if len(label) > w:
+                half = (w - 1) // 2
+                label = label[:half] + "…" + label[len(label) - (w - half - 1):]
             return f"{label:<{result_col_w}}"
 
         def _subheader() -> str:
@@ -440,3 +446,52 @@ class BenchmarkSweep:
         lines.append(sep)
         lines.append(f"runs: {results[0].total.count}  (all values in ms)")
         return "\n".join(lines)
+
+
+@dataclass
+class BenchmarkMatrix:
+    """Expand N named axes into a cartesian product of configs and delegate to BenchmarkSweep.
+
+    Each key in `axes` becomes a key in the pipeline_config dict passed to
+    pipeline_factory. All combinations are generated automatically.
+
+    Example::
+
+        matrix = BenchmarkMatrix(
+            pipeline_factory=make_pipeline,
+            axes={
+                "batch_size": [1, 2, 4, 8],
+                "workers": [1, 4, 8],
+                "lock": ["on", "off"],
+            },
+            inputs=[input_fn],
+            config=MeasurementConfig(runs=30),
+        )
+        results = matrix.run()          # 4 × 3 × 2 = 24 results
+        print(BenchmarkSweep.to_table(results))
+    """
+
+    pipeline_factory: Callable[[dict], Pipeline]
+    axes: dict[str, list]
+    inputs: list[InputFn]
+    config: MeasurementConfig = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.config is None:
+            self.config = MeasurementConfig()
+
+    def pipeline_configs(self) -> list[dict]:
+        keys = list(self.axes.keys())
+        return [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
+
+    def run(self) -> list[BenchmarkResult]:
+        return BenchmarkSweep(
+            pipeline_factory=self.pipeline_factory,
+            pipeline_configs=self.pipeline_configs(),
+            inputs=self.inputs,
+            config=self.config,
+        ).run()
+
+    @staticmethod
+    def to_table(results: list[BenchmarkResult]) -> str:
+        return BenchmarkSweep.to_table(results)
