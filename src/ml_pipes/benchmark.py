@@ -465,25 +465,29 @@ class BenchmarkMatrix:
     Each key in `axes` becomes a key in the pipeline_config dict passed to
     pipeline_factory. All combinations are generated automatically.
 
+    An optional `filter` predicate receives each config dict and returns False
+    to skip that combination:
+
     Example::
 
         matrix = BenchmarkMatrix(
             pipeline_factory=make_pipeline,
             axes={
+                "workers":    [1, 2, 4, 8, 16],
                 "batch_size": [1, 2, 4, 8],
-                "workers": [1, 4, 8],
-                "lock": ["on", "off"],
             },
+            filter=lambda c: c["workers"] >= c["batch_size"],
             inputs=[input_fn],
             config=MeasurementConfig(runs=30),
         )
-        results = matrix.run()          # 4 × 3 × 2 = 24 results
+        results = matrix.run()
         print(BenchmarkSweep.to_table(results))
     """
 
     pipeline_factory: Callable[[dict], Pipeline]
     axes: dict[str, list]
     inputs: list[InputFn]
+    filter: Callable[[dict], bool] | None = None
     config: MeasurementConfig = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -492,7 +496,95 @@ class BenchmarkMatrix:
 
     def pipeline_configs(self) -> list[dict]:
         keys = list(self.axes.keys())
-        return [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
+        configs = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
+        if self.filter is not None:
+            configs = [c for c in configs if self.filter(c)]
+        return configs
+
+    def to_plan(self) -> str:
+        keys = list(self.axes.keys())
+        all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
+        active = set(frozenset(c.items()) for c in self.pipeline_configs())
+        col_w = max(len(f"{k}={v}") for c in all_combos for k, v in c.items())
+        rows = []
+        for combo in all_combos:
+            kept = frozenset(combo.items()) in active
+            cells = "  ".join(f"{k}={str(v):<{col_w - len(k) - 1}}" for k, v in combo.items())
+            rows.append(f"  {'○' if kept else '×'}  {cells}")
+        total = len(all_combos)
+        n_active = len(active)
+        header = f"plan: {total} combinations ({n_active} active, {total - n_active} filtered)"
+        return "\n".join([header] + rows)
+
+    def to_grid(self) -> str:
+        """Render a 2D (or 3D) overview grid of active/filtered combinations.
+
+        Supports 2 or 3 axes only. Layout:
+          - 2 axes: rows = axis 0, columns = axis 1
+          - 3 axes: rows = axis 0, inner columns = axis 1, outer column groups = axis 2
+
+        Axis names and values are printed as a legend below the grid, not inside cells.
+        """
+        keys = list(self.axes.keys())
+        n = len(keys)
+        if n < 2 or n > 3:
+            raise ValueError(f"to_grid() requires 2 or 3 axes, got {n}")
+
+        all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
+        active = set(frozenset(c.items()) for c in self.pipeline_configs())
+
+        row_key = keys[0]
+        col_key = keys[1]
+        grp_key = keys[2] if n == 3 else None
+
+        row_vals = self.axes[row_key]
+        col_vals = self.axes[col_key]
+        grp_vals = self.axes[grp_key] if grp_key else [None]
+
+        cell_w = max(len(str(v)) for v in col_vals)
+        row_label_w = max(len(str(v)) for v in row_vals)
+        col_count = len(col_vals)
+        grp_w = col_count * (cell_w + 2) - 2  # width of one group block
+
+        axis_desc = f"row={row_key}  col={col_key}" + (f"  grp={grp_key}" if grp_key else "")
+        lines = [f"grid: {axis_desc}", ""]
+
+        # Group header (axis 2 values) — only for 3-axis case
+        if grp_key:
+            grp_header = " " * (row_label_w + 2)
+            for gi, gv in enumerate(grp_vals):
+                label = str(gv)
+                grp_header += f"{label:^{grp_w}}"
+                if gi < len(grp_vals) - 1:
+                    grp_header += "    "
+            lines.append(grp_header)
+
+        # Column header: actual values, repeated per group
+        col_header = " " * (row_label_w + 2)
+        block = "  ".join(f"{str(cv):^{cell_w}}" for cv in col_vals)
+        col_header += "    ".join(block for _ in grp_vals)
+        lines.append(col_header)
+
+        # Rows: actual row values as labels
+        for rv in row_vals:
+            row = f"{str(rv):{row_label_w}}  "
+            blocks = []
+            for gv in grp_vals:
+                cells = []
+                for cv in col_vals:
+                    combo = {row_key: rv, col_key: cv}
+                    if grp_key:
+                        combo[grp_key] = gv
+                    mark = "○" if frozenset(combo.items()) in active else "×"
+                    cells.append(f"{mark:^{cell_w}}")
+                blocks.append("  ".join(cells))
+            row += "    ".join(blocks)
+            lines.append(row)
+
+        lines.append("")
+        lines.append("○ = active  × = filtered")
+
+        return "\n".join(lines)
 
     def run(self) -> list[BenchmarkResult]:
         return BenchmarkSweep(

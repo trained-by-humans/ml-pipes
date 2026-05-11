@@ -375,6 +375,92 @@ def test_matrix_default_config():
     assert matrix.config.runs == 100
 
 
+def test_matrix_filter_removes_invalid_combos():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"workers": [1, 2, 4], "batch_size": [1, 2, 4]},
+        filter=lambda c: c["workers"] >= c["batch_size"],
+        inputs=[lambda: _static_input(0)],
+        config=MeasurementConfig(runs=3, warmup=1),
+    )
+    configs = matrix.pipeline_configs()
+    assert all(c["workers"] >= c["batch_size"] for c in configs)
+    assert len(configs) == 6  # (1,1),(2,1),(2,2),(4,1),(4,2),(4,4)
+
+
+def test_matrix_to_plan_shows_all_combos():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"workers": [1, 2], "batch_size": [1, 2]},
+        filter=lambda c: c["workers"] >= c["batch_size"],
+        inputs=[lambda: _static_input(0)],
+    )
+    plan = matrix.to_plan()
+    assert "○" in plan
+    assert "×" in plan
+    assert "4 combinations" in plan
+    assert "3 active" in plan
+    assert "1 filtered" in plan
+
+
+def test_matrix_to_plan_no_filter():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"a": [1, 2], "b": [1, 2]},
+        inputs=[lambda: _static_input(0)],
+    )
+    plan = matrix.to_plan()
+    assert "×" not in plan
+    assert "4 active, 0 filtered" in plan
+
+
+def test_matrix_to_grid_2axes():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"workers": [1, 2], "batch_size": [1, 2]},
+        filter=lambda c: c["workers"] >= c["batch_size"],
+        inputs=[lambda: _static_input(0)],
+    )
+    grid = matrix.to_grid()
+    assert "○" in grid
+    assert "×" in grid
+    assert "row=workers" in grid
+    assert "col=batch_size" in grid
+    assert "1" in grid  # row values shown directly
+    assert "2" in grid
+
+
+def test_matrix_to_grid_3axes():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"workers": [1, 2], "batch_size": [1, 2], "serialize": [True, False]},
+        filter=lambda c: c["workers"] >= c["batch_size"],
+        inputs=[lambda: _static_input(0)],
+    )
+    grid = matrix.to_grid()
+    assert "grp=serialize" in grid
+
+
+def test_matrix_to_grid_wrong_axes():
+    import pytest
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"a": [1]},
+        inputs=[lambda: _static_input(0)],
+    )
+    with pytest.raises(ValueError):
+        matrix.to_grid()
+
+
+def test_matrix_filter_none_keeps_all():
+    matrix = BenchmarkMatrix(
+        pipeline_factory=_make_pipeline_from_config,
+        axes={"a": [1, 2], "b": [1, 2]},
+        inputs=[lambda: _static_input(0)],
+    )
+    assert len(matrix.pipeline_configs()) == 4
+
+
 def test_matrix_to_table_delegates_to_sweep():
     results = BenchmarkMatrix(
         pipeline_factory=_make_pipeline_from_config,
