@@ -320,3 +320,123 @@ class Benchmark:
             self._pipeline._tracing_config = prior_tracing
 
         return collector.report(label=self._label, metadata=self._metadata)
+
+
+@dataclass
+class BenchmarkSweep:
+    """Run an explicit list of pipeline configs × inputs and collect all results.
+
+    pipeline_factory is called once per config to produce a fresh Pipeline.
+    Each (config, input) combination is run as an independent Benchmark.
+    Results are labelled "{input_label} | {config}" where config is the
+    str representation of the pipeline_config dict.
+
+    Example::
+
+        sweep = BenchmarkSweep(
+            pipeline_factory=make_pipeline,
+            pipeline_configs=[{"workers": 1}, {"workers": 4}],
+            inputs=[input_fn_a, input_fn_b],
+            config=MeasurementConfig(runs=30),
+        )
+        results = sweep.run()
+        print(BenchmarkSweep.to_table(results))
+    """
+
+    pipeline_factory: Callable[[dict], Pipeline]
+    pipeline_configs: list[dict]
+    inputs: list[InputFn]
+    config: MeasurementConfig = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.config is None:
+            self.config = MeasurementConfig()
+
+    def run(self) -> list[BenchmarkResult]:
+        results: list[BenchmarkResult] = []
+        for input_fn in self.inputs:
+            _id, value, _tag, _meta = input_fn()
+            input_label = _id
+            for pipeline_config in self.pipeline_configs:
+                pipeline = self.pipeline_factory(pipeline_config)
+                label = f"{input_label} | {pipeline_config}"
+
+                result = Benchmark(
+                    pipeline=pipeline,
+                    input_fn=input_fn,
+                    config=self.config,
+                    label=label,
+                    metadata={"pipeline_config": pipeline_config, "input": input_label},
+                ).run()
+                results.append(result)
+        return results
+
+    @staticmethod
+    def to_table(results: list[BenchmarkResult]) -> str:
+        """Render a multi-column comparison table: one column per result, rows are operators."""
+        if not results:
+            return "(no results)"
+
+        # Collect all operator labels in first-seen order
+        all_labels: list[str] = ["total"]
+        seen: set[str] = {"total"}
+        for r in results:
+            for op in r.operators:
+                if op.label not in seen:
+                    all_labels.append(op.label)
+                    seen.add(op.label)
+
+        # Determine shared percentile keys
+        pct_keys = sorted(results[0].total.percentiles)
+
+        col_label = max(len(lbl) for lbl in all_labels)
+        col_w = 9
+        cols_per_result = 1 + len(pct_keys)  # mean + percentiles
+        result_col_w = cols_per_result * (col_w + 2)
+
+        def _header_for(r: BenchmarkResult) -> str:
+            label = r.label[:result_col_w - 1]
+            return f"{label:<{result_col_w}}"
+
+        def _subheader() -> str:
+            sub = f"{'mean':>{col_w}}"
+            for p in pct_keys:
+                sub += f"  {f'p{int(p * 100)}':>{col_w}}"
+            return sub
+
+        def _row_for(stat: InvocationStat | None) -> str:
+            if stat is None:
+                return " " * col_w + "  " + "  ".join("-" * col_w for _ in pct_keys)
+            row = f"{stat.mean_ms:>{col_w}.2f}"
+            for p in pct_keys:
+                row += f"  {stat.percentiles.get(p, 0.0):>{col_w}.2f}"
+            return row
+
+        # Build lookup: result index → {label: InvocationStat}
+        lookups: list[dict[str, InvocationStat]] = []
+        for r in results:
+            d: dict[str, InvocationStat] = {"total": r.total}
+            for op in r.operators:
+                d[op.label] = op
+            lookups.append(d)
+
+        sep_width = col_label + 2 + len(results) * (result_col_w + 2)
+        sep = "-" * sep_width
+
+        lines = [sep]
+        # Result labels row
+        header_row = " " * (col_label + 2) + "  ".join(_header_for(r) for r in results)
+        lines.append(header_row)
+        # Subheader: mean / p50 / p95 / p99 per result
+        sub_row = " " * (col_label + 2) + "  ".join(_subheader() for _ in results)
+        lines.append(sub_row)
+        lines.append(sep)
+
+        for lbl in all_labels:
+            row = f"{lbl:<{col_label}}  "
+            row += "  ".join(_row_for(lookup.get(lbl)) for lookup in lookups)
+            lines.append(row)
+
+        lines.append(sep)
+        lines.append(f"runs: {results[0].total.count}  (all values in ms)")
+        return "\n".join(lines)
