@@ -1,3 +1,12 @@
+from .benchmark import (
+    Benchmark,
+    BenchmarkCollector,
+    BenchmarkDiff,
+    BenchmarkResult,
+    InvocationStat,
+    InvocationStatDiff,
+    MeasurementConfig,
+)
 from .context import Context, Recall, Store
 from .inspection import (
     HtmlRenderer,
@@ -92,6 +101,13 @@ from .types import (
 )
 
 __all__ = [
+    "Benchmark",
+    "BenchmarkCollector",
+    "BenchmarkDiff",
+    "BenchmarkResult",
+    "InvocationStat",
+    "InvocationStatDiff",
+    "MeasurementConfig",
     "ArgMax",
     "AggregateCollector",
     "ConcurrentCollector",
