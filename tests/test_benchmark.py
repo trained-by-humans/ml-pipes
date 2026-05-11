@@ -136,6 +136,33 @@ def test_result_to_table_renders():
     assert "mean" in table
 
 
+def test_result_to_table_expand_regions_false_hides_child_spans():
+    result = _make_result()
+    # Simulate child labels by marking one operator as a child
+    child_label = result.operators[0].label
+    result.child_labels.add(child_label)
+    table = result.to_table(expand_regions=False)
+    assert "total" in table
+    assert "child spans hidden" in table
+    assert child_label not in table
+
+
+def test_result_to_table_expand_regions_true_shows_operators():
+    result = _make_result()
+    table = result.to_table(expand_regions=True)
+    for op in result.operators:
+        assert op.label in table
+
+
+def test_result_to_table_expand_regions_false_no_children_no_note():
+    result = _make_result()
+    # No child labels — footer note should not appear
+    table = result.to_table(expand_regions=False)
+    assert "child spans hidden" not in table
+    for op in result.operators:
+        assert op.label in table
+
+
 def test_result_to_dict_is_json_serializable():
     result = _make_result()
     d = result.to_dict()
@@ -307,6 +334,17 @@ def test_matrix_to_table_renders():
     table = BenchmarkSweep.to_table(results)
     assert "total" in table
     assert "mean" in table
+
+
+def test_sweep_to_table_expand_regions_false():
+    results = BenchmarkSweep(
+        pipeline_factory=_make_pipeline_from_config,
+        pipeline_configs=[{"a": 1}],
+        inputs=[lambda: _static_input(0)],
+        config=MeasurementConfig(runs=3, warmup=1),
+    ).run()
+    table = BenchmarkSweep.to_table(results, expand_regions=False)
+    assert "total" in table
 
 
 def test_matrix_to_table_empty():

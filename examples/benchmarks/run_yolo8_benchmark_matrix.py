@@ -113,7 +113,7 @@ def main() -> int:
     print(file=sys.stderr)
 
     results = matrix.run()
-    print(BenchmarkMatrix.to_table(results))
+    print(BenchmarkMatrix.to_table(results, expand_regions=True))
 
     if args.save:
         save_dir = args.save
