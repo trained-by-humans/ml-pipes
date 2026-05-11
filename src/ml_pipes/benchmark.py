@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -92,6 +93,15 @@ class BenchmarkResult:
             "total": _span(self.total),
             "operators": [_span(s) for s in self.operators],
         }
+
+    def slug(self, ext: str = "") -> str:
+        """Filesystem-safe version of the label, suitable for use as a filename.
+
+        Characters illegal on common filesystems (/ \\ : * ? " < > |) are replaced
+        with underscores. An optional extension (e.g. '.json') can be appended.
+        """
+        safe = re.sub(r'[/\\:*?"<>|]', "_", self.label)
+        return safe + ext
 
     def save(self, path: str) -> None:
         with open(path, "w") as f:
