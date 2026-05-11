@@ -305,17 +305,27 @@ def test_matrix_run_produces_correct_count():
 
 def test_matrix_result_labels_contain_input_and_config():
     configs = [{"mode": "fast"}]
-    inputs = [lambda: ("my_input", 0, None, None)]
-    matrix = BenchmarkSweep(
+    results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=configs,
-        input_fns=inputs,
+        input_fns=[lambda: _static_input(0)],
+        input_labels=["my_input"],
         measurement=MeasurementConfig(runs=3, warmup=1),
-    )
-    results = matrix.run()
+    ).run()
     assert len(results) == 1
     assert "my_input" in results[0].label
     assert "fast" in results[0].label
+
+
+def test_matrix_result_labels_default_to_index():
+    results = BenchmarkSweep(
+        factory=_make_pipeline_from_config,
+        configs=[{}],
+        input_fns=[lambda: _static_input(0), lambda: _static_input(1)],
+        measurement=MeasurementConfig(runs=3, warmup=1),
+    ).run()
+    assert "input0" in results[0].label
+    assert "input1" in results[1].label
 
 
 def test_matrix_default_config():
@@ -359,16 +369,16 @@ def test_matrix_to_table_empty():
 
 def test_matrix_metadata_records_config_and_input():
     configs = [{"batch": 4}]
-    inputs = [lambda: ("img.jpg", 0, None, None)]
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=configs,
-        input_fns=inputs,
+        input_fns=[lambda: _static_input(0)],
+        input_labels=["img.jpg"],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     meta = results[0].metadata
     assert meta["pipeline_config"] == {"batch": 4}
-    assert meta["input"] == "img.jpg"
+    assert "img.jpg" in results[0].label
 
 
 # ---------------------------------------------------------------------------

@@ -104,8 +104,9 @@ def main() -> int:
         factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
         axes=axes,
         filter=_valid,
-        inputs=[_input_fn(image_path)],
-        config=config,
+        input_fns=[_input_fn(image_path)],
+        input_labels=[image_path.name],
+        measurement=config,
     )
 
     print(f"\n{matrix.to_plan()}\n", file=sys.stderr)

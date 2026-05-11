@@ -108,8 +108,9 @@ def main() -> int:
     sweep = BenchmarkSweep(
         factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
         configs=configs,
-        inputs=[_input_fn(image_path, label="coco_sample")],
-        config=config,
+        input_fns=[_input_fn(image_path)],
+        input_labels=["coco_sample"],
+        measurement=config,
     )
 
     print(f"\nRunning {len(configs)} configs "
