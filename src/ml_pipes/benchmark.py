@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-import functools
 import itertools
 import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from .factory import (
+    InputFn,
+    _DATA_FACTORY_ATTR,
+    _PIPELINE_FACTORY_ATTR,
+    data_factory,
+    discover_factory,
+    pipeline_factory,
+    validate_factory_config,
+)
 
 import numpy as np
 
@@ -427,42 +436,6 @@ class BenchmarkCollector(ConcurrentCollector):
         self._calls = 0
         self._total_samples.clear()
         self._span_tree.clear()
-
-
-# InputFn returns (id, value, tag, metadata).
-# tag and metadata are reserved for future bucketing/annotation features and ignored for now.
-InputFn = Callable[[], tuple[str, Any, str | None, dict | None]]
-
-_PIPELINE_FACTORY_ATTR = "_ml_pipes_pipeline_factory"
-_DATA_FACTORY_ATTR = "_ml_pipes_data_factory"
-
-
-def pipeline_factory(fn: Callable) -> Callable:
-    """Mark a function as a pipeline factory for CLI discovery.
-
-    The decorated function may have any signature; the CLI calls it via
-    ``factory(config_dict)`` which unpacks to ``fn(**config)``.  Any parameter
-    without a default must be supplied through ``--config`` or ``--axis``.
-    """
-    @functools.wraps(fn)
-    def wrapper(config: dict) -> Any:
-        return fn(**config)
-    setattr(wrapper, _PIPELINE_FACTORY_ATTR, True)
-    return wrapper
-
-
-def data_factory(fn: Callable) -> Callable:
-    """Mark a function as a data factory for CLI discovery.
-
-    The decorated function may have any signature and must return an
-    ``InputFn`` — a zero-argument callable yielding
-    ``(id: str, value: Any, tag: str | None, metadata: dict | None)``.
-    """
-    @functools.wraps(fn)
-    def wrapper(config: dict) -> Any:
-        return fn(**config)
-    setattr(wrapper, _DATA_FACTORY_ATTR, True)
-    return wrapper
 
 
 class Benchmark:

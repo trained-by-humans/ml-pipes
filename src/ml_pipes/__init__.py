@@ -8,9 +8,8 @@ from .benchmark import (
     InvocationStat,
     InvocationStatDiff,
     MeasurementConfig,
-    data_factory,
-    pipeline_factory,
 )
+from .factory import data_factory, pipeline_factory, InputFn
 from .context import Context, Recall, Store
 from .inspection import (
     HtmlRenderer,
@@ -116,6 +115,7 @@ __all__ = [
     "MeasurementConfig",
     "data_factory",
     "pipeline_factory",
+    "InputFn",
     "ArgMax",
     "AggregateCollector",
     "ConcurrentCollector",
