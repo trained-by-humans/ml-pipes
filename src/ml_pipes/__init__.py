@@ -8,6 +8,8 @@ from .benchmark import (
     InvocationStat,
     InvocationStatDiff,
     MeasurementConfig,
+    data_factory,
+    pipeline_factory,
 )
 from .context import Context, Recall, Store
 from .inspection import (
@@ -112,6 +114,8 @@ __all__ = [
     "InvocationStat",
     "InvocationStatDiff",
     "MeasurementConfig",
+    "data_factory",
+    "pipeline_factory",
     "ArgMax",
     "AggregateCollector",
     "ConcurrentCollector",
