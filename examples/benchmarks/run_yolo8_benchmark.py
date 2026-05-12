@@ -90,7 +90,7 @@ def main() -> int:
     result_full = Benchmark(
         pipeline=full_pipeline,
         input_fn=input_fn,
-        config=config,
+        measurement=config,
         label=f"yolo8{args.model}-full",
         metadata={"model": model_name, "variant": args.model},
     ).run()
@@ -115,7 +115,7 @@ def main() -> int:
     result_low = Benchmark(
         pipeline=pipeline_low_conf,
         input_fn=input_fn,
-        config=config,
+        measurement=config,
         label="conf=0.10",
         metadata={"conf_threshold": 0.10},
     ).run()
@@ -123,7 +123,7 @@ def main() -> int:
     result_high = Benchmark(
         pipeline=pipeline_high_conf,
         input_fn=input_fn,
-        config=config,
+        measurement=config,
         label="conf=0.50",
         metadata={"conf_threshold": 0.50},
     ).run()
@@ -140,7 +140,7 @@ def main() -> int:
     result_infer_only = Benchmark(
         pipeline=infer_only_pipeline,
         input_fn=input_fn,
-        config=config,
+        measurement=config,
         label="inference-only",
         metadata={"model": model_name},
     ).run()
