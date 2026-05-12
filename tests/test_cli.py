@@ -5,17 +5,17 @@ import types
 
 import pytest
 
-from ml_pipes.benchmark import (
+from ml_pipes.factory import (
     _DATA_FACTORY_ATTR,
     _PIPELINE_FACTORY_ATTR,
     data_factory,
+    discover_factory,
     pipeline_factory,
 )
 from ml_pipes.__main__ import (
     CLIError,
     _build_file_input_fns,
     _build_parser,
-    _discover_factory,
     _parse_axis_spec,
     _parse_axis_value,
     _parse_configs,
@@ -146,7 +146,7 @@ def test_discover_factory_single_found():
     @pipeline_factory
     def my_pf(x): pass
     m = _fake_module("_test", my_pf=my_pf, other=lambda: None)
-    result = _discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
+    result = discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
     assert result is my_pf
 
 
@@ -156,20 +156,20 @@ def test_discover_factory_multiple_raises():
     @pipeline_factory
     def pf2(x): pass
     m = _fake_module("_test2", pf1=pf1, pf2=pf2)
-    with pytest.raises(CLIError, match="multiple @pipeline_factory"):
-        _discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
+    with pytest.raises(ValueError, match="multiple @pipeline_factory"):
+        discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
 
 
 def test_discover_factory_none_when_absent():
     m = _fake_module("_test3", other=lambda: None)
-    result = _discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
+    result = discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
     assert result is None
 
 
 def test_discover_factory_explicit_bypasses_scan():
     def explicit(config): pass
     m = _fake_module("_test4")
-    result = _discover_factory(m, explicit, _PIPELINE_FACTORY_ATTR, "pipeline")
+    result = discover_factory(m, explicit, _PIPELINE_FACTORY_ATTR, "pipeline")
     assert result is explicit
 
 

@@ -2,21 +2,24 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import inspect
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
 from ml_pipes.benchmark import (
-    _DATA_FACTORY_ATTR,
-    _PIPELINE_FACTORY_ATTR,
     Benchmark,
     BenchmarkMatrix,
     BenchmarkResult,
     BenchmarkSweep,
-    InputFn,
     MeasurementConfig,
+)
+from ml_pipes.factory import (
+    _DATA_FACTORY_ATTR,
+    _PIPELINE_FACTORY_ATTR,
+    InputFn,
+    discover_factory,
+    validate_factory_config,
 )
 
 
@@ -60,34 +63,11 @@ def _load_ref(ref: str) -> tuple[Any, Any]:
     return module, fn
 
 
-def _discover_factory(
-    module: Any, explicit_fn: Any, attr: str, kind: str
-) -> Any:
-    """Return explicit_fn if provided, otherwise scan module for attr marker.
-
-    Returns None when nothing is found (caller decides whether that's an error).
-    """
-    if explicit_fn is not None:
-        return explicit_fn
-
-    found = [
-        (name, fn)
-        for name, fn in vars(module).items()
-        if callable(fn) and getattr(fn, attr, False)
-    ]
-
-    if len(found) > 1:
-        names = ", ".join(name for name, _ in found)
-        raise CLIError(
-            f"multiple @{kind}_factory found in {module.__name__!r}: [{names}]. "
-            f"Only one is allowed per module; remove one or use 'module:{kind}_factory_fn' syntax."
-        )
-
-    return found[0][1] if found else None
-
-
 def _resolve_pipeline_factory(module: Any, explicit_fn: Any, ref: str):
-    fn = _discover_factory(module, explicit_fn, _PIPELINE_FACTORY_ATTR, "pipeline")
+    try:
+        fn = discover_factory(module, explicit_fn, _PIPELINE_FACTORY_ATTR, "pipeline")
+    except ValueError as exc:
+        raise CLIError(str(exc)) from exc
     if fn is None:
         mod_name = ref.split(":")[0]
         raise CLIError(
@@ -111,14 +91,20 @@ def _resolve_inputs(
 
     if data_ref is not None:
         data_module, explicit_fn = _load_ref(data_ref)
-        data_fn = _discover_factory(data_module, explicit_fn, _DATA_FACTORY_ATTR, "data")
+        try:
+            data_fn = discover_factory(data_module, explicit_fn, _DATA_FACTORY_ATTR, "data")
+        except ValueError as exc:
+            raise CLIError(str(exc)) from exc
         if data_fn is None:
             raise CLIError(
                 f"no @data_factory found in {data_ref!r}. "
                 f"Decorate a function with @data_factory or use 'module:fn_name' syntax."
             )
     else:
-        data_fn = _discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
+        try:
+            data_fn = discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
+        except ValueError as exc:
+            raise CLIError(str(exc)) from exc
 
     if data_fn is not None:
         input_fn = data_fn({})
@@ -221,17 +207,9 @@ def _build_measurement(args: argparse.Namespace) -> MeasurementConfig:
     )
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
 def _validate_config(factory, config: dict) -> None:
-    """Raise CLIError if config is missing required parameters."""
-    wrapped = getattr(factory, "__wrapped__", None)
-    if wrapped is None:
-        return
     try:
-        inspect.signature(wrapped).bind(**config)
+        validate_factory_config(factory, config)
     except TypeError as exc:
         raise CLIError(f"missing required argument for config {config}: {exc}") from exc
 
@@ -252,6 +230,23 @@ def _save_results(results: list[BenchmarkResult], save_dir: str) -> None:
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
+
+def cmd_run(args: argparse.Namespace) -> int:
+    module, explicit_fn = _load_ref(args.pipeline_ref)
+    factory = _resolve_pipeline_factory(module, explicit_fn, args.pipeline_ref)
+    input_fns, _ = _resolve_inputs(
+        data_ref=getattr(args, "data_ref", None),
+        input_paths=args.input,
+        pipeline_module=module,
+    )
+    config = dict(_parse_arg_spec(s) for s in (args.args or []))
+    _validate_config(factory, config)
+    pipeline = factory(config)
+    for input_fn in input_fns:
+        _, value, _, _ = input_fn()
+        pipeline(value)
+    return 0
+
 
 def cmd_benchmark(args: argparse.Namespace) -> int:
     module, explicit_fn = _load_ref(args.pipeline_ref)
@@ -368,6 +363,20 @@ def _build_parser() -> argparse.ArgumentParser:
     shared.add_argument("--collapse-regions", action="store_true", default=False,
                         help="Collapse region spans in output table")
 
+    run_p = sub.add_parser(
+        "run",
+        help="Run a pipeline once without measurement",
+        description="Discover @pipeline_factory and @data_factory and run the pipeline once.",
+    )
+    run_p.add_argument("pipeline_ref", metavar="MODULE[:FN]",
+                       help="Pipeline factory: 'pkg.module' or 'pkg.module:fn_name'")
+    run_p.add_argument("data_ref", metavar="DATA_MODULE[:FN]", nargs="?", default=None,
+                       help="Data factory (auto-discovered in pipeline module if absent)")
+    run_p.add_argument("--input", nargs="+", metavar="PATH",
+                       help="Fallback input files when no @data_factory is present")
+    run_p.add_argument("--arg", action="append", dest="args", metavar="KEY=VALUE",
+                       help="Factory argument (repeatable), e.g. --arg slice_wh=480x480")
+
     bench_p = sub.add_parser(
         "benchmark", parents=[shared],
         help="Single benchmark run with default config",
@@ -415,7 +424,9 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        if args.command == "benchmark":
+        if args.command == "run":
+            exit_code = cmd_run(args)
+        elif args.command == "benchmark":
             exit_code = cmd_benchmark(args)
         elif args.command == "sweep":
             exit_code = cmd_sweep(args)
