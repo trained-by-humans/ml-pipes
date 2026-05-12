@@ -44,7 +44,7 @@ from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
 from ml_pipes import Pipeline
-from ml_pipes.benchmark import BenchmarkSweep, MeasurementConfig
+from ml_pipes.benchmark import BenchmarkResult, BenchmarkSweep, MeasurementConfig
 
 
 def _make_pipeline(model_path: Path, output_path: Path, coco_classes: list[str]):
