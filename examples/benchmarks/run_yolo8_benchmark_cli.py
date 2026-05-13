@@ -13,13 +13,13 @@ Usage (single run, with optional config overrides):
         --arg slice_wh=480x480 --runs 20 --warmup 3
 
 Usage (sweep over explicit configs):
-    python -m ml_pipes sweep examples.benchmarks.run_yolo8_benchmark_cli \
+    python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
         --config '{"slice_wh":[320,320],"overlap_wh":[80,80]}' \
         --config '{"slice_wh":[480,480],"overlap_wh":[80,80]}' \
         --runs 20 --warmup 3
 
-Usage (matrix sweep — cartesian product of axes):
-    python -m ml_pipes sweep examples.benchmarks.run_yolo8_benchmark_cli \
+Usage (axis sweep — cartesian product of axes):
+    python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
         --axis slice_wh=240x240,320x320,480x480 \
         --axis overlap_wh=40x40,80x80 \
         --runs 20 --warmup 3

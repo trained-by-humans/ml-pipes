@@ -476,10 +476,9 @@ class Benchmark:
 
 @dataclass
 class BenchmarkSweep:
-    """Run pipeline_configs × data_configs and collect all results.
+    """Cross-product every pipeline config with every data config and collect all results.
 
-    The sweep cross-products every pipeline config with every data config,
-    calling ``data_factory(data_config)`` fresh for each cell::
+    Calls ``data_factory(data_config)`` fresh for each cell::
 
         sweep = BenchmarkSweep(
             factory=make_pipeline,
