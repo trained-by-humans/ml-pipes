@@ -528,7 +528,8 @@ class BenchmarkSweep:
                 visible = {k: v for k, v in data_config.items() if not k.startswith("_")}
                 data_label = "|".join(f"{k}:{v}" for k, v in visible.items()) or "input"
             for pipeline_config in self.configs:
-                config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
+                visible = {k: v for k, v in pipeline_config.items() if not k.startswith("_")}
+                config_str = "|".join(f"{k}:{v}" for k, v in visible.items())
                 auto_label = f"{data_label}|{config_str}" if config_str else data_label
                 if self.label_prefix:
                     label = self.label_prefix if is_single else f"{self.label_prefix}|{auto_label}"
