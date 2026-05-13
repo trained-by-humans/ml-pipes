@@ -479,14 +479,24 @@ class Benchmark:
 
 @dataclass
 class BenchmarkSweep:
-    """Run an explicit list of pipeline configs × inputs and collect all results.
+    """Run pipeline_configs × data_configs and collect all results.
 
-    factory is called once per config to produce a fresh Pipeline.
-    Each (config, input_fn) combination is run as an independent Benchmark.
-    Results are labelled "{input_label}|{config}" where config is the
-    str representation of the pipeline config dict.
+    Two input paths are supported:
 
-    Example::
+    Structured path (recommended) — supply ``data_factory`` and optionally
+    ``data_configs``.  The sweep cross-products every pipeline config with every
+    data config, calling ``data_factory(data_config)`` fresh for each cell::
+
+        sweep = BenchmarkSweep(
+            factory=make_pipeline,
+            configs=[{"workers": 1}, {"workers": 4}],
+            data_factory=make_input,
+            data_configs=[{"image": "a.jpg"}, {"image": "b.jpg"}],
+            measurement=MeasurementConfig(runs=30),
+        )
+
+    Legacy path — supply ``input_fns`` directly (pre-built InputFn list).
+    Pipeline configs are swept per input, matching the original behaviour::
 
         sweep = BenchmarkSweep(
             factory=make_pipeline,
@@ -494,37 +504,63 @@ class BenchmarkSweep:
             input_fns=[input_fn_a, input_fn_b],
             measurement=MeasurementConfig(runs=30),
         )
-        results = sweep.run()
-        print(BenchmarkResult.to_comparison_table(results))
     """
 
     factory: Callable[[dict], Pipeline]
     configs: list[dict]
-    input_fns: list[InputFn]
+    input_fns: list[InputFn] | None = None
     input_labels: list[str] | None = None
+    data_factory: Callable[[dict], InputFn] | None = None
+    data_configs: list[dict] | None = None
     measurement: MeasurementConfig = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.measurement is None:
             self.measurement = MeasurementConfig()
+        has_input_fns = self.input_fns is not None
+        has_data_factory = self.data_factory is not None
+        if not has_input_fns and not has_data_factory:
+            raise ValueError("BenchmarkSweep requires either input_fns or data_factory")
+        if has_input_fns and has_data_factory:
+            raise ValueError("BenchmarkSweep accepts input_fns or data_factory, not both")
+        if has_input_fns and self.data_configs is not None:
+            raise ValueError("data_configs cannot be used with input_fns; use data_factory instead")
+        if has_data_factory and self.data_configs is None:
+            self.data_configs = [{}]
 
     def run(self) -> list[BenchmarkResult]:
         results: list[BenchmarkResult] = []
-        for i, input_fn in enumerate(self.input_fns):
-            input_label = self.input_labels[i] if self.input_labels else f"input{i}"
-            for pipeline_config in self.configs:
-                pipeline = self.factory(pipeline_config)
-                config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
-                label = f"{input_label}|{config_str}" if config_str else input_label
 
-                result = Benchmark(
-                    pipeline=pipeline,
-                    input_fn=input_fn,
-                    measurement=self.measurement,
-                    label=label,
-                    metadata={"pipeline_config": pipeline_config},
-                ).run()
-                results.append(result)
+        if self.data_factory is not None:
+            for data_config in self.data_configs:  # type: ignore[union-attr]
+                input_fn = self.data_factory(data_config)
+                data_label = "|".join(f"{k}:{v}" for k, v in data_config.items()) or "input"
+                for pipeline_config in self.configs:
+                    config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
+                    label = f"{data_label}|{config_str}" if config_str else data_label
+                    result = Benchmark(
+                        pipeline=self.factory(pipeline_config),
+                        input_fn=input_fn,
+                        measurement=self.measurement,
+                        label=label,
+                        metadata={"pipeline_config": pipeline_config, "data_config": data_config},
+                    ).run()
+                    results.append(result)
+        else:
+            for i, input_fn in enumerate(self.input_fns):  # type: ignore[union-attr]
+                input_label = self.input_labels[i] if self.input_labels else f"input{i}"
+                for pipeline_config in self.configs:
+                    config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
+                    label = f"{input_label}|{config_str}" if config_str else input_label
+                    result = Benchmark(
+                        pipeline=self.factory(pipeline_config),
+                        input_fn=input_fn,
+                        measurement=self.measurement,
+                        label=label,
+                        metadata={"pipeline_config": pipeline_config},
+                    ).run()
+                    results.append(result)
+
         return results
 
 
@@ -557,14 +593,26 @@ class BenchmarkMatrix:
 
     factory: Callable[[dict], Pipeline]
     axes: dict[str, list]
-    input_fns: list[InputFn]
+    input_fns: list[InputFn] | None = None
     input_labels: list[str] | None = None
+    data_factory: Callable[[dict], InputFn] | None = None
+    data_axes: dict[str, list] | None = None
+    data_filter: Callable[[dict], bool] | None = None
     filter: Callable[[dict], bool] | None = None
     measurement: MeasurementConfig = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.measurement is None:
             self.measurement = MeasurementConfig()
+
+    def prepare_data_configs(self) -> list[dict]:
+        if not self.data_axes:
+            return [{}]
+        keys = list(self.data_axes.keys())
+        all_configs = [dict(zip(keys, combo)) for combo in itertools.product(*self.data_axes.values())]
+        if self.data_filter is not None:
+            all_configs = [c for c in all_configs if self.data_filter(c)]
+        return all_configs
 
     def prepare_configs(self) -> list[dict]:
         keys = list(self.axes.keys())
@@ -663,6 +711,8 @@ class BenchmarkMatrix:
             configs=self.prepare_configs(),
             input_fns=self.input_fns,
             input_labels=self.input_labels,
+            data_factory=self.data_factory,
+            data_configs=self.prepare_data_configs() if self.data_factory else None,
             measurement=self.measurement,
         ).run()
 
