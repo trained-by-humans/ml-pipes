@@ -779,6 +779,13 @@ class BenchmarkBuilder:
         self._data_input_fn = fn
         return self
 
+    def data_inputs(self, fns: list[InputFn], labels: list[str]) -> "BenchmarkBuilder":
+        """Use multiple InputFns as a sweep — each gets a label."""
+        _fn_map = dict(zip(labels, fns))
+        self._data_factory_fn = lambda cfg, _m=_fn_map: _m[cfg["_label"]]
+        self._data_configs_list = [{"_label": lab} for lab in labels]
+        return self
+
     def data_factory(self, factory: Callable) -> "BenchmarkBuilder":
         """Use a data factory callable (enables data config sweep)."""
         self._data_factory_fn = factory

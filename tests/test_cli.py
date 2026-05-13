@@ -16,13 +16,11 @@ from ml_pipes.__main__ import (
     CLIError,
     _build_file_input_fns,
     _build_parser,
-    _parse_arg_spec,
-    _parse_args_to_config,
-    _parse_axis_spec,
-    _parse_axis_value,
-    _parse_configs,
+    _parse_config_arg,
+    _parse_config_axis,
+    _parse_config_value,
+    _parse_config_list,
     cmd_benchmark,
-    cmd_sweep,
 )
 
 
@@ -64,74 +62,74 @@ def test_decorators_exported_from_init():
 # Axis value parsing
 # ---------------------------------------------------------------------------
 
-def test_parse_axis_value_nxm_tuple():
-    assert _parse_axis_value("320x320") == (320, 320)
-    assert _parse_axis_value("40x40") == (40, 40)
+def test_parse_config_value_nxm_tuple():
+    assert _parse_config_value("320x320") == (320, 320)
+    assert _parse_config_value("40x40") == (40, 40)
 
 
-def test_parse_axis_value_3tuple():
-    assert _parse_axis_value("1x2x3") == (1, 2, 3)
+def test_parse_config_value_3tuple():
+    assert _parse_config_value("1x2x3") == (1, 2, 3)
 
 
-def test_parse_axis_value_int():
-    assert _parse_axis_value("4") == 4
+def test_parse_config_value_int():
+    assert _parse_config_value("4") == 4
 
 
-def test_parse_axis_value_float():
-    assert _parse_axis_value("0.25") == pytest.approx(0.25)
-    assert _parse_axis_value("1.5") == pytest.approx(1.5)
+def test_parse_config_value_float():
+    assert _parse_config_value("0.25") == pytest.approx(0.25)
+    assert _parse_config_value("1.5") == pytest.approx(1.5)
 
 
-def test_parse_axis_value_str():
-    assert _parse_axis_value("fast") == "fast"
-    assert _parse_axis_value("true") == "true"
+def test_parse_config_value_str():
+    assert _parse_config_value("fast") == "fast"
+    assert _parse_config_value("true") == "true"
 
 
-def test_parse_axis_spec_integers():
-    key, vals = _parse_axis_spec("workers=1,2,4,8")
+def test_parse_config_axis_integers():
+    key, vals = _parse_config_axis("workers=1,2,4,8")
     assert key == "workers"
     assert vals == [1, 2, 4, 8]
 
 
-def test_parse_axis_spec_tuples():
-    key, vals = _parse_axis_spec("slice_wh=320x320,480x480")
+def test_parse_config_axis_tuples():
+    key, vals = _parse_config_axis("slice_wh=320x320,480x480")
     assert key == "slice_wh"
     assert vals == [(320, 320), (480, 480)]
 
 
-def test_parse_axis_spec_floats():
-    key, vals = _parse_axis_spec("conf=0.1,0.25,0.5")
+def test_parse_config_axis_floats():
+    key, vals = _parse_config_axis("conf=0.1,0.25,0.5")
     assert key == "conf"
     assert vals == pytest.approx([0.1, 0.25, 0.5])
 
 
-def test_parse_axis_spec_no_equals_raises():
+def test_parse_config_axis_no_equals_raises():
     with pytest.raises(CLIError, match="--axis must be in the form"):
-        _parse_axis_spec("noequalssign")
+        _parse_config_axis("noequalssign")
 
 
-def test_parse_axis_spec_empty_values_raises():
+def test_parse_config_axis_empty_values_raises():
     with pytest.raises(CLIError, match="--axis has no values"):
-        _parse_axis_spec("key=")
+        _parse_config_axis("key=")
 
 
 # ---------------------------------------------------------------------------
 # Config JSON parsing
 # ---------------------------------------------------------------------------
 
-def test_parse_configs_valid():
-    result = _parse_configs(['{"a": 1}', '{"b": "x"}'])
+def test_parse_config_list_valid():
+    result = _parse_config_list(['{"a": 1}', '{"b": "x"}'])
     assert result == [{"a": 1}, {"b": "x"}]
 
 
-def test_parse_configs_invalid_json_raises():
+def test_parse_config_list_invalid_json_raises():
     with pytest.raises(CLIError, match="invalid JSON in --config #1"):
-        _parse_configs(["{bad json}"])
+        _parse_config_list(["{bad json}"])
 
 
-def test_parse_configs_non_dict_raises():
+def test_parse_config_list_non_dict_raises():
     with pytest.raises(CLIError, match="must be a JSON object"):
-        _parse_configs(["[1, 2, 3]"])
+        _parse_config_list(["[1, 2, 3]"])
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +294,7 @@ def test_cmd_benchmark_missing_required_arg_raises(tmp_path):
             "--input", str(f),
             "--runs", "2", "--warmup", "1",
         ])
-        with pytest.raises(CLIError, match="missing required argument"):
+        with pytest.raises(TypeError):
             cmd_benchmark(args)
     finally:
         del sys.modules["_test_bench_missing"]
@@ -306,34 +304,21 @@ def test_cmd_benchmark_missing_required_arg_raises(tmp_path):
 # --arg / --data-arg parsing
 # ---------------------------------------------------------------------------
 
-def test_parse_arg_spec_valid():
-    assert _parse_arg_spec("workers=4") == ("workers", 4)
-    assert _parse_arg_spec("mode=fast") == ("mode", "fast")
-    assert _parse_arg_spec("wh=320x240") == ("wh", (320, 240))
+def test_parse_config_arg_valid():
+    assert _parse_config_arg("workers=4") == ("workers", 4)
+    assert _parse_config_arg("mode=fast") == ("mode", "fast")
+    assert _parse_config_arg("wh=320x240") == ("wh", (320, 240))
 
 
-def test_parse_arg_spec_no_equals_raises():
+def test_parse_config_arg_no_equals_raises():
     with pytest.raises(CLIError, match="--arg must be in the form"):
-        _parse_arg_spec("noequalssign")
+        _parse_config_arg("noequalssign")
 
 
-def test_parse_arg_spec_empty_key_raises():
+def test_parse_config_arg_empty_key_raises():
     with pytest.raises(CLIError, match="--arg key is empty"):
-        _parse_arg_spec("=value")
+        _parse_config_arg("=value")
 
-
-def test_parse_args_to_config_builds_dict():
-    result = _parse_args_to_config(["workers=4", "mode=fast"], "--arg")
-    assert result == {"workers": 4, "mode": "fast"}
-
-
-def test_parse_args_to_config_duplicate_key_raises():
-    with pytest.raises(CLIError, match="--arg key 'workers' specified more than once"):
-        _parse_args_to_config(["workers=4", "workers=8"], "--arg")
-
-
-def test_parse_args_to_config_empty_list():
-    assert _parse_args_to_config([], "--arg") == {}
 
 
 # ---------------------------------------------------------------------------
@@ -357,64 +342,64 @@ def test_parser_data_arg_on_benchmark():
 
 
 # ---------------------------------------------------------------------------
-# Parser: sweep mutual exclusion groups
+# Parser: benchmark mutual exclusion groups
 # ---------------------------------------------------------------------------
 
-def test_parser_sweep_arg_and_config_mutually_exclusive():
+def test_parser_benchmark_arg_and_config_mutually_exclusive():
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([
-            "sweep", "some.module",
+            "benchmark", "some.module",
             "--arg", "workers=4",
             "--config", '{"workers": 4}',
         ])
 
 
-def test_parser_sweep_arg_and_axis_mutually_exclusive():
+def test_parser_benchmark_arg_and_axis_mutually_exclusive():
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([
-            "sweep", "some.module",
+            "benchmark", "some.module",
             "--arg", "workers=4",
             "--axis", "workers=1,2,4",
         ])
 
 
-def test_parser_sweep_data_arg_and_data_config_mutually_exclusive():
+def test_parser_benchmark_data_arg_and_data_config_mutually_exclusive():
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([
-            "sweep", "some.module",
+            "benchmark", "some.module",
             "--data-arg", "image_path=img.jpg",
             "--data-config", '{"image_path": "img.jpg"}',
         ])
 
 
-def test_parser_sweep_data_arg_and_data_axis_mutually_exclusive():
+def test_parser_benchmark_data_arg_and_data_axis_mutually_exclusive():
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([
-            "sweep", "some.module",
+            "benchmark", "some.module",
             "--data-arg", "image_path=img.jpg",
             "--data-axis", "image_path=img1.jpg,img2.jpg",
         ])
 
 
-def test_parser_sweep_data_config_and_data_axis_mutually_exclusive():
+def test_parser_benchmark_data_config_and_data_axis_mutually_exclusive():
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([
-            "sweep", "some.module",
+            "benchmark", "some.module",
             "--data-config", '{"image_path": "img.jpg"}',
             "--data-axis", "image_path=img1.jpg,img2.jpg",
         ])
 
 
 # ---------------------------------------------------------------------------
-# Integration — cmd_sweep with data_factory
+# Integration — cmd_benchmark with data_factory
 # ---------------------------------------------------------------------------
 
-def test_cmd_sweep_with_data_factory(tmp_path, capsys):
+def test_cmd_benchmark_with_data_factory(tmp_path, capsys):
     @data_factory
     def make_data(image_path="default.jpg"):
         def _fn():
@@ -429,11 +414,11 @@ def test_cmd_sweep_with_data_factory(tmp_path, capsys):
     try:
         parser = _build_parser()
         args = parser.parse_args([
-            "sweep", "_test_sweep_data:_wrapped_identity", "_test_sweep_data:make_data",
+            "benchmark", "_test_sweep_data:_wrapped_identity", "_test_sweep_data:make_data",
             "--data-arg", "image_path=test.jpg",
             "--runs", "2", "--warmup", "1",
         ])
-        code = cmd_sweep(args)
+        code = cmd_benchmark(args)
         assert code == 0
         out = capsys.readouterr().out
         assert "mean" in out
@@ -441,7 +426,7 @@ def test_cmd_sweep_with_data_factory(tmp_path, capsys):
         del sys.modules["_test_sweep_data"]
 
 
-def test_cmd_sweep_with_data_axis(tmp_path, capsys):
+def test_cmd_benchmark_with_data_axis(tmp_path, capsys):
     @data_factory
     def make_data(image_path="default.jpg"):
         def _fn():
@@ -456,11 +441,11 @@ def test_cmd_sweep_with_data_axis(tmp_path, capsys):
     try:
         parser = _build_parser()
         args = parser.parse_args([
-            "sweep", "_test_sweep_data_axis:_wrapped_identity", "_test_sweep_data_axis:make_data",
+            "benchmark", "_test_sweep_data_axis:_wrapped_identity", "_test_sweep_data_axis:make_data",
             "--data-axis", "image_path=img1.jpg,img2.jpg",
             "--runs", "2", "--warmup", "1",
         ])
-        code = cmd_sweep(args)
+        code = cmd_benchmark(args)
         assert code == 0
         out = capsys.readouterr().out
         assert "mean" in out

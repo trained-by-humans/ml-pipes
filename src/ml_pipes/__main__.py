@@ -8,11 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from ml_pipes.benchmark import (
-    Benchmark,
-    BenchmarkMatrix,
+    BenchmarkBuilder,
     BenchmarkResult,
-    BenchmarkSweep,
-    MeasurementConfig,
 )
 from ml_pipes.factory import (
     _DATA_FACTORY_ATTR,
@@ -28,7 +25,7 @@ class CLIError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Module / function loading
+# Module / factory loading
 # ---------------------------------------------------------------------------
 
 def _load_ref(ref: str) -> tuple[Any, Any]:
@@ -78,14 +75,7 @@ def _resolve_pipeline_factory(module: Any, explicit_fn: Any, ref: str):
     return fn
 
 
-# ---------------------------------------------------------------------------
-# Input resolution
-# ---------------------------------------------------------------------------
-
-def _resolve_data_factory(
-    data_ref: str | None,
-    pipeline_module: Any,
-) -> Any:
+def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
     """Discover and return the data factory callable without calling it."""
     if data_ref is not None:
         data_module, explicit_fn = _load_ref(data_ref)
@@ -105,6 +95,10 @@ def _resolve_data_factory(
     except ValueError as exc:
         raise CLIError(str(exc)) from exc
 
+
+# ---------------------------------------------------------------------------
+# Input helpers (cmd_run only)
+# ---------------------------------------------------------------------------
 
 def _resolve_inputs(
     data_ref: str | None,
@@ -151,10 +145,10 @@ def _build_file_input_fns(paths: list[str]) -> tuple[list[InputFn], list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Argument / config parsing
+# Config parsing
 # ---------------------------------------------------------------------------
 
-def _parse_axis_value(s: str) -> int | float | tuple | str:
+def _parse_config_value(s: str) -> int | float | tuple | str:
     parts = s.split("x")
     if len(parts) > 1:
         try:
@@ -172,31 +166,30 @@ def _parse_axis_value(s: str) -> int | float | tuple | str:
     return s
 
 
-def _parse_arg_spec(spec: str) -> tuple[str, Any]:
-    """Parse 'key=value' into (key, typed_value). Reuses axis value typing."""
+def _parse_config_arg(spec: str) -> tuple[str, Any]:
     if "=" not in spec:
         raise CLIError(f"--arg must be in the form key=value — got: {spec!r}")
     key, _, value_str = spec.partition("=")
     key = key.strip()
     if not key:
         raise CLIError(f"--arg key is empty in: {spec!r}")
-    return key, _parse_axis_value(value_str.strip())
+    return key, _parse_config_value(value_str.strip())
 
 
-def _parse_axis_spec(spec: str) -> tuple[str, list]:
+def _parse_config_axis(spec: str) -> tuple[str, list]:
     if "=" not in spec:
         raise CLIError(f"--axis must be in the form key=v1,v2,... — got: {spec!r}")
     key, _, values_str = spec.partition("=")
     key = key.strip()
     if not key:
         raise CLIError(f"--axis key is empty in: {spec!r}")
-    values = [_parse_axis_value(v.strip()) for v in values_str.split(",") if v.strip()]
+    values = [_parse_config_value(v.strip()) for v in values_str.split(",") if v.strip()]
     if not values:
         raise CLIError(f"--axis has no values in: {spec!r}")
     return key, values
 
 
-def _parse_configs(raw_configs: list[str]) -> list[dict]:
+def _parse_config_list(raw_configs: list[str]) -> list[dict]:
     result = []
     for i, raw in enumerate(raw_configs):
         try:
@@ -212,33 +205,6 @@ def _parse_configs(raw_configs: list[str]) -> list[dict]:
             )
         result.append(parsed)
     return result
-
-
-def _build_measurement(args: argparse.Namespace) -> MeasurementConfig:
-    warmup = args.warmup if args.warmup is not None else max(5, args.runs // 10)
-    return MeasurementConfig(
-        runs=args.runs,
-        warmup=warmup,
-        percentiles=tuple(args.percentiles),
-    )
-
-
-def _parse_args_to_config(specs: list[str], flag: str) -> dict:
-    """Parse repeated KEY=VALUE specs into a dict, raising on duplicate keys."""
-    config: dict = {}
-    for spec in specs:
-        key, value = _parse_arg_spec(spec)
-        if key in config:
-            raise CLIError(f"{flag} key {key!r} specified more than once")
-        config[key] = value
-    return config
-
-
-def _validate_config(factory, config: dict) -> None:
-    try:
-        validate_factory_config(factory, config)
-    except TypeError as exc:
-        raise CLIError(f"missing required argument for config {config}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -261,15 +227,18 @@ def _save_results(results: list[BenchmarkResult], save_dir: str) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     module, explicit_fn = _load_ref(args.pipeline_ref)
     factory = _resolve_pipeline_factory(module, explicit_fn, args.pipeline_ref)
-    pipeline_config = _parse_args_to_config(args.args or [], "--arg")
-    data_config = _parse_args_to_config(args.data_args or [], "--data-arg")
+    pipeline_config = {k: v for spec in (args.args or []) for k, v in [_parse_config_arg(spec)]}
+    data_config = {k: v for spec in (args.data_args or []) for k, v in [_parse_config_arg(spec)]}
     input_fns, _ = _resolve_inputs(
         data_ref=getattr(args, "data_ref", None),
         input_paths=args.input,
         pipeline_module=module,
         data_config=data_config,
     )
-    _validate_config(factory, pipeline_config)
+    try:
+        validate_factory_config(factory, pipeline_config)
+    except TypeError as exc:
+        raise CLIError(f"missing required argument for config {pipeline_config}: {exc}") from exc
     pipeline = factory(pipeline_config)
     for input_fn in input_fns:
         _, value, _, _ = input_fn()
@@ -280,69 +249,23 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_benchmark(args: argparse.Namespace) -> int:
     module, explicit_fn = _load_ref(args.pipeline_ref)
     factory = _resolve_pipeline_factory(module, explicit_fn, args.pipeline_ref)
-    pipeline_config = _parse_args_to_config(args.args or [], "--arg")
-    data_config = _parse_args_to_config(args.data_args or [], "--data-arg")
-    input_fns, input_labels = _resolve_inputs(
-        data_ref=getattr(args, "data_ref", None),
-        input_paths=args.input,
-        pipeline_module=module,
-        data_config=data_config,
-    )
-    measurement = _build_measurement(args)
-    expand_regions = not args.collapse_regions
-
-    results = []
-    for input_fn, label in zip(input_fns, input_labels):
-        _validate_config(factory, pipeline_config)
-        pipeline = factory(pipeline_config)
-        result = Benchmark(
-            pipeline=pipeline,
-            input_fn=input_fn,
-            measurement=measurement,
-            label=label,
-        ).run()
-        results.append(result)
-
-    if len(results) == 1:
-        print(results[0].to_table(expand_regions=expand_regions))
-    else:
-        print(BenchmarkResult.to_comparison_table(results, expand_regions=expand_regions))
-
-    if args.save:
-        _save_results(results, args.save)
-    return 0
-
-
-def cmd_sweep(args: argparse.Namespace) -> int:
-    module, explicit_fn = _load_ref(args.pipeline_ref)
-    factory = _resolve_pipeline_factory(module, explicit_fn, args.pipeline_ref)
     data_fn = _resolve_data_factory(getattr(args, "data_ref", None), module)
-    measurement = _build_measurement(args)
     expand_regions = not args.collapse_regions
 
-    # Pipeline dimension
-    if args.axes:
-        pipeline_axes = {}
-        for spec in args.axes:
-            key, values = _parse_axis_spec(spec)
-            pipeline_axes[key] = values
-    elif args.configs:
-        pipeline_configs = _parse_configs(args.configs)
-    else:
-        pipeline_configs = [_parse_args_to_config(args.args or [], "--arg")]
+    builder = BenchmarkBuilder.factory(factory)
 
-    # Data dimension
-    if args.data_axes:
-        data_axes = {}
-        for spec in args.data_axes:
-            key, values = _parse_axis_spec(spec)
-            data_axes[key] = values
-    elif args.data_configs:
-        data_configs = _parse_configs(args.data_configs)
-    else:
-        data_configs = [_parse_args_to_config(args.data_args or [], "--data-arg")]
+    match (bool(args.axes), bool(args.configs)):
+        case (True, _):
+            for spec in args.axes:
+                key, values = _parse_config_axis(spec)
+                builder.pipeline_config_axis(key, *values)
+        case (_, True):
+            builder.pipeline_configs(_parse_config_list(args.configs))
+        case _:
+            for spec in args.args or []:
+                key, value = _parse_config_arg(spec)
+                builder.pipeline_config_arg(key, value)
 
-    # Resolve data source — file --input paths become a data factory over per-file configs
     if data_fn is None:
         if not args.input:
             raise CLIError(
@@ -350,42 +273,31 @@ def cmd_sweep(args: argparse.Namespace) -> int:
                 "Either decorate a function with @data_factory, or pass --input path [...]."
             )
         raw_fns, raw_labels = _build_file_input_fns(args.input)
-        _fn_map = {lab: fn for fn, lab in zip(raw_fns, raw_labels)}
-        data_fn = lambda cfg, _m=_fn_map: _m[cfg["_label"]]
-        data_configs = [{"_label": lab} for lab in raw_labels]
+        builder.data_inputs(raw_fns, raw_labels)
+    else:
+        builder.data_factory(data_fn)
+        match (bool(args.data_axes), bool(args.data_configs)):
+            case (True, _):
+                for spec in args.data_axes:
+                    key, values = _parse_config_axis(spec)
+                    builder.data_config_axis(key, *values)
+            case (_, True):
+                builder.data_configs(_parse_config_list(args.data_configs))
+            case _:
+                for spec in args.data_args or []:
+                    key, value = _parse_config_arg(spec)
+                    builder.data_config_arg(key, value)
+
+    builder.runs(args.runs)
+    if args.warmup is not None:
+        builder.warmup(args.warmup)
+    builder.percentiles(*args.percentiles)
 
     if args.axes:
-        runner = BenchmarkMatrix(
-            factory=factory,
-            axes=pipeline_axes,
-            data_factory=data_fn,
-            data_axes=data_axes if args.data_axes else None,
-            measurement=measurement,
-        )
-        print(runner.to_plan(), file=sys.stderr)
+        print(builder.plan(), file=sys.stderr)
         print(file=sys.stderr)
-        results = runner.run()
-    elif args.data_axes:
-        # Data axes only — expand locally and use BenchmarkSweep
-        from itertools import product as _product
-        keys = list(data_axes.keys())
-        expanded = [dict(zip(keys, combo)) for combo in _product(*data_axes.values())]
-        results = BenchmarkSweep(
-            factory=factory,
-            configs=pipeline_configs,
-            data_factory=data_fn,
-            data_configs=expanded,
-            measurement=measurement,
-        ).run()
-    else:
-        results = BenchmarkSweep(
-            factory=factory,
-            configs=pipeline_configs,
-            data_factory=data_fn,
-            data_configs=data_configs,
-            measurement=measurement,
-        ).run()
 
+    results = builder.run()
     print(BenchmarkResult.to_comparison_table(results, expand_regions=expand_regions))
 
     if args.save:
@@ -435,8 +347,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     bench_p = sub.add_parser(
         "benchmark", parents=[shared],
-        help="Single benchmark run with default config",
-        description="Discover @pipeline_factory and @data_factory and run a single benchmark.",
+        help="Benchmark a pipeline — single config, explicit sweep, or cartesian axis expansion",
+        description=(
+            "Discover @pipeline_factory and @data_factory and benchmark the pipeline. "
+            "Use --arg for a single config, --config for an explicit sweep, "
+            "or --axis for cartesian-product expansion."
+        ),
     )
     bench_p.add_argument("pipeline_ref", metavar="MODULE[:FN]",
                          help="Pipeline factory: 'pkg.module' or 'pkg.module:fn_name'")
@@ -444,36 +360,17 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="Data factory (auto-discovered in pipeline module if absent)")
     bench_p.add_argument("--input", nargs="+", metavar="PATH",
                          help="Fallback input files when no @data_factory is present")
-    bench_p.add_argument("--arg", action="append", dest="args", metavar="KEY=VALUE",
-                         help="Pipeline factory argument (repeatable), e.g. --arg max_concurrency=8")
-    bench_p.add_argument("--data-arg", action="append", dest="data_args", metavar="KEY=VALUE",
-                         help="Data factory argument (repeatable), e.g. --data-arg image_path=img.jpg")
-
-    sweep_p = sub.add_parser(
-        "sweep", parents=[shared],
-        help="Parameterized sweep over configs or axes",
-        description=(
-            "Run multiple benchmark configurations. "
-            "Use --config for explicit JSON dicts or --axis for cartesian-product expansion."
-        ),
-    )
-    sweep_p.add_argument("pipeline_ref", metavar="MODULE[:FN]",
-                         help="Pipeline factory reference")
-    sweep_p.add_argument("data_ref", metavar="DATA_MODULE[:FN]", nargs="?", default=None,
-                         help="Data factory reference (auto-discovered if absent)")
-    sweep_p.add_argument("--input", nargs="+", metavar="PATH",
-                         help="Fallback input files")
-    pipeline_group = sweep_p.add_mutually_exclusive_group()
+    pipeline_group = bench_p.add_mutually_exclusive_group()
     pipeline_group.add_argument("--arg", action="append", dest="args", metavar="KEY=VALUE",
-                                help="Single pipeline config value (repeatable); mutually exclusive with --config/--axis")
+                                help="Pipeline config value (repeatable); mutually exclusive with --config/--axis")
     pipeline_group.add_argument("--config", action="append", dest="configs", metavar="JSON",
                                 help="Explicit pipeline config as JSON dict (repeatable)")
     pipeline_group.add_argument("--axis", action="append", dest="axes",
                                 metavar="KEY=V1,V2,...",
                                 help="Pipeline axis for cartesian expansion (repeatable)")
-    data_group = sweep_p.add_mutually_exclusive_group()
+    data_group = bench_p.add_mutually_exclusive_group()
     data_group.add_argument("--data-arg", action="append", dest="data_args", metavar="KEY=VALUE",
-                            help="Single data config value (repeatable); mutually exclusive with --data-config/--data-axis")
+                            help="Data config value (repeatable); mutually exclusive with --data-config/--data-axis")
     data_group.add_argument("--data-config", action="append", dest="data_configs", metavar="JSON",
                             help="Explicit data config as JSON dict (repeatable)")
     data_group.add_argument("--data-axis", action="append", dest="data_axes",
@@ -496,8 +393,6 @@ def main() -> None:
             exit_code = cmd_run(args)
         elif args.command == "benchmark":
             exit_code = cmd_benchmark(args)
-        elif args.command == "sweep":
-            exit_code = cmd_sweep(args)
         else:
             parser.print_help()
             exit_code = 1
