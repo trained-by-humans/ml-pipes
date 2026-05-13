@@ -364,6 +364,36 @@ def test_matrix_to_table_empty():
     assert BenchmarkResult.to_comparison_table([]) == "(no results)"
 
 
+def test_comparison_table_union_of_percentile_columns():
+    # result_a has p50+p95, result_b has p50+p99 — table must show all three
+    result_a = _make_result_with_percentiles("a", (0.50, 0.95))
+    result_b = _make_result_with_percentiles("b", (0.50, 0.99))
+    table = BenchmarkResult.to_comparison_table([result_a, result_b])
+    assert "p50" in table
+    assert "p95" in table
+    assert "p99" in table
+
+
+def test_comparison_table_missing_percentile_renders_dash():
+    # result_a has no p99 — that cell must render as "-", not "0.00"
+    result_a = _make_result_with_percentiles("a", (0.50, 0.95))
+    result_b = _make_result_with_percentiles("b", (0.50, 0.99))
+    table = BenchmarkResult.to_comparison_table([result_a, result_b])
+    assert "0.00" not in table  # "0.00" would indicate missing value treated as zero
+    assert "-" in table         # dash present for the missing cell
+
+
+def _make_result_with_percentiles(label: str, percentiles: tuple[float, ...]) -> BenchmarkResult:
+    config = MeasurementConfig(runs=5, warmup=1, percentiles=percentiles)
+    collector = BenchmarkCollector(config)
+    pipeline = _make_pipeline()
+    pipeline.set_tracing(collector)
+    for _ in range(6):
+        pipeline(1)
+    collector.stop()
+    return collector.report(label=label)
+
+
 def test_matrix_metadata_records_config_and_data_config():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,

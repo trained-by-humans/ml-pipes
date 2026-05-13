@@ -179,7 +179,10 @@ class BenchmarkResult:
                     all_rows.append((depth, s.label))
                     seen.add(s.label)
 
-        pct_keys = sorted(results[0].total.percentiles)
+        all_pct: set[float] = set()
+        for r in results:
+            all_pct.update(r.total.percentiles)
+        pct_keys = sorted(all_pct)
 
         col_label = max(len("  " * d + lbl) for d, lbl in all_rows)
         col_w = 9
@@ -213,7 +216,10 @@ class BenchmarkResult:
                 return " " * col_w + "  " + "  ".join("-" * col_w for _ in pct_keys)
             row = f"{stat.mean_ms:>{col_w}.2f}"
             for p in pct_keys:
-                row += f"  {stat.percentiles.get(p, 0.0):>{col_w}.2f}"
+                if p in stat.percentiles:
+                    row += f"  {stat.percentiles[p]:>{col_w}.2f}"
+                else:
+                    row += f"  {'-':>{col_w}}"
             return row
 
         lookups: list[dict[str, InvocationStat]] = []
