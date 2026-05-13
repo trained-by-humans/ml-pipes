@@ -40,13 +40,26 @@ def data_factory(fn: Callable) -> Callable:
     return wrapper
 
 
+def _wrap_as_factory(fn: Callable) -> Callable:
+    """Wrap a plain callable so it accepts (config: dict) and calls fn(**config)."""
+    @functools.wraps(fn)
+    def wrapper(config: dict) -> Any:
+        return fn(**config)
+    return wrapper
+
+
 def discover_factory(module: Any, explicit_fn: Any, attr: str, kind: str) -> Any:
     """Scan module for a function marked with attr, or return explicit_fn if given.
+
+    Explicit refs that are not already decorated are wrapped to accept (config: dict)
+    so they behave identically to @pipeline_factory / @data_factory callables.
 
     Returns None when nothing is found.
     Raises ValueError when more than one decorated function is present.
     """
     if explicit_fn is not None:
+        if not getattr(explicit_fn, attr, False):
+            return _wrap_as_factory(explicit_fn)
         return explicit_fn
 
     found = [
