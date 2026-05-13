@@ -9,6 +9,7 @@ import pytest
 from ml_pipes import Pipeline
 from ml_pipes.benchmark import (
     Benchmark,
+    BenchmarkBuilder,
     BenchmarkCollector,
     BenchmarkMatrix,
     BenchmarkSweep,
@@ -544,3 +545,277 @@ def test_slug_with_extension():
 def test_slug_colon_replaced():
     result = _make_result(label="img|batch_size:4")
     assert ":" not in result.slug()
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkBuilder
+# ---------------------------------------------------------------------------
+
+from ml_pipes.factory import pipeline_factory as _pipeline_factory, data_factory as _data_factory
+
+@_pipeline_factory
+def _make_builder_pipeline(**kwargs) -> Pipeline:
+    return Pipeline([_AddOne(), _Double()])
+
+
+def _builder_input_fn():
+    return ("input", 1, None, None)
+
+
+@_data_factory
+def _make_builder_data_factory(value: int = 1):
+    """Data factory: accepts a config dict, returns an InputFn."""
+    def input_fn():
+        return (str(value), 1, None, None)   # always pass int 1 to the pipeline
+    return input_fn
+
+
+# --- Named constructors ---
+
+def test_builder_pipeline_constructor():
+    p = _make_pipeline()
+    b = BenchmarkBuilder.pipeline(p)
+    assert b._source is p
+
+
+def test_builder_factory_constructor():
+    b = BenchmarkBuilder.factory(_make_builder_pipeline)
+    assert b._source is _make_builder_pipeline
+
+
+# --- Single run: concrete pipeline + concrete input ---
+
+def test_builder_single_run_returns_one_result():
+    results = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_input(_builder_input_fn)
+        .runs(3).warmup(1)
+        .run()
+    )
+    assert len(results) == 1
+    assert isinstance(results[0], BenchmarkResult)
+
+
+def test_builder_single_run_label_applied():
+    results = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_input(_builder_input_fn)
+        .label("my-run")
+        .runs(3).warmup(1)
+        .run()
+    )
+    assert results[0].label == "my-run"
+
+
+# --- Sweep: factory + explicit pipeline configs + concrete input ---
+
+def test_builder_pipeline_configs_sweep():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_configs([{}, {}])
+        .data_input(_builder_input_fn)
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2
+
+
+def test_builder_pipeline_config_arg_builds_dict():
+    b = BenchmarkBuilder.factory(_make_builder_pipeline)
+    b.pipeline_config_arg("workers", 4)
+    assert b._pipeline_config_dict == {"workers": 4}
+
+
+# --- Sweep: concrete pipeline + data_factory + data configs ---
+
+def test_builder_data_factory_sweep():
+    results = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_configs([{"value": 1}, {"value": 2}])
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2
+
+
+def test_builder_data_config_arg_builds_dict():
+    b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(_make_builder_data_factory)
+    b.data_config_arg("value", 99)
+    assert b._data_config_dict == {"value": 99}
+
+
+# --- Cross sweep: factory configs × data configs ---
+
+def test_builder_pipeline_configs_cross_data_configs():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_configs([{}, {}])
+        .data_factory(_make_builder_data_factory)
+        .data_configs([{"value": 1}, {"value": 2}])
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 4  # 2 pipeline configs × 2 data configs
+
+
+# --- Matrix: pipeline axis ---
+
+def test_builder_pipeline_config_axis_uses_matrix():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config_axis("x", 1, 2, 3)
+        .data_input(_builder_input_fn)
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 3
+
+
+# --- Matrix: data axis ---
+
+def test_builder_data_config_axis_uses_matrix():
+    results = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config_axis("value", 10, 20)
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2
+
+
+# --- Matrix: both axes (pipeline × data) ---
+
+def test_builder_both_axes_cross_product():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config_axis("x", 1, 2)
+        .data_factory(_make_builder_data_factory)
+        .data_config_axis("value", 10, 20)
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 4  # 2 × 2
+
+
+# --- plan() / grid() require axes ---
+
+def test_builder_plan_requires_pipeline_axis():
+    b = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .data_input(_builder_input_fn)
+    )
+    with pytest.raises(ValueError, match="pipeline_config_axis"):
+        b.plan()
+
+
+def test_builder_plan_returns_string():
+    b = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config_axis("x", 1, 2, 3)
+        .data_input(_builder_input_fn)
+    )
+    assert isinstance(b.plan(), str)
+
+
+# --- Filters ---
+
+def test_builder_pipeline_config_filter_drops_configs():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config_axis("x", 1, 2, 3, 4)
+        .pipeline_config_filter(lambda c: c["x"] % 2 == 0)
+        .data_input(_builder_input_fn)
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2  # x=2 and x=4 kept
+
+
+def test_builder_data_config_filter_drops_configs():
+    results = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config_axis("value", 1, 2, 3, 4)
+        .data_config_filter(lambda c: c["value"] % 2 == 0)
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2
+
+
+# --- Validation errors ---
+
+def test_builder_pipeline_configs_and_axis_raises():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        (
+            BenchmarkBuilder.factory(_make_builder_pipeline)
+            .pipeline_configs([{}])
+            .pipeline_config_axis("x", 1)
+            .data_input(_builder_input_fn)
+            .run()
+        )
+
+
+def test_builder_data_configs_and_axis_raises():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        (
+            BenchmarkBuilder.pipeline(_make_pipeline())
+            .data_factory(_make_builder_data_factory)
+            .data_configs([{}])
+            .data_config_axis("value", 1)
+            .run()
+        )
+
+
+def test_builder_data_input_and_data_factory_raises():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        (
+            BenchmarkBuilder.pipeline(_make_pipeline())
+            .data_input(_builder_input_fn)
+            .data_factory(_make_builder_data_factory)
+            .run()
+        )
+
+
+def test_builder_data_config_with_data_input_raises():
+    with pytest.raises(ValueError, match="data_input"):
+        (
+            BenchmarkBuilder.pipeline(_make_pipeline())
+            .data_input(_builder_input_fn)
+            .data_config_arg("value", 1)
+            .run()
+        )
+
+
+def test_builder_data_config_without_factory_raises():
+    with pytest.raises(ValueError, match="data_factory"):
+        (
+            BenchmarkBuilder.pipeline(_make_pipeline())
+            .data_config_arg("value", 1)
+            .run()
+        )
+
+
+def test_builder_no_data_raises():
+    with pytest.raises(ValueError, match="data_input.*data_factory"):
+        BenchmarkBuilder.pipeline(_make_pipeline()).runs(2).warmup(1).run()
+
+
+# --- Measurement defaults ---
+
+def test_builder_measurement_defaults():
+    b = BenchmarkBuilder.pipeline(_make_pipeline())
+    m = b._build_measurement()
+    assert m.runs == 100
+    assert m.warmup == 10
+    assert m.percentiles == (0.50, 0.95, 0.99)
+
+
+def test_builder_measurement_custom():
+    b = BenchmarkBuilder.pipeline(_make_pipeline()).runs(20).warmup(3).percentiles(0.5, 0.99)
+    m = b._build_measurement()
+    assert m.runs == 20
+    assert m.warmup == 3
+    assert m.percentiles == (0.5, 0.99)
