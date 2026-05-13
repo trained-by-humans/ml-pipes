@@ -293,10 +293,6 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         builder.warmup(args.warmup)
     builder.percentiles(*args.percentiles)
 
-    if args.axes:
-        print(builder.plan(), file=sys.stderr)
-        print(file=sys.stderr)
-
     results = builder.run()
     print(BenchmarkResult.to_comparison_table(results, expand_regions=expand_regions))
 

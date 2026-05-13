@@ -1,9 +1,9 @@
 """
 Matrix benchmark: sweep slice_wh × overlap_wh axes for the tiled YOLOv8 pipeline.
 
-BenchmarkMatrix expands the cartesian product of all axes automatically and
-delegates each cell to BenchmarkSweep → Benchmark. Useful for finding the
-tile size / overlap combination that best balances latency and detection quality.
+BenchmarkBuilder expands the cartesian product of all axes automatically.
+Useful for finding the tile size / overlap combination that best balances
+latency and detection quality.
 
 Axes swept:
   slice_wh   — tile size in pixels (width × height)
@@ -45,7 +45,7 @@ from examples.run_yolo8_onnx import YOLO8_MODELS
 from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
 from ml_pipes import Pipeline
-from ml_pipes.benchmark import BenchmarkMatrix, BenchmarkResult, MeasurementConfig
+from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
 def _make_pipeline(model_path: Path, output_path: Path, coco_classes: list[str]):
@@ -64,7 +64,7 @@ def _make_pipeline(model_path: Path, output_path: Path, coco_classes: list[str])
 
 def _input_fn(image_path: Path):
     def fn():
-        return (image_path.name, image_path, None, None)
+        return image_path.name, image_path, None, None
     return fn
 
 
@@ -89,31 +89,16 @@ def main() -> int:
 
     output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
 
-    axes = {
-        "slice_wh":   [(240, 240), (320, 320), (480, 480)],
-        "overlap_wh": [(40, 40), (80, 80), (120, 120)],
-    }
-
-    # Overlap >= half the slice size produces excessive tile coverage.
-    def _valid(c: dict) -> bool:
-        return c["overlap_wh"][0] < c["slice_wh"][0] // 2
-
-    config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
-
-    _fn = _input_fn(image_path)
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
-        axes=axes,
-        filter=_valid,
-        data_factory=lambda _, fn=_fn: fn,
-        measurement=config,
+    builder = (
+        BenchmarkBuilder.factory(_make_pipeline(model_path, output_path, COCO_CLASSES))
+        .pipeline_config_axis("slice_wh", (240, 240), (320, 320), (480, 480))
+        .pipeline_config_axis("overlap_wh", (40, 40), (80, 80), (120, 120))
+        .pipeline_config_filter(lambda c: c["overlap_wh"][0] < c["slice_wh"][0] // 2)
+        .data_input(_input_fn(image_path))
+        .runs(args.runs).warmup(args.warmup)
     )
 
-    print(f"\n{matrix.to_plan()}\n", file=sys.stderr)
-    print(matrix.to_grid(), file=sys.stderr)
-    print(file=sys.stderr)
-
-    results = matrix.run()
+    results = builder.run(verbose=True)
     print(BenchmarkResult.to_comparison_table(results, expand_regions=False))
 
     if args.save:
