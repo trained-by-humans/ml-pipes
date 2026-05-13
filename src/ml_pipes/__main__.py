@@ -82,13 +82,11 @@ def _resolve_pipeline_factory(module: Any, explicit_fn: Any, ref: str):
 # Input resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_inputs(
+def _resolve_data_factory(
     data_ref: str | None,
-    input_paths: list[str] | None,
     pipeline_module: Any,
-) -> tuple[list[InputFn], list[str]]:
-    data_fn = None
-
+) -> Any:
+    """Discover and return the data factory callable without calling it."""
     if data_ref is not None:
         data_module, explicit_fn = _load_ref(data_ref)
         try:
@@ -100,14 +98,24 @@ def _resolve_inputs(
                 f"no @data_factory found in {data_ref!r}. "
                 f"Decorate a function with @data_factory or use 'module:fn_name' syntax."
             )
-    else:
-        try:
-            data_fn = discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
-        except ValueError as exc:
-            raise CLIError(str(exc)) from exc
+        return data_fn
+
+    try:
+        return discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
+    except ValueError as exc:
+        raise CLIError(str(exc)) from exc
+
+
+def _resolve_inputs(
+    data_ref: str | None,
+    input_paths: list[str] | None,
+    pipeline_module: Any,
+    data_config: dict,
+) -> tuple[list[InputFn], list[str]]:
+    data_fn = _resolve_data_factory(data_ref, pipeline_module)
 
     if data_fn is not None:
-        input_fn = data_fn({})
+        input_fn = data_fn(data_config)
         return [input_fn], [getattr(data_fn, "__wrapped__", data_fn).__name__]
 
     if not input_paths:
@@ -207,6 +215,17 @@ def _build_measurement(args: argparse.Namespace) -> MeasurementConfig:
     )
 
 
+def _parse_args_to_config(specs: list[str], flag: str) -> dict:
+    """Parse repeated KEY=VALUE specs into a dict, raising on duplicate keys."""
+    config: dict = {}
+    for spec in specs:
+        key, value = _parse_arg_spec(spec)
+        if key in config:
+            raise CLIError(f"{flag} key {key!r} specified more than once")
+        config[key] = value
+    return config
+
+
 def _validate_config(factory, config: dict) -> None:
     try:
         validate_factory_config(factory, config)
@@ -234,14 +253,16 @@ def _save_results(results: list[BenchmarkResult], save_dir: str) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     module, explicit_fn = _load_ref(args.pipeline_ref)
     factory = _resolve_pipeline_factory(module, explicit_fn, args.pipeline_ref)
+    pipeline_config = _parse_args_to_config(args.args or [], "--arg")
+    data_config = _parse_args_to_config(args.data_args or [], "--data-arg")
     input_fns, _ = _resolve_inputs(
         data_ref=getattr(args, "data_ref", None),
         input_paths=args.input,
         pipeline_module=module,
+        data_config=data_config,
     )
-    config = dict(_parse_arg_spec(s) for s in (args.args or []))
-    _validate_config(factory, config)
-    pipeline = factory(config)
+    _validate_config(factory, pipeline_config)
+    pipeline = factory(pipeline_config)
     for input_fn in input_fns:
         _, value, _, _ = input_fn()
         pipeline(value)
@@ -251,20 +272,21 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_benchmark(args: argparse.Namespace) -> int:
     module, explicit_fn = _load_ref(args.pipeline_ref)
     factory = _resolve_pipeline_factory(module, explicit_fn, args.pipeline_ref)
+    pipeline_config = _parse_args_to_config(args.args or [], "--arg")
+    data_config = _parse_args_to_config(args.data_args or [], "--data-arg")
     input_fns, input_labels = _resolve_inputs(
         data_ref=getattr(args, "data_ref", None),
         input_paths=args.input,
         pipeline_module=module,
+        data_config=data_config,
     )
     measurement = _build_measurement(args)
     expand_regions = not args.collapse_regions
 
-    config = dict(_parse_arg_spec(s) for s in (args.args or []))
-
     results = []
     for input_fn, label in zip(input_fns, input_labels):
-        _validate_config(factory, config)
-        pipeline = factory(config)
+        _validate_config(factory, pipeline_config)
+        pipeline = factory(pipeline_config)
         result = Benchmark(
             pipeline=pipeline,
             input_fn=input_fn,
@@ -286,51 +308,81 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
 def cmd_sweep(args: argparse.Namespace) -> int:
     module, explicit_fn = _load_ref(args.pipeline_ref)
     factory = _resolve_pipeline_factory(module, explicit_fn, args.pipeline_ref)
-    input_fns, input_labels = _resolve_inputs(
-        data_ref=getattr(args, "data_ref", None),
-        input_paths=args.input,
-        pipeline_module=module,
-    )
+    data_fn = _resolve_data_factory(getattr(args, "data_ref", None), module)
     measurement = _build_measurement(args)
     expand_regions = not args.collapse_regions
 
+    # Pipeline dimension
     if args.axes:
-        axes: dict[str, list] = {}
+        pipeline_axes = {}
         for spec in args.axes:
             key, values = _parse_axis_spec(spec)
-            axes[key] = values
-        runner = BenchmarkMatrix(
-            factory=factory,
-            axes=axes,
-            input_fns=input_fns,
-            input_labels=input_labels,
-            measurement=measurement,
-        )
-        print(runner.to_plan(), file=sys.stderr)
-        print(file=sys.stderr)
-        results = runner.run()
-
+            pipeline_axes[key] = values
     elif args.configs:
-        configs = _parse_configs(args.configs)
-        for c in configs:
-            _validate_config(factory, c)
-        results = BenchmarkSweep(
-            factory=factory,
-            configs=configs,
-            input_fns=input_fns,
-            input_labels=input_labels,
-            measurement=measurement,
-        ).run()
-
+        pipeline_configs = _parse_configs(args.configs)
     else:
-        _validate_config(factory, {})
-        results = BenchmarkSweep(
-            factory=factory,
-            configs=[{}],
-            input_fns=input_fns,
-            input_labels=input_labels,
-            measurement=measurement,
-        ).run()
+        pipeline_configs = [_parse_args_to_config(args.args or [], "--arg")]
+
+    # Data dimension
+    if args.data_axes:
+        data_axes = {}
+        for spec in args.data_axes:
+            key, values = _parse_axis_spec(spec)
+            data_axes[key] = values
+    elif args.data_configs:
+        data_configs = _parse_configs(args.data_configs)
+    else:
+        data_configs = [_parse_args_to_config(args.data_args or [], "--data-arg")]
+
+    # Resolve input path: data_factory if available, else --input files
+    if data_fn is not None:
+        if args.axes or args.data_axes:
+            runner = BenchmarkMatrix(
+                factory=factory,
+                axes=pipeline_axes if args.axes else {"_": [{}]},
+                data_factory=data_fn,
+                data_axes=data_axes if args.data_axes else None,
+                measurement=measurement,
+            )
+            if args.axes:
+                print(runner.to_plan(), file=sys.stderr)
+                print(file=sys.stderr)
+            results = runner.run()
+        else:
+            results = BenchmarkSweep(
+                factory=factory,
+                configs=pipeline_configs,
+                data_factory=data_fn,
+                data_configs=data_configs,
+                measurement=measurement,
+            ).run()
+    else:
+        # Fall back to --input file paths (legacy input_fns path)
+        if not args.input:
+            raise CLIError(
+                "no @data_factory found and no --input paths given. "
+                "Either decorate a function with @data_factory, or pass --input path [...]."
+            )
+        input_fns, input_labels = _build_file_input_fns(args.input)
+        if args.axes:
+            runner = BenchmarkMatrix(
+                factory=factory,
+                axes=pipeline_axes,
+                input_fns=input_fns,
+                input_labels=input_labels,
+                measurement=measurement,
+            )
+            print(runner.to_plan(), file=sys.stderr)
+            print(file=sys.stderr)
+            results = runner.run()
+        else:
+            results = BenchmarkSweep(
+                factory=factory,
+                configs=pipeline_configs,
+                input_fns=input_fns,
+                input_labels=input_labels,
+                measurement=measurement,
+            ).run()
 
     print(BenchmarkResult.to_comparison_table(results, expand_regions=expand_regions))
 
@@ -375,7 +427,9 @@ def _build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--input", nargs="+", metavar="PATH",
                        help="Fallback input files when no @data_factory is present")
     run_p.add_argument("--arg", action="append", dest="args", metavar="KEY=VALUE",
-                       help="Factory argument (repeatable), e.g. --arg slice_wh=480x480")
+                       help="Pipeline factory argument (repeatable), e.g. --arg slice_wh=480x480")
+    run_p.add_argument("--data-arg", action="append", dest="data_args", metavar="KEY=VALUE",
+                       help="Data factory argument (repeatable), e.g. --data-arg image_path=img.jpg")
 
     bench_p = sub.add_parser(
         "benchmark", parents=[shared],
@@ -389,7 +443,9 @@ def _build_parser() -> argparse.ArgumentParser:
     bench_p.add_argument("--input", nargs="+", metavar="PATH",
                          help="Fallback input files when no @data_factory is present")
     bench_p.add_argument("--arg", action="append", dest="args", metavar="KEY=VALUE",
-                         help="Factory argument (repeatable), e.g. --arg max_concurrency=8")
+                         help="Pipeline factory argument (repeatable), e.g. --arg max_concurrency=8")
+    bench_p.add_argument("--data-arg", action="append", dest="data_args", metavar="KEY=VALUE",
+                         help="Data factory argument (repeatable), e.g. --data-arg image_path=img.jpg")
 
     sweep_p = sub.add_parser(
         "sweep", parents=[shared],
@@ -405,12 +461,22 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="Data factory reference (auto-discovered if absent)")
     sweep_p.add_argument("--input", nargs="+", metavar="PATH",
                          help="Fallback input files")
-    config_group = sweep_p.add_mutually_exclusive_group()
-    config_group.add_argument("--config", action="append", dest="configs", metavar="JSON",
-                              help="Explicit config as JSON dict (repeatable)")
-    config_group.add_argument("--axis", action="append", dest="axes",
-                              metavar="KEY=V1,V2,...",
-                              help="Axis for cartesian expansion (repeatable)")
+    pipeline_group = sweep_p.add_mutually_exclusive_group()
+    pipeline_group.add_argument("--arg", action="append", dest="args", metavar="KEY=VALUE",
+                                help="Single pipeline config value (repeatable); mutually exclusive with --config/--axis")
+    pipeline_group.add_argument("--config", action="append", dest="configs", metavar="JSON",
+                                help="Explicit pipeline config as JSON dict (repeatable)")
+    pipeline_group.add_argument("--axis", action="append", dest="axes",
+                                metavar="KEY=V1,V2,...",
+                                help="Pipeline axis for cartesian expansion (repeatable)")
+    data_group = sweep_p.add_mutually_exclusive_group()
+    data_group.add_argument("--data-arg", action="append", dest="data_args", metavar="KEY=VALUE",
+                            help="Single data config value (repeatable); mutually exclusive with --data-config/--data-axis")
+    data_group.add_argument("--data-config", action="append", dest="data_configs", metavar="JSON",
+                            help="Explicit data config as JSON dict (repeatable)")
+    data_group.add_argument("--data-axis", action="append", dest="data_axes",
+                            metavar="KEY=V1,V2,...",
+                            help="Data axis for cartesian expansion (repeatable)")
 
     return parser
 
