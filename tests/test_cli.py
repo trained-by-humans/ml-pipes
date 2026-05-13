@@ -211,6 +211,24 @@ def test_build_file_input_fns(tmp_path):
     assert meta1 is None
 
 
+def test_build_file_input_fns_basename_collision(tmp_path):
+    d1 = tmp_path / "setA"
+    d2 = tmp_path / "setB"
+    d1.mkdir()
+    d2.mkdir()
+    f1 = d1 / "img001.jpg"
+    f2 = d2 / "img001.jpg"
+    f1.write_bytes(b"fake")
+    f2.write_bytes(b"fake")
+    fns, labels = _build_file_input_fns([str(f1), str(f2)])
+    assert labels[0] != labels[1], "colliding basenames must produce distinct labels"
+    assert str(f1) == labels[0]
+    assert str(f2) == labels[1]
+    id1, _, _, _ = fns[0]()
+    id2, _, _, _ = fns[1]()
+    assert id1 != id2
+
+
 def test_build_file_input_fns_missing_raises(tmp_path):
     with pytest.raises(CLIError, match="input file not found"):
         _build_file_input_fns([str(tmp_path / "nonexistent.jpg")])

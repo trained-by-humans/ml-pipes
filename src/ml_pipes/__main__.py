@@ -127,18 +127,26 @@ def _resolve_inputs(
 
 
 def _build_file_input_fns(paths: list[str]) -> tuple[list[InputFn], list[str]]:
-    fns: list[InputFn] = []
-    labels: list[str] = []
+    resolved = []
     for p in paths:
         path = Path(p)
         if not path.exists():
             raise CLIError(f"input file not found: {path}")
-        def _make(p: Path = path) -> InputFn:
+        resolved.append(path)
+
+    basenames = [p.name for p in resolved]
+    duplicate = {name for name in basenames if basenames.count(name) > 1}
+
+    fns: list[InputFn] = []
+    labels: list[str] = []
+    for path in resolved:
+        label = str(path) if path.name in duplicate else path.name
+        def _make(p: Path = path, id_: str = label) -> InputFn:
             def fn():
-                return (p.name, p, None, None)
+                return (id_, p, None, None)
             return fn
         fns.append(_make())
-        labels.append(path.name)
+        labels.append(label)
     return fns, labels
 
 
