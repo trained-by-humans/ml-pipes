@@ -117,13 +117,11 @@ def main() -> int:
 
     output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
 
-    shared = dict(model_path=model_path, output_path=output_path, conf_threshold=0.25)
     data_input = _input_fn(image_path)
 
     plain_results = (
         BenchmarkBuilder.factory(yolo8_plain_benchmark_pipeline)
-        .pipeline_config_arg("model_path", model_path)
-        .pipeline_config_arg("output_path", output_path)
+        .pipeline_config(model_path=model_path, output_path=output_path)
         .data_input(data_input)
         .runs(args.runs).warmup(args.warmup)
         .run(verbose=False)
@@ -131,9 +129,10 @@ def main() -> int:
 
     tiled_results = (
         BenchmarkBuilder.factory(yolo8_tiled_benchmark_pipeline)
-        .pipeline_configs([
-            {**shared, "slice_wh": (320, 320), "overlap_wh": (80, 80)},
-            {**shared, "slice_wh": (480, 480), "overlap_wh": (80, 80)},
+        .pipeline_config(model_path=model_path, output_path=output_path)
+        .pipeline_config_set([
+            {"slice_wh": (320, 320)},
+            {"slice_wh": (480, 480), "overlap_wh": (120, 120)},
         ])
         .data_input(data_input)
         .runs(args.runs).warmup(args.warmup)

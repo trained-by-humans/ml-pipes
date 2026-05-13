@@ -655,7 +655,7 @@ def test_builder_single_run_label_applied():
 def test_builder_pipeline_configs_sweep():
     results = (
         BenchmarkBuilder.factory(_make_builder_pipeline)
-        .pipeline_configs([{}, {}])
+        .pipeline_config_set([{}, {}])
         .data_input(_builder_input_fn)
         .runs(2).warmup(1)
         .run()
@@ -663,9 +663,9 @@ def test_builder_pipeline_configs_sweep():
     assert len(results) == 2
 
 
-def test_builder_pipeline_config_arg_builds_dict():
+def test_builder_pipeline_config_builds_dict():
     b = BenchmarkBuilder.factory(_make_builder_pipeline)
-    b.pipeline_config_arg("workers", 4)
+    b.pipeline_config(workers=4)
     assert b._pipeline_config_dict == {"workers": 4}
 
 
@@ -675,16 +675,16 @@ def test_builder_data_factory_sweep():
     results = (
         BenchmarkBuilder.pipeline(_make_pipeline())
         .data_factory(_make_builder_data_factory)
-        .data_configs([{"value": 1}, {"value": 2}])
+        .data_config_set([{"value": 1}, {"value": 2}])
         .runs(2).warmup(1)
         .run()
     )
     assert len(results) == 2
 
 
-def test_builder_data_config_arg_builds_dict():
+def test_builder_data_config_builds_dict():
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(_make_builder_data_factory)
-    b.data_config_arg("value", 99)
+    b.data_config(value=99)
     assert b._data_config_dict == {"value": 99}
 
 
@@ -693,9 +693,9 @@ def test_builder_data_config_arg_builds_dict():
 def test_builder_pipeline_configs_cross_data_configs():
     results = (
         BenchmarkBuilder.factory(_make_builder_pipeline)
-        .pipeline_configs([{}, {}])
+        .pipeline_config_set([{}, {}])
         .data_factory(_make_builder_data_factory)
-        .data_configs([{"value": 1}, {"value": 2}])
+        .data_config_set([{"value": 1}, {"value": 2}])
         .runs(2).warmup(1)
         .run()
     )
@@ -796,7 +796,7 @@ def test_builder_pipeline_configs_and_axis_raises():
     with pytest.raises(ValueError, match="mutually exclusive"):
         (
             BenchmarkBuilder.factory(_make_builder_pipeline)
-            .pipeline_configs([{}])
+            .pipeline_config_set([{}])
             .pipeline_config_axis("x", 1)
             .data_input(_builder_input_fn)
             .run()
@@ -808,7 +808,7 @@ def test_builder_data_configs_and_axis_raises():
         (
             BenchmarkBuilder.pipeline(_make_pipeline())
             .data_factory(_make_builder_data_factory)
-            .data_configs([{}])
+            .data_config_set([{}])
             .data_config_axis("value", 1)
             .run()
         )
@@ -829,7 +829,7 @@ def test_builder_data_config_with_data_input_raises():
         (
             BenchmarkBuilder.pipeline(_make_pipeline())
             .data_input(_builder_input_fn)
-            .data_config_arg("value", 1)
+            .data_config(value=1)
             .run()
         )
 
@@ -838,7 +838,7 @@ def test_builder_data_config_without_factory_raises():
     with pytest.raises(ValueError, match="data_factory"):
         (
             BenchmarkBuilder.pipeline(_make_pipeline())
-            .data_config_arg("value", 1)
+            .data_config(value=1)
             .run()
         )
 
@@ -864,3 +864,210 @@ def test_builder_measurement_custom():
     assert m.runs == 20
     assert m.warmup == 3
     assert m.percentiles == (0.5, 0.99)
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkBuilder — pipeline config merging
+# ---------------------------------------------------------------------------
+
+def test_pipeline_config_and_pipeline_config_merge_into_single_config():
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(model_path="/model.onnx")
+        .pipeline_config(conf_threshold=0.5, slice_wh=(320, 320))
+        ._resolve_pipeline_configs()
+    )
+    assert configs == [{"model_path": "/model.onnx", "conf_threshold": 0.5, "slice_wh": (320, 320)}]
+
+
+def test_pipeline_config_merges_into_config_set():
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(model_path="/model.onnx")
+        .pipeline_config_set([{"slice_wh": (320, 320)}, {"slice_wh": (480, 480)}])
+        ._resolve_pipeline_configs()
+    )
+    assert configs == [
+        {"model_path": "/model.onnx", "slice_wh": (320, 320)},
+        {"model_path": "/model.onnx", "slice_wh": (480, 480)},
+    ]
+
+
+def test_pipeline_config_multi_merges_into_config_set():
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(model_path="/model.onnx", conf_threshold=0.25)
+        .pipeline_config_set([{"slice_wh": (320, 320)}, {"slice_wh": (480, 480)}])
+        ._resolve_pipeline_configs()
+    )
+    assert configs == [
+        {"model_path": "/model.onnx", "conf_threshold": 0.25, "slice_wh": (320, 320)},
+        {"model_path": "/model.onnx", "conf_threshold": 0.25, "slice_wh": (480, 480)},
+    ]
+
+
+def test_pipeline_config_merges_into_axis_expansion():
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(model_path="/model.onnx")
+        .pipeline_config_axis("slice_wh", (320, 320), (480, 480))
+        ._resolve_pipeline_configs()
+    )
+    assert configs == [
+        {"model_path": "/model.onnx", "slice_wh": (320, 320)},
+        {"model_path": "/model.onnx", "slice_wh": (480, 480)},
+    ]
+
+
+def test_pipeline_config_multi_merges_into_axis_expansion():
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(model_path="/model.onnx", conf_threshold=0.25)
+        .pipeline_config_axis("slice_wh", (320, 320), (480, 480))
+        ._resolve_pipeline_configs()
+    )
+    assert configs == [
+        {"model_path": "/model.onnx", "conf_threshold": 0.25, "slice_wh": (320, 320)},
+        {"model_path": "/model.onnx", "conf_threshold": 0.25, "slice_wh": (480, 480)},
+    ]
+
+
+def test_pipeline_config_set_key_overrides_base():
+    # per-config entry wins over base when the same key appears in both
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(conf_threshold=0.25)
+        .pipeline_config_set([{"conf_threshold": 0.5}, {}])
+        ._resolve_pipeline_configs()
+    )
+    assert configs[0]["conf_threshold"] == 0.5
+    assert configs[1]["conf_threshold"] == 0.25
+
+
+def test_pipeline_axis_value_overrides_base():
+    # axis value wins over base when the same key appears in both
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(conf_threshold=0.25)
+        .pipeline_config_axis("conf_threshold", 0.1, 0.9)
+        ._resolve_pipeline_configs()
+    )
+    assert [c["conf_threshold"] for c in configs] == [0.1, 0.9]
+
+
+def test_pipeline_config_multi_present_in_each_axis_config():
+    configs = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(model_path="/model.onnx", output_path="/out")
+        .pipeline_config_axis("slice_wh", (240, 240), (320, 320), (480, 480))
+        ._resolve_pipeline_configs()
+    )
+    assert len(configs) == 3
+    assert all(c["model_path"] == "/model.onnx" for c in configs)
+    assert all(c["output_path"] == "/out" for c in configs)
+    assert [c["slice_wh"] for c in configs] == [(240, 240), (320, 320), (480, 480)]
+
+
+# ---------------------------------------------------------------------------
+# BenchmarkBuilder — data config merging
+# ---------------------------------------------------------------------------
+
+def test_data_config_and_data_config_merge_into_single_config():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(dataset="coco")
+        .data_config(split="val")
+        ._resolve_data_configs()
+    )
+    assert configs == [{"dataset": "coco", "split": "val"}]
+
+
+def test_data_config_merges_into_data_config_set():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(dataset="coco")
+        .data_config_set([{"image_path": "a.jpg"}, {"image_path": "b.jpg"}])
+        ._resolve_data_configs()
+    )
+    assert configs == [
+        {"dataset": "coco", "image_path": "a.jpg"},
+        {"dataset": "coco", "image_path": "b.jpg"},
+    ]
+
+
+def test_data_config_multi_merges_into_data_config_set():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(dataset="coco", split="val")
+        .data_config_set([{"image_path": "a.jpg"}, {"image_path": "b.jpg"}])
+        ._resolve_data_configs()
+    )
+    assert configs == [
+        {"dataset": "coco", "split": "val", "image_path": "a.jpg"},
+        {"dataset": "coco", "split": "val", "image_path": "b.jpg"},
+    ]
+
+
+def test_data_config_merges_into_data_axis():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(dataset="coco")
+        .data_config_axis("value", 1, 2)
+        ._resolve_data_configs()
+    )
+    assert all(c["dataset"] == "coco" for c in configs)
+    assert [c["value"] for c in configs] == [1, 2]
+
+
+def test_data_config_multi_merges_into_data_axis():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(dataset="coco", split="val")
+        .data_config_axis("value", 1, 2)
+        ._resolve_data_configs()
+    )
+    assert all(c["dataset"] == "coco" for c in configs)
+    assert all(c["split"] == "val" for c in configs)
+    assert [c["value"] for c in configs] == [1, 2]
+
+
+def test_data_config_set_key_overrides_base():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(split="val")
+        .data_config_set([{"split": "test"}, {}])
+        ._resolve_data_configs()
+    )
+    assert configs[0]["split"] == "test"
+    assert configs[1]["split"] == "val"
+
+
+def test_data_axis_value_overrides_base():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(value=99)
+        .data_config_axis("value", 1, 2)
+        ._resolve_data_configs()
+    )
+    assert [c["value"] for c in configs] == [1, 2]
+
+
+def test_data_config_multi_present_in_each_axis_config():
+    configs = (
+        BenchmarkBuilder.pipeline(_make_pipeline())
+        .data_factory(_make_builder_data_factory)
+        .data_config(dataset="coco", split="val")
+        .data_config_axis("value", 1, 2, 3)
+        ._resolve_data_configs()
+    )
+    assert len(configs) == 3
+    assert all(c["dataset"] == "coco" for c in configs)
+    assert all(c["split"] == "val" for c in configs)
+    assert [c["value"] for c in configs] == [1, 2, 3]

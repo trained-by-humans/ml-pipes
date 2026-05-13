@@ -1,5 +1,5 @@
 """
-Matrix benchmark: sweep slice_wh × overlap_wh axes for the tiled YOLOv8 pipeline.
+Axis sweep benchmark: sweep slice_wh × overlap_wh axes for the tiled YOLOv8 pipeline.
 
 BenchmarkBuilder expands the cartesian product of all axes automatically.
 Useful for finding the tile size / overlap combination that best balances
@@ -13,9 +13,9 @@ A filter drops combinations where overlap >= half the slice size, as those
 would produce more than 2× tile coverage and hurt latency with little gain.
 
 Usage:
-    python run_yolo8_benchmark_matrix.py
-    python run_yolo8_benchmark_matrix.py --runs 20 --warmup 3
-    python run_yolo8_benchmark_matrix.py --model s --save results/
+    python run_yolo8_benchmark_sweep_axis.py
+    python run_yolo8_benchmark_sweep_axis.py --runs 20 --warmup 3
+    python run_yolo8_benchmark_sweep_axis.py --model s --save results/
 """
 from __future__ import annotations
 
@@ -98,8 +98,7 @@ def main() -> int:
 
     builder = (
         BenchmarkBuilder.factory(yolo8_tiled_benchmark_pipeline)
-        .pipeline_config_arg("model_path", model_path)
-        .pipeline_config_arg("output_path", output_path)
+        .pipeline_config(model_path=model_path, output_path=output_path)
         .pipeline_config_axis("slice_wh", (240, 240), (320, 320), (480, 480))
         .pipeline_config_axis("overlap_wh", (40, 40), (80, 80), (120, 120))
         .pipeline_config_filter(lambda c: c["overlap_wh"][0] < c["slice_wh"][0] // 2)
