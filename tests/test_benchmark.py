@@ -784,6 +784,25 @@ def test_builder_metadata_does_not_overwrite_pipeline_config():
     assert results[0].metadata["note"] == "hi"
 
 
+def test_builder_label_and_metadata_apply_with_data_factory_sweep():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config_set([{"x": 1}, {"x": 2}])
+        .data_factory(_make_builder_data_factory)
+        .data_config(value=7)
+        .label("factory-exp")
+        .metadata({"env": "test"})
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2
+    assert all(r.label.startswith("factory-exp|") for r in results)
+    for expected_x, result in zip((1, 2), results):
+        assert result.metadata["pipeline_config"] == {"x": expected_x}
+        assert result.metadata["data_config"] == {"value": 7}
+        assert result.metadata["env"] == "test"
+
+
 # --- Sweep: factory + explicit pipeline configs + concrete input ---
 
 def test_builder_pipeline_configs_sweep():
