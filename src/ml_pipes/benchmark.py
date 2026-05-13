@@ -3,24 +3,21 @@ from __future__ import annotations
 import itertools
 import json
 import re
+import sys
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, TypeAlias
 
-from .factory import (
-    InputFn,
-    _DATA_FACTORY_ATTR,
-    _PIPELINE_FACTORY_ATTR,
-    data_factory,
-    discover_factory,
-    pipeline_factory,
-    validate_factory_config,
-)
+from .factory import InputFn
 
 import numpy as np
 
 from .collectors.concurrent_collector import ConcurrentCollector
 from .core import Pipeline
 from .tracing import InvocationTrace
+
+PipelineFactory: TypeAlias = Callable[[dict], Pipeline]
+DataFactory: TypeAlias = Callable[[dict], InputFn]
+ConfigFilter: TypeAlias = Callable[[dict], bool]
 
 
 @dataclass
@@ -501,9 +498,9 @@ class BenchmarkSweep:
         )
     """
 
-    factory: Callable[[dict], Pipeline]
+    factory: PipelineFactory
     configs: list[dict]
-    data_factory: Callable[[dict], InputFn]
+    data_factory: DataFactory
     data_configs: list[dict] | None = None
     measurement: MeasurementConfig = None  # type: ignore[assignment]
 
@@ -537,162 +534,6 @@ class BenchmarkSweep:
 
 
 
-@dataclass
-class BenchmarkMatrix:
-    """Expand N named axes into a cartesian product of configs and delegate to BenchmarkSweep.
-
-    Each key in `axes` becomes a key in the pipeline config dict passed to
-    factory. All combinations are generated automatically.
-
-    An optional `filter` predicate receives each config dict and returns False
-    to skip that combination:
-
-    Example::
-
-        matrix = BenchmarkMatrix(
-            factory=make_pipeline,
-            axes={
-                "workers":    [1, 2, 4, 8, 16],
-                "batch_size": [1, 2, 4, 8],
-            },
-            filter=lambda c: c["workers"] >= c["batch_size"],
-            data_factory=make_input,
-            measurement=MeasurementConfig(runs=30),
-        )
-        results = matrix.run()
-        print(BenchmarkResult.to_comparison_table(results))
-
-    To benchmark against a single fixed input with no config, wrap it::
-
-        matrix = BenchmarkMatrix(
-            factory=make_pipeline,
-            axes={"workers": [1, 2, 4]},
-            data_factory=lambda _: my_input_fn,
-        )
-    """
-
-    factory: Callable[[dict], Pipeline]
-    axes: dict[str, list]
-    data_factory: Callable[[dict], InputFn]
-    data_axes: dict[str, list] | None = None
-    data_filter: Callable[[dict], bool] | None = None
-    filter: Callable[[dict], bool] | None = None
-    measurement: MeasurementConfig = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.measurement is None:
-            self.measurement = MeasurementConfig()
-
-    def prepare_data_configs(self) -> list[dict]:
-        if not self.data_axes:
-            return [{}]
-        keys = list(self.data_axes.keys())
-        all_configs = [dict(zip(keys, combo)) for combo in itertools.product(*self.data_axes.values())]
-        if self.data_filter is not None:
-            all_configs = [c for c in all_configs if self.data_filter(c)]
-        return all_configs
-
-    def prepare_configs(self) -> list[dict]:
-        keys = list(self.axes.keys())
-        all_configs = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
-        if self.filter is not None:
-            all_configs = [c for c in all_configs if self.filter(c)]
-        return all_configs
-
-    def to_plan(self) -> str:
-        keys = list(self.axes.keys())
-        all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self.axes.values())]
-        active = set(frozenset(c.items()) for c in all_combos if self.filter is None or self.filter(c))
-        col_w = max(len(f"{k}={v}") for c in all_combos for k, v in c.items())
-        rows = []
-        for combo in all_combos:
-            kept = frozenset(combo.items()) in active
-            cells = "  ".join(f"{k}={str(v):<{col_w - len(k) - 1}}" for k, v in combo.items())
-            rows.append(f"  {'○' if kept else '×'}  {cells}")
-        total = len(all_combos)
-        n_active = len(active)
-        header = f"plan: {total} combinations ({n_active} active, {total - n_active} filtered)"
-        return "\n".join([header] + rows)
-
-    def to_grid(self) -> str:
-        """Render a 2D (or 3D) overview grid of active/filtered combinations.
-
-        Supports 2 or 3 axes only. Layout:
-          - 2 axes: rows = axis 0, columns = axis 1
-          - 3 axes: rows = axis 0, inner columns = axis 1, outer column groups = axis 2
-
-        Axis names and values are printed as a legend below the grid, not inside cells.
-        """
-        keys = list(self.axes.keys())
-        n = len(keys)
-        if n < 2 or n > 3:
-            raise ValueError(f"to_grid() requires 2 or 3 axes, got {n}")
-
-        active = set(frozenset(c.items()) for c in self.prepare_configs())
-
-        row_key = keys[0]
-        col_key = keys[1]
-        grp_key = keys[2] if n == 3 else None
-
-        row_vals = self.axes[row_key]
-        col_vals = self.axes[col_key]
-        grp_vals = self.axes[grp_key] if grp_key else [None]
-
-        cell_w = max(len(str(v)) for v in col_vals)
-        row_label_w = max(len(str(v)) for v in row_vals)
-        col_count = len(col_vals)
-        grp_w = col_count * (cell_w + 2) - 2  # width of one group block
-
-        axis_desc = f"row={row_key}  col={col_key}" + (f"  grp={grp_key}" if grp_key else "")
-        lines = [f"grid: {axis_desc}", ""]
-
-        # Group header (axis 2 values) — only for 3-axis case
-        if grp_key:
-            grp_header = " " * (row_label_w + 2)
-            for gi, gv in enumerate(grp_vals):
-                label = str(gv)
-                grp_header += f"{label:^{grp_w}}"
-                if gi < len(grp_vals) - 1:
-                    grp_header += "    "
-            lines.append(grp_header)
-
-        # Column header: actual values, repeated per group
-        col_header = " " * (row_label_w + 2)
-        block = "  ".join(f"{str(cv):^{cell_w}}" for cv in col_vals)
-        col_header += "    ".join(block for _ in grp_vals)
-        lines.append(col_header)
-
-        # Rows: actual row values as labels
-        for rv in row_vals:
-            row = f"{str(rv):{row_label_w}}  "
-            blocks = []
-            for gv in grp_vals:
-                cells = []
-                for cv in col_vals:
-                    combo = {row_key: rv, col_key: cv}
-                    if grp_key:
-                        combo[grp_key] = gv
-                    mark = "○" if frozenset(combo.items()) in active else "×"
-                    cells.append(f"{mark:^{cell_w}}")
-                blocks.append("  ".join(cells))
-            row += "    ".join(blocks)
-            lines.append(row)
-
-        lines.append("")
-        lines.append("○ = active  × = filtered")
-
-        return "\n".join(lines)
-
-    def run(self) -> list[BenchmarkResult]:
-        return BenchmarkSweep(
-            factory=self.factory,
-            configs=self.prepare_configs(),
-            data_factory=self.data_factory,
-            data_configs=self.prepare_data_configs(),
-            measurement=self.measurement,
-        ).run()
-
-
 class BenchmarkBuilder:
     """Fluent builder for benchmarks.
 
@@ -705,11 +546,11 @@ class BenchmarkBuilder:
     ``.run()`` which returns ``list[BenchmarkResult]``.
     """
 
-    def __init__(self, source: "Pipeline | Callable") -> None:
+    def __init__(self, source: Pipeline | PipelineFactory) -> None:
         self._source = source
 
         self._data_input_fn: InputFn | None = None
-        self._data_factory_fn: Callable | None = None
+        self._data_factory_fn: DataFactory | None = None
 
         self._pipeline_config_dict: dict = {}
         self._pipeline_configs_list: list[dict] | None = None
@@ -732,12 +573,12 @@ class BenchmarkBuilder:
     # ------------------------------------------------------------------
 
     @classmethod
-    def pipeline(cls, p: "Pipeline") -> "BenchmarkBuilder":
+    def pipeline(cls, p: Pipeline) -> BenchmarkBuilder:
         """Start from a concrete Pipeline (no config sweep)."""
         return cls(p)
 
     @classmethod
-    def factory(cls, f: Callable) -> "BenchmarkBuilder":
+    def factory(cls, f: PipelineFactory) -> BenchmarkBuilder:
         """Start from a pipeline factory callable."""
         return cls(f)
 
@@ -745,27 +586,27 @@ class BenchmarkBuilder:
     # Pipeline config dimension
     # ------------------------------------------------------------------
 
-    def pipeline_config(self, **kwargs) -> "BenchmarkBuilder":
+    def pipeline_config(self, **kwargs) -> BenchmarkBuilder:
         """Set a single pipeline config dict."""
         self._pipeline_config_dict.update(kwargs)
         return self
 
-    def pipeline_configs(self, configs: list[dict]) -> "BenchmarkBuilder":
+    def pipeline_configs(self, configs: list[dict]) -> BenchmarkBuilder:
         """Set an explicit list of pipeline configs for a sweep."""
         self._pipeline_configs_list = list(configs)
         return self
 
-    def pipeline_config_arg(self, key: str, value: Any) -> "BenchmarkBuilder":
+    def pipeline_config_arg(self, key: str, value: Any) -> BenchmarkBuilder:
         """Add a single key to the pipeline config dict."""
         self._pipeline_config_dict[key] = value
         return self
 
-    def pipeline_config_axis(self, key: str, *values) -> "BenchmarkBuilder":
+    def pipeline_config_axis(self, key: str, *values) -> BenchmarkBuilder:
         """Register a pipeline config axis for cartesian expansion."""
         self._pipeline_axes[key] = list(values)
         return self
 
-    def pipeline_config_filter(self, pred: Callable[[dict], bool]) -> "BenchmarkBuilder":
+    def pipeline_config_filter(self, pred: ConfigFilter) -> BenchmarkBuilder:
         """Drop pipeline configs where pred returns False."""
         self._pipeline_config_filter_fn = pred
         return self
@@ -774,44 +615,44 @@ class BenchmarkBuilder:
     # Data dimension
     # ------------------------------------------------------------------
 
-    def data_input(self, fn: InputFn) -> "BenchmarkBuilder":
+    def data_input(self, fn: InputFn) -> BenchmarkBuilder:
         """Use a concrete InputFn (no data config sweep)."""
         self._data_input_fn = fn
         return self
 
-    def data_inputs(self, fns: list[InputFn], labels: list[str]) -> "BenchmarkBuilder":
+    def data_inputs(self, fns: list[InputFn], labels: list[str]) -> BenchmarkBuilder:
         """Use multiple InputFns as a sweep — each gets a label."""
         _fn_map = dict(zip(labels, fns))
         self._data_factory_fn = lambda cfg, _m=_fn_map: _m[cfg["_label"]]
         self._data_configs_list = [{"_label": lab} for lab in labels]
         return self
 
-    def data_factory(self, factory: Callable) -> "BenchmarkBuilder":
+    def data_factory(self, factory: DataFactory) -> BenchmarkBuilder:
         """Use a data factory callable (enables data config sweep)."""
         self._data_factory_fn = factory
         return self
 
-    def data_config(self, **kwargs) -> "BenchmarkBuilder":
+    def data_config(self, **kwargs) -> BenchmarkBuilder:
         """Set a single data config dict."""
         self._data_config_dict.update(kwargs)
         return self
 
-    def data_configs(self, configs: list[dict]) -> "BenchmarkBuilder":
+    def data_configs(self, configs: list[dict]) -> BenchmarkBuilder:
         """Set an explicit list of data configs for a sweep."""
         self._data_configs_list = list(configs)
         return self
 
-    def data_config_arg(self, key: str, value: Any) -> "BenchmarkBuilder":
+    def data_config_arg(self, key: str, value: Any) -> BenchmarkBuilder:
         """Add a single key to the data config dict."""
         self._data_config_dict[key] = value
         return self
 
-    def data_config_axis(self, key: str, *values) -> "BenchmarkBuilder":
+    def data_config_axis(self, key: str, *values) -> BenchmarkBuilder:
         """Register a data config axis for cartesian expansion."""
         self._data_axes[key] = list(values)
         return self
 
-    def data_config_filter(self, pred: Callable[[dict], bool]) -> "BenchmarkBuilder":
+    def data_config_filter(self, pred: ConfigFilter) -> BenchmarkBuilder:
         """Drop data configs where pred returns False."""
         self._data_config_filter_fn = pred
         return self
@@ -820,15 +661,15 @@ class BenchmarkBuilder:
     # Measurement
     # ------------------------------------------------------------------
 
-    def runs(self, n: int) -> "BenchmarkBuilder":
+    def runs(self, n: int) -> BenchmarkBuilder:
         self._runs = n
         return self
 
-    def warmup(self, n: int) -> "BenchmarkBuilder":
+    def warmup(self, n: int) -> BenchmarkBuilder:
         self._warmup = n
         return self
 
-    def percentiles(self, *ps: float) -> "BenchmarkBuilder":
+    def percentiles(self, *ps: float) -> BenchmarkBuilder:
         self._percentiles = list(ps)
         return self
 
@@ -836,11 +677,11 @@ class BenchmarkBuilder:
     # Annotation
     # ------------------------------------------------------------------
 
-    def label(self, s: str) -> "BenchmarkBuilder":
+    def label(self, s: str) -> BenchmarkBuilder:
         self._label_str = s
         return self
 
-    def metadata(self, d: dict) -> "BenchmarkBuilder":
+    def metadata(self, d: dict) -> BenchmarkBuilder:
         self._metadata_dict = d
         return self
 
@@ -872,89 +713,141 @@ class BenchmarkBuilder:
             raise ValueError("data_config*() requires data_factory() to be set")
 
     def plan(self) -> str:
-        """Return a plan string (requires at least one pipeline_config_axis)."""
+        output = self._plan()
+        print(output, file=sys.stderr)
+        return output
+
+    def _plan(self) -> str:
         if not self._pipeline_axes:
-            raise ValueError("plan() requires at least one pipeline_config_axis()")
-        return self._build_matrix().to_plan()
+            configs = self._resolve_pipeline_configs()
+            rows = [f"  {i + 1}. {c}" for i, c in enumerate(configs)]
+            return "\n".join([f"plan: {len(configs)} config(s)"] + rows)
+
+        keys = list(self._pipeline_axes.keys())
+        all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self._pipeline_axes.values())]
+        pred = self._pipeline_config_filter_fn
+        active = {frozenset(c.items()) for c in all_combos if pred is None or pred(c)}
+        col_w = max(len(f"{k}={v}") for c in all_combos for k, v in c.items())
+        rows = []
+        for combo in all_combos:
+            kept = frozenset(combo.items()) in active
+            cells = "  ".join(f"{k}={str(v):<{col_w - len(k) - 1}}" for k, v in combo.items())
+            rows.append(f"  {'○' if kept else '×'}  {cells}")
+        total = len(all_combos)
+        n_active = len(active)
+        parts = [f"plan: {total} combinations ({n_active} active, {total - n_active} filtered)"] + rows
+
+        if 2 <= len(keys) <= 3:
+            parts += ["", self.grid()]
+
+        return "\n".join(parts)
 
     def grid(self) -> str:
-        """Return a grid string (requires at least one pipeline_config_axis)."""
         if not self._pipeline_axes:
             raise ValueError("grid() requires at least one pipeline_config_axis()")
-        return self._build_matrix().to_grid()
+        axes = self._pipeline_axes
+        keys = list(axes.keys())
+        n = len(keys)
+        if n < 2 or n > 3:
+            raise ValueError(f"grid() requires 2 or 3 axes, got {n}")
+        pred = self._pipeline_config_filter_fn
+        all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*axes.values())]
+        active = {frozenset(c.items()) for c in all_combos if pred is None or pred(c)}
+        row_key, col_key = keys[0], keys[1]
+        grp_key = keys[2] if n == 3 else None
+        row_vals, col_vals = axes[row_key], axes[col_key]
+        grp_vals = axes[grp_key] if grp_key else [None]
+        cell_w = max(len(str(v)) for v in col_vals)
+        row_label_w = max(len(str(v)) for v in row_vals)
+        grp_w = len(col_vals) * (cell_w + 2) - 2
+        axis_desc = f"row={row_key}  col={col_key}" + (f"  grp={grp_key}" if grp_key else "")
+        lines = [f"grid: {axis_desc}", ""]
+        if grp_key:
+            grp_header = " " * (row_label_w + 2)
+            for gi, gv in enumerate(grp_vals):
+                grp_header += f"{str(gv):^{grp_w}}"
+                if gi < len(grp_vals) - 1:
+                    grp_header += "    "
+            lines.append(grp_header)
+        col_header = " " * (row_label_w + 2)
+        block = "  ".join(f"{str(cv):^{cell_w}}" for cv in col_vals)
+        col_header += "    ".join(block for _ in grp_vals)
+        lines.append(col_header)
+        for rv in row_vals:
+            row = f"{str(rv):{row_label_w}}  "
+            blocks = []
+            for gv in grp_vals:
+                cells = []
+                for cv in col_vals:
+                    combo = {row_key: rv, col_key: cv}
+                    if grp_key:
+                        combo[grp_key] = gv
+                    mark = "○" if frozenset(combo.items()) in active else "×"
+                    cells.append(f"{mark:^{cell_w}}")
+                blocks.append("  ".join(cells))
+            row += "    ".join(blocks)
+            lines.append(row)
+        lines += ["", "○ = active  × = filtered"]
+        return "\n".join(lines)
 
-    def _build_matrix(self) -> BenchmarkMatrix:
-        _factory, _, data_factory, _, _ = self._resolve()
-        return BenchmarkMatrix(
-            factory=_factory,
-            axes=self._pipeline_axes,
-            filter=self._pipeline_config_filter_fn,
-            data_factory=data_factory,
-            data_axes=self._data_axes or None,
-            data_filter=self._data_config_filter_fn,
-            measurement=self._build_measurement(),
-        )
-
-    def _resolve(self) -> "tuple[Callable, list[dict], Callable, list[dict], bool]":
-        """Resolve to (pipeline_factory, pipeline_configs, data_factory, data_configs, use_matrix)."""
+    def _resolve_factory(self) -> PipelineFactory:
         if isinstance(self._source, Pipeline):
             _pipeline = self._source
-            _factory: Callable = lambda _: _pipeline
-        else:
-            _factory = self._source
+            return lambda _: _pipeline
+        return self._source
 
-        # --- Pipeline configs ---
+    def _resolve_pipeline_configs(self) -> list[dict]:
         if self._pipeline_axes:
             keys = list(self._pipeline_axes.keys())
-            pipeline_configs = [
+            configs = [
                 dict(zip(keys, combo))
                 for combo in itertools.product(*self._pipeline_axes.values())
             ]
             if self._pipeline_config_filter_fn:
-                pipeline_configs = [c for c in pipeline_configs if self._pipeline_config_filter_fn(c)]
-        elif self._pipeline_configs_list is not None:
-            pipeline_configs = self._pipeline_configs_list
-        else:
-            pipeline_configs = [self._pipeline_config_dict]
+                configs = [c for c in configs if self._pipeline_config_filter_fn(c)]
+            return configs
+        if self._pipeline_configs_list is not None:
+            return self._pipeline_configs_list
+        return [self._pipeline_config_dict]
 
-        # --- Data factory ---
+    def _resolve_data_factory(self) -> DataFactory:
         if self._data_input_fn is not None:
-            _label = self._label_str or "input"
             _fn = self._data_input_fn
-            data_factory: Callable = lambda _, fn=_fn: fn
-            data_configs = [{"_label": _label}]
-        elif self._data_factory_fn is not None:
-            data_factory = self._data_factory_fn
-            if self._data_axes:
-                keys = list(self._data_axes.keys())
-                data_configs = [
-                    dict(zip(keys, combo))
-                    for combo in itertools.product(*self._data_axes.values())
-                ]
-                if self._data_config_filter_fn:
-                    data_configs = [c for c in data_configs if self._data_config_filter_fn(c)]
-            elif self._data_configs_list is not None:
-                data_configs = self._data_configs_list
-            else:
-                data_configs = [self._data_config_dict if self._data_config_dict else {}]
-        else:
-            raise ValueError("no data_input() or data_factory() provided")
+            return lambda _, fn=_fn: fn
+        if self._data_factory_fn is not None:
+            return self._data_factory_fn
+        raise ValueError("no data_input() or data_factory() provided")
 
-        use_matrix = bool(self._pipeline_axes or self._data_axes)
-        return _factory, pipeline_configs, data_factory, data_configs, use_matrix
+    def _resolve_data_configs(self) -> list[dict]:
+        if self._data_input_fn is not None:
+            return [{"_label": self._label_str or "input"}]
+        if self._data_axes:
+            keys = list(self._data_axes.keys())
+            configs = [
+                dict(zip(keys, combo))
+                for combo in itertools.product(*self._data_axes.values())
+            ]
+            if self._data_config_filter_fn:
+                configs = [c for c in configs if self._data_config_filter_fn(c)]
+            return configs
+        if self._data_configs_list is not None:
+            return self._data_configs_list
+        return [self._data_config_dict if self._data_config_dict else {}]
 
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
 
-    def run(self) -> list[BenchmarkResult]:
+    def run(self, verbose: bool = True) -> list[BenchmarkResult]:
         """Execute the benchmark(s) and return all results."""
         self._validate()
-        _factory, pipeline_configs, data_factory, data_configs, _ = self._resolve()
+        if verbose:
+            print(self._plan(), file=sys.stderr)
+            print(file=sys.stderr)
         return BenchmarkSweep(
-            factory=_factory,
-            configs=pipeline_configs,
-            data_factory=data_factory,
-            data_configs=data_configs,
+            factory=self._resolve_factory(),
+            configs=self._resolve_pipeline_configs(),
+            data_factory=self._resolve_data_factory(),
+            data_configs=self._resolve_data_configs(),
             measurement=self._build_measurement(),
         ).run()

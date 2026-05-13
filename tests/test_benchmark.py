@@ -11,7 +11,6 @@ from ml_pipes.benchmark import (
     Benchmark,
     BenchmarkBuilder,
     BenchmarkCollector,
-    BenchmarkMatrix,
     BenchmarkSweep,
     BenchmarkResult,
     InvocationStat,
@@ -378,78 +377,82 @@ def test_matrix_metadata_records_config_and_data_config():
 
 
 # ---------------------------------------------------------------------------
-# BenchmarkMatrix
+# BenchmarkBuilder — axis expansion (was BenchmarkMatrix)
 # ---------------------------------------------------------------------------
 
 _FIXED_DATA = lambda _: lambda: _static_input(0)
 
 
 def test_matrix_pipeline_configs_cartesian_product():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"a": [1, 2], "b": ["x", "y"], "c": [True]},
-        data_factory=_FIXED_DATA,
+    pipeline_configs = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("a", 1, 2)
+        .pipeline_config_axis("b", "x", "y")
+        .pipeline_config_axis("c", True)
+        .data_factory(_FIXED_DATA)
+        ._resolve_pipeline_configs()
     )
-    configs = matrix.prepare_configs()
-    assert len(configs) == 4  # 2 × 2 × 1
-    assert {"a": 1, "b": "x", "c": True} in configs
-    assert {"a": 2, "b": "y", "c": True} in configs
+    assert len(pipeline_configs) == 4  # 2 × 2 × 1
+    assert {"a": 1, "b": "x", "c": True} in pipeline_configs
+    assert {"a": 2, "b": "y", "c": True} in pipeline_configs
 
 
 def test_matrix_run_produces_correct_count():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"workers": [1, 2], "mode": ["fast", "slow"]},
-        data_factory=lambda cfg: lambda: _static_input(cfg["idx"]),
-        data_axes={"idx": [0, 1]},
-        measurement=MeasurementConfig(runs=3, warmup=1),
+    results = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("workers", 1, 2)
+        .pipeline_config_axis("mode", "fast", "slow")
+        .data_factory(lambda cfg: lambda: _static_input(cfg["idx"]))
+        .data_config_axis("idx", 0, 1)
+        .runs(3).warmup(1)
+        .run()
     )
-    results = matrix.run()
     assert len(results) == 8  # (2×2 pipeline) × 2 data configs
 
 
 def test_matrix_single_axis():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"conf": [0.1, 0.5, 0.9]},
-        data_factory=_FIXED_DATA,
-        measurement=MeasurementConfig(runs=3, warmup=1),
+    results = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("conf", 0.1, 0.5, 0.9)
+        .data_factory(_FIXED_DATA)
+        .runs(3).warmup(1)
+        .run()
     )
-    results = matrix.run()
     assert len(results) == 3
 
 
-def test_matrix_default_config():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"a": [1]},
-        data_factory=_FIXED_DATA,
+def test_matrix_default_measurement():
+    builder = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("a", 1)
+        .data_factory(_FIXED_DATA)
     )
-    assert matrix.measurement is not None
-    assert matrix.measurement.runs == 100
+    m = builder._build_measurement()
+    assert m.runs == 100
 
 
 def test_matrix_filter_removes_invalid_combos():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"workers": [1, 2, 4], "batch_size": [1, 2, 4]},
-        filter=lambda c: c["workers"] >= c["batch_size"],
-        data_factory=_FIXED_DATA,
-        measurement=MeasurementConfig(runs=3, warmup=1),
+    pipeline_configs = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("workers", 1, 2, 4)
+        .pipeline_config_axis("batch_size", 1, 2, 4)
+        .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
+        .data_factory(_FIXED_DATA)
+        ._resolve_pipeline_configs()
     )
-    configs = matrix.prepare_configs()
-    assert all(c["workers"] >= c["batch_size"] for c in configs)
-    assert len(configs) == 6  # (1,1),(2,1),(2,2),(4,1),(4,2),(4,4)
+    assert all(c["workers"] >= c["batch_size"] for c in pipeline_configs)
+    assert len(pipeline_configs) == 6  # (1,1),(2,1),(2,2),(4,1),(4,2),(4,4)
 
 
 def test_matrix_to_plan_shows_all_combos():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"workers": [1, 2], "batch_size": [1, 2]},
-        filter=lambda c: c["workers"] >= c["batch_size"],
-        data_factory=_FIXED_DATA,
+    plan = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("workers", 1, 2)
+        .pipeline_config_axis("batch_size", 1, 2)
+        .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
+        .data_factory(_FIXED_DATA)
+        .plan()
     )
-    plan = matrix.to_plan()
     assert "○" in plan
     assert "×" in plan
     assert "4 combinations" in plan
@@ -458,69 +461,111 @@ def test_matrix_to_plan_shows_all_combos():
 
 
 def test_matrix_to_plan_no_filter():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"a": [1, 2], "b": [1, 2]},
-        data_factory=_FIXED_DATA,
+    plan = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("a", 1, 2)
+        .pipeline_config_axis("b", 1, 2)
+        .data_factory(_FIXED_DATA)
+        .plan()
     )
-    plan = matrix.to_plan()
-    assert "×" not in plan
     assert "4 active, 0 filtered" in plan
+    assert "×" not in plan.split("grid:")[0]
 
 
-def test_matrix_to_grid_2axes():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"workers": [1, 2], "batch_size": [1, 2]},
-        filter=lambda c: c["workers"] >= c["batch_size"],
-        data_factory=_FIXED_DATA,
+def test_plan_includes_grid_for_2axes():
+    plan = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("workers", 1, 2)
+        .pipeline_config_axis("batch_size", 1, 2)
+        .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
+        .data_factory(_FIXED_DATA)
+        .plan()
     )
-    grid = matrix.to_grid()
+    assert "row=workers" in plan
+    assert "col=batch_size" in plan
+
+
+def test_plan_includes_grid_for_3axes():
+    plan = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("workers", 1, 2)
+        .pipeline_config_axis("batch_size", 1, 2)
+        .pipeline_config_axis("serialize", True, False)
+        .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
+        .data_factory(_FIXED_DATA)
+        .plan()
+    )
+    assert "grp=serialize" in plan
+
+
+def test_plan_single_axis_omits_grid():
+    plan = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("a", 1, 2)
+        .data_factory(_FIXED_DATA)
+        .plan()
+    )
+    assert "grid:" not in plan
+    assert "2 combinations" in plan
+
+
+def test_grid_2axes():
+    grid = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("workers", 1, 2)
+        .pipeline_config_axis("batch_size", 1, 2)
+        .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
+        .data_factory(_FIXED_DATA)
+        .grid()
+    )
     assert "○" in grid
     assert "×" in grid
     assert "row=workers" in grid
     assert "col=batch_size" in grid
-    assert "1" in grid
-    assert "2" in grid
 
 
-def test_matrix_to_grid_3axes():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"workers": [1, 2], "batch_size": [1, 2], "serialize": [True, False]},
-        filter=lambda c: c["workers"] >= c["batch_size"],
-        data_factory=_FIXED_DATA,
+def test_grid_3axes():
+    grid = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("workers", 1, 2)
+        .pipeline_config_axis("batch_size", 1, 2)
+        .pipeline_config_axis("serialize", True, False)
+        .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
+        .data_factory(_FIXED_DATA)
+        .grid()
     )
-    grid = matrix.to_grid()
     assert "grp=serialize" in grid
 
 
-def test_matrix_to_grid_wrong_axes():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"a": [1]},
-        data_factory=_FIXED_DATA,
-    )
+def test_grid_wrong_axes_raises():
     with pytest.raises(ValueError):
-        matrix.to_grid()
+        (
+            BenchmarkBuilder.factory(_make_pipeline_from_config)
+            .pipeline_config_axis("a", 1)
+            .data_factory(_FIXED_DATA)
+            .grid()
+        )
 
 
 def test_matrix_filter_none_keeps_all():
-    matrix = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"a": [1, 2], "b": [1, 2]},
-        data_factory=_FIXED_DATA,
+    pipeline_configs = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("a", 1, 2)
+        .pipeline_config_axis("b", 1, 2)
+        .data_factory(_FIXED_DATA)
+        ._resolve_pipeline_configs()
     )
-    assert len(matrix.prepare_configs()) == 4
+    assert len(pipeline_configs) == 4
 
 
 def test_matrix_to_comparison_table_renders():
-    results = BenchmarkMatrix(
-        factory=_make_pipeline_from_config,
-        axes={"a": [1, 2]},
-        data_factory=_FIXED_DATA,
-        measurement=MeasurementConfig(runs=3, warmup=1),
-    ).run()
+    results = (
+        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        .pipeline_config_axis("a", 1, 2)
+        .data_factory(_FIXED_DATA)
+        .runs(3).warmup(1)
+        .run()
+    )
     assert "total" in BenchmarkResult.to_comparison_table(results)
 
 
@@ -699,13 +744,15 @@ def test_builder_both_axes_cross_product():
 
 # --- plan() / grid() require axes ---
 
-def test_builder_plan_requires_pipeline_axis():
-    b = (
+def test_builder_plan_without_axes_lists_configs():
+    plan = (
         BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(x=1)
         .data_input(_builder_input_fn)
+        .plan()
     )
-    with pytest.raises(ValueError, match="pipeline_config_axis"):
-        b.plan()
+    assert "1 config" in plan
+    assert "x" in plan
 
 
 def test_builder_plan_returns_string():
