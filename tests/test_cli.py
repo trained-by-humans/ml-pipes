@@ -170,7 +170,23 @@ def test_discover_factory_explicit_bypasses_scan():
     def explicit(config): pass
     m = _fake_module("_test4")
     result = discover_factory(m, explicit, _PIPELINE_FACTORY_ATTR, "pipeline")
-    assert result is explicit
+    # Undecorated explicit refs are wrapped — __wrapped__ points to the original
+    assert result.__wrapped__ is explicit
+
+
+def test_discover_factory_explicit_undecorated_wraps_for_dict_call():
+    def plain(x=1, y=2): return (x, y)
+    m = _fake_module("_test5")
+    result = discover_factory(m, plain, _PIPELINE_FACTORY_ATTR, "pipeline")
+    assert result({"x": 10, "y": 20}) == (10, 20)
+
+
+def test_discover_factory_explicit_already_decorated_not_double_wrapped():
+    @pipeline_factory
+    def decorated(x=1): pass
+    m = _fake_module("_test6")
+    result = discover_factory(m, decorated, _PIPELINE_FACTORY_ATTR, "pipeline")
+    assert result is decorated
 
 
 # ---------------------------------------------------------------------------
