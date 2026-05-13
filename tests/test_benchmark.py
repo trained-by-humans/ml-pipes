@@ -376,6 +376,55 @@ def test_matrix_metadata_records_config_and_data_config():
     assert "data_config" in meta
 
 
+def test_sweep_label_prefix_single_result():
+    results = BenchmarkSweep(
+        factory=_make_pipeline_from_config,
+        configs=[{}],
+        data_factory=lambda _: lambda: _static_input(0),
+        measurement=MeasurementConfig(runs=3, warmup=1),
+        label_prefix="baseline",
+    ).run()
+    assert results[0].label == "baseline"
+
+
+def test_sweep_label_prefix_multi_result():
+    results = BenchmarkSweep(
+        factory=_make_pipeline_from_config,
+        configs=[{"a": 1}, {"a": 2}],
+        data_factory=lambda _: lambda: _static_input(0),
+        measurement=MeasurementConfig(runs=3, warmup=1),
+        label_prefix="exp",
+    ).run()
+    assert len(results) == 2
+    assert all(r.label.startswith("exp|") for r in results)
+
+
+def test_sweep_extra_metadata_merged_into_all_results():
+    results = BenchmarkSweep(
+        factory=_make_pipeline_from_config,
+        configs=[{"a": 1}, {"a": 2}],
+        data_factory=lambda _: lambda: _static_input(0),
+        measurement=MeasurementConfig(runs=3, warmup=1),
+        extra_metadata={"env": "ci", "git_sha": "abc"},
+    ).run()
+    assert len(results) == 2
+    for r in results:
+        assert r.metadata["env"] == "ci"
+        assert r.metadata["git_sha"] == "abc"
+
+
+def test_sweep_extra_metadata_does_not_overwrite_pipeline_config():
+    results = BenchmarkSweep(
+        factory=_make_pipeline_from_config,
+        configs=[{"batch": 4}],
+        data_factory=lambda _: lambda: _static_input(0),
+        measurement=MeasurementConfig(runs=3, warmup=1),
+        extra_metadata={"note": "hi"},
+    ).run()
+    assert results[0].metadata["pipeline_config"] == {"batch": 4}
+    assert results[0].metadata["note"] == "hi"
+
+
 # ---------------------------------------------------------------------------
 # BenchmarkBuilder — axis expansion (was BenchmarkMatrix)
 # ---------------------------------------------------------------------------
@@ -650,6 +699,61 @@ def test_builder_single_run_label_applied():
     assert results[0].label == "my-run"
 
 
+def test_builder_label_applied_with_factory_single_result():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .data_factory(_make_builder_data_factory)
+        .label("factory-run")
+        .runs(3).warmup(1)
+        .run()
+    )
+    assert len(results) == 1
+    assert results[0].label == "factory-run"
+
+
+def test_builder_label_prefix_on_sweep():
+    # with multiple results, label_prefix is prepended to each auto-generated label
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config_set([{"x": 1}, {"x": 2}])
+        .data_input(_builder_input_fn)
+        .label("exp")
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2
+    assert all(r.label.startswith("exp|") for r in results)
+
+
+def test_builder_metadata_applied_to_all_results():
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config_set([{"x": 1}, {"x": 2}])
+        .data_input(_builder_input_fn)
+        .metadata({"env": "test", "git_sha": "abc123"})
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert len(results) == 2
+    for r in results:
+        assert r.metadata["env"] == "test"
+        assert r.metadata["git_sha"] == "abc123"
+
+
+def test_builder_metadata_does_not_overwrite_pipeline_config():
+    # metadata merges on top; pipeline_config key in auto-metadata is preserved
+    results = (
+        BenchmarkBuilder.factory(_make_builder_pipeline)
+        .pipeline_config(x=1)
+        .data_input(_builder_input_fn)
+        .metadata({"note": "hi"})
+        .runs(2).warmup(1)
+        .run()
+    )
+    assert results[0].metadata["pipeline_config"] == {"x": 1}
+    assert results[0].metadata["note"] == "hi"
+
+
 # --- Sweep: factory + explicit pipeline configs + concrete input ---
 
 def test_builder_pipeline_configs_sweep():
@@ -792,6 +896,36 @@ def test_builder_data_config_filter_drops_configs():
 
 # --- Validation errors ---
 
+def test_builder_concrete_pipeline_with_pipeline_config_raises():
+    with pytest.raises(ValueError, match="concrete Pipeline"):
+        (
+            BenchmarkBuilder.pipeline(_make_pipeline())
+            .pipeline_config(workers=4)
+            .data_input(_builder_input_fn)
+            .run()
+        )
+
+
+def test_builder_concrete_pipeline_with_pipeline_config_set_raises():
+    with pytest.raises(ValueError, match="concrete Pipeline"):
+        (
+            BenchmarkBuilder.pipeline(_make_pipeline())
+            .pipeline_config_set([{"x": 1}])
+            .data_input(_builder_input_fn)
+            .run()
+        )
+
+
+def test_builder_concrete_pipeline_with_pipeline_config_axis_raises():
+    with pytest.raises(ValueError, match="concrete Pipeline"):
+        (
+            BenchmarkBuilder.pipeline(_make_pipeline())
+            .pipeline_config_axis("x", 1, 2)
+            .data_input(_builder_input_fn)
+            .run()
+        )
+
+
 def test_builder_pipeline_configs_and_axis_raises():
     with pytest.raises(ValueError, match="mutually exclusive"):
         (
@@ -825,7 +959,7 @@ def test_builder_data_input_and_data_factory_raises():
 
 
 def test_builder_data_config_with_data_input_raises():
-    with pytest.raises(ValueError, match="data_input"):
+    with pytest.raises(ValueError, match="concrete InputFn"):
         (
             BenchmarkBuilder.pipeline(_make_pipeline())
             .data_input(_builder_input_fn)

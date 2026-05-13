@@ -502,6 +502,8 @@ class BenchmarkSweep:
     data_factory: DataFactory
     data_configs: list[dict] | None = None
     measurement: MeasurementConfig = None  # type: ignore[assignment]
+    label_prefix: str | None = None
+    extra_metadata: dict | None = None
 
     def __post_init__(self) -> None:
         if self.measurement is None:
@@ -510,6 +512,7 @@ class BenchmarkSweep:
             self.data_configs = [{}]
 
     def run(self) -> list[BenchmarkResult]:
+        is_single = len(self.configs) == 1 and len(self.data_configs) == 1  # type: ignore[arg-type]
         results: list[BenchmarkResult] = []
         for data_config in self.data_configs:  # type: ignore[union-attr]
             input_fn = self.data_factory(data_config)
@@ -520,13 +523,20 @@ class BenchmarkSweep:
                 data_label = "|".join(f"{k}:{v}" for k, v in visible.items()) or "input"
             for pipeline_config in self.configs:
                 config_str = "|".join(f"{k}:{v}" for k, v in pipeline_config.items())
-                label = f"{data_label}|{config_str}" if config_str else data_label
+                auto_label = f"{data_label}|{config_str}" if config_str else data_label
+                if self.label_prefix:
+                    label = self.label_prefix if is_single else f"{self.label_prefix}|{auto_label}"
+                else:
+                    label = auto_label
+                metadata: dict = {"pipeline_config": pipeline_config, "data_config": data_config}
+                if self.extra_metadata:
+                    metadata.update(self.extra_metadata)
                 result = Benchmark(
                     pipeline=self.factory(pipeline_config),
                     input_fn=input_fn,
                     measurement=self.measurement,
                     label=label,
-                    metadata={"pipeline_config": pipeline_config, "data_config": data_config},
+                    metadata=metadata,
                 ).run()
                 results.append(result)
         return results
@@ -685,10 +695,25 @@ class BenchmarkBuilder:
         return MeasurementConfig(runs=n, warmup=w, percentiles=p)
 
     def _validate(self) -> None:
+        self._validate_pipeline_source()
+        self._validate_data_source()
+
+    def _validate_pipeline_source(self) -> None:
+        if isinstance(self._source, Pipeline):
+            has_pipeline_config = (
+                self._pipeline_config_dict
+                or self._pipeline_config_set is not None
+                or self._pipeline_axes
+            )
+            if has_pipeline_config:
+                raise ValueError(
+                    "pipeline config methods cannot be used with BenchmarkBuilder.pipeline() — "
+                    "a concrete Pipeline ignores config. Use BenchmarkBuilder.factory() instead."
+                )
         if self._pipeline_config_set is not None and self._pipeline_axes:
             raise ValueError("pipeline_config_set() and pipeline_config_axis() are mutually exclusive")
-        if self._data_config_set is not None and self._data_axes:
-            raise ValueError("data_config_set() and data_config_axis() are mutually exclusive")
+
+    def _validate_data_source(self) -> None:
         if self._data_input_fn is not None and self._data_factory_fn is not None:
             raise ValueError("data_input() and data_factory() are mutually exclusive")
         has_data_config = (
@@ -697,9 +722,14 @@ class BenchmarkBuilder:
             or self._data_axes
         )
         if has_data_config and self._data_input_fn is not None:
-            raise ValueError("data_config*() cannot be used with data_input() — InputFn has no config")
+            raise ValueError(
+                "data config methods cannot be used with data_input() — "
+                "a concrete InputFn ignores config. Use data_factory() instead."
+            )
         if has_data_config and self._data_factory_fn is None and self._data_input_fn is None:
             raise ValueError("data_config*() requires data_factory() to be set")
+        if self._data_config_set is not None and self._data_axes:
+            raise ValueError("data_config_set() and data_config_axis() are mutually exclusive")
 
     def plan(self) -> str:
         output = self._plan()
@@ -809,7 +839,7 @@ class BenchmarkBuilder:
 
     def _resolve_data_configs(self) -> list[dict]:
         if self._data_input_fn is not None:
-            return [{"_label": self._label_str or "input"}]
+            return [{"_label": "input"}]
         if self._data_axes:
             keys = list(self._data_axes.keys())
             configs = [
@@ -839,4 +869,6 @@ class BenchmarkBuilder:
             data_factory=self._resolve_data_factory(),
             data_configs=self._resolve_data_configs(),
             measurement=self._build_measurement(),
+            label_prefix=self._label_str or None,
+            extra_metadata=self._metadata_dict or None,
         ).run()
