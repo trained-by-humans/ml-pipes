@@ -553,12 +553,12 @@ class BenchmarkBuilder:
         self._data_factory_fn: DataFactory | None = None
 
         self._pipeline_config_dict: dict = {}
-        self._pipeline_configs_list: list[dict] | None = None
+        self._pipeline_config_set: list[dict] | None = None
         self._pipeline_axes: dict[str, list] = {}
         self._pipeline_config_filter_fn: Callable | None = None
 
         self._data_config_dict: dict = {}
-        self._data_configs_list: list[dict] | None = None
+        self._data_config_set: list[dict] | None = None
         self._data_axes: dict[str, list] = {}
         self._data_config_filter_fn: Callable | None = None
 
@@ -591,14 +591,9 @@ class BenchmarkBuilder:
         self._pipeline_config_dict.update(kwargs)
         return self
 
-    def pipeline_configs(self, configs: list[dict]) -> BenchmarkBuilder:
-        """Set an explicit list of pipeline configs for a sweep."""
-        self._pipeline_configs_list = list(configs)
-        return self
-
-    def pipeline_config_arg(self, key: str, value: Any) -> BenchmarkBuilder:
-        """Add a single key to the pipeline config dict."""
-        self._pipeline_config_dict[key] = value
+    def pipeline_config_set(self, configs: list[dict]) -> BenchmarkBuilder:
+        """Set an explicit list of handpicked pipeline configs for a sweep."""
+        self._pipeline_config_set = list(configs)
         return self
 
     def pipeline_config_axis(self, key: str, *values) -> BenchmarkBuilder:
@@ -624,7 +619,7 @@ class BenchmarkBuilder:
         """Use multiple InputFns as a sweep — each gets a label."""
         _fn_map = dict(zip(labels, fns))
         self._data_factory_fn = lambda cfg, _m=_fn_map: _m[cfg["_label"]]
-        self._data_configs_list = [{"_label": lab} for lab in labels]
+        self._data_config_set = [{"_label": lab} for lab in labels]
         return self
 
     def data_factory(self, factory: DataFactory) -> BenchmarkBuilder:
@@ -637,14 +632,9 @@ class BenchmarkBuilder:
         self._data_config_dict.update(kwargs)
         return self
 
-    def data_configs(self, configs: list[dict]) -> BenchmarkBuilder:
-        """Set an explicit list of data configs for a sweep."""
-        self._data_configs_list = list(configs)
-        return self
-
-    def data_config_arg(self, key: str, value: Any) -> BenchmarkBuilder:
-        """Add a single key to the data config dict."""
-        self._data_config_dict[key] = value
+    def data_config_set(self, configs: list[dict]) -> BenchmarkBuilder:
+        """Set an explicit list of handpicked data configs for a sweep."""
+        self._data_config_set = list(configs)
         return self
 
     def data_config_axis(self, key: str, *values) -> BenchmarkBuilder:
@@ -696,15 +686,15 @@ class BenchmarkBuilder:
         return MeasurementConfig(runs=n, warmup=w, percentiles=p)
 
     def _validate(self) -> None:
-        if self._pipeline_configs_list is not None and self._pipeline_axes:
-            raise ValueError("pipeline_configs() and pipeline_config_axis() are mutually exclusive")
-        if self._data_configs_list is not None and self._data_axes:
-            raise ValueError("data_configs() and data_config_axis() are mutually exclusive")
+        if self._pipeline_config_set is not None and self._pipeline_axes:
+            raise ValueError("pipeline_config_set() and pipeline_config_axis() are mutually exclusive")
+        if self._data_config_set is not None and self._data_axes:
+            raise ValueError("data_config_set() and data_config_axis() are mutually exclusive")
         if self._data_input_fn is not None and self._data_factory_fn is not None:
             raise ValueError("data_input() and data_factory() are mutually exclusive")
         has_data_config = (
             self._data_config_dict
-            or self._data_configs_list is not None
+            or self._data_config_set is not None
             or self._data_axes
         )
         if has_data_config and self._data_input_fn is not None:
@@ -800,14 +790,14 @@ class BenchmarkBuilder:
         if self._pipeline_axes:
             keys = list(self._pipeline_axes.keys())
             configs = [
-                dict(zip(keys, combo))
+                {**self._pipeline_config_dict, **dict(zip(keys, combo))}
                 for combo in itertools.product(*self._pipeline_axes.values())
             ]
             if self._pipeline_config_filter_fn:
                 configs = [c for c in configs if self._pipeline_config_filter_fn(c)]
             return configs
-        if self._pipeline_configs_list is not None:
-            return self._pipeline_configs_list
+        if self._pipeline_config_set is not None:
+            return [{**self._pipeline_config_dict, **c} for c in self._pipeline_config_set]
         return [self._pipeline_config_dict]
 
     def _resolve_data_factory(self) -> DataFactory:
@@ -824,14 +814,14 @@ class BenchmarkBuilder:
         if self._data_axes:
             keys = list(self._data_axes.keys())
             configs = [
-                dict(zip(keys, combo))
+                {**self._data_config_dict, **dict(zip(keys, combo))}
                 for combo in itertools.product(*self._data_axes.values())
             ]
             if self._data_config_filter_fn:
                 configs = [c for c in configs if self._data_config_filter_fn(c)]
             return configs
-        if self._data_configs_list is not None:
-            return self._data_configs_list
+        if self._data_config_set is not None:
+            return [{**self._data_config_dict, **c} for c in self._data_config_set]
         return [self._data_config_dict if self._data_config_dict else {}]
 
     # ------------------------------------------------------------------

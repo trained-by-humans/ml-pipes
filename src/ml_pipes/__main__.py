@@ -260,11 +260,11 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
                 key, values = _parse_config_axis(spec)
                 builder.pipeline_config_axis(key, *values)
         case (_, True):
-            builder.pipeline_configs(_parse_config_list(args.configs))
+            builder.pipeline_config_set(_parse_config_list(args.configs))
         case _:
             for spec in args.args or []:
                 key, value = _parse_config_arg(spec)
-                builder.pipeline_config_arg(key, value)
+                builder.pipeline_config(**{key: value})
 
     if data_fn is None:
         if not args.input:
@@ -282,11 +282,11 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
                     key, values = _parse_config_axis(spec)
                     builder.data_config_axis(key, *values)
             case (_, True):
-                builder.data_configs(_parse_config_list(args.data_configs))
+                builder.data_config_set(_parse_config_list(args.data_configs))
             case _:
                 for spec in args.data_args or []:
                     key, value = _parse_config_arg(spec)
-                    builder.data_config_arg(key, value)
+                    builder.data_config(**{key: value})
 
     builder.runs(args.runs)
     if args.warmup is not None:
