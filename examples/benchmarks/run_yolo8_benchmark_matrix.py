@@ -100,12 +100,12 @@ def main() -> int:
 
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
 
+    _fn = _input_fn(image_path)
     matrix = BenchmarkMatrix(
         factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
         axes=axes,
         filter=_valid,
-        input_fns=[_input_fn(image_path)],
-        input_labels=[image_path.name],
+        data_factory=lambda _, fn=_fn: fn,
         measurement=config,
     )
 

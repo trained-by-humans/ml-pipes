@@ -293,24 +293,22 @@ def _make_pipeline_from_config(config: dict) -> Pipeline:
 
 def test_matrix_run_produces_correct_count():
     configs = [{"workers": 1}, {"workers": 2}]
-    inputs = [lambda: _static_input(0), lambda: _static_input(1)]
-    matrix = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
-        configs=configs,
-        input_fns=inputs,
-        measurement=MeasurementConfig(runs=3, warmup=1),
-    )
-    results = matrix.run()
-    assert len(results) == 4  # 2 configs × 2 inputs
-
-
-def test_matrix_result_labels_contain_input_and_config():
-    configs = [{"mode": "fast"}]
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=configs,
-        input_fns=[lambda: _static_input(0)],
-        input_labels=["my_input"],
+        data_factory=lambda cfg: lambda: _static_input(cfg["idx"]),
+        data_configs=[{"idx": 0}, {"idx": 1}],
+        measurement=MeasurementConfig(runs=3, warmup=1),
+    ).run()
+    assert len(results) == 4  # 2 configs × 2 data configs
+
+
+def test_matrix_result_labels_contain_input_and_config():
+    results = BenchmarkSweep(
+        factory=_make_pipeline_from_config,
+        configs=[{"mode": "fast"}],
+        data_factory=lambda cfg: lambda: _static_input(0),
+        data_configs=[{"name": "my_input"}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     assert len(results) == 1
@@ -318,34 +316,33 @@ def test_matrix_result_labels_contain_input_and_config():
     assert "fast" in results[0].label
 
 
-def test_matrix_result_labels_default_to_index():
+def test_matrix_result_labels_data_key_in_label():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{}],
-        input_fns=[lambda: _static_input(0), lambda: _static_input(1)],
+        data_factory=lambda cfg: lambda: _static_input(cfg["idx"]),
+        data_configs=[{"idx": 0}, {"idx": 1}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
-    assert "input0" in results[0].label
-    assert "input1" in results[1].label
+    assert "idx:0" in results[0].label
+    assert "idx:1" in results[1].label
 
 
 def test_matrix_default_config():
     matrix = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{}],
-        input_fns=[lambda: _static_input(0)],
+        data_factory=lambda _: lambda: _static_input(0),
     )
     assert matrix.measurement is not None
     assert matrix.measurement.runs == 100
 
 
 def test_matrix_to_table_renders():
-    configs = [{"a": 1}, {"a": 2}]
-    inputs = [lambda: _static_input(0)]
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
-        configs=configs,
-        input_fns=inputs,
+        configs=[{"a": 1}, {"a": 2}],
+        data_factory=lambda _: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     table = BenchmarkResult.to_comparison_table(results)
@@ -357,7 +354,7 @@ def test_sweep_to_table_expand_regions_false():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"a": 1}],
-        input_fns=[lambda: _static_input(0)],
+        data_factory=lambda _: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     table = BenchmarkResult.to_comparison_table(results, expand_regions=False)
@@ -368,29 +365,30 @@ def test_matrix_to_table_empty():
     assert BenchmarkResult.to_comparison_table([]) == "(no results)"
 
 
-def test_matrix_metadata_records_config_and_input():
-    configs = [{"batch": 4}]
+def test_matrix_metadata_records_config_and_data_config():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
-        configs=configs,
-        input_fns=[lambda: _static_input(0)],
-        input_labels=["img.jpg"],
+        configs=[{"batch": 4}],
+        data_factory=lambda _: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     meta = results[0].metadata
     assert meta["pipeline_config"] == {"batch": 4}
-    assert "img.jpg" in results[0].label
+    assert "data_config" in meta
 
 
 # ---------------------------------------------------------------------------
 # BenchmarkMatrix
 # ---------------------------------------------------------------------------
 
+_FIXED_DATA = lambda _: lambda: _static_input(0)
+
+
 def test_matrix_pipeline_configs_cartesian_product():
     matrix = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"a": [1, 2], "b": ["x", "y"], "c": [True]},
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     configs = matrix.prepare_configs()
     assert len(configs) == 4  # 2 × 2 × 1
@@ -402,18 +400,19 @@ def test_matrix_run_produces_correct_count():
     matrix = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"workers": [1, 2], "mode": ["fast", "slow"]},
-        input_fns=[lambda: _static_input(0), lambda: _static_input(1)],
+        data_factory=lambda cfg: lambda: _static_input(cfg["idx"]),
+        data_axes={"idx": [0, 1]},
         measurement=MeasurementConfig(runs=3, warmup=1),
     )
     results = matrix.run()
-    assert len(results) == 8  # 2 axes × 2 values each × 2 inputs
+    assert len(results) == 8  # (2×2 pipeline) × 2 data configs
 
 
 def test_matrix_single_axis():
     matrix = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"conf": [0.1, 0.5, 0.9]},
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
         measurement=MeasurementConfig(runs=3, warmup=1),
     )
     results = matrix.run()
@@ -424,7 +423,7 @@ def test_matrix_default_config():
     matrix = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"a": [1]},
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     assert matrix.measurement is not None
     assert matrix.measurement.runs == 100
@@ -435,7 +434,7 @@ def test_matrix_filter_removes_invalid_combos():
         factory=_make_pipeline_from_config,
         axes={"workers": [1, 2, 4], "batch_size": [1, 2, 4]},
         filter=lambda c: c["workers"] >= c["batch_size"],
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
         measurement=MeasurementConfig(runs=3, warmup=1),
     )
     configs = matrix.prepare_configs()
@@ -448,7 +447,7 @@ def test_matrix_to_plan_shows_all_combos():
         factory=_make_pipeline_from_config,
         axes={"workers": [1, 2], "batch_size": [1, 2]},
         filter=lambda c: c["workers"] >= c["batch_size"],
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     plan = matrix.to_plan()
     assert "○" in plan
@@ -462,7 +461,7 @@ def test_matrix_to_plan_no_filter():
     matrix = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"a": [1, 2], "b": [1, 2]},
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     plan = matrix.to_plan()
     assert "×" not in plan
@@ -474,14 +473,14 @@ def test_matrix_to_grid_2axes():
         factory=_make_pipeline_from_config,
         axes={"workers": [1, 2], "batch_size": [1, 2]},
         filter=lambda c: c["workers"] >= c["batch_size"],
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     grid = matrix.to_grid()
     assert "○" in grid
     assert "×" in grid
     assert "row=workers" in grid
     assert "col=batch_size" in grid
-    assert "1" in grid  # row values shown directly
+    assert "1" in grid
     assert "2" in grid
 
 
@@ -490,18 +489,17 @@ def test_matrix_to_grid_3axes():
         factory=_make_pipeline_from_config,
         axes={"workers": [1, 2], "batch_size": [1, 2], "serialize": [True, False]},
         filter=lambda c: c["workers"] >= c["batch_size"],
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     grid = matrix.to_grid()
     assert "grp=serialize" in grid
 
 
 def test_matrix_to_grid_wrong_axes():
-    import pytest
     matrix = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"a": [1]},
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     with pytest.raises(ValueError):
         matrix.to_grid()
@@ -511,7 +509,7 @@ def test_matrix_filter_none_keeps_all():
     matrix = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"a": [1, 2], "b": [1, 2]},
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
     )
     assert len(matrix.prepare_configs()) == 4
 
@@ -520,7 +518,7 @@ def test_matrix_to_comparison_table_renders():
     results = BenchmarkMatrix(
         factory=_make_pipeline_from_config,
         axes={"a": [1, 2]},
-        input_fns=[lambda: _static_input(0)],
+        data_factory=_FIXED_DATA,
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     assert "total" in BenchmarkResult.to_comparison_table(results)

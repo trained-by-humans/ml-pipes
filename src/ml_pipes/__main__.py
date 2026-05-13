@@ -342,55 +342,49 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     else:
         data_configs = [_parse_args_to_config(args.data_args or [], "--data-arg")]
 
-    # Resolve input path: data_factory if available, else --input files
-    if data_fn is not None:
-        if args.axes or args.data_axes:
-            runner = BenchmarkMatrix(
-                factory=factory,
-                axes=pipeline_axes if args.axes else {"_": [{}]},
-                data_factory=data_fn,
-                data_axes=data_axes if args.data_axes else None,
-                measurement=measurement,
-            )
-            if args.axes:
-                print(runner.to_plan(), file=sys.stderr)
-                print(file=sys.stderr)
-            results = runner.run()
-        else:
-            results = BenchmarkSweep(
-                factory=factory,
-                configs=pipeline_configs,
-                data_factory=data_fn,
-                data_configs=data_configs,
-                measurement=measurement,
-            ).run()
-    else:
-        # Fall back to --input file paths (legacy input_fns path)
+    # Resolve data source — file --input paths become a data factory over per-file configs
+    if data_fn is None:
         if not args.input:
             raise CLIError(
                 "no @data_factory found and no --input paths given. "
                 "Either decorate a function with @data_factory, or pass --input path [...]."
             )
-        input_fns, input_labels = _build_file_input_fns(args.input)
-        if args.axes:
-            runner = BenchmarkMatrix(
-                factory=factory,
-                axes=pipeline_axes,
-                input_fns=input_fns,
-                input_labels=input_labels,
-                measurement=measurement,
-            )
-            print(runner.to_plan(), file=sys.stderr)
-            print(file=sys.stderr)
-            results = runner.run()
-        else:
-            results = BenchmarkSweep(
-                factory=factory,
-                configs=pipeline_configs,
-                input_fns=input_fns,
-                input_labels=input_labels,
-                measurement=measurement,
-            ).run()
+        raw_fns, raw_labels = _build_file_input_fns(args.input)
+        _fn_map = {lab: fn for fn, lab in zip(raw_fns, raw_labels)}
+        data_fn = lambda cfg, _m=_fn_map: _m[cfg["_label"]]
+        data_configs = [{"_label": lab} for lab in raw_labels]
+
+    if args.axes:
+        runner = BenchmarkMatrix(
+            factory=factory,
+            axes=pipeline_axes,
+            data_factory=data_fn,
+            data_axes=data_axes if args.data_axes else None,
+            measurement=measurement,
+        )
+        print(runner.to_plan(), file=sys.stderr)
+        print(file=sys.stderr)
+        results = runner.run()
+    elif args.data_axes:
+        # Data axes only — expand locally and use BenchmarkSweep
+        from itertools import product as _product
+        keys = list(data_axes.keys())
+        expanded = [dict(zip(keys, combo)) for combo in _product(*data_axes.values())]
+        results = BenchmarkSweep(
+            factory=factory,
+            configs=pipeline_configs,
+            data_factory=data_fn,
+            data_configs=expanded,
+            measurement=measurement,
+        ).run()
+    else:
+        results = BenchmarkSweep(
+            factory=factory,
+            configs=pipeline_configs,
+            data_factory=data_fn,
+            data_configs=data_configs,
+            measurement=measurement,
+        ).run()
 
     print(BenchmarkResult.to_comparison_table(results, expand_regions=expand_regions))
 
