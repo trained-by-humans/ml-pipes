@@ -716,3 +716,265 @@ class BenchmarkMatrix:
             measurement=self.measurement,
         ).run()
 
+
+class BenchmarkBuilder:
+    """Fluent builder for benchmarks.
+
+    Entry points::
+
+        BenchmarkBuilder.pipeline(p)   # concrete Pipeline (no config sweep)
+        BenchmarkBuilder.factory(f)    # factory callable (config sweep / matrix)
+
+    Chain measurement, pipeline config, and data config methods, then call
+    ``.run()`` which returns ``list[BenchmarkResult]``.
+    """
+
+    def __init__(self, source: "Pipeline | Callable") -> None:
+        self._source = source
+
+        self._data_input_fn: InputFn | None = None
+        self._data_factory_fn: Callable | None = None
+
+        self._pipeline_config_dict: dict = {}
+        self._pipeline_configs_list: list[dict] | None = None
+        self._pipeline_axes: dict[str, list] = {}
+        self._pipeline_config_filter_fn: Callable | None = None
+
+        self._data_config_dict: dict = {}
+        self._data_configs_list: list[dict] | None = None
+        self._data_axes: dict[str, list] = {}
+        self._data_config_filter_fn: Callable | None = None
+
+        self._runs: int | None = None
+        self._warmup: int | None = None
+        self._percentiles: list[float] | None = None
+        self._label_str: str | None = None
+        self._metadata_dict: dict | None = None
+
+    # ------------------------------------------------------------------
+    # Named constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def pipeline(cls, p: "Pipeline") -> "BenchmarkBuilder":
+        """Start from a concrete Pipeline (no config sweep)."""
+        return cls(p)
+
+    @classmethod
+    def factory(cls, f: Callable) -> "BenchmarkBuilder":
+        """Start from a pipeline factory callable."""
+        return cls(f)
+
+    # ------------------------------------------------------------------
+    # Pipeline config dimension
+    # ------------------------------------------------------------------
+
+    def pipeline_config(self, **kwargs) -> "BenchmarkBuilder":
+        """Set a single pipeline config dict."""
+        self._pipeline_config_dict.update(kwargs)
+        return self
+
+    def pipeline_configs(self, configs: list[dict]) -> "BenchmarkBuilder":
+        """Set an explicit list of pipeline configs for a sweep."""
+        self._pipeline_configs_list = list(configs)
+        return self
+
+    def pipeline_config_arg(self, key: str, value: Any) -> "BenchmarkBuilder":
+        """Add a single key to the pipeline config dict."""
+        self._pipeline_config_dict[key] = value
+        return self
+
+    def pipeline_config_axis(self, key: str, *values) -> "BenchmarkBuilder":
+        """Register a pipeline config axis for cartesian expansion."""
+        self._pipeline_axes[key] = list(values)
+        return self
+
+    def pipeline_config_filter(self, pred: Callable[[dict], bool]) -> "BenchmarkBuilder":
+        """Drop pipeline configs where pred returns False."""
+        self._pipeline_config_filter_fn = pred
+        return self
+
+    # ------------------------------------------------------------------
+    # Data dimension
+    # ------------------------------------------------------------------
+
+    def data_input(self, fn: InputFn) -> "BenchmarkBuilder":
+        """Use a concrete InputFn (no data config sweep)."""
+        self._data_input_fn = fn
+        return self
+
+    def data_factory(self, factory: Callable) -> "BenchmarkBuilder":
+        """Use a data factory callable (enables data config sweep)."""
+        self._data_factory_fn = factory
+        return self
+
+    def data_config(self, **kwargs) -> "BenchmarkBuilder":
+        """Set a single data config dict."""
+        self._data_config_dict.update(kwargs)
+        return self
+
+    def data_configs(self, configs: list[dict]) -> "BenchmarkBuilder":
+        """Set an explicit list of data configs for a sweep."""
+        self._data_configs_list = list(configs)
+        return self
+
+    def data_config_arg(self, key: str, value: Any) -> "BenchmarkBuilder":
+        """Add a single key to the data config dict."""
+        self._data_config_dict[key] = value
+        return self
+
+    def data_config_axis(self, key: str, *values) -> "BenchmarkBuilder":
+        """Register a data config axis for cartesian expansion."""
+        self._data_axes[key] = list(values)
+        return self
+
+    def data_config_filter(self, pred: Callable[[dict], bool]) -> "BenchmarkBuilder":
+        """Drop data configs where pred returns False."""
+        self._data_config_filter_fn = pred
+        return self
+
+    # ------------------------------------------------------------------
+    # Measurement
+    # ------------------------------------------------------------------
+
+    def runs(self, n: int) -> "BenchmarkBuilder":
+        self._runs = n
+        return self
+
+    def warmup(self, n: int) -> "BenchmarkBuilder":
+        self._warmup = n
+        return self
+
+    def percentiles(self, *ps: float) -> "BenchmarkBuilder":
+        self._percentiles = list(ps)
+        return self
+
+    # ------------------------------------------------------------------
+    # Annotation
+    # ------------------------------------------------------------------
+
+    def label(self, s: str) -> "BenchmarkBuilder":
+        self._label_str = s
+        return self
+
+    def metadata(self, d: dict) -> "BenchmarkBuilder":
+        self._metadata_dict = d
+        return self
+
+    # ------------------------------------------------------------------
+    # Execution helpers
+    # ------------------------------------------------------------------
+
+    def _build_measurement(self) -> MeasurementConfig:
+        n = self._runs or 100
+        w = self._warmup if self._warmup is not None else max(5, n // 10)
+        p = tuple(self._percentiles) if self._percentiles else (0.50, 0.95, 0.99)
+        return MeasurementConfig(runs=n, warmup=w, percentiles=p)
+
+    def _validate(self) -> None:
+        if self._pipeline_configs_list is not None and self._pipeline_axes:
+            raise ValueError("pipeline_configs() and pipeline_config_axis() are mutually exclusive")
+        if self._data_configs_list is not None and self._data_axes:
+            raise ValueError("data_configs() and data_config_axis() are mutually exclusive")
+        if self._data_input_fn is not None and self._data_factory_fn is not None:
+            raise ValueError("data_input() and data_factory() are mutually exclusive")
+        has_data_config = (
+            self._data_config_dict
+            or self._data_configs_list is not None
+            or self._data_axes
+        )
+        if has_data_config and self._data_input_fn is not None:
+            raise ValueError("data_config*() cannot be used with data_input() — InputFn has no config")
+        if has_data_config and self._data_factory_fn is None and self._data_input_fn is None:
+            raise ValueError("data_config*() requires data_factory() to be set")
+
+    def plan(self) -> str:
+        """Return a plan string (requires at least one pipeline_config_axis)."""
+        if not self._pipeline_axes:
+            raise ValueError("plan() requires at least one pipeline_config_axis()")
+        return self._build_matrix().to_plan()
+
+    def grid(self) -> str:
+        """Return a grid string (requires at least one pipeline_config_axis)."""
+        if not self._pipeline_axes:
+            raise ValueError("grid() requires at least one pipeline_config_axis()")
+        return self._build_matrix().to_grid()
+
+    def _build_matrix(self) -> BenchmarkMatrix:
+        _factory, pipeline_kw, data_kw, _ = self._resolve_kwargs()
+        return BenchmarkMatrix(
+            factory=_factory,
+            measurement=self._build_measurement(),
+            **pipeline_kw,
+            **data_kw,
+        )
+
+    def _resolve_kwargs(self) -> "tuple[Callable, dict, dict, bool]":
+        _factory: Callable
+        if isinstance(self._source, Pipeline):
+            _pipeline = self._source
+            _factory = lambda _: _pipeline
+        else:
+            _factory = self._source
+
+        use_matrix = bool(self._pipeline_axes or self._data_axes)
+
+        if self._pipeline_axes:
+            pipeline_kw: dict = dict(
+                axes=self._pipeline_axes,
+                filter=self._pipeline_config_filter_fn,
+            )
+        elif use_matrix:
+            # Data has axes but pipeline doesn't — use a single dummy axis so
+            # BenchmarkMatrix can drive the cross-product correctly.
+            _real_factory = _factory
+            _factory = lambda c: _real_factory({k: v for k, v in c.items() if k != "_"})
+            pipeline_kw = dict(axes={"_": [{}]})
+        elif self._pipeline_configs_list is not None:
+            pipeline_kw = dict(configs=self._pipeline_configs_list)
+        else:
+            pipeline_kw = dict(configs=[self._pipeline_config_dict])
+
+        if self._data_input_fn is not None:
+            data_kw: dict = dict(
+                input_fns=[self._data_input_fn],
+                input_labels=[self._label_str or "input"],
+            )
+        elif self._data_factory_fn is not None:
+            if self._data_axes:
+                data_kw = dict(
+                    data_factory=self._data_factory_fn,
+                    data_axes=self._data_axes,
+                    data_filter=self._data_config_filter_fn,
+                )
+            elif self._data_configs_list is not None:
+                data_kw = dict(
+                    data_factory=self._data_factory_fn,
+                    data_configs=self._data_configs_list,
+                )
+            else:
+                cfg = self._data_config_dict if self._data_config_dict else {}
+                data_kw = dict(data_factory=self._data_factory_fn, data_configs=[cfg])
+        else:
+            raise ValueError("no data_input() or data_factory() provided")
+
+        return _factory, pipeline_kw, data_kw, use_matrix
+
+    # ------------------------------------------------------------------
+    # Run
+    # ------------------------------------------------------------------
+
+    def run(self) -> list[BenchmarkResult]:
+        """Execute the benchmark(s) and return all results."""
+        self._validate()
+        _factory, pipeline_kw, data_kw, use_matrix = self._resolve_kwargs()
+        measurement = self._build_measurement()
+
+        if use_matrix:
+            return BenchmarkMatrix(
+                factory=_factory, measurement=measurement, **pipeline_kw, **data_kw
+            ).run()
+        else:
+            return BenchmarkSweep(
+                factory=_factory, measurement=measurement, **pipeline_kw, **data_kw
+            ).run()

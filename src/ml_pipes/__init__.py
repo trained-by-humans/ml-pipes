@@ -1,5 +1,6 @@
 from .benchmark import (
     Benchmark,
+    BenchmarkBuilder,
     BenchmarkCollector,
     BenchmarkDiff,
     BenchmarkMatrix,
@@ -105,6 +106,7 @@ from .types import (
 
 __all__ = [
     "Benchmark",
+    "BenchmarkBuilder",
     "BenchmarkCollector",
     "BenchmarkDiff",
     "BenchmarkMatrix",
