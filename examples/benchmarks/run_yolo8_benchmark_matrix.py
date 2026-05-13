@@ -30,6 +30,7 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.benchmarks"
 
 from examples.common import (
+    ASSETS_DIR,
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
@@ -44,22 +45,28 @@ from examples.common import (
 from examples.run_yolo8_onnx import YOLO8_MODELS
 from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
-from ml_pipes import Pipeline
+from ml_pipes import Pipeline, pipeline_factory
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
-def _make_pipeline(model_path: Path, output_path: Path, coco_classes: list[str]):
-    def factory(config: dict) -> Pipeline:
-        return (
-            decode()
-            + yolo8_tiled_pipeline(
-                model_path,
-                slice_wh=config["slice_wh"],
-                overlap_wh=config["overlap_wh"],
-            )
-            + visualize_detections_and_store(output_path, coco_classes)
-        )
-    return factory
+_DEFAULT_MODEL_VARIANT = "n"
+_model_name, _model_url = YOLO8_MODELS[_DEFAULT_MODEL_VARIANT]
+_DEFAULT_MODEL_PATH = resolve_model_path(ASSETS_DIR, _model_name, _model_url, _DEFAULT_MODEL_VARIANT)
+_DEFAULT_OUTPUT_PATH = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, _model_name)
+
+
+@pipeline_factory
+def yolo8_tiled_benchmark_pipeline(
+    model_path: Path = _DEFAULT_MODEL_PATH,
+    output_path: Path = _DEFAULT_OUTPUT_PATH,
+    slice_wh: tuple[int, int] = (320, 320),
+    overlap_wh: tuple[int, int] = (80, 80),
+) -> Pipeline:
+    return (
+        decode()
+        + yolo8_tiled_pipeline(model_path, slice_wh=slice_wh, overlap_wh=overlap_wh)
+        + visualize_detections_and_store(output_path, COCO_CLASSES)
+    )
 
 
 def _input_fn(image_path: Path):
@@ -90,7 +97,9 @@ def main() -> int:
     output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
 
     builder = (
-        BenchmarkBuilder.factory(_make_pipeline(model_path, output_path, COCO_CLASSES))
+        BenchmarkBuilder.factory(yolo8_tiled_benchmark_pipeline)
+        .pipeline_config_arg("model_path", model_path)
+        .pipeline_config_arg("output_path", output_path)
         .pipeline_config_axis("slice_wh", (240, 240), (320, 320), (480, 480))
         .pipeline_config_axis("overlap_wh", (40, 40), (80, 80), (120, 120))
         .pipeline_config_filter(lambda c: c["overlap_wh"][0] < c["slice_wh"][0] // 2)

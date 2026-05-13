@@ -1,7 +1,7 @@
 """
 Sweep benchmark: plain inference vs tiled inference for YOLOv8.
 
-Compares two pipeline structures side by side using BenchmarkSweep:
+Compares two pipeline structures side by side:
   - plain: standard single-pass inference at 640×640
   - tiled: SAHI-style tiling with Scatter/Gather + NMM deduplication
 
@@ -29,6 +29,7 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.benchmarks"
 
 from examples.common import (
+    ASSETS_DIR,
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
@@ -43,30 +44,49 @@ from examples.common import (
 from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
-from ml_pipes import Pipeline
-from ml_pipes.benchmark import BenchmarkResult, BenchmarkSweep, MeasurementConfig
+from ml_pipes import Pipeline, pipeline_factory
+from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
-def _make_pipeline(model_path: Path, output_path: Path, coco_classes: list[str]):
-    def factory(config: dict) -> Pipeline:
-        if config.get("tiled", False):
-            return (
-                decode()
-                + yolo8_tiled_pipeline(
-                    model_path,
-                    conf_threshold=config.get("conf_threshold", 0.25),
-                    slice_wh=config.get("slice_wh", (320, 320)),
-                    overlap_wh=config.get("overlap_wh", (80, 80)),
-                    max_concurrency=config.get("max_concurrency", 4),
-                )
-                + visualize_detections_and_store(output_path, coco_classes)
-            )
-        return (
-            decode()
-            + yolo8_inference_pipeline(model_path, conf_threshold=config.get("conf_threshold", 0.25))
-            + visualize_detections_and_store(output_path, coco_classes)
+_DEFAULT_MODEL_VARIANT = "n"
+_model_name, _model_url = YOLO8_MODELS[_DEFAULT_MODEL_VARIANT]
+_DEFAULT_MODEL_PATH = resolve_model_path(ASSETS_DIR, _model_name, _model_url, _DEFAULT_MODEL_VARIANT)
+_DEFAULT_OUTPUT_PATH = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, _model_name)
+
+
+@pipeline_factory
+def yolo8_plain_benchmark_pipeline(
+    model_path: Path = _DEFAULT_MODEL_PATH,
+    output_path: Path = _DEFAULT_OUTPUT_PATH,
+    conf_threshold: float = 0.25,
+) -> Pipeline:
+    return (
+        decode()
+        + yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
+        + visualize_detections_and_store(output_path, COCO_CLASSES)
+    )
+
+
+@pipeline_factory
+def yolo8_tiled_benchmark_pipeline(
+    model_path: Path = _DEFAULT_MODEL_PATH,
+    output_path: Path = _DEFAULT_OUTPUT_PATH,
+    conf_threshold: float = 0.25,
+    slice_wh: tuple[int, int] = (320, 320),
+    overlap_wh: tuple[int, int] = (80, 80),
+    max_concurrency: int = 4,
+) -> Pipeline:
+    return (
+        decode()
+        + yolo8_tiled_pipeline(
+            model_path,
+            conf_threshold=conf_threshold,
+            slice_wh=slice_wh,
+            overlap_wh=overlap_wh,
+            max_concurrency=max_concurrency,
         )
-    return factory
+        + visualize_detections_and_store(output_path, COCO_CLASSES)
+    )
 
 
 def _input_fn(image_path: Path, label: str | None = None):
@@ -97,27 +117,30 @@ def main() -> int:
 
     output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
 
-    configs = [
-        {"tiled": False, "conf_threshold": 0.25},
-        {"tiled": True,  "conf_threshold": 0.25, "slice_wh": (320, 320), "overlap_wh": (80, 80)},
-        {"tiled": True,  "conf_threshold": 0.25, "slice_wh": (480, 480), "overlap_wh": (80, 80)},
-    ]
+    shared = dict(model_path=model_path, output_path=output_path, conf_threshold=0.25)
+    data_input = _input_fn(image_path)
 
-    config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
-
-    _fn = _input_fn(image_path)
-    sweep = BenchmarkSweep(
-        factory=_make_pipeline(model_path, output_path, COCO_CLASSES),
-        configs=configs,
-        data_factory=lambda _, fn=_fn: fn,
-        data_configs=[{"_label": "coco_sample"}],
-        measurement=config,
+    plain_results = (
+        BenchmarkBuilder.factory(yolo8_plain_benchmark_pipeline)
+        .pipeline_config_arg("model_path", model_path)
+        .pipeline_config_arg("output_path", output_path)
+        .data_input(data_input)
+        .runs(args.runs).warmup(args.warmup)
+        .run(verbose=False)
     )
 
-    print(f"\nRunning {len(configs)} configs "
-          f"({args.warmup} warmup + {args.runs} measured each)\n", file=sys.stderr)
+    tiled_results = (
+        BenchmarkBuilder.factory(yolo8_tiled_benchmark_pipeline)
+        .pipeline_configs([
+            {**shared, "slice_wh": (320, 320), "overlap_wh": (80, 80)},
+            {**shared, "slice_wh": (480, 480), "overlap_wh": (80, 80)},
+        ])
+        .data_input(data_input)
+        .runs(args.runs).warmup(args.warmup)
+        .run(verbose=False)
+    )
 
-    results = sweep.run()
+    results = plain_results + tiled_results
     print(BenchmarkResult.to_comparison_table(results, expand_regions=False))
 
     if args.save:
