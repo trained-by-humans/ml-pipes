@@ -17,6 +17,7 @@ from ml_pipes.benchmark import (
     InvocationStatDiff,
     MeasurementConfig,
 )
+from ml_pipes.factory import InputFn
 from ml_pipes.tracing import InvocationTrace, StepSpan, TracingConfig
 from ml_pipes.collectors import PrintCollector
 
@@ -1254,3 +1255,84 @@ def test_data_config_multi_present_in_each_axis_config():
     assert all(c["dataset"] == "coco" for c in configs)
     assert all(c["split"] == "val" for c in configs)
     assert [c["value"] for c in configs] == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Factory signature error feedback
+# ---------------------------------------------------------------------------
+
+from ml_pipes import pipeline_factory, data_factory as data_factory_decorator
+
+
+@pipeline_factory
+def _strict_pipeline_factory(workers: int) -> Pipeline:
+    return _make_pipeline()
+
+
+@data_factory_decorator
+def _strict_data_factory(value: int) -> InputFn:
+    def fn():
+        return ("input", value, None, None)
+    return fn
+
+
+def test_pipeline_factory_bad_config_raises_with_context():
+    sweep = BenchmarkSweep(
+        factory=_strict_pipeline_factory,
+        configs=[{"unknown_param": 1}],
+        data_factory=lambda _: _static_input,
+    )
+    with pytest.raises(TypeError, match="pipeline factory got unknown config key.*unknown_param"):
+        sweep.run()
+
+
+def test_pipeline_factory_missing_required_raises_with_context():
+    sweep = BenchmarkSweep(
+        factory=_strict_pipeline_factory,
+        configs=[{}],
+        data_factory=lambda _: _static_input,
+    )
+    with pytest.raises(TypeError, match="pipeline factory is missing required config key.*workers"):
+        sweep.run()
+
+
+def test_data_factory_bad_config_raises_with_context():
+    sweep = BenchmarkSweep(
+        factory=lambda _: _make_pipeline(),
+        configs=[{}],
+        data_factory=_strict_data_factory,
+        data_configs=[{"unknown_param": 1}],
+    )
+    with pytest.raises(TypeError, match="data factory got unknown config key.*unknown_param"):
+        sweep.run()
+
+
+def test_data_factory_missing_required_raises_with_context():
+    sweep = BenchmarkSweep(
+        factory=lambda _: _make_pipeline(),
+        configs=[{}],
+        data_factory=_strict_data_factory,
+        data_configs=[{}],
+    )
+    with pytest.raises(TypeError, match="data factory is missing required config key.*value"):
+        sweep.run()
+
+
+def test_pipeline_factory_returns_none_raises_with_context():
+    sweep = BenchmarkSweep(
+        factory=lambda _: None,
+        configs=[{"workers": 1}],
+        data_factory=lambda _: _static_input,
+    )
+    with pytest.raises(TypeError, match="pipeline factory must return a Pipeline"):
+        sweep.run()
+
+
+def test_data_factory_returns_none_raises_with_context():
+    sweep = BenchmarkSweep(
+        factory=lambda _: _make_pipeline(),
+        configs=[{}],
+        data_factory=lambda _: None,
+    )
+    with pytest.raises(TypeError, match="data factory must return a callable InputFn"):
+        sweep.run()

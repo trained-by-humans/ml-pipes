@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import itertools
 import json
 import re
@@ -480,6 +481,35 @@ class Benchmark:
         return collector.report(label=self._label, metadata=self._metadata)
 
 
+def _validate_factory_config(kind: str, factory: Callable, config: dict) -> None:
+    """Pre-validate config against the factory signature before calling it.
+
+    Only runs when __wrapped__ is present (i.e. @pipeline_factory / @data_factory was used).
+    Raises TypeError with a precise message rather than parsing the exception after the fact.
+    """
+    fn = getattr(factory, "__wrapped__", None)
+    if fn is None:
+        return
+    params = inspect.signature(fn).parameters
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    if not has_var_keyword:
+        unexpected = [k for k in config if k not in params]
+        if unexpected:
+            raise TypeError(
+                f"{kind} factory got unknown config key(s) {unexpected!r} for config {config!r}"
+            )
+    missing = [
+        name for name, p in params.items()
+        if p.default is inspect.Parameter.empty
+        and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        and name not in config
+    ]
+    if missing:
+        raise TypeError(
+            f"{kind} factory is missing required config key(s) {missing!r} for config {config!r}"
+        )
+
+
 @dataclass
 class BenchmarkSweep:
     """Cross-product every pipeline config with every data config and collect all results.
@@ -521,7 +551,18 @@ class BenchmarkSweep:
         is_single = len(self.configs) == 1 and len(self.data_configs) == 1  # type: ignore[arg-type]
         results: list[BenchmarkResult] = []
         for data_config in self.data_configs:  # type: ignore[union-attr]
-            input_fn = self.data_factory(data_config)
+            _validate_factory_config("data", self.data_factory, data_config)
+            try:
+                input_fn = self.data_factory(data_config)
+            except TypeError as exc:
+                raise TypeError(
+                    f"data factory rejected config {data_config!r}: {exc}"
+                ) from exc
+            if not callable(input_fn):
+                raise TypeError(
+                    f"data factory must return a callable InputFn, got {type(input_fn).__name__!r} "
+                    f"for config {data_config!r}"
+                )
             if "_label" in data_config and len(data_config) == 1:
                 data_label = data_config["_label"]
             else:
@@ -538,8 +579,20 @@ class BenchmarkSweep:
                 metadata: dict = {"pipeline_config": pipeline_config, "data_config": data_config}
                 if self.extra_metadata:
                     metadata.update(self.extra_metadata)
+                _validate_factory_config("pipeline", self.factory, pipeline_config)
+                try:
+                    pipeline = self.factory(pipeline_config)
+                except TypeError as exc:
+                    raise TypeError(
+                        f"pipeline factory rejected config {pipeline_config!r}: {exc}"
+                    ) from exc
+                if not isinstance(pipeline, Pipeline):
+                    raise TypeError(
+                        f"pipeline factory must return a Pipeline, got {type(pipeline).__name__!r} "
+                        f"for config {pipeline_config!r}"
+                    )
                 result = Benchmark(
-                    pipeline=self.factory(pipeline_config),
+                    pipeline=pipeline,
                     input_fn=input_fn,
                     measurement=self.measurement,
                     label=label,
