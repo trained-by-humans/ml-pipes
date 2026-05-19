@@ -88,6 +88,7 @@ def main() -> int:
     infer_pipe = build_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
     pipeline.validate()
+    pipeline.describe()
     pipeline(image_path)
     return 0
 

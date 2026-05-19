@@ -88,6 +88,7 @@ def main() -> int:
     )
 
     pipeline = build_video_annotation_pipeline(model_path)
+    pipeline.describe()
 
     frame_idx = 0
     while True:
