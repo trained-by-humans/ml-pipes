@@ -15,6 +15,7 @@ import time
 import numpy as np
 
 from .batch import BatchGate, LeaderBatch
+from .context import Selector, SelectorPart, _attribute_annotation, _normalize_selector
 from .region import RegionCloser, RegionOpener
 from .scatter import ScatterGate
 from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
@@ -146,6 +147,39 @@ class Resize:
             "area": cv2.INTER_AREA,
         }
         return mapping[self.interpolation]
+
+
+class ConvertColorSpace:
+    def __init__(self, output_color_space: Literal["RGB", "BGR"]):
+        if output_color_space not in {"RGB", "BGR"}:
+            raise ValueError(f"ConvertColorSpace only supports RGB or BGR output, got {output_color_space}")
+        self.output_color_space = output_color_space
+
+    def __call__(self, image_payload: ImagePayload) -> ImagePayload:
+        if "C" not in image_payload.layout:
+            raise ValueError(f"ConvertColorSpace expects a layout containing C, got {image_payload.layout}")
+
+        if image_payload.color_space not in {"RGB", "BGR"}:
+            raise ValueError(
+                f"ConvertColorSpace only supports BGR/RGB input, got {image_payload.color_space}"
+            )
+
+        channel_axis = image_payload.layout.index("C")
+        channels = image_payload.channels
+        if channels != 3:
+            raise ValueError(
+                f"ConvertColorSpace only supports 3-channel images, got {channels} for layout {image_payload.layout}"
+            )
+
+        array = image_payload.array
+        if image_payload.color_space != self.output_color_space:
+            array = np.flip(array, axis=channel_axis)
+        converted = np.ascontiguousarray(array)
+        return ImagePayload(
+            array=converted,
+            color_space=self.output_color_space,
+            layout=image_payload.layout,
+        )
 
 
 class Normalize:
@@ -1610,6 +1644,79 @@ class LogDetections(SideEffectOp):
 # ---------------------------------------------------------------------------
 # Control
 # ---------------------------------------------------------------------------
+
+class Select:
+    def __init__(self, *selector: SelectorPart):
+        if not selector:
+            raise ValueError("Select requires at least one selector part")
+        self.selector = selector[0] if len(selector) == 1 else selector
+        self._selector = self._normalize_selector_parts(selector)
+        if not self._selector:
+            raise ValueError("Select requires a non-empty selector")
+        self._selector_label = self._format_selector_label(self.selector, self._selector)
+
+    @staticmethod
+    def _normalize_selector_parts(
+        selector: tuple[SelectorPart | tuple[SelectorPart, ...], ...],
+    ) -> tuple[str | int, ...]:
+        normalized: list[str | int] = []
+        for part in selector:
+            normalized.extend(_normalize_selector(part))
+        return tuple(normalized)
+
+    @staticmethod
+    def _format_selector_label(selector: Selector, normalized: tuple[str | int, ...]) -> str:
+        if isinstance(selector, int):
+            return f"index={selector}"
+        return f"select={normalized!r}"
+
+    def __call__(self, current: object) -> Any:
+        selected = current
+        for part in self._selector:
+            if isinstance(part, int):
+                if not isinstance(selected, tuple):
+                    raise TypeError(f"Select({self._selector_label}) can only index tuple outputs")
+                selected = selected[part]
+                continue
+            selected = getattr(selected, part)
+        return selected
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations
+        if current_output is Any:
+            if isinstance(self._selector[0], int):
+                return (tuple,), Any
+            return (Any,), Any
+
+        selected = current_output
+        for part in self._selector:
+            if selected is Any or selected is None:
+                return (current_output,), Any
+            if isinstance(part, int):
+                origin = get_origin(selected)
+                if origin is tuple:
+                    parts = get_args(selected)
+                elif isinstance(selected, tuple):
+                    parts = selected
+                else:
+                    raise validation_error_type(
+                        f"Select({self._selector_label}) requires a tuple boundary, got {selected}"
+                    )
+                if not (-len(parts) <= part < len(parts)):
+                    raise validation_error_type(
+                        f"Select({self._selector_label}) is out of bounds for {selected} (length {len(parts)})"
+                    )
+                selected = parts[part]
+                continue
+            selected = _attribute_annotation(selected, part)
+        return (current_output,), selected
+
 
 class Pick:
     """Selects one or more elements from a tuple by index, discarding the rest.

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -7,7 +8,7 @@ import numpy as np
 import torch
 
 from examples.common import COCO_IMAGE_NAME, build_output_path
-from ml_pipes import Decode, ImagePayload, LoadFile, Pipeline, Store
+from ml_pipes import ConvertColorSpace, Decode, LoadFile, Pipeline, Select, Store
 from ml_pipes.torch.types import TorchTensorRegistry
 
 MASK2FORMER_MODEL_IDS: dict[str, str] = {
@@ -63,11 +64,14 @@ class Mask2FormerInfer:
         self.bundle = bundle
         self.device = device
 
-    def __call__(self, image: ImagePayload) -> TorchTensorRegistry:
-        if image.layout != "HWC":
-            raise ValueError(f"Mask2FormerInfer expects HWC image layout, got {image.layout}")
-        rgb = self._to_rgb_array(image)
-        pixel_values = self.bundle.processor(images=rgb, return_tensors="pt")["pixel_values"].to(self.device)
+    def __call__(self, image: np.ndarray) -> TorchTensorRegistry:
+        if image.ndim != 3 or image.shape[-1] != 3:
+            raise ValueError(
+                f"Mask2FormerInfer expects an HWC RGB ndarray with 3 channels, got shape {image.shape!r}"
+            )
+        if not image.flags.c_contiguous:
+            raise ValueError("Mask2FormerInfer expects a contiguous RGB ndarray")
+        pixel_values = self.bundle.processor(images=image, return_tensors="pt")["pixel_values"].to(self.device)
         with torch.inference_mode():
             outputs = self.bundle.model(pixel_values=pixel_values)
         return TorchTensorRegistry(
@@ -77,14 +81,6 @@ class Mask2FormerInfer:
             }
         )
 
-    @staticmethod
-    def _to_rgb_array(image: ImagePayload) -> np.ndarray:
-        if image.color_space == "BGR":
-            return np.ascontiguousarray(image.array[:, :, ::-1])
-        if image.color_space == "RGB":
-            return np.ascontiguousarray(image.array)
-        raise ValueError(f"Mask2FormerInfer expects BGR or RGB input, got {image.color_space}")
-
 
 def build_mask2former_preprocess_pipeline() -> Pipeline:
     return Pipeline(
@@ -93,6 +89,8 @@ def build_mask2former_preprocess_pipeline() -> Pipeline:
             Decode(),
             Store("source_image"),
             Store("image_shape", select="spatial_shape"),
+            ConvertColorSpace("RGB"),
+            Select("array"),
         ]
     )
 
