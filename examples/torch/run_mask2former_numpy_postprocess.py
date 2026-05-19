@@ -147,12 +147,11 @@ class PanopticSegmentsFromQueries:
             query_mask = kept_masks[index] >= self.mask_threshold
             winner_mask = winner_ids == index
             original_area = int(query_mask.sum())
-            winner_area = int(winner_mask.sum())
             final_mask = query_mask & winner_mask
             final_area = int(final_mask.sum())
-            if original_area == 0 or winner_area == 0 or final_area == 0:
+            if original_area == 0 or final_area == 0:
                 continue
-            if winner_area / original_area < self.overlap_threshold:
+            if final_area / original_area < self.overlap_threshold:
                 continue
             _append_or_merge_numpy_panoptic_segment(
                 merged_masks=merged_masks,
