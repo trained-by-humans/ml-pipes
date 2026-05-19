@@ -54,6 +54,7 @@ Image file into an inference-ready tensor:
 |---|---|---|
 | `Decode()` | `Path / str / bytes` → `ImagePayload` | Reads and decodes image file |
 | `Resize(target_size, mode, interpolation, pad_value, center, allow_scale_up)` | `ImagePayload` → `(ImagePayload, ResizeTransform)` | `mode`: `"resize"` (stretch) or `"letterbox"` (aspect-ratio-preserving with padding) |
+| `ConvertColorSpace(output_color_space)` | `ImagePayload` → `ImagePayload` | Converts between BGR and RGB while preserving layout/dtype |
 | `Normalize(scale, mean, std, output_layout, output_color_space, add_batch_dim)` | `ImagePayload` → `TensorPayload` | Scales, normalizes, transposes layout, optionally converts BGR↔RGB |
 | `Cast(dtype)` | `TensorPayload` → `TensorPayload` | Casts dtype, e.g. float32 → float16 |
 
@@ -159,7 +160,8 @@ them through every operator in between. See the
 |---|---|
 | `Store(name, index)` | Saves the current value (or `current[index]`) into context. The flowing value is unchanged. |
 | `Recall(name)` | Appends a stored value to the flowing value, producing a tuple. Idempotent. |
-| `Pick(index)` | Selects one element from a tuple, discarding the others. |
+| `Select(*selector)` | Projects the current value via attribute access and tuple indexing. Example: `Select("spatial_shape", 0)`, `Select("spatial_shape.0")`, or `Select("array")`. |
+| `Pick(index)` | Tuple-only shorthand for selecting one element from a tuple and discarding the rest. |
 
 ---
 

@@ -2,10 +2,12 @@
 Tests for Store/Recall reachability validation — richer error messages,
 extend() re-validation, and Embed attribution.
 """
+import numpy as np
 import pytest
 
 from ml_pipes import Batch, Pick, Pipeline, PipelineValidationError, Recall, Store, UnBatch, embed
 from ml_pipes.context import Recall, Store
+from ml_pipes.types import ImagePayload
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +85,20 @@ def test_store_pick_recall_type_flow_passes():
     ]).validate()
 
 
+def test_store_select_stores_image_payload_property():
+    image = ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8))
+    pipeline = Pipeline([Store("image_shape", select="spatial_shape"), Recall("image_shape")])
+
+    result = pipeline(image)
+
+    assert result[0] is image
+    assert result[1] == (10, 20)
+
+
+def test_store_select_type_flow_passes():
+    Pipeline([Store("image_shape", select="spatial_shape"), Recall("image_shape")]).validate()
+
+
 def test_store_index_out_of_bounds_raises_on_concrete_input():
     with pytest.raises(PipelineValidationError, match="Store\\('x', index=5\\) is out of bounds"):
         Pipeline([IntToPair(), Store("x", index=5)]).validate()
@@ -90,6 +106,11 @@ def test_store_index_out_of_bounds_raises_on_concrete_input():
 
 def test_store_index_out_of_bounds_silent_on_vague_input():
     Pipeline([Store("x", index=5)]).validate()
+
+
+def test_store_rejects_index_and_select_together():
+    with pytest.raises(ValueError, match="either index or select"):
+        Store("x", index=0, select="shape")
 
 
 # ---------------------------------------------------------------------------
