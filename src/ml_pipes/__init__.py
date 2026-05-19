@@ -23,6 +23,7 @@ from .inspection import (
     StepView,
     TextBlock,
 )
+from .description import PipelineDescription, StepDescription
 from .core import Pipeline, Embed, embed, Inline, inline, Operator
 from .validation import PipelineValidationError, TypeContract
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
@@ -183,6 +184,8 @@ __all__ = [
     "Renderer",
     "StepView",
     "TextBlock",
+    "PipelineDescription",
+    "StepDescription",
     "Infer",
     "LoadFile",
     "LogDetections",

@@ -9,10 +9,17 @@ from typing import Any, Callable, Iterable
 _log = logging.getLogger(__name__)
 
 from .context import Context, ContextOp
+from .description import PipelineDescription, _build_pipeline_description
 from .inspection import InspectionResult, _CaptureCollector
 from .region import RegionCloser, RegionOpener
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, operator_config, snapshot
-from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
+from .validation import (
+    PipelineValidationError,
+    PipelineValidator,
+    TypeContract,
+    format_annotation,
+    is_annotation_compatible,
+)
 
 # An operator is anything the pipeline can execute as a step.
 Operator = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
@@ -85,6 +92,20 @@ class Pipeline:
         except Exception:
             pass
         return InspectionResult(collector.trace.spans)
+
+    def describe(self, expand_embedded: bool = True) -> PipelineDescription:
+        """Describe, print, and return the static pipeline structure."""
+        description = self._describe(expand_embedded=expand_embedded)
+        print(description)
+        return description
+
+    def _describe(self, expand_embedded: bool = True) -> PipelineDescription:
+        return _build_pipeline_description(
+            operators=self.operators,
+            expand_embedded=expand_embedded,
+            label_for=lambda i: self._label_for(i),
+            is_pipeline_operator=lambda operator: isinstance(operator, Embed),
+        )
 
     def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
         trace = InvocationTrace() if cfg is not None else _NoOpTrace()
