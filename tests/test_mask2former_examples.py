@@ -17,7 +17,11 @@ from examples.torch.mask2former_infer import (
     Mask2FormerInfer,
     build_mask2former_preprocess_pipeline,
 )
+from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFromQueries
+from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries
 from ml_pipes import Pipeline, Recall
+from ml_pipes.torch.types import TorchTensorRegistry
+from ml_pipes.types import TensorRegistry
 
 
 def _write_png(path: Path, image: np.ndarray) -> None:
@@ -122,3 +126,111 @@ def test_mask2former_boundary_pipeline_validates() -> None:
     ).validate()
 
     assert contract is not None
+
+
+def test_numpy_panoptic_segments_filter_by_surviving_overlap() -> None:
+    registry = TensorRegistry(
+        {
+            "query_scores": np.array([0.9, 0.8], dtype=np.float32),
+            "query_classes": np.array([0, 1], dtype=np.int64),
+            "mask_probs": np.array(
+                [
+                    [
+                        [0.9, 0.9, 0.0],
+                        [0.9, 0.9, 0.0],
+                        [0.0, 0.0, 0.0],
+                    ],
+                    [
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.9, 0.9],
+                        [0.0, 0.9, 0.9],
+                    ],
+                ],
+                dtype=np.float32,
+            ),
+            "winner_ids": np.array(
+                [
+                    [0, 0, 0],
+                    [0, 1, 1],
+                    [0, 1, 1],
+                ],
+                dtype=np.int64,
+            ),
+        }
+    )
+
+    result = PanopticSegmentsFromQueries(
+        thing_class_ids=frozenset({0, 1}),
+        scores="query_scores",
+        classes="query_classes",
+        masks="mask_probs",
+        winner_ids="winner_ids",
+        overlap_threshold=0.8,
+    )(registry)
+
+    np.testing.assert_array_equal(result["classes"], np.array([1], dtype=np.int64))
+    np.testing.assert_allclose(result["scores"], np.array([0.8], dtype=np.float32))
+    np.testing.assert_array_equal(
+        result["masks"],
+        np.array(
+            [
+                [
+                    [False, False, False],
+                    [False, True, True],
+                    [False, True, True],
+                ]
+            ],
+            dtype=bool,
+        ),
+    )
+
+
+def test_torch_panoptic_segments_filter_by_surviving_overlap() -> None:
+    registry = TorchTensorRegistry(
+        {
+            "query_scores": torch.tensor([0.9, 0.8], dtype=torch.float32),
+            "query_classes": torch.tensor([0, 1], dtype=torch.int64),
+            "mask_probs": torch.tensor(
+                [
+                    [
+                        [0.9, 0.9, 0.0],
+                        [0.9, 0.9, 0.0],
+                        [0.0, 0.0, 0.0],
+                    ],
+                    [
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.9, 0.9],
+                        [0.0, 0.9, 0.9],
+                    ],
+                ],
+                dtype=torch.float32,
+            ),
+            "winner_ids": torch.tensor(
+                [
+                    [0, 0, 0],
+                    [0, 1, 1],
+                    [0, 1, 1],
+                ],
+                dtype=torch.int64,
+            ),
+        }
+    )
+
+    result = TorchPanopticSegmentsFromQueries(
+        thing_class_ids=frozenset({0, 1}),
+        scores="query_scores",
+        classes="query_classes",
+        masks="mask_probs",
+        winner_ids="winner_ids",
+        overlap_threshold=0.8,
+    )(registry)
+
+    assert result["classes"].tolist() == [1]
+    assert result["scores"].tolist() == pytest.approx([0.8])
+    assert result["masks"].tolist() == [
+        [
+            [False, False, False],
+            [False, True, True],
+            [False, True, True],
+        ]
+    ]
