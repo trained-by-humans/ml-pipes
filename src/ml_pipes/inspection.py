@@ -144,6 +144,10 @@ def _image_to_rgb(value: ImagePayload) -> np.ndarray:
     return arr
 
 
+def _is_rgb_image_array(value: np.ndarray) -> bool:
+    return value.dtype == np.uint8 and value.ndim == 3 and value.shape[-1] == 3
+
+
 def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
     """Tile a list of HxWx3 RGB images into a square-ish grid."""
     import math
@@ -351,6 +355,29 @@ def _register_builtin_formatters() -> None:
             ),
         ]
 
+    def _format_ndarray(value: np.ndarray) -> list[OutputBlock]:
+        if _is_rgb_image_array(value):
+            height, width = value.shape[:2]
+            return [
+                ImageBlock(title=f"ndarray  {width}×{height}  RGB", array=value),
+                TextBlock(
+                    "ndarray",
+                    [
+                        ("shape", str(value.shape)),
+                        ("dtype", str(value.dtype)),
+                    ],
+                ),
+            ]
+        return [
+            TextBlock(
+                "ndarray",
+                [
+                    ("shape", str(value.shape)),
+                    ("dtype", str(value.dtype)),
+                ],
+            )
+        ]
+
     def _format_tensor(value: TensorPayload) -> list[OutputBlock]:
         name = type(value).__name__
         arr = value.array
@@ -392,6 +419,7 @@ def _register_builtin_formatters() -> None:
     _OUTPUT_FORMATTERS[Segmentations]   = _format_segmentations
     _OUTPUT_FORMATTERS[Detections]      = _format_detections
     _OUTPUT_FORMATTERS[ImagePayload]    = _format_image
+    _OUTPUT_FORMATTERS[np.ndarray]      = _format_ndarray
     _OUTPUT_FORMATTERS[TensorPayload]   = _format_tensor
     _OUTPUT_FORMATTERS[ResizeTransform] = _format_resize_transform
     _OUTPUT_FORMATTERS[RuntimeOutputs]  = _format_runtime_outputs

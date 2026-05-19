@@ -11,6 +11,7 @@ from ml_pipes.ops import (
     ArgMax,
     BinarizeTensor,
     BinarizeTensorByThreshold,
+    ConvertColorSpace,
     CreateTensorMask,
     CreateTensorMaskByThreshold,
     ConvertBoxFormat,
@@ -39,6 +40,7 @@ from ml_pipes.ops import (
     Resize,
     ResizeMasks,
     SaveImage,
+    Select,
     SelectTensors,
     Sigmoid,
     Slice,
@@ -78,6 +80,16 @@ class IntToString:
 class IntToPair:
     def __call__(self, value: int) -> tuple[int, str]:
         return value, str(value)
+
+
+class MakeImage:
+    def __call__(self, value: int) -> ImagePayload:
+        return ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+
+class AcceptArray:
+    def __call__(self, value: np.ndarray) -> int:
+        return int(value.shape[0])
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +177,41 @@ def test_pick_establishes_tuple_input_boundary_from_downstream_type():
     assert contract is not None
     assert contract.input_type is tuple
 
+
+def test_select_validation_propagates_array_attribute_type():
+    contract = Pipeline([MakeImage(), Select("array"), AcceptArray()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_select_validation_propagates_nested_attribute_type():
+    contract = Pipeline([MakeImage(), Select("spatial_shape", 0), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_select_validation_accepts_dotted_string_selector():
+    contract = Pipeline([MakeImage(), Select("spatial_shape.0"), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_select_tuple_index_rejects_known_non_tuple_input():
+    pipeline = Pipeline([IntToString(), Select(0)])
+
+    with pytest.raises(PipelineValidationError, match="tuple"):
+        pipeline.validate()
+
+
+def test_select_tuple_index_establishes_tuple_input_boundary():
+    contract = Pipeline([Select(0), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is tuple
+
 def test_resize_op_can_do_plain_resize_without_padding():
     image = np.zeros((10, 20, 3), dtype=np.uint8)
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
@@ -199,6 +246,52 @@ def test_image_payload_spatial_shape_uses_layout_for_chw():
     assert payload.width == 20
     assert payload.size == (20, 10)
     assert payload.channels == 3
+
+
+def test_convert_color_space_converts_bgr_to_rgb_and_preserves_metadata():
+    image = np.array([[[10, 20, 30], [40, 50, 60]]], dtype=np.uint8)
+    payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
+
+    converted = ConvertColorSpace("RGB")(payload)
+
+    assert converted.color_space == "RGB"
+    assert converted.layout == "HWC"
+    assert converted.dtype == "uint8"
+    assert converted.array.flags.c_contiguous
+    assert converted.array.tolist() == [[[30, 20, 10], [60, 50, 40]]]
+
+
+def test_convert_color_space_uses_channel_axis_from_layout():
+    image = np.array(
+        [
+            [[10, 40]],
+            [[20, 50]],
+            [[30, 60]],
+        ],
+        dtype=np.uint8,
+    )
+    payload = ImagePayload(array=image, color_space="BGR", layout="CHW")
+
+    converted = ConvertColorSpace("RGB")(payload)
+
+    assert converted.layout == "CHW"
+    assert converted.color_space == "RGB"
+    assert converted.array.flags.c_contiguous
+    assert converted.array.tolist() == [[[30, 60]], [[20, 50]], [[10, 40]]]
+
+
+def test_convert_color_space_rejects_non_three_channel_input():
+    payload = ImagePayload(array=np.zeros((10, 20, 1), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+    with pytest.raises(ValueError, match="3-channel"):
+        ConvertColorSpace("RGB")(payload)
+
+
+def test_convert_color_space_rejects_unknown_source_color_space():
+    payload = ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8), color_space="HSV", layout="HWC")
+
+    with pytest.raises(ValueError, match="BGR/RGB input"):
+        ConvertColorSpace("RGB")(payload)
 
 
 # ---------------------------------------------------------------------------
