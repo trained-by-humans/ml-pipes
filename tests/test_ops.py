@@ -6,21 +6,31 @@ import pytest
 
 from ml_pipes import Pipeline, PipelineValidationError
 from ml_pipes.ops import (
+    ApplyTensorMask,
     AsType,
     ArgMax,
+    BinarizeTensor,
+    BinarizeTensorByThreshold,
+    ConvertColorSpace,
+    CreateTensorMask,
+    CreateTensorMaskByThreshold,
     ConvertBoxFormat,
     DrawBoxes,
     Extract,
+    FilterTensorsByMasksArea,
     FilterPredictions,
     FilterPredictionsByArea,
     FilterPredictionsByClass,
     FilterPredictionsByScore,
     FilterTensors,
-    MaskTensors,
+    FilterTensorsByScore,
     GatherScores,
     Infer,
     LogDetections,
     MapToObjects,
+    MultiplyTensors,
+    MeanMaskScores,
+    MasksToBoxes,
     NMS,
     Normalize,
     ProjectBoxes,
@@ -28,15 +38,22 @@ from ml_pipes.ops import (
     ProjectRoIMasks,
     ReconstructMasks,
     Resize,
+    ResizeMasks,
     SaveImage,
+    Select,
+    SelectTensors,
     Sigmoid,
     Slice,
     Softmax,
+    SortTensorsBy,
+    TopK,
+    TopKIndices2D,
     Squeeze,
     Pick,
     ToDetections,
     ToSegmentations,
     Transpose,
+    WeightMasksByScores,
 )
 from ml_pipes.types import (
     Detections,
@@ -63,6 +80,16 @@ class IntToString:
 class IntToPair:
     def __call__(self, value: int) -> tuple[int, str]:
         return value, str(value)
+
+
+class MakeImage:
+    def __call__(self, value: int) -> ImagePayload:
+        return ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+
+class AcceptArray:
+    def __call__(self, value: np.ndarray) -> int:
+        return int(value.shape[0])
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +177,41 @@ def test_pick_establishes_tuple_input_boundary_from_downstream_type():
     assert contract is not None
     assert contract.input_type is tuple
 
+
+def test_select_validation_propagates_array_attribute_type():
+    contract = Pipeline([MakeImage(), Select("array"), AcceptArray()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_select_validation_propagates_nested_attribute_type():
+    contract = Pipeline([MakeImage(), Select("spatial_shape", 0), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_select_validation_accepts_dotted_string_selector():
+    contract = Pipeline([MakeImage(), Select("spatial_shape.0"), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_select_tuple_index_rejects_known_non_tuple_input():
+    pipeline = Pipeline([IntToString(), Select(0)])
+
+    with pytest.raises(PipelineValidationError, match="tuple"):
+        pipeline.validate()
+
+
+def test_select_tuple_index_establishes_tuple_input_boundary():
+    contract = Pipeline([Select(0), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is tuple
+
 def test_resize_op_can_do_plain_resize_without_padding():
     image = np.zeros((10, 20, 3), dtype=np.uint8)
     payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
@@ -160,6 +222,76 @@ def test_resize_op_can_do_plain_resize_without_padding():
     assert transform.scale == (2.0, 4.0)
     assert transform.pad == (0.0, 0.0)
     assert transform.resized_shape == (40, 40)
+
+
+def test_image_payload_exposes_derived_shape_properties():
+    payload = ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+    assert payload.shape == (10, 20, 3)
+    assert payload.spatial_shape == (10, 20)
+    assert payload.height == 10
+    assert payload.width == 20
+    assert payload.size == (20, 10)
+    assert payload.dtype == "uint8"
+    assert payload.ndim == 3
+    assert payload.channels == 3
+
+
+def test_image_payload_spatial_shape_uses_layout_for_chw():
+    payload = ImagePayload(array=np.zeros((3, 10, 20), dtype=np.uint8), color_space="BGR", layout="CHW")
+
+    assert payload.shape == (3, 10, 20)
+    assert payload.spatial_shape == (10, 20)
+    assert payload.height == 10
+    assert payload.width == 20
+    assert payload.size == (20, 10)
+    assert payload.channels == 3
+
+
+def test_convert_color_space_converts_bgr_to_rgb_and_preserves_metadata():
+    image = np.array([[[10, 20, 30], [40, 50, 60]]], dtype=np.uint8)
+    payload = ImagePayload(array=image, color_space="BGR", layout="HWC")
+
+    converted = ConvertColorSpace("RGB")(payload)
+
+    assert converted.color_space == "RGB"
+    assert converted.layout == "HWC"
+    assert converted.dtype == "uint8"
+    assert converted.array.flags.c_contiguous
+    assert converted.array.tolist() == [[[30, 20, 10], [60, 50, 40]]]
+
+
+def test_convert_color_space_uses_channel_axis_from_layout():
+    image = np.array(
+        [
+            [[10, 40]],
+            [[20, 50]],
+            [[30, 60]],
+        ],
+        dtype=np.uint8,
+    )
+    payload = ImagePayload(array=image, color_space="BGR", layout="CHW")
+
+    converted = ConvertColorSpace("RGB")(payload)
+
+    assert converted.layout == "CHW"
+    assert converted.color_space == "RGB"
+    assert converted.array.flags.c_contiguous
+    assert converted.array.tolist() == [[[30, 60]], [[20, 50]], [[10, 40]]]
+
+
+def test_convert_color_space_rejects_non_three_channel_input():
+    payload = ImagePayload(array=np.zeros((10, 20, 1), dtype=np.uint8), color_space="BGR", layout="HWC")
+
+    with pytest.raises(ValueError, match="3-channel"):
+        ConvertColorSpace("RGB")(payload)
+
+
+def test_convert_color_space_rejects_unknown_source_color_space():
+    payload = ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8), color_space="HSV", layout="HWC")
+
+    with pytest.raises(ValueError, match="BGR/RGB input"):
+        ConvertColorSpace("RGB")(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +411,16 @@ def test_argmax_picks_highest_score_index_per_row():
     assert result["classes"].tolist() == [1, 0]
 
 
+def test_argmax_axis_zero_handles_empty_leading_dimension():
+    registry = TensorRegistry({"scores": np.zeros((0, 2, 3), dtype=np.float32)})
+
+    result = ArgMax("scores", axis=0, as_="classes")(registry)
+
+    assert result["classes"].dtype == np.int32
+    assert result["classes"].shape == (2, 3)
+    assert np.array_equal(result["classes"], np.zeros((2, 3), dtype=np.int32))
+
+
 def test_gather_scores_picks_class_score():
     scores = np.array([[0.1, 0.9], [0.8, 0.2]], dtype=np.float32)
     classes = np.array([1, 0], dtype=np.int32)
@@ -287,6 +429,41 @@ def test_gather_scores_picks_class_score():
     result = GatherScores("scores", "classes")(registry)
 
     assert np.allclose(result["scores"], [0.9, 0.8])
+
+
+def test_topk_picks_highest_values_and_indices():
+    registry = TensorRegistry({"scores": np.array([0.1, 0.7, 0.2, 0.8], dtype=np.float32)})
+
+    result = TopK("scores", k=3, values_as="top_scores", indices_as="top_indices")(registry)
+
+    assert np.allclose(result["top_scores"], [0.8, 0.7, 0.2])
+    assert result["top_indices"].tolist() == [3, 1, 2]
+
+
+def test_topk_indices_2d_returns_values_and_row_col_indices():
+    registry = TensorRegistry(
+        {
+            "class_probs": np.array(
+                [
+                    [0.1, 0.7, 0.2],
+                    [0.8, 0.3, 0.6],
+                ],
+                dtype=np.float32,
+            )
+        }
+    )
+
+    result = TopKIndices2D(
+        "class_probs",
+        k=3,
+        values_as="top_scores",
+        row_indices_as="query_indices",
+        col_indices_as="class_ids",
+    )(registry)
+
+    assert np.allclose(result["top_scores"], [0.8, 0.7, 0.6])
+    assert result["query_indices"].tolist() == [1, 0, 1]
+    assert result["class_ids"].tolist() == [0, 1, 2]
 
 
 # ---------------------------------------------------------------------------
@@ -301,12 +478,370 @@ def test_softmax_sums_to_one_per_row():
     assert np.allclose(result["logits"].sum(axis=-1), [1.0])
 
 
+def test_softmax_handles_empty_reduction_axis():
+    registry = TensorRegistry({"logits": np.zeros((0, 2, 3), dtype=np.float32)})
+
+    result = Softmax("logits", axis=0)(registry)
+
+    assert result["logits"].shape == (0, 2, 3)
+    assert result["logits"].dtype == np.float32
+
+
 def test_sigmoid_maps_zero_to_half():
     registry = TensorRegistry({"x": np.array([[0.0]], dtype=np.float32)})
 
     result = Sigmoid("x")(registry)
 
     assert np.allclose(result["x"], [[0.5]])
+
+
+def test_sigmoid_is_stable_for_large_magnitude_values():
+    registry = TensorRegistry({"x": np.array([[-1000.0, 1000.0]], dtype=np.float32)})
+
+    result = Sigmoid("x")(registry)
+
+    assert np.isfinite(result["x"]).all()
+    assert result["x"].dtype == np.float32
+    assert np.allclose(result["x"], [[0.0, 1.0]])
+
+
+def test_multiply_tensors_uses_numpy_broadcasting():
+    registry = TensorRegistry(
+        {
+            "left": np.array([[1.0], [2.0]], dtype=np.float32),
+            "right": np.array([[10.0, 20.0]], dtype=np.float32),
+        }
+    )
+
+    result = MultiplyTensors("left", "right", as_="product")(registry)
+
+    assert np.allclose(result["product"], [[10.0, 20.0], [20.0, 40.0]])
+
+
+def test_weight_masks_by_scores_broadcasts_scores_over_masks():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.5, 2.0], dtype=np.float32),
+            "masks": np.array(
+                [
+                    [[1.0, 2.0], [3.0, 4.0]],
+                    [[5.0, 6.0], [7.0, 8.0]],
+                ],
+                dtype=np.float32,
+            ),
+        }
+    )
+
+    result = WeightMasksByScores(as_="weighted_masks")(registry)
+
+    assert np.allclose(
+        result["weighted_masks"],
+        [
+            [[0.5, 1.0], [1.5, 2.0]],
+            [[10.0, 12.0], [14.0, 16.0]],
+        ],
+    )
+
+
+def test_resize_masks_to_image_resizes_mask_stack():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[0.0, 1.0], [1.0, 0.0]],
+                ],
+                dtype=np.float32,
+            )
+        }
+    )
+
+    result = ResizeMasks(masks="masks", as_="resized_masks")(registry, (4, 6))
+
+    assert result["resized_masks"].shape == (1, 4, 6)
+    assert result["resized_masks"].dtype == np.float32
+
+
+def test_mean_mask_scores_computes_mean_over_binary_support():
+    registry = TensorRegistry(
+        {
+            "selected_masks": np.array(
+                [
+                    [[0.0, 1.0], [0.5, 0.0]],
+                    [[0.2, 0.4], [0.6, 0.8]],
+                ],
+                dtype=np.float32,
+            ),
+            "binary_masks": np.array(
+                [
+                    [[False, True], [True, False]],
+                    [[True, False], [False, True]],
+                ]
+            ),
+        }
+    )
+
+    result = MeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+
+    assert np.allclose(result["mean_mask_scores"], [0.75, 0.5])
+
+
+def test_mean_mask_scores_handles_empty_masks():
+    registry = TensorRegistry(
+        {
+            "selected_masks": np.zeros((0, 2, 2), dtype=np.float32),
+            "binary_masks": np.zeros((0, 2, 2), dtype=bool),
+        }
+    )
+
+    result = MeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+
+    assert result["mean_mask_scores"].shape == (0,)
+    assert result["mean_mask_scores"].dtype == np.float64
+
+
+def test_mean_mask_scores_handles_empty_masks_without_binary_masks():
+    registry = TensorRegistry({"selected_masks": np.zeros((0, 2, 2), dtype=np.float32)})
+
+    result = MeanMaskScores(masks="selected_masks", binary_masks=None, as_="mean_mask_scores")(registry)
+
+    assert result["mean_mask_scores"].shape == (0,)
+    assert result["mean_mask_scores"].dtype == np.float32
+
+
+def test_masks_to_boxes_converts_masks_to_xyxy():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[False, True, True], [False, True, False]],
+                    [[False, False, False], [False, False, False]],
+                ]
+            )
+        }
+    )
+
+    result = MasksToBoxes(as_="boxes")(registry)
+
+    assert np.allclose(result["boxes"][0], [1.0, 0.0, 3.0, 2.0])
+    assert np.allclose(result["boxes"][1], [0.0, 0.0, 0.0, 0.0])
+
+
+def test_filter_masks_by_area_filters_parallel_tensors():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[1, 0], [0, 0]],
+                    [[1, 1], [1, 0]],
+                ],
+                dtype=bool,
+            ),
+            "scores": np.array([0.2, 0.9], dtype=np.float32),
+            "classes": np.array([1, 2], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
+
+    assert result["masks"].shape[0] == 1
+    assert np.allclose(result["scores"], [0.9])
+    assert result["classes"].tolist() == [2]
+
+
+def test_filter_masks_by_area_handles_empty_masks():
+    registry = TensorRegistry(
+        {
+            "masks": np.zeros((0, 2, 2), dtype=bool),
+            "scores": np.zeros((0,), dtype=np.float32),
+            "classes": np.zeros((0,), dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
+
+    assert result["masks"].shape == (0, 2, 2)
+    assert result["scores"].shape == (0,)
+    assert result["classes"].shape == (0,)
+
+
+def test_empty_instance_postprocess_pipeline_returns_empty_segmentations():
+    pipeline = Pipeline([
+        TopKIndices2D(
+            "class_probs",
+            k=100,
+            values_as="top_scores",
+            row_indices_as="query_indices",
+            col_indices_as="class_ids",
+        ),
+        SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+        BinarizeTensorByThreshold("selected_masks", threshold=0.5, as_="binary_masks"),
+        MeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
+        MultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
+        FilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
+        FilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=0.5),
+        SortTensorsBy("binary_masks", "class_ids", by="final_scores"),
+        MasksToBoxes(masks="binary_masks", as_="boxes"),
+        ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
+    ])
+    registry = TensorRegistry(
+        {
+            "class_probs": np.zeros((0, 3), dtype=np.float32),
+            "mask_probs": np.zeros((0, 2, 2), dtype=np.float32),
+        }
+    )
+
+    result = pipeline(registry)
+
+    assert isinstance(result, Segmentations)
+    assert result.boxes == []
+    assert result.scores == []
+    assert result.classes == []
+    assert result.masks == []
+
+
+def test_create_tensor_mask_writes_boolean_mask_from_predicate():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.2, 0.8, 0.5], dtype=np.float32),
+        }
+    )
+
+    result = CreateTensorMask("scores", predicate=lambda tensor: tensor >= 0.5, as_="keep")(registry)
+
+    assert result["keep"].dtype == np.bool_
+    assert result["keep"].tolist() == [False, True, True]
+
+
+def test_create_tensor_mask_by_threshold_writes_boolean_mask():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[0.4, 0.7], [0.9, 0.1]],
+                    [[0.2, 0.3], [0.8, 0.6]],
+                ],
+                dtype=np.float32,
+            )
+        }
+    )
+
+    result = CreateTensorMaskByThreshold("masks", threshold=0.5, as_="binary_masks")(registry)
+
+    assert result["binary_masks"].dtype == np.bool_
+    assert result["binary_masks"].tolist() == [
+        [[False, True], [True, False]],
+        [[False, False], [True, True]],
+    ]
+
+
+def test_binarize_tensor_by_threshold_is_alias():
+    assert BinarizeTensorByThreshold is CreateTensorMaskByThreshold
+
+
+def test_binarize_tensor_is_alias():
+    assert BinarizeTensor is CreateTensorMask
+
+
+def test_sort_tensors_by_sorts_parallel_tensors():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.5, 0.9, 0.1], dtype=np.float32),
+            "classes": np.array([5, 9, 1], dtype=np.int64),
+        }
+    )
+
+    result = SortTensorsBy("classes", by="scores", descending=True)(registry)
+
+    assert np.allclose(result["scores"], [0.9, 0.5, 0.1])
+    assert result["classes"].tolist() == [9, 5, 1]
+
+
+def test_filter_tensors_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.9, 0.5, 0.8], dtype=np.float32),
+            "classes": np.array([0, 1, 0], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensors(
+        "scores",
+        "classes",
+        predicate=lambda reg: reg["classes"] == 0,
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert np.allclose(result["selected_scores"], [0.9, 0.8])
+    assert result["selected_classes"].tolist() == [0, 0]
+    assert np.allclose(result["scores"], [0.9, 0.5, 0.8])
+
+
+def test_filter_tensors_by_score_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.9, 0.5, 0.8], dtype=np.float32),
+            "classes": np.array([0, 1, 0], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByScore(
+        "classes",
+        score="scores",
+        min_score=0.75,
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert np.allclose(result["selected_scores"], [0.9, 0.8])
+    assert result["selected_classes"].tolist() == [0, 0]
+    assert np.allclose(result["scores"], [0.9, 0.5, 0.8])
+
+
+def test_filter_tensors_by_masks_area_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "masks": np.array(
+                [
+                    [[1, 0], [0, 0]],
+                    [[1, 1], [1, 0]],
+                ],
+                dtype=bool,
+            ),
+            "scores": np.array([0.2, 0.9], dtype=np.float32),
+            "classes": np.array([1, 2], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByMasksArea(
+        "scores",
+        "classes",
+        masks="masks",
+        min_area=2,
+        as_=("selected_masks", "selected_scores", "selected_classes"),
+    )(registry)
+
+    assert result["selected_masks"].shape[0] == 1
+    assert np.allclose(result["selected_scores"], [0.9])
+    assert result["selected_classes"].tolist() == [2]
+    assert np.allclose(result["scores"], [0.2, 0.9])
+
+
+def test_sort_tensors_by_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.5, 0.9, 0.1], dtype=np.float32),
+            "classes": np.array([5, 9, 1], dtype=np.int64),
+        }
+    )
+
+    result = SortTensorsBy(
+        "classes",
+        by="scores",
+        as_=("sorted_scores", "sorted_classes"),
+    )(registry)
+
+    assert np.allclose(result["sorted_scores"], [0.9, 0.5, 0.1])
+    assert result["sorted_classes"].tolist() == [9, 5, 1]
+    assert np.allclose(result["scores"], [0.5, 0.9, 0.1])
 
 
 # ---------------------------------------------------------------------------
@@ -361,10 +896,10 @@ def test_nms_suppresses_same_class_overlap():
 
 
 # ---------------------------------------------------------------------------
-# MaskTensors
+# SelectTensors
 # ---------------------------------------------------------------------------
 
-def test_mask_tensors_synchronises_extra_tensor_with_nms_kept_indices():
+def test_select_tensors_synchronises_extra_tensor_with_nms_kept_indices():
     registry = _make_registry(
         boxes=[[10, 10, 50, 50], [12, 12, 48, 48]],
         scores=[0.95, 0.85],
@@ -373,7 +908,7 @@ def test_mask_tensors_synchronises_extra_tensor_with_nms_kept_indices():
     registry["coefficients"] = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
 
     result = NMS(kept_as="kept")(registry)
-    result = MaskTensors("coefficients", indices="kept")(result)
+    result = SelectTensors("coefficients", indices="kept")(result)
 
     assert result["coefficients"].shape == (1, 2)
     assert result["coefficients"].tolist() == [[1.0, 2.0]]
@@ -709,7 +1244,7 @@ def test_project_roi_masks_preserves_fractional_box():
 
 
 # ---------------------------------------------------------------------------
-# MaskTensors / FilterTensors
+# SelectTensors / ApplyTensorMask / FilterTensors
 # ---------------------------------------------------------------------------
 
 def _registry(**arrays: np.ndarray) -> TensorRegistry:
@@ -719,22 +1254,62 @@ def _registry(**arrays: np.ndarray) -> TensorRegistry:
     return r
 
 
-def test_mask_tensors_applies_index_array():
+def test_select_tensors_applies_index_array():
     r = _registry(
         scores=np.array([0.9, 0.5, 0.8]),
         kept=np.array([0, 2]),
     )
-    result = MaskTensors("scores", "kept")(r)
+    result = SelectTensors("scores", indices="kept")(r)
     assert result["scores"].tolist() == [0.9, 0.8]
 
 
-def test_mask_tensors_writes_to_new_key():
+def test_select_tensors_writes_to_new_key():
     r = _registry(
         scores=np.array([0.9, 0.5, 0.8]),
         kept=np.array([1]),
     )
-    result = MaskTensors("scores", "kept", as_="filtered_scores")(r)
-    assert result["filtered_scores"].tolist() == [0.5]
+    result = SelectTensors("scores", indices="kept", as_="selected_scores")(r)
+    assert result["selected_scores"].tolist() == [0.5]
+    assert result["scores"].tolist() == [0.9, 0.5, 0.8]
+
+
+def test_select_tensors_can_write_multiple_outputs():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([4, 5, 6]),
+        kept=np.array([2, 0]),
+    )
+    result = SelectTensors(
+        "scores",
+        "classes",
+        indices="kept",
+        as_=("selected_scores", "selected_classes"),
+    )(r)
+    assert result["selected_scores"].tolist() == [0.8, 0.9]
+    assert result["selected_classes"].tolist() == [6, 4]
+    assert result["scores"].tolist() == [0.9, 0.5, 0.8]
+
+
+def test_apply_tensor_mask_applies_boolean_mask():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        keep=np.array([True, False, True]),
+        classes=np.array([4, 5, 6]),
+    )
+    result = ApplyTensorMask("scores", "classes", mask="keep")(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+    assert result["classes"].tolist() == [4, 6]
+
+
+def test_apply_tensor_mask_can_write_to_new_keys():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        keep=np.array([True, False, True]),
+        classes=np.array([4, 5, 6]),
+    )
+    result = ApplyTensorMask("scores", "classes", mask="keep", as_=("selected_scores", "selected_classes"))(r)
+    assert result["selected_scores"].tolist() == [0.9, 0.8]
+    assert result["selected_classes"].tolist() == [4, 6]
     assert result["scores"].tolist() == [0.9, 0.5, 0.8]
 
 
@@ -754,6 +1329,20 @@ def test_filter_tensors_applies_to_multiple_keys():
         classes=np.array([0, 1, 0]),
     )
     result = FilterTensors("boxes", "scores", "classes", predicate=lambda reg: reg["classes"] == 0)(r)
+    assert result["scores"].tolist() == [0.9, 0.8]
+    assert result["classes"].tolist() == [0, 0]
+    assert len(result["boxes"]) == 2
+
+
+def test_filter_tensors_by_score_applies_score_predicate():
+    r = _registry(
+        boxes=np.array([[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]]),
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([0, 1, 0]),
+    )
+
+    result = FilterTensorsByScore("boxes", "classes", score="scores", min_score=0.75)(r)
+
     assert result["scores"].tolist() == [0.9, 0.8]
     assert result["classes"].tolist() == [0, 0]
     assert len(result["boxes"]) == 2

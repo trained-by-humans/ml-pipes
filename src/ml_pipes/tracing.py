@@ -171,20 +171,57 @@ def merge_traces(traces: list[InvocationTrace]) -> InvocationTrace:
 
 
 def _extract_shape(value: Any) -> str | None:
+    def _raw_shape_of(obj: Any) -> Any | None:
+        return getattr(obj, "shape", None)
+
+    def _looks_like_torch_tensor(obj: Any) -> bool:
+        module_name = type(obj).__module__
+        return module_name.startswith("torch") and _raw_shape_of(obj) is not None
+
+    def _shape_of(obj: Any) -> Any | None:
+        shape = _raw_shape_of(obj)
+        if shape is None:
+            return None
+        if _looks_like_torch_tensor(obj):
+            return tuple(shape)
+        return shape
+
+    def _device_of(obj: Any) -> str | None:
+        if not _looks_like_torch_tensor(obj):
+            return None
+        device = getattr(obj, "device", None)
+        if device is None:
+            return None
+        return str(device)
+
+    def _fmt_shape_with_device(shape: Any, device: str | None) -> str:
+        if device is None:
+            return str(shape)
+        return f"{shape} @ {device}"
+
     name = type(value).__name__
     # ImagePayload, TensorPayload (have .array.shape)
     if hasattr(value, "array") and hasattr(value.array, "shape"):
-        return f"{name} {value.array.shape}"
+        return f"{name} {_fmt_shape_with_device(_shape_of(value.array), _device_of(value.array))}"
+    # bare torch.Tensor
+    if _looks_like_torch_tensor(value):
+        return f"{name} {_fmt_shape_with_device(_shape_of(value), _device_of(value))}"
     # bare numpy array
     if hasattr(value, "shape"):
-        return f"{name} {value.shape}"
+        return f"{name} {_shape_of(value)}"
     # TensorRegistry: one "key: shape" entry per tensor
     if hasattr(value, "_tensors") and isinstance(getattr(value, "_tensors", None), dict):
-        entries = ", ".join(f"{k}: {v.shape}" for k, v in value._tensors.items())
+        entries = ", ".join(
+            f"{k}: {_fmt_shape_with_device(_shape_of(v), _device_of(v))}"
+            for k, v in value._tensors.items()
+        )
         return f"{name} {{{entries}}}"
     # RuntimeOutputs: named output tensors
     if hasattr(value, "names") and hasattr(value, "tensors"):
-        entries = ", ".join(f"{n}: {t.array.shape}" for n, t in zip(value.names, value.tensors))
+        entries = ", ".join(
+            f"{n}: {_fmt_shape_with_device(_shape_of(t.array), _device_of(t.array))}"
+            for n, t in zip(value.names, value.tensors)
+        )
         return f"{name} {{{entries}}}"
     # Detections / Segmentations
     if hasattr(value, "boxes") and hasattr(value, "scores"):

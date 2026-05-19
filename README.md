@@ -10,6 +10,12 @@ individually testable, and model-agnostic.
 pip install -e .
 ```
 
+Torch operators live in an optional subpackage:
+
+```bash
+pip install -e .[torch]
+```
+
 ## Quick start
 
 ```python
@@ -43,6 +49,70 @@ pipeline = Pipeline([
 detections = pipeline("image.jpg")
 print(detections.boxes, detections.scores, detections.classes)
 ```
+
+## Torch Execution Domain
+
+Torch support is intentionally isolated under `ml_pipes.torch`. Core
+`ml_pipes` stays NumPy/ONNX-oriented, and domain crossings stay explicit.
+
+For the full guide, see [TORCH.md](TORCH.md).
+
+```python
+import torch
+
+from ml_pipes import Pipeline
+from ml_pipes.torch import (
+    ToNumpyRegistry,
+    ToTorch,
+    TorchAsType,
+    TorchCollate,
+    TorchDistribute,
+    TorchExtract,
+    TorchInfer,
+    TorchNMS,
+)
+
+model = torch.nn.Conv2d(3, 4, kernel_size=1).eval().to("cpu")
+
+pipeline = Pipeline([
+    ...,
+    ToTorch(device="cpu"),
+    TorchAsType("float32"),
+    TorchInfer(model, input_layout="NCHW", output_names=("logits",), output_layouts=("NCHW",)),
+    TorchDistribute(),
+    TorchExtract("logits", as_="scores"),
+    ToNumpyRegistry(),
+])
+```
+
+You can also cross domains around a postprocess handoff:
+
+```python
+from ml_pipes import Extract, Infer, Pipeline
+from ml_pipes.torch import ToNumpyRegistry, ToTorchRegistry, TorchNMS
+
+pipeline = Pipeline([
+    Infer("detector.onnx"),
+    Extract("boxes", "scores", "classes"),
+    ToTorchRegistry(device="cpu"),
+    TorchNMS(),
+    ToNumpyRegistry(),
+    ...,
+])
+```
+
+For fuller Torch examples, see:
+
+- [TORCH.md](TORCH.md) for execution-domain rules, copy semantics, and common patterns
+- [examples/torch/run_mask2former_torch_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_torch_postprocess.py:1)
+  for a Torch-heavy Mask2Former postprocess pipeline
+- [examples/torch/run_mask2former_numpy_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_numpy_postprocess.py:1)
+  for the matching NumPy handoff version
+
+The Torch Mask2Former example keeps mask upsampling, query filtering, pixel
+ownership, stuff merging, and mask-to-box conversion in Torch before handing
+the result back to NumPy. These example scripts also require `transformers`
+and `safetensors` in the environment.
 
 Switching to a different model family (RF-DETR, Mask R-CNN, YOLO11) means
 changing the operators between `Infer` and `ToDetections` — preprocessing and

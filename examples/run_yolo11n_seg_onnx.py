@@ -15,6 +15,7 @@ from common import (
 )
 from ml_pipes import (
     ArgMax,
+    SelectTensors,
     ConvertBoxFormat,
     GatherScores,
     Infer,
@@ -22,7 +23,6 @@ from ml_pipes import (
     Normalize,
     Pick,
     Pipeline,
-    MaskTensors,
     ProjectBoxes,
     ProjectMasks,
     ReconstructMasks,
@@ -63,7 +63,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
             GatherScores("class_scores", "classes", as_="scores"),
             ConvertBoxFormat(from_="cxcywh"),
             NMS(kept_as="kept"),
-            MaskTensors("mask_coeffs", "kept"),
+            SelectTensors("mask_coeffs", indices="kept"),
             ReconstructMasks("mask_coeffs", "protos", as_="masks"),
             Recall("resize_transform"),
             ProjectBoxes(),

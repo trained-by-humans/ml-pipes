@@ -15,6 +15,7 @@ import time
 import numpy as np
 
 from .batch import BatchGate, LeaderBatch
+from .context import Selector, SelectorPart, _attribute_annotation, _normalize_selector
 from .region import RegionCloser, RegionOpener
 from .scatter import ScatterGate
 from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
@@ -34,6 +35,23 @@ from .validation import PipelineValidationError, is_annotation_compatible
 # ---------------------------------------------------------------------------
 # Image / preprocessing
 # ---------------------------------------------------------------------------
+
+def _normalize_axis(axis: int, ndim: int) -> int:
+    normalized = axis if axis >= 0 else axis + ndim
+    if normalized < 0 or normalized >= ndim:
+        raise np.exceptions.AxisError(axis, ndim=ndim)
+    return normalized
+
+
+def _shape_without_axis(shape: tuple[int, ...], axis: int) -> tuple[int, ...]:
+    return shape[:axis] + shape[axis + 1:]
+
+
+def _flatten_leading_dim(array: np.ndarray) -> np.ndarray:
+    leading = int(array.shape[0])
+    trailing = int(np.prod(array.shape[1:], dtype=np.int64))
+    return array.reshape(leading, trailing)
+
 
 class LoadFile:
     def __call__(self, image_path: str | Path) -> bytes:
@@ -146,6 +164,39 @@ class Resize:
             "area": cv2.INTER_AREA,
         }
         return mapping[self.interpolation]
+
+
+class ConvertColorSpace:
+    def __init__(self, output_color_space: Literal["RGB", "BGR"]):
+        if output_color_space not in {"RGB", "BGR"}:
+            raise ValueError(f"ConvertColorSpace only supports RGB or BGR output, got {output_color_space}")
+        self.output_color_space = output_color_space
+
+    def __call__(self, image_payload: ImagePayload) -> ImagePayload:
+        if "C" not in image_payload.layout:
+            raise ValueError(f"ConvertColorSpace expects a layout containing C, got {image_payload.layout}")
+
+        if image_payload.color_space not in {"RGB", "BGR"}:
+            raise ValueError(
+                f"ConvertColorSpace only supports BGR/RGB input, got {image_payload.color_space}"
+            )
+
+        channel_axis = image_payload.layout.index("C")
+        channels = image_payload.channels
+        if channels != 3:
+            raise ValueError(
+                f"ConvertColorSpace only supports 3-channel images, got {channels} for layout {image_payload.layout}"
+            )
+
+        array = image_payload.array
+        if image_payload.color_space != self.output_color_space:
+            array = np.flip(array, axis=channel_axis)
+        converted = np.ascontiguousarray(array)
+        return ImagePayload(
+            array=converted,
+            color_space=self.output_color_space,
+            layout=image_payload.layout,
+        )
 
 
 class Normalize:
@@ -433,6 +484,71 @@ class GatherRows:
         return registry
 
 
+class TopK:
+    """Selects the top-k values and indices from a 1D named tensor."""
+
+    def __init__(self, src: str, k: int, values_as: str = "top_values", indices_as: str = "top_indices"):
+        self.src = src
+        self.k = k
+        self.values_as = values_as
+        self.indices_as = indices_as
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        values = registry[self.src]
+        if values.ndim != 1:
+            raise ValueError(f"TopK expects a 1D tensor, got shape {values.shape}")
+        size = int(values.shape[0])
+        top_k = min(self.k, size)
+        if top_k == 0:
+            registry[self.values_as] = values[:0]
+            registry[self.indices_as] = np.zeros((0,), dtype=np.int64)
+            return registry
+        top_indices = np.argpartition(values, -top_k)[-top_k:]
+        order = np.argsort(values[top_indices])[::-1]
+        top_indices = top_indices[order].astype(np.int64, copy=False)
+        registry[self.values_as] = values[top_indices]
+        registry[self.indices_as] = top_indices
+        return registry
+
+
+class TopKIndices2D:
+    """Selects top-k values from a 2D named tensor and returns row/column indices."""
+
+    def __init__(
+        self,
+        src: str,
+        k: int,
+        values_as: str = "top_values",
+        row_indices_as: str = "row_indices",
+        col_indices_as: str = "col_indices",
+    ):
+        self.src = src
+        self.k = k
+        self.values_as = values_as
+        self.row_indices_as = row_indices_as
+        self.col_indices_as = col_indices_as
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        values = registry[self.src]
+        if values.ndim != 2:
+            raise ValueError(f"TopKIndices2D expects a 2D tensor, got shape {values.shape}")
+        rows, cols = values.shape
+        flat = values.reshape(-1)
+        top_k = min(self.k, int(flat.shape[0]))
+        if top_k == 0:
+            registry[self.values_as] = flat[:0]
+            registry[self.row_indices_as] = np.zeros((0,), dtype=np.int64)
+            registry[self.col_indices_as] = np.zeros((0,), dtype=np.int64)
+            return registry
+        top_indices = np.argpartition(flat, -top_k)[-top_k:]
+        order = np.argsort(flat[top_indices])[::-1]
+        top_indices = top_indices[order].astype(np.int64, copy=False)
+        registry[self.values_as] = flat[top_indices]
+        registry[self.row_indices_as] = (top_indices // cols).astype(np.int64, copy=False)
+        registry[self.col_indices_as] = (top_indices % cols).astype(np.int64, copy=False)
+        return registry
+
+
 # ---------------------------------------------------------------------------
 # Math / activations
 # ---------------------------------------------------------------------------
@@ -449,27 +565,16 @@ class ArgMax:
         self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = np.argmax(registry[self.src], axis=self.axis).astype(np.int32)
+        tensor = registry[self.src]
+        axis = _normalize_axis(self.axis, tensor.ndim)
+        if tensor.shape[axis] == 0:
+            registry[self.as_] = np.zeros(_shape_without_axis(tensor.shape, axis), dtype=np.int32)
+            return registry
+        registry[self.as_] = np.argmax(tensor, axis=axis).astype(np.int32)
         return registry
 
 
-class GatherScores:
-    """Reduces a 2D score matrix to 1D by picking each row's value at its class index.
-
-    Equivalent to: scores[arange(N), classes]
-    Writes result back to scores (or as_) in the registry.
-    """
-
-    def __init__(self, scores: str, classes: str, as_: str | None = None):
-        self.scores = scores
-        self.classes = classes
-        self.as_ = as_ or scores
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        scores = registry[self.scores]
-        classes = registry[self.classes]
-        registry[self.as_] = scores[np.arange(scores.shape[0]), classes].astype(scores.dtype)
-        return registry
+GatherScores = GatherRows
 
 
 class Softmax:
@@ -485,9 +590,13 @@ class Softmax:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         x = registry[self.src]
-        shifted = x - np.max(x, axis=self.axis, keepdims=True)
+        axis = _normalize_axis(self.axis, x.ndim)
+        if x.shape[axis] == 0:
+            registry[self.as_] = x.copy()
+            return registry
+        shifted = x - np.max(x, axis=axis, keepdims=True)
         exp = np.exp(shifted)
-        registry[self.as_] = exp / np.sum(exp, axis=self.axis, keepdims=True)
+        registry[self.as_] = exp / np.sum(exp, axis=axis, keepdims=True)
         return registry
 
 
@@ -502,7 +611,29 @@ class Sigmoid:
         self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = 1.0 / (1.0 + np.exp(-registry[self.src]))
+        x = registry[self.src]
+        positive = x >= 0
+        result = np.empty_like(x)
+        result[positive] = 1.0 / (1.0 + np.exp(-x[positive]))
+        exp_values = np.exp(x[~positive])
+        result[~positive] = exp_values / (1.0 + exp_values)
+        registry[self.as_] = result
+        return registry
+
+
+class MultiplyTensors:
+    """Multiplies two registry tensors elementwise using NumPy broadcasting.
+
+    Defaults to in-place on the left-hand tensor when as_ is not provided.
+    """
+
+    def __init__(self, left: str, right: str, as_: str | None = None):
+        self.left = left
+        self.right = right
+        self.as_ = as_ or left
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        registry[self.as_] = registry[self.left] * registry[self.right]
         return registry
 
 
@@ -603,7 +734,7 @@ class NMS:
     """Non-Maximum Suppression on named tensors in a TensorRegistry.
 
     Filters boxes, scores, and classes in-place.
-    Optionally stores the kept indices under kept_as for use with MaskTensors.
+    Optionally stores the kept indices under kept_as for use with SelectTensors.
     """
 
     def __init__(
@@ -762,23 +893,166 @@ class NMM:
         return Detections(boxes=merged_boxes, scores=merged_scores, classes=merged_classes)
 
 
-class MaskTensors:
-    """Applies a pre-existing index mask from the registry to a tensor:
-    registry[as_] = registry[src][registry[indices]]
+class CreateTensorMask:
+    """Creates a boolean mask tensor from one source tensor."""
 
-    Pair with NMS(kept_as=...) to synchronise extra tensors (e.g. mask coefficients)
-    with the boxes/scores/classes that NMS already filtered.
-
-    Defaults to in-place (overwrites src) when as_ is not provided.
-    """
-
-    def __init__(self, src: str, indices: str, as_: str | None = None):
+    def __init__(self, src: str, predicate: Callable[[Any], Any], as_: str):
         self.src = src
-        self.indices = indices
-        self.as_ = as_ or src
+        self.as_ = as_
+        self.predicate = predicate
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = registry[self.src][registry[self.indices]]
+        registry[self.as_] = np.asarray(self.predicate(registry[self.src]), dtype=bool)
+        return registry
+
+
+BinarizeTensor = CreateTensorMask
+
+
+class CreateTensorMaskByThreshold:
+    """Creates a boolean mask tensor by thresholding one source tensor."""
+
+    def __init__(self, src: str, threshold: float, as_: str | None = None):
+        self._inner = CreateTensorMask(
+            src=src,
+            as_=as_ or src,
+            predicate=lambda tensor: tensor >= threshold,
+        )
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
+BinarizeTensorByThreshold = CreateTensorMaskByThreshold
+
+
+def _resolve_multi_output_names(
+    operator_name: str,
+    srcs: Sequence[str],
+    as_: str | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    if not srcs:
+        raise ValueError(f"{operator_name} requires at least one source tensor")
+    if len(srcs) == 1:
+        src = srcs[0]
+        if as_ is not None and not isinstance(as_, str):
+            raise ValueError(f"{operator_name} as_ must be a string when operating on one tensor")
+        return (as_ or src,)
+    if as_ is None:
+        return tuple(srcs)
+    if isinstance(as_, str):
+        raise ValueError(f"{operator_name} as_ must be a tuple when operating on more than one tensor")
+    if len(as_) != len(srcs):
+        raise ValueError(f"{operator_name} as_ tuple must match the number of source tensors")
+    return tuple(as_)
+
+
+class ApplyTensorMask:
+    """Applies one boolean mask to one or more tensors in-place."""
+
+    def __init__(self, *srcs: str, mask: str, as_: str | tuple[str, ...] | None = None):
+        self.srcs = srcs
+        self.mask = mask
+        self.dst_names = _resolve_multi_output_names("ApplyTensorMask", srcs, as_)
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        mask = registry[self.mask]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][mask]
+        return registry
+
+
+class SelectTensors:
+    """Applies one integer index tensor to one or more tensors in-place."""
+
+    def __init__(self, *srcs: str, indices: str, as_: str | tuple[str, ...] | None = None):
+        self.srcs = srcs
+        self.indices = indices
+        self.dst_names = _resolve_multi_output_names("SelectTensors", srcs, as_)
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        indices = registry[self.indices]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][indices]
+        return registry
+
+
+class FilterTensors:
+    """Filters one or more tensors using a single user-supplied predicate.
+
+    The predicate is evaluated once and the resulting mask is applied to every
+    key. All keys are updated in-place.
+
+    Example — keep only person and car before NMS:
+        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in {0, 2} for c in r["classes"]])
+    """
+
+    def __init__(
+        self,
+        *srcs: str,
+        predicate: Callable[[TensorRegistry], Any],
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        self.srcs = srcs
+        self.predicate = predicate
+        self.dst_names = _resolve_multi_output_names("FilterTensors", srcs, as_)
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        mask = self.predicate(registry)
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][mask]
+        return registry
+
+
+class FilterTensorsByScore:
+    """Shorthand for FilterTensors with a score threshold predicate.
+
+    The score tensor is always filtered automatically; additional keys are listed as positional args.
+
+    Example:
+        FilterTensorsByScore("boxes", "masks", "classes", score="scores", min_score=0.7)
+    """
+
+    def __init__(
+        self,
+        *srcs: str,
+        score: str,
+        min_score: float,
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        all_srcs = (score,) + tuple(s for s in srcs if s != score)
+        self._inner = FilterTensors(
+            *all_srcs,
+            predicate=lambda r: r[score] >= min_score,
+            as_=as_,
+        )
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
+class FilterTensorsByMasksArea:
+    """Filters tensors by the minimum foreground area of one masks tensor."""
+
+    def __init__(
+        self,
+        *srcs: str,
+        masks: str = "masks",
+        min_area: int = 1,
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
+        self.srcs = all_srcs
+        self.masks = masks
+        self.min_area = min_area
+        self.dst_names = _resolve_multi_output_names("FilterTensorsByMasksArea", all_srcs, as_)
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        masks = registry[self.masks]
+        areas = _flatten_leading_dim(np.asarray(masks, dtype=bool)).sum(axis=1)
+        keep = areas >= self.min_area
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][keep]
         return registry
 
 
@@ -799,47 +1073,138 @@ class MapTensor:
         return registry
 
 
-class ThresholdTensors:
-    """Shorthand for FilterTensors with a score threshold predicate.
+class SortTensorsBy:
+    """Sorts one or more registry tensors by the values of a key tensor."""
 
-    The score tensor is always filtered automatically; additional keys are listed as positional args.
-
-    Example:
-        ThresholdTensors("boxes", "masks", "classes", score="scores", min_score=0.7)
-    """
-
-    def __init__(self, *srcs: str, score: str, min_score: float):
-        all_srcs = (score,) + tuple(s for s in srcs if s != score)
-        self._inner = FilterTensors(*all_srcs, predicate=lambda r: r[score] >= min_score)
-
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        return self._inner(registry)
-
-
-class FilterTensors:
-    """Filters one or more tensors using a single user-supplied predicate.
-
-    The predicate is evaluated once and the resulting mask is applied to every
-    key. All keys are updated in-place.
-
-    Example — keep only person and car before NMS:
-        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in {0, 2} for c in r["classes"]])
-    """
-
-    def __init__(self, *srcs: str, predicate: Callable[[TensorRegistry], Any]):
-        self.srcs = srcs
-        self.predicate = predicate
+    def __init__(
+        self,
+        *srcs: str,
+        by: str,
+        descending: bool = True,
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        all_srcs = (by,) + tuple(src for src in srcs if src != by)
+        self.srcs = all_srcs
+        self.by = by
+        self.descending = descending
+        self.dst_names = _resolve_multi_output_names("SortTensorsBy", all_srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        mask = self.predicate(registry)
-        for src in self.srcs:
-            registry[src] = registry[src][mask]
+        order = np.argsort(registry[self.by])
+        if self.descending:
+            order = order[::-1]
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][order]
+        return registry
+
+
+class WeightMasksByScores:
+    """Weights each mask by its corresponding 1D score.
+
+    Common panoptic step:
+      scores: (N,)
+      masks:  (N, H, W) or any tensor with leading query dimension N
+      result: scores broadcast across the remaining mask dimensions
+    """
+
+    def __init__(self, masks: str = "masks", scores: str = "scores", *, as_: str):
+        self.masks = masks
+        self.scores = scores
+        self.as_ = as_
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        scores = registry[self.scores]
+        masks = registry[self.masks]
+        expanded_scores = scores.reshape((scores.shape[0],) + (1,) * (masks.ndim - 1))
+        registry[self.as_] = expanded_scores * masks
         return registry
 
 
 # ---------------------------------------------------------------------------
 # Segmentation
 # ---------------------------------------------------------------------------
+
+
+class ResizeMasks:
+    """Resizes a stack of masks to a target shape."""
+
+    def __init__(self, masks: str = "masks", as_: str | None = None):
+        self.masks = masks
+        self.as_ = as_ or masks
+
+    def __call__(self, registry: TensorRegistry, image_shape: tuple[int, int]) -> TensorRegistry:
+        import cv2
+
+        height, width = image_shape
+        masks = registry[self.masks]
+        resized = [cv2.resize(mask, (width, height), interpolation=cv2.INTER_LINEAR) for mask in masks]
+        registry[self.as_] = (
+            np.stack(resized, axis=0)
+            if resized
+            else np.zeros((0, height, width), dtype=masks.dtype)
+        )
+        return registry
+
+
+class MeanMaskScores:
+    """Computes one mean score per mask from dense mask values.
+
+    If `binary_masks` is provided, the mean is computed only over pixels where
+    the binary mask is True. If `binary_masks` is None, the mean is computed
+    over all pixels in each dense mask.
+    """
+
+    def __init__(
+        self,
+        masks: str = "masks",
+        binary_masks: str | None = "binary_masks",
+        *,
+        as_: str,
+    ):
+        self.masks = masks
+        self.binary_masks = binary_masks
+        self.as_ = as_
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        masks = registry[self.masks]
+        if self.binary_masks is None:
+            registry[self.as_] = _flatten_leading_dim(masks).mean(axis=1)
+            return registry
+
+        binary_masks = registry[self.binary_masks]
+        areas = _flatten_leading_dim(binary_masks).sum(axis=1)
+        mask_sums = _flatten_leading_dim(masks * binary_masks).sum(axis=1)
+        registry[self.as_] = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
+        return registry
+
+
+class MasksToBoxes:
+    """Converts binary masks into xyxy boxes."""
+
+    def __init__(self, masks: str = "masks", *, as_: str):
+        self.masks = masks
+        self.as_ = as_
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        masks = registry[self.masks]
+        count = masks.shape[0]
+        if count == 0:
+            registry[self.as_] = np.zeros((0, 4), dtype=np.float32)
+            return registry
+
+        _, height, width = masks.shape
+        xs = np.arange(width, dtype=np.float32).reshape(1, 1, width)
+        ys = np.arange(height, dtype=np.float32).reshape(1, height, 1)
+        x1 = np.where(masks, xs, float(width)).min(axis=(-2, -1))
+        y1 = np.where(masks, ys, float(height)).min(axis=(-2, -1))
+        x2 = np.where(masks, xs, -1.0).max(axis=(-2, -1)) + 1.0
+        y2 = np.where(masks, ys, -1.0).max(axis=(-2, -1)) + 1.0
+        boxes = np.stack([x1, y1, x2, y2], axis=-1).astype(np.float32, copy=False)
+        empty = ~masks.any(axis=(-2, -1))
+        boxes[empty] = 0.0
+        registry[self.as_] = boxes
+        return registry
+
 
 class ReconstructMasks:
     """Reconstructs raw segmentation masks from coefficients and prototypes.
@@ -1305,6 +1670,79 @@ class LogDetections(SideEffectOp):
 # ---------------------------------------------------------------------------
 # Control
 # ---------------------------------------------------------------------------
+
+class Select:
+    def __init__(self, *selector: SelectorPart):
+        if not selector:
+            raise ValueError("Select requires at least one selector part")
+        self.selector = selector[0] if len(selector) == 1 else selector
+        self._selector = self._normalize_selector_parts(selector)
+        if not self._selector:
+            raise ValueError("Select requires a non-empty selector")
+        self._selector_label = self._format_selector_label(self.selector, self._selector)
+
+    @staticmethod
+    def _normalize_selector_parts(
+        selector: tuple[SelectorPart | tuple[SelectorPart, ...], ...],
+    ) -> tuple[str | int, ...]:
+        normalized: list[str | int] = []
+        for part in selector:
+            normalized.extend(_normalize_selector(part))
+        return tuple(normalized)
+
+    @staticmethod
+    def _format_selector_label(selector: Selector, normalized: tuple[str | int, ...]) -> str:
+        if isinstance(selector, int):
+            return f"index={selector}"
+        return f"select={normalized!r}"
+
+    def __call__(self, current: object) -> Any:
+        selected = current
+        for part in self._selector:
+            if isinstance(part, int):
+                if not isinstance(selected, tuple):
+                    raise TypeError(f"Select({self._selector_label}) can only index tuple outputs")
+                selected = selected[part]
+                continue
+            selected = getattr(selected, part)
+        return selected
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations
+        if current_output is Any:
+            if isinstance(self._selector[0], int):
+                return (tuple,), Any
+            return (Any,), Any
+
+        selected = current_output
+        for part in self._selector:
+            if selected is Any or selected is None:
+                return (current_output,), Any
+            if isinstance(part, int):
+                origin = get_origin(selected)
+                if origin is tuple:
+                    parts = get_args(selected)
+                elif isinstance(selected, tuple):
+                    parts = selected
+                else:
+                    raise validation_error_type(
+                        f"Select({self._selector_label}) requires a tuple boundary, got {selected}"
+                    )
+                if not (-len(parts) <= part < len(parts)):
+                    raise validation_error_type(
+                        f"Select({self._selector_label}) is out of bounds for {selected} (length {len(parts)})"
+                    )
+                selected = parts[part]
+                continue
+            selected = _attribute_annotation(selected, part)
+        return (current_output,), selected
+
 
 class Pick:
     """Selects one or more elements from a tuple by index, discarding the rest.
