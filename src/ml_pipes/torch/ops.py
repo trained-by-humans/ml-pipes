@@ -62,6 +62,48 @@ def _numpy_conversion_can_alias_torch_source(
     return source_device_type == "cpu" and (target_dtype is None or source_dtype == target_dtype)
 
 
+def _convert_numpy_array_to_torch(
+    source: np.ndarray,
+    *,
+    device: str,
+    target_dtype: torch.dtype | None,
+    copy: bool,
+) -> torch.Tensor:
+    array = np.asarray(source)
+    source_dtype = torch.as_tensor(array).dtype
+    conversion_can_alias_source = _torch_conversion_can_alias_numpy_source(
+        device=device,
+        source_dtype=source_dtype,
+        target_dtype=target_dtype,
+    )
+    tensor = torch.as_tensor(array, dtype=target_dtype, device=device)
+    detached_from_source = not conversion_can_alias_source
+    if copy and not detached_from_source:
+        tensor = tensor.clone()
+    return tensor
+
+
+def _convert_torch_tensor_to_numpy(
+    source: torch.Tensor,
+    *,
+    target_dtype: np.dtype | None,
+    copy: bool,
+) -> np.ndarray:
+    base_array = source.detach().cpu().numpy()
+    conversion_can_alias_source = _numpy_conversion_can_alias_torch_source(
+        source_device_type=source.device.type,
+        source_dtype=base_array.dtype,
+        target_dtype=target_dtype,
+    )
+    array = base_array
+    if target_dtype is not None:
+        array = array.astype(target_dtype, copy=False)
+    detached_from_source = not conversion_can_alias_source or array is not base_array
+    if copy and not detached_from_source:
+        array = array.copy()
+    return array
+
+
 class ToTorch:
     def __init__(self, device: str = "cpu", dtype: str | None = None, copy: bool = False):
         self.device = canonical_torch_device(device)
@@ -70,17 +112,11 @@ class ToTorch:
 
     def __call__(self, tensor_payload: TensorPayload) -> TorchTensorPayload:
         target_dtype = resolve_torch_dtype(self.dtype) if self.dtype is not None else None
-        array = np.asarray(tensor_payload.array)
-        base_tensor = torch.as_tensor(array)
-        conversion_can_alias_source = _torch_conversion_can_alias_numpy_source(
+        tensor = _convert_numpy_array_to_torch(
+            tensor_payload.array,
             device=self.device,
-            source_dtype=base_tensor.dtype,
             target_dtype=target_dtype,
-        )
-        tensor = (
-            torch.tensor(array, dtype=target_dtype, device=self.device)
-            if self.copy and conversion_can_alias_source
-            else torch.as_tensor(array, dtype=target_dtype, device=self.device)
+            copy=self.copy,
         )
         return TorchTensorPayload(
             array=tensor,
@@ -96,19 +132,12 @@ class ToNumpy:
         self.copy = copy
 
     def __call__(self, tensor_payload: TorchTensorPayload) -> TensorPayload:
-        base_array = tensor_payload.array.detach().cpu().numpy()
-        array = base_array
         target_dtype = np.dtype(self.dtype) if self.dtype is not None else None
-        conversion_can_alias_source = _numpy_conversion_can_alias_torch_source(
-            source_device_type=tensor_payload.array.device.type,
-            source_dtype=base_array.dtype,
+        array = _convert_torch_tensor_to_numpy(
+            tensor_payload.array,
             target_dtype=target_dtype,
+            copy=self.copy,
         )
-        if target_dtype is not None:
-            array = array.astype(target_dtype, copy=False)
-        detached_from_source = not conversion_can_alias_source or array is not base_array
-        if self.copy and not detached_from_source:
-            array = array.copy()
         return TensorPayload(array=array, layout=tensor_payload.layout, dtype=str(array.dtype))
 
 
@@ -122,17 +151,11 @@ class ToTorchRegistry:
         target_dtype = resolve_torch_dtype(self.dtype) if self.dtype is not None else None
         tensors = {}
         for name, value in registry._tensors.items():
-            array = np.asarray(value)
-            base_tensor = torch.as_tensor(array)
-            conversion_can_alias_source = _torch_conversion_can_alias_numpy_source(
+            tensors[name] = _convert_numpy_array_to_torch(
+                value,
                 device=self.device,
-                source_dtype=base_tensor.dtype,
                 target_dtype=target_dtype,
-            )
-            tensors[name] = (
-                torch.tensor(array, dtype=target_dtype, device=self.device)
-                if self.copy and conversion_can_alias_source
-                else torch.as_tensor(array, dtype=target_dtype, device=self.device)
+                copy=self.copy,
             )
         return TorchTensorRegistry(tensors)
 
@@ -145,20 +168,12 @@ class ToNumpyRegistry:
     def __call__(self, registry: TorchTensorRegistry) -> TensorRegistry:
         arrays = {}
         for name, tensor in registry._tensors.items():
-            base_array = tensor.detach().cpu().numpy()
-            array = base_array
             target_dtype = np.dtype(self.dtype) if self.dtype is not None else None
-            conversion_can_alias_source = _numpy_conversion_can_alias_torch_source(
-                source_device_type=tensor.device.type,
-                source_dtype=base_array.dtype,
+            arrays[name] = _convert_torch_tensor_to_numpy(
+                tensor,
                 target_dtype=target_dtype,
+                copy=self.copy,
             )
-            if target_dtype is not None:
-                array = array.astype(target_dtype, copy=False)
-            detached_from_source = not conversion_can_alias_source or array is not base_array
-            if self.copy and not detached_from_source:
-                array = array.copy()
-            arrays[name] = array
         return TensorRegistry(arrays)
 
 
