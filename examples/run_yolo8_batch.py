@@ -45,13 +45,13 @@ from ml_pipes import (
 # accepts any batch size.  Requires: pip install ultralytics
 #
 # Usage (runs the sample COCO image 8 times by default):
-#   python run_batch_yolo8_onnx.py
+#   python run_yolo8_batch.py
 #
 # Run with explicit images:
-#   python run_batch_yolo8_onnx.py --images img1.jpg img2.jpg img3.jpg img4.jpg
+#   python run_yolo8_batch.py --images img1.jpg img2.jpg img3.jpg img4.jpg
 #
 # Tune batch size and thread-pool size:
-#   python run_batch_yolo8_onnx.py --batch-size 4 --workers 8
+#   python run_yolo8_batch.py --batch-size 4 --workers 8
 
 MODEL_NAME = "yolov8n_dynamic.onnx"
 

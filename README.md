@@ -50,6 +50,12 @@ detections = pipeline("image.jpg")
 print(detections.boxes, detections.scores, detections.classes)
 ```
 
+## Benchmarking
+
+For per-operator latency profiling, config sweeps, result diffs, saved
+artifacts, and the `python -m ml_pipes benchmark` CLI, see
+[BENCHMARKING.md](BENCHMARKING.md).
+
 ## Torch Execution Domain
 
 Torch support is intentionally isolated under `ml_pipes.torch`. Core
