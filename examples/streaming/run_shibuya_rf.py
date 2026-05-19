@@ -7,7 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent))
 
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -56,13 +56,12 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile:
     print(f"Resolving stream URL from {url} ...", file=sys.stderr)
     stream_url = get_stream_url(url)
 
-    cap = cv2.VideoCapture(stream_url)
-    if not cap.isOpened():
-        print("Error: could not open stream.", file=sys.stderr)
+    try:
+        reader = FrameReader(stream_url, stride=stride)
+    except OSError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    stream_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    reader = FrameReader(cap, stream_fps=stream_fps, stream_url=stream_url, stride=stride)
     mode = "tiled" if tile else "standard"
     print(f"Streaming with {workers} worker(s), stride={stride}, mode={mode} — press Q in the window to quit.", file=sys.stderr)
 
@@ -106,7 +105,6 @@ def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile:
                 stopped = True
 
     reader.stop()
-    cap.release()
     cv2.destroyAllWindows()
     return 0
 
