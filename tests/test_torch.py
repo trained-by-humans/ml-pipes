@@ -173,6 +173,26 @@ def test_to_numpy_copy_true_isolates_cpu_torch_storage():
     assert result.array.tolist() == [1.0, 2.0]
 
 
+def test_to_torch_registry_copy_true_isolates_cpu_numpy_storage():
+    from ml_pipes.types import TensorRegistry
+
+    registry = TensorRegistry({"scores": np.array([1.0, 2.0], dtype=np.float32)})
+
+    result = ToTorchRegistry(copy=True)(registry)
+    registry["scores"][0] = 9.0
+
+    assert result["scores"].tolist() == [1.0, 2.0]
+
+
+def test_to_numpy_registry_copy_false_shares_cpu_torch_storage():
+    registry = TorchTensorRegistry({"scores": torch.tensor([1.0, 2.0], dtype=torch.float32)})
+
+    result = ToNumpyRegistry(copy=False)(registry)
+    registry["scores"][0] = 9.0
+
+    assert result["scores"].tolist() == [9.0, 2.0]
+
+
 def test_torch_infer_defaults_output_names_and_layouts():
     op = TorchInfer(torch.nn.Identity().eval())
     outputs = op(_torch_payload(torch.ones((1, 3, 4, 4))))
