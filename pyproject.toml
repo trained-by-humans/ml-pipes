@@ -27,6 +27,9 @@ torch = [
     "torchvision",
 ]
 
+[project.scripts]
+ml-pipes = "ml_pipes.__main__:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

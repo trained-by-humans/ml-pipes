@@ -1,3 +1,15 @@
+from .benchmark import (
+    Benchmark,
+    BenchmarkBuilder,
+    BenchmarkCollector,
+    BenchmarkDiff,
+    BenchmarkSweep,
+    BenchmarkResult,
+    InvocationStat,
+    InvocationStatDiff,
+    MeasurementConfig,
+)
+from .factory import data_factory, pipeline_factory, InputFn
 from .context import Context, Recall, Store
 from .inspection import (
     HtmlRenderer,
@@ -94,6 +106,18 @@ from .types import (
 )
 
 __all__ = [
+    "Benchmark",
+    "BenchmarkBuilder",
+    "BenchmarkCollector",
+    "BenchmarkDiff",
+    "BenchmarkSweep",
+    "BenchmarkResult",
+    "InvocationStat",
+    "InvocationStatDiff",
+    "MeasurementConfig",
+    "data_factory",
+    "pipeline_factory",
+    "InputFn",
     "ArgMax",
     "AggregateCollector",
     "ConcurrentCollector",

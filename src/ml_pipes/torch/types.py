@@ -5,25 +5,40 @@ from dataclasses import dataclass
 import torch
 
 
-_TORCH_DTYPE_TO_NAME: dict[torch.dtype, str] = {
-    torch.bool: "bool",
-    torch.uint8: "uint8",
-    torch.int8: "int8",
-    torch.int16: "int16",
-    torch.int32: "int32",
-    torch.int64: "int64",
-    torch.float16: "float16",
-    torch.float32: "float32",
-    torch.float64: "float64",
-}
+def _build_dtype_maps() -> tuple[dict, dict]:
+    d2n: dict[torch.dtype, str] = {
+        torch.bool: "bool",
+        torch.uint8: "uint8",
+        torch.int8: "int8",
+        torch.int16: "int16",
+        torch.int32: "int32",
+        torch.int64: "int64",
+        torch.float16: "float16",
+        torch.float32: "float32",
+        torch.float64: "float64",
+    }
+    return d2n, {name: dtype for dtype, name in d2n.items()}
 
-_NAME_TO_TORCH_DTYPE: dict[str, torch.dtype] = {
-    name: dtype for dtype, name in _TORCH_DTYPE_TO_NAME.items()
-}
+_TORCH_DTYPE_TO_NAME: dict[torch.dtype, str] | None = None
+_NAME_TO_TORCH_DTYPE: dict[str, torch.dtype] | None = None
+
+
+def _dtype_to_name() -> dict[torch.dtype, str]:
+    global _TORCH_DTYPE_TO_NAME, _NAME_TO_TORCH_DTYPE
+    if _TORCH_DTYPE_TO_NAME is None:
+        _TORCH_DTYPE_TO_NAME, _NAME_TO_TORCH_DTYPE = _build_dtype_maps()
+    return _TORCH_DTYPE_TO_NAME
+
+
+def _name_to_dtype() -> dict[str, torch.dtype]:
+    global _TORCH_DTYPE_TO_NAME, _NAME_TO_TORCH_DTYPE
+    if _NAME_TO_TORCH_DTYPE is None:
+        _TORCH_DTYPE_TO_NAME, _NAME_TO_TORCH_DTYPE = _build_dtype_maps()
+    return _NAME_TO_TORCH_DTYPE
 
 
 def canonical_torch_dtype(dtype: torch.dtype) -> str:
-    return _TORCH_DTYPE_TO_NAME.get(dtype, str(dtype).replace("torch.", ""))
+    return _dtype_to_name().get(dtype, str(dtype).replace("torch.", ""))
 
 
 def resolve_torch_dtype(dtype: str | torch.dtype | None) -> torch.dtype | None:
@@ -32,7 +47,7 @@ def resolve_torch_dtype(dtype: str | torch.dtype | None) -> torch.dtype | None:
     if isinstance(dtype, torch.dtype):
         return dtype
     try:
-        return _NAME_TO_TORCH_DTYPE[dtype]
+        return _name_to_dtype()[dtype]
     except KeyError as exc:
         raise ValueError(f"Unsupported torch dtype {dtype!r}") from exc
 

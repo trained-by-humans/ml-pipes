@@ -3,18 +3,18 @@ Inspection example: visualise the data at every pipeline step.
 
 Three pipelines are demonstrated:
 
-  simple   — single image through the full YOLOv8 detection pipeline.
+  Simple   — single image through the full YOLOv8 detection pipeline.
 
-  batched  — 8 image paths in, Scatter decodes them concurrently,
+  Batched  — 8 image paths in, Scatter decodes them concurrently,
              Batch groups them into batches of 4 for inference,
              UnBatch/Gather collect per-image detections.
 
-  tiled    — single image tiled into overlapping 240×240 patches,
+  Tiled    — single image tiled into overlapping 200×200 patches,
              each tile inferred independently via Scatter, results
              stitched back and deduplicated with NMM.
 
 Usage:
-    # Open result in the default web browser (default behaviour)
+    # Open result in the default web browser (default behavior)
     python run_inspect.py
 
     # Use the tiled pipeline
@@ -45,32 +45,28 @@ import sys
 from pathlib import Path
 
 from common import (
+    COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
     add_assets_dir_arg,
     add_model_arg,
+    build_output_path,
+    decode,
     download_if_missing,
     resolve_model_path,
-    decode,
+    visualize_detections_and_store,
 )
-from common import COCO_CLASSES, build_output_path, visualize_detections_and_store
-from ml_pipes import DrawBoxes, SaveImage
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
-from run_batch_yolo8_onnx import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
+from run_yolo8_batch import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
+from run_yolo8_tile import yolo8_tiled_pipeline
 from ml_pipes import (
     Gather,
     Inline,
     InspectionResult,
     InspectionSerializer,
-    NMM,
-    Pick,
     Pipeline,
     PipelineInspector,
-    Recall,
     Scatter,
-    Stitch,
-    Store,
-    Tile,
 )
 
 
@@ -79,7 +75,6 @@ from ml_pipes import (
 # ---------------------------------------------------------------------------
 
 def run_inspection_simple(model_path: Path, image_path: Path, output_path: Path) -> InspectionResult:
-    """Single image → decode → infer → visualize."""
     pipeline: Pipeline = (
         decode()
         + yolo8_inference_pipeline(model_path)
@@ -93,54 +88,33 @@ def run_inspection_simple(model_path: Path, image_path: Path, output_path: Path)
 
 
 def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResult:
-    """8 paths → Scatter(decode+preprocess) → Gather → Batch(4) Infer → UnBatch → Detections.
-
-    Uses the dynamic-batch ONNX model (yolov8n_dynamic.onnx) which accepts any
-    batch size. Scatter fans the list out to worker threads; Gather collects
-    preprocessed tensors; the Batch region runs batched inference.
-    """
-    from run_batch_yolo8_onnx import _export_dynamic_model
+    from run_yolo8_batch import _export_dynamic_model
 
     model_path = assets_dir / BATCH_MODEL_NAME
     if not model_path.exists():
         print(f"Exporting dynamic-batch model → {model_path}", file=sys.stderr)
         _export_dynamic_model(model_path)
 
-    # build_batch_pipeline expects single-threaded Batch gate usage;
-    # wrap it with Scatter/Gather so inspect() can drive it from a list.
-    per_image = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
+    inference_pipeline = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
     pipeline = Pipeline([
         Scatter(max_concurrency=4),
-        Inline(per_image),
+        Inline(inference_pipeline),
         Gather(),
     ])
-
-    image_paths = [image_path] * 8
+    pipeline.validate()
     print("Running batched inspection...", file=sys.stderr)
-    result = pipeline.inspect(image_paths)
+    result = pipeline.inspect([image_path] * 8)
     print(result)
     return result
 
 
 def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) -> InspectionResult:
-    """Single image → Tile → Scatter(infer per tile) → Gather → Stitch → NMM → DrawBoxes."""
-    infer = yolo8_inference_pipeline(model_path)
-    pipeline = Pipeline([
-        Inline(decode()),
-        Tile(slice_wh=(200, 200), overlap_wh=(40, 40)),
-        Store("tile_rects", index=1),
-        Pick(0),
-        Scatter(max_concurrency=4),
-        Inline(infer),
-        Gather(),
-        Recall("tile_rects"),
-        Stitch(),
-        NMM(iou_threshold=0.4),
-        Recall("source_image", index=0),
-        DrawBoxes(class_names=COCO_CLASSES),
-        SaveImage(output_path, at=0),
-        Pick(0),
-    ])
+    pipeline = (
+        decode()
+        + yolo8_tiled_pipeline(model_path)
+        + visualize_detections_and_store(output_path, COCO_CLASSES)
+    )
+    pipeline.validate()
     print("Running tiled inspection...", file=sys.stderr)
     result = pipeline.inspect(image_path)
     print(result)
