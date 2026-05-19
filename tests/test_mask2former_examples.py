@@ -19,7 +19,8 @@ from examples.torch.mask2former_infer import (
 )
 from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFromQueries
 from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries
-from ml_pipes import Pipeline, Recall
+from ml_pipes import ArgMax, Pipeline, Recall
+from ml_pipes.torch import TorchArgMax
 from ml_pipes.torch.types import TorchTensorRegistry
 from ml_pipes.types import TensorRegistry
 
@@ -234,3 +235,53 @@ def test_torch_panoptic_segments_filter_by_surviving_overlap() -> None:
             [False, True, True],
         ]
     ]
+
+
+def test_numpy_panoptic_sequence_handles_all_queries_filtered() -> None:
+    registry = TensorRegistry(
+        {
+            "query_scores": np.zeros((0,), dtype=np.float32),
+            "query_classes": np.zeros((0,), dtype=np.int64),
+            "mask_probs": np.zeros((0, 2, 3), dtype=np.float32),
+            "weighted_masks": np.zeros((0, 2, 3), dtype=np.float32),
+        }
+    )
+
+    ArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
+    result = PanopticSegmentsFromQueries(
+        thing_class_ids=frozenset({0, 1}),
+        scores="query_scores",
+        classes="query_classes",
+        masks="mask_probs",
+        winner_ids="winner_ids",
+    )(registry)
+
+    assert result["winner_ids"].shape == (2, 3)
+    assert result["masks"].shape == (0, 2, 3)
+    assert result["scores"].dtype == np.float32
+    assert result["classes"].dtype == np.int64
+
+
+def test_torch_panoptic_sequence_handles_all_queries_filtered() -> None:
+    registry = TorchTensorRegistry(
+        {
+            "query_scores": torch.zeros((0,), dtype=torch.float32),
+            "query_classes": torch.zeros((0,), dtype=torch.int64),
+            "mask_probs": torch.zeros((0, 2, 3), dtype=torch.float32),
+            "weighted_masks": torch.zeros((0, 2, 3), dtype=torch.float32),
+        }
+    )
+
+    TorchArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
+    result = TorchPanopticSegmentsFromQueries(
+        thing_class_ids=frozenset({0, 1}),
+        scores="query_scores",
+        classes="query_classes",
+        masks="mask_probs",
+        winner_ids="winner_ids",
+    )(registry)
+
+    assert tuple(result["winner_ids"].shape) == (2, 3)
+    assert tuple(result["masks"].shape) == (0, 2, 3)
+    assert result["scores"].dtype == torch.float32
+    assert result["classes"].dtype == torch.int64

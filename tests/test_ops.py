@@ -411,6 +411,16 @@ def test_argmax_picks_highest_score_index_per_row():
     assert result["classes"].tolist() == [1, 0]
 
 
+def test_argmax_axis_zero_handles_empty_leading_dimension():
+    registry = TensorRegistry({"scores": np.zeros((0, 2, 3), dtype=np.float32)})
+
+    result = ArgMax("scores", axis=0, as_="classes")(registry)
+
+    assert result["classes"].dtype == np.int32
+    assert result["classes"].shape == (2, 3)
+    assert np.array_equal(result["classes"], np.zeros((2, 3), dtype=np.int32))
+
+
 def test_gather_scores_picks_class_score():
     scores = np.array([[0.1, 0.9], [0.8, 0.2]], dtype=np.float32)
     classes = np.array([1, 0], dtype=np.int32)
@@ -466,6 +476,15 @@ def test_softmax_sums_to_one_per_row():
     result = Softmax("logits")(registry)
 
     assert np.allclose(result["logits"].sum(axis=-1), [1.0])
+
+
+def test_softmax_handles_empty_reduction_axis():
+    registry = TensorRegistry({"logits": np.zeros((0, 2, 3), dtype=np.float32)})
+
+    result = Softmax("logits", axis=0)(registry)
+
+    assert result["logits"].shape == (0, 2, 3)
+    assert result["logits"].dtype == np.float32
 
 
 def test_sigmoid_maps_zero_to_half():
@@ -566,6 +585,29 @@ def test_mean_mask_scores_computes_mean_over_binary_support():
     assert np.allclose(result["mean_mask_scores"], [0.75, 0.5])
 
 
+def test_mean_mask_scores_handles_empty_masks():
+    registry = TensorRegistry(
+        {
+            "selected_masks": np.zeros((0, 2, 2), dtype=np.float32),
+            "binary_masks": np.zeros((0, 2, 2), dtype=bool),
+        }
+    )
+
+    result = MeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+
+    assert result["mean_mask_scores"].shape == (0,)
+    assert result["mean_mask_scores"].dtype == np.float64
+
+
+def test_mean_mask_scores_handles_empty_masks_without_binary_masks():
+    registry = TensorRegistry({"selected_masks": np.zeros((0, 2, 2), dtype=np.float32)})
+
+    result = MeanMaskScores(masks="selected_masks", binary_masks=None, as_="mean_mask_scores")(registry)
+
+    assert result["mean_mask_scores"].shape == (0,)
+    assert result["mean_mask_scores"].dtype == np.float32
+
+
 def test_masks_to_boxes_converts_masks_to_xyxy():
     registry = TensorRegistry(
         {
@@ -604,6 +646,57 @@ def test_filter_masks_by_area_filters_parallel_tensors():
     assert result["masks"].shape[0] == 1
     assert np.allclose(result["scores"], [0.9])
     assert result["classes"].tolist() == [2]
+
+
+def test_filter_masks_by_area_handles_empty_masks():
+    registry = TensorRegistry(
+        {
+            "masks": np.zeros((0, 2, 2), dtype=bool),
+            "scores": np.zeros((0,), dtype=np.float32),
+            "classes": np.zeros((0,), dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
+
+    assert result["masks"].shape == (0, 2, 2)
+    assert result["scores"].shape == (0,)
+    assert result["classes"].shape == (0,)
+
+
+def test_empty_instance_postprocess_pipeline_returns_empty_segmentations():
+    pipeline = Pipeline([
+        TopKIndices2D(
+            "class_probs",
+            k=100,
+            values_as="top_scores",
+            row_indices_as="query_indices",
+            col_indices_as="class_ids",
+        ),
+        SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+        BinarizeTensorByThreshold("selected_masks", threshold=0.5, as_="binary_masks"),
+        MeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
+        MultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
+        FilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
+        FilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=0.5),
+        SortTensorsBy("binary_masks", "class_ids", by="final_scores"),
+        MasksToBoxes(masks="binary_masks", as_="boxes"),
+        ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
+    ])
+    registry = TensorRegistry(
+        {
+            "class_probs": np.zeros((0, 3), dtype=np.float32),
+            "mask_probs": np.zeros((0, 2, 2), dtype=np.float32),
+        }
+    )
+
+    result = pipeline(registry)
+
+    assert isinstance(result, Segmentations)
+    assert result.boxes == []
+    assert result.scores == []
+    assert result.classes == []
+    assert result.masks == []
 
 
 def test_create_tensor_mask_writes_boolean_mask_from_predicate():

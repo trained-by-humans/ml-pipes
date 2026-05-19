@@ -5,7 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes import Batch, Gather, Normalize, Pipeline, PipelineValidationError, Scatter, TracingConfig, UnBatch
+from ml_pipes import Batch, Gather, Normalize, Pipeline, PipelineValidationError, Scatter, ToSegmentations, TracingConfig, UnBatch
 from ml_pipes.inspection import ImageBlock, PipelineInspector, TextBlock
 from ml_pipes.tracing import TraceCollector
 from ml_pipes.types import TensorPayload
@@ -266,6 +266,51 @@ def test_torch_argmax_and_multiply_tensors_work_on_registry():
 
     assert registry["classes"].tolist() == [1, 0]
     assert torch.allclose(registry["product"], torch.tensor([[10.0, 20.0], [20.0, 40.0]]))
+
+
+def test_torch_argmax_axis_zero_handles_empty_leading_dimension():
+    registry = TorchTensorRegistry({"scores": torch.zeros((0, 2, 3), dtype=torch.float32)})
+
+    TorchArgMax("scores", axis=0, as_="classes")(registry)
+
+    assert registry["classes"].dtype == torch.int64
+    assert tuple(registry["classes"].shape) == (2, 3)
+    assert torch.equal(registry["classes"], torch.zeros((2, 3), dtype=torch.int64))
+
+
+def test_empty_torch_instance_postprocess_pipeline_returns_empty_segmentations():
+    pipeline = Pipeline([
+        TorchTopKIndices2D(
+            "class_probs",
+            k=100,
+            values_as="top_scores",
+            row_indices_as="query_indices",
+            col_indices_as="class_ids",
+        ),
+        TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+        TorchBinarizeTensorByThreshold("selected_masks", threshold=0.5, as_="binary_masks"),
+        TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
+        TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
+        TorchFilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
+        TorchFilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=0.5),
+        TorchSortTensorsBy("binary_masks", "class_ids", by="final_scores"),
+        TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
+        ToNumpyRegistry(),
+        ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
+    ])
+    registry = TorchTensorRegistry(
+        {
+            "class_probs": torch.zeros((0, 3), dtype=torch.float32),
+            "mask_probs": torch.zeros((0, 2, 2), dtype=torch.float32),
+        }
+    )
+
+    result = pipeline(registry)
+
+    assert result.boxes == []
+    assert result.scores == []
+    assert result.classes == []
+    assert result.masks == []
 
 
 def test_torch_softmax_slice_gather_and_threshold_tensors_work_on_registry():

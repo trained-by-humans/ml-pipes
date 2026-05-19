@@ -36,6 +36,23 @@ from .validation import PipelineValidationError, is_annotation_compatible
 # Image / preprocessing
 # ---------------------------------------------------------------------------
 
+def _normalize_axis(axis: int, ndim: int) -> int:
+    normalized = axis if axis >= 0 else axis + ndim
+    if normalized < 0 or normalized >= ndim:
+        raise np.exceptions.AxisError(axis, ndim=ndim)
+    return normalized
+
+
+def _shape_without_axis(shape: tuple[int, ...], axis: int) -> tuple[int, ...]:
+    return shape[:axis] + shape[axis + 1:]
+
+
+def _flatten_leading_dim(array: np.ndarray) -> np.ndarray:
+    leading = int(array.shape[0])
+    trailing = int(np.prod(array.shape[1:], dtype=np.int64))
+    return array.reshape(leading, trailing)
+
+
 class LoadFile:
     def __call__(self, image_path: str | Path) -> bytes:
         path = Path(image_path)
@@ -548,7 +565,12 @@ class ArgMax:
         self.as_ = as_ or src
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        registry[self.as_] = np.argmax(registry[self.src], axis=self.axis).astype(np.int32)
+        tensor = registry[self.src]
+        axis = _normalize_axis(self.axis, tensor.ndim)
+        if tensor.shape[axis] == 0:
+            registry[self.as_] = np.zeros(_shape_without_axis(tensor.shape, axis), dtype=np.int32)
+            return registry
+        registry[self.as_] = np.argmax(tensor, axis=axis).astype(np.int32)
         return registry
 
 
@@ -568,9 +590,13 @@ class Softmax:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         x = registry[self.src]
-        shifted = x - np.max(x, axis=self.axis, keepdims=True)
+        axis = _normalize_axis(self.axis, x.ndim)
+        if x.shape[axis] == 0:
+            registry[self.as_] = x.copy()
+            return registry
+        shifted = x - np.max(x, axis=axis, keepdims=True)
         exp = np.exp(shifted)
-        registry[self.as_] = exp / np.sum(exp, axis=self.axis, keepdims=True)
+        registry[self.as_] = exp / np.sum(exp, axis=axis, keepdims=True)
         return registry
 
 
@@ -1023,7 +1049,7 @@ class FilterTensorsByMasksArea:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         masks = registry[self.masks]
-        areas = np.asarray(masks, dtype=bool).reshape(masks.shape[0], -1).sum(axis=1)
+        areas = _flatten_leading_dim(np.asarray(masks, dtype=bool)).sum(axis=1)
         keep = areas >= self.min_area
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][keep]
@@ -1142,12 +1168,12 @@ class MeanMaskScores:
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         masks = registry[self.masks]
         if self.binary_masks is None:
-            registry[self.as_] = masks.reshape(masks.shape[0], -1).mean(axis=1)
+            registry[self.as_] = _flatten_leading_dim(masks).mean(axis=1)
             return registry
 
         binary_masks = registry[self.binary_masks]
-        areas = binary_masks.reshape(binary_masks.shape[0], -1).sum(axis=1)
-        mask_sums = (masks * binary_masks).reshape(masks.shape[0], -1).sum(axis=1)
+        areas = _flatten_leading_dim(binary_masks).sum(axis=1)
+        mask_sums = _flatten_leading_dim(masks * binary_masks).sum(axis=1)
         registry[self.as_] = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
         return registry
 

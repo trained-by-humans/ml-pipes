@@ -301,7 +301,18 @@ class TorchArgMax:
         self.as_ = as_ or src
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        registry[self.as_] = torch.argmax(registry[self.src], dim=self.axis)
+        tensor = registry[self.src]
+        axis = self.axis if self.axis >= 0 else self.axis + tensor.ndim
+        if axis < 0 or axis >= tensor.ndim:
+            raise IndexError(
+                f"Dimension out of range (expected to be in range of [{-tensor.ndim}, {tensor.ndim - 1}], "
+                f"but got {self.axis})"
+            )
+        if tensor.shape[axis] == 0:
+            shape = tensor.shape[:axis] + tensor.shape[axis + 1:]
+            registry[self.as_] = torch.zeros(shape, dtype=torch.int64, device=tensor.device)
+            return registry
+        registry[self.as_] = torch.argmax(tensor, dim=axis)
         return registry
 
 
