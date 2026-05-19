@@ -4,13 +4,12 @@ import contextlib
 import json
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal, Any, TypeVar, get_args, get_origin
 from typing import TextIO
-
-import time
 
 import numpy as np
 
@@ -19,7 +18,6 @@ from .context import Selector, SelectorPart, _attribute_annotation, _normalize_s
 from .region import RegionCloser, RegionOpener
 from .scatter import ScatterGate
 from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
-from .types import ResizeTransform
 from .types import (
     Detections,
     ImagePayload,
@@ -29,6 +27,7 @@ from .types import (
     TensorPayload,
     TensorRegistry,
 )
+from .types import ResizeTransform
 from .validation import PipelineValidationError, is_annotation_compatible
 
 

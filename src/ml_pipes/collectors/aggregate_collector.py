@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ..tracing import InvocationTrace, StepSpan
 from .concurrent_collector import ConcurrentCollector
+from ..tracing import InvocationTrace, StepSpan
 
 
 def _update_optional_mean(current: float | None, incoming: float | None, n: int) -> float | None:

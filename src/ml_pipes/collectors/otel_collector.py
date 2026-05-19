@@ -5,8 +5,8 @@ from __future__ import annotations
 # Never imported by core.py or __init__.py — no implicit dependency.
 from opentelemetry import trace as otel_trace
 
-from ..tracing import InvocationTrace
 from .concurrent_collector import ConcurrentCollector
+from ..tracing import InvocationTrace
 
 
 class OtelCollector(ConcurrentCollector):

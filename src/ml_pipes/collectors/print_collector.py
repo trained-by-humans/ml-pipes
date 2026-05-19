@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ..tracing import InvocationTrace
 from .serial_collector import SerialCollector
+from ..tracing import InvocationTrace
 
 
 class PrintCollector(SerialCollector):

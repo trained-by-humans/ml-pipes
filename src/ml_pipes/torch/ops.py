@@ -10,7 +10,6 @@ import torch
 
 from ml_pipes.types import TensorPayload, TensorRegistry
 from ml_pipes.validation import is_annotation_compatible
-
 from .types import (
     TorchRuntimeOutputs,
     TorchTensorPayload,

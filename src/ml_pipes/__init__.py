@@ -9,8 +9,12 @@ from .benchmark import (
     InvocationStatDiff,
     MeasurementConfig,
 )
-from .factory import data_factory, pipeline_factory, InputFn
+from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
 from .context import Context, Recall, Store
+from .core import Pipeline, Embed, embed, Inline, inline, Operator
+from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
+from .description import PipelineDescription, StepDescription
+from .factory import data_factory, pipeline_factory, InputFn
 from .inspection import (
     HtmlRenderer,
     ImageBlock,
@@ -23,12 +27,6 @@ from .inspection import (
     StepView,
     TextBlock,
 )
-from .description import PipelineDescription, StepDescription
-from .core import Pipeline, Embed, embed, Inline, inline, Operator
-from .validation import PipelineValidationError, TypeContract
-from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
-from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
-from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
 from .ops import (
     AsType,
     ArgMax,
@@ -95,6 +93,7 @@ from .ops import (
 )
 from .region import RegionCloser, RegionOpener
 from .tiling import Stitch, Tile, TileRect
+from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
 from .types import (
     Detections,
     ImagePayload,
@@ -105,6 +104,7 @@ from .types import (
     TensorPayload,
     TensorRegistry,
 )
+from .validation import PipelineValidationError, TypeContract
 
 __all__ = [
     "Benchmark",

@@ -6,13 +6,20 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
-_log = logging.getLogger(__name__)
-
 from .context import Context, ContextOp
 from .description import PipelineDescription, _build_pipeline_description
 from .inspection import InspectionResult, _CaptureCollector
 from .region import RegionCloser, RegionOpener
-from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, operator_config, snapshot
+from .tracing import (
+    InvocationTrace,
+    StepSpan,
+    TraceCollector,
+    TracingConfig,
+    _NoOpTrace,
+    _extract_shape,
+    operator_config,
+    snapshot,
+)
 from .validation import (
     PipelineValidationError,
     PipelineValidator,
@@ -21,9 +28,10 @@ from .validation import (
     is_annotation_compatible,
 )
 
+_log = logging.getLogger(__name__)
+
 # An operator is anything the pipeline can execute as a step.
 Operator = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
-
 
 
 @dataclass(frozen=True)
@@ -146,7 +154,13 @@ class Pipeline:
             inference=inference,
         )
 
-    def _execute(self, value: Any, trace: Any, cfg: TracingConfig | None, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
+    def _execute(
+        self,
+        value: Any,
+        trace: Any,
+        cfg: TracingConfig | None,
+        region: tuple[int, int] | None = None,
+    ) -> tuple[Any, Any]:
         start, end = region if region is not None else (0, len(self.operators))
         context = Context()
         current = value
@@ -165,14 +179,23 @@ class Pipeline:
             trace.total_duration_s = time.perf_counter() - t_start
         return current, trace
 
-    def _step_into_region(self, i: int, current: Any, context: Context, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context]:
+    def _step_into_region(
+        self,
+        i: int,
+        current: Any,
+        context: Context,
+        trace: Any,
+        cfg: TracingConfig | None,
+    ) -> tuple[Any, Context]:
         operator = self.operators[i]
         label = self._label_for(i, cfg.operator_labels if cfg else None)
         region_start = i + 1
         region_end = self._find_region_end(region_start, type(operator), operator.closing_type)
+
         # Bounded executor: the operator can only run operators within its own region.
         def execute_region(value: Any, child_trace: Any) -> Any:
             return self._execute(value, trace=child_trace, cfg=cfg, region=(region_start, region_end))
+
         result = operator.run_region(current, label, execute_region, trace, cfg)
         return result, context
 
@@ -183,7 +206,14 @@ class Pipeline:
         name = op.__name__ if inspect.isfunction(op) or inspect.ismethod(op) else type(op).__name__
         return f"{i}:{name}"
 
-    def _step(self, i: int, current: Any, context: Context, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context]:
+    def _step(
+        self,
+        i: int,
+        current: Any,
+        context: Context,
+        trace: Any,
+        cfg: TracingConfig | None,
+    ) -> tuple[Any, Context]:
         operator = self.operators[i]
         label = self._label_for(i, cfg.operator_labels if cfg else None)
         capture = cfg.capture_shapes if cfg else False
@@ -196,17 +226,24 @@ class Pipeline:
                 result = operator(*args)
                 ctx_out = context
         except Exception:
-            trace.spans.append(StepSpan(label, t, time.perf_counter() - t, error=True,
-                                        operator_type=type(operator)))
+            trace.spans.append(
+                StepSpan(
+                    label, t, time.perf_counter() - t, error=True, operator_type=type(operator)
+                )
+            )
             raise
-        trace.spans.append(StepSpan(
-            label, t, time.perf_counter() - t,
-            operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
-            input_shape=_extract_shape(current) if capture else None,
-            output_shape=_extract_shape(result) if capture else None,
-            output_value=snapshot(result) if (cfg and cfg._capture_outputs) else None,
-            operator_type=type(operator),
-        ))
+        trace.spans.append(
+            StepSpan(
+                label,
+                t,
+                time.perf_counter() - t,
+                operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
+                input_shape=_extract_shape(current) if capture else None,
+                output_shape=_extract_shape(result) if capture else None,
+                output_value=snapshot(result) if (cfg and cfg._capture_outputs) else None,
+                operator_type=type(operator),
+            )
+        )
         return result, ctx_out
 
     def _find_region_end(self, start: int, opening_op: type, closing_op: type) -> int:
@@ -215,8 +252,10 @@ class Pipeline:
         j = start
         while j < len(self.operators) and depth > 0:
             op = self.operators[j]
-            if isinstance(op, opening_op): depth += 1
-            elif isinstance(op, closing_op): depth -= 1
+            if isinstance(op, opening_op):
+                depth += 1
+            elif isinstance(op, closing_op):
+                depth -= 1
             j += 1
         return j - 1
 
