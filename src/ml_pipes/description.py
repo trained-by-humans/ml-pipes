@@ -206,7 +206,10 @@ def _build_description_steps(
             described_pipeline = operator.pipeline._describe(
                 expand_embedded=expand_embedded,
             )
-            pipeline_boundary = _description_boundary(described_pipeline)
+            pipeline_boundary = _resolve_embedded_pipeline_boundary(
+                operator=operator,
+                described_pipeline=described_pipeline,
+            )
             steps.append(
                 StepDescription(
                     label=label,
@@ -322,6 +325,39 @@ def _description_boundary(description: PipelineDescription) -> _StaticBoundary:
     )
 
 
+def _resolve_embedded_pipeline_boundary(
+    *,
+    operator: Any,
+    described_pipeline: PipelineDescription,
+) -> _StaticBoundary:
+    boundary = _description_boundary(described_pipeline)
+    if boundary.input_type is not Any and boundary.output_type is not Any:
+        return boundary
+
+    contract = _infer_pipeline_contract(getattr(operator, "pipeline", None))
+    if contract is None:
+        return boundary
+
+    return _StaticBoundary(
+        input_type=contract.input_type if boundary.input_type is Any else boundary.input_type,
+        output_type=contract.output_type if boundary.output_type is Any else boundary.output_type,
+    )
+
+
+def _infer_pipeline_contract(pipeline: Any) -> Any | None:
+    if pipeline is None:
+        return None
+
+    validate = getattr(pipeline, "validate", None)
+    if not callable(validate):
+        return None
+
+    try:
+        return validate(inference=True)
+    except Exception:
+        return None
+
+
 def _build_description_layout(
     steps: list[StepDescription],
     *,
@@ -412,7 +448,48 @@ def _lookup_constructor_arg(operator: Any, name: str) -> Any:
         for attr_name in (name, f"_{name}"):
             if hasattr(owner, attr_name):
                 return getattr(owner, attr_name)
+    return _lookup_derived_constructor_arg(operator, name)
+
+
+def _lookup_derived_constructor_arg(operator: Any, name: str) -> Any:
+    if hasattr(operator, "_mapping"):
+        mapping = getattr(operator, "_mapping")
+        if isinstance(mapping, dict):
+            names = tuple(mapping)
+            aliases = tuple(mapping.values())
+            if name == "names":
+                return _collapse_variadic_value(names)
+            if name == "as_" and aliases != names:
+                return _collapse_variadic_value(aliases)
+
+    if name == "providers":
+        session = getattr(operator, "session", None)
+        get_providers = getattr(session, "get_providers", None)
+        if callable(get_providers):
+            try:
+                return tuple(get_providers())
+            except Exception:
+                return _MISSING
+
+    if name == "dtype" and hasattr(operator, "model_dtype"):
+        dtype = getattr(operator, "model_dtype")
+        if dtype is None:
+            return None
+        dtype_name = getattr(dtype, "name", None)
+        if isinstance(dtype_name, str):
+            return dtype_name
+        return str(dtype)
+
+    if name == "serialize" and hasattr(operator, "_lock"):
+        return hasattr(getattr(operator, "_lock"), "acquire")
+
     return _MISSING
+
+
+def _collapse_variadic_value(values: tuple[Any, ...]) -> Any:
+    if len(values) == 1:
+        return values[0]
+    return values
 
 
 def _normalize_config_value(value: Any) -> Any:

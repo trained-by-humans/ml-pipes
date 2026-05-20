@@ -4,8 +4,10 @@ from typing import Any
 
 from ml_pipes import (
     Batch,
+    Extract,
     Gather,
     ImagePayload,
+    Infer,
     InvocationTrace,
     Pipeline,
     Recall,
@@ -65,6 +67,24 @@ class ImageOp:
 class _Capture(TraceCollector):
     def on_trace(self, trace: InvocationTrace) -> None:
         del trace
+
+
+class _FakeSession:
+    def __init__(self, providers: tuple[str, ...]) -> None:
+        self._providers = providers
+
+    def get_providers(self) -> tuple[str, ...]:
+        return self._providers
+
+
+class _FakeDType:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeLock:
+    def acquire(self) -> None:
+        return None
 
 
 def test_describe_flat_typed_pipeline_uses_static_signatures_and_config():
@@ -196,6 +216,17 @@ def test_describe_can_collapse_embedded_pipeline():
     assert embedded.children == []
 
 
+def test_describe_softly_recovers_embedded_boundary_from_inner_contract():
+    inner = Pipeline([Batch(size=2), ListIdentity(), UnBatch()])
+    description = Pipeline([embed(inner)]).describe(expand_embedded=False)
+
+    embedded = description.steps[0]
+    assert embedded.kind == "pipeline"
+    assert embedded.input_type is int
+    assert embedded.output_type is int
+    assert embedded.children == []
+
+
 def test_describe_falls_back_to_any_for_untyped_operator():
     description = Pipeline([UntypedOp(), ConfiguredIntToString()]).describe()
 
@@ -243,3 +274,36 @@ def test_describe_leaves_unmatched_regions_as_plain_operators():
     assert [step.kind for step in description.steps] == ["operator", "operator", "operator"]
     assert description.steps[0].input_type is Any
     assert description.steps[2].output_type is Any
+
+
+def test_describe_preserves_extract_constructor_config():
+    description = Pipeline([Extract("output0", as_="preds")]).describe()
+
+    assert description.steps[0].operator_config == {
+        "names": "output0",
+        "as_": "preds",
+    }
+
+
+def test_describe_preserves_infer_constructor_config_from_normalized_state():
+    infer = object.__new__(Infer)
+    infer.model_path = "model.onnx"
+    infer.session = _FakeSession(("CPUExecutionProvider",))
+    infer.input_name = "images"
+    infer.input_layout = "NCHW"
+    infer.model_dtype = _FakeDType("float16")
+    infer.output_layouts = ("NCHW",)
+    infer._lock = _FakeLock()
+    infer.output_names = ("output0",)
+
+    description = Pipeline([infer]).describe()
+
+    assert description.steps[0].operator_config == {
+        "model_path": "model.onnx",
+        "providers": ("CPUExecutionProvider",),
+        "input_name": "images",
+        "input_layout": "NCHW",
+        "dtype": "float16",
+        "output_layouts": ("NCHW",),
+        "serialize": True,
+    }
