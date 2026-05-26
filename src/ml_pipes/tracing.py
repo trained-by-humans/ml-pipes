@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
+from collections.abc import Iterator, Mapping
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from types import GeneratorType
 from typing import Any
 
 
@@ -89,8 +92,72 @@ class TracingConfig:
 
 
 def snapshot(value: Any) -> Any:
-    """Deep-copy *value* so a span captures a point-in-time snapshot."""
-    return copy.deepcopy(value)
+    """Deep-copy *value* so a span captures a point-in-time snapshot.
+
+    When a value contains runtime-only state such as generators or iterators,
+    fall back to a display-safe structural snapshot instead of failing the
+    entire inspection run.
+    """
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return _snapshot_fallback(value, seen=set())
+
+
+_SNAPSHOT_PRIMITIVES = (bool, int, float, str, bytes, type(None))
+
+
+def _snapshot_fallback(value: Any, *, seen: set[int]) -> Any:
+    if isinstance(value, _SNAPSHOT_PRIMITIVES):
+        return value
+
+    value_id = id(value)
+    if value_id in seen:
+        return "<cycle>"
+    seen.add(value_id)
+    try:
+        if isinstance(value, (GeneratorType, Iterator)):
+            return repr(value)
+
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            field_values = {
+                field.name: _snapshot_fallback(getattr(value, field.name), seen=seen)
+                for field in dataclasses.fields(value)
+            }
+            try:
+                return type(value)(**field_values)
+            except Exception:
+                return field_values
+
+        if isinstance(value, Mapping):
+            snapshot_mapping = {}
+            for key, item in value.items():
+                snapshot_key = _snapshot_fallback(key, seen=seen)
+                try:
+                    hash(snapshot_key)
+                except Exception:
+                    snapshot_key = repr(key)
+                snapshot_mapping[snapshot_key] = _snapshot_fallback(item, seen=seen)
+            return snapshot_mapping
+
+        if isinstance(value, list):
+            return [_snapshot_fallback(item, seen=seen) for item in value]
+
+        if isinstance(value, tuple):
+            items = tuple(_snapshot_fallback(item, seen=seen) for item in value)
+            if hasattr(value, "_fields"):
+                try:
+                    return type(value)(*items)
+                except Exception:
+                    return items
+            return items
+
+        if isinstance(value, set):
+            return sorted((_snapshot_fallback(item, seen=seen) for item in value), key=repr)
+
+        return repr(value)
+    finally:
+        seen.discard(value_id)
 
 
 _PICKLE_SAFE = (bool, int, float, str, bytes, type(None))
