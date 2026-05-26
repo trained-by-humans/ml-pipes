@@ -9,6 +9,7 @@ description = "Minimal YOLOv8 ONNX Runtime inference SDK"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "ijson>=3.3",
     "numpy>=1.26",
     "opencv-python>=4.9",
     "onnxruntime>=1.18",
