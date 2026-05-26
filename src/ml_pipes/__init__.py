@@ -12,6 +12,7 @@ from .benchmark import (
 from .factory import data_factory, pipeline_factory, InputFn
 from .context import Context, Recall, Store
 from .inspection import (
+    GroupBlock,
     HtmlRenderer,
     ImageBlock,
     InspectionResult,
@@ -173,6 +174,7 @@ __all__ = [
     "GatherRows",
     "GatherScores",
     "HtmlRenderer",
+    "GroupBlock",
     "ImagePayload",
     "InspectionResult",
     "InspectionSerializer",

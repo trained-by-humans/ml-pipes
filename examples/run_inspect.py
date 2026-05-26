@@ -124,7 +124,7 @@ def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) 
 def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
     inspector = PipelineInspector()
     if args.save:
-        saved = inspector.save_to_html(result, args.save)
+        saved = inspector.save_to_html(result, args.save, orientation=args.orientation)
         print(f"Inspection report saved to: {saved}", file=sys.stderr)
     elif args.plot:
         saved = inspector.save_to_plot(result, args.plot)
@@ -135,7 +135,7 @@ def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
     elif args.print_only:
         pass
     else:
-        inspector.show_in_browser(result)
+        inspector.show_in_browser(result, orientation=args.orientation)
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +150,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Which pipeline to inspect (default: simple).")
     parser.add_argument("--load", metavar="PATH", type=Path, default=None,
                         help="Load a previously serialized result instead of running the pipeline.")
+    parser.add_argument(
+        "--orientation",
+        choices=["horizontal", "vertical"],
+        default="horizontal",
+        help="HTML inspection layout orientation (default: horizontal). Use vertical for text-heavy or tabular outputs.",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--save", metavar="PATH", type=Path, default=None,
                        help="Save HTML report to PATH instead of opening a browser.")

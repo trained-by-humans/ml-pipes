@@ -124,6 +124,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="mid_pipeline",
         help="Which error scenario to run (default: mid_pipeline).",
     )
+    parser.add_argument(
+        "--orientation",
+        choices=["horizontal", "vertical"],
+        default="horizontal",
+        help="HTML inspection layout orientation (default: horizontal). Use vertical for text-heavy or tabular outputs.",
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--save", metavar="PATH", type=Path, default=None,
                        help="Save HTML report to PATH instead of opening a browser.")
@@ -137,10 +143,10 @@ def main() -> int:
     result = _SCENARIOS[args.scenario]()
     inspector = PipelineInspector()
     if args.save:
-        saved = inspector.save_to_html(result, args.save)
+        saved = inspector.save_to_html(result, args.save, orientation=args.orientation)
         print(f"Saved to: {saved}", file=sys.stderr)
     elif not args.print_only:
-        inspector.show_in_browser(result)
+        inspector.show_in_browser(result, orientation=args.orientation)
 
     return 0
 
