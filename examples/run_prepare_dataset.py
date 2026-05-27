@@ -12,6 +12,11 @@ Usage:
         --arg shuffle=42 \
         --arg sort_labels=true \
         --arg overwrite=true
+
+    python -m ml_pipes run examples.run_prepare_dataset:build_prepare_dataset_collection_pipeline \
+        --data-arg input_path=dataset/collected \
+        --arg output_path=dataset/generated/prepared_collection.json \
+        --arg overwrite=true
 """
 from __future__ import annotations
 
@@ -28,7 +33,18 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
-from ml_pipes import InputFn, Pipeline, SideEffectOp, data_factory, pipeline_factory
+from ml_pipes import (
+    InputFn,
+    InvocationTrace,
+    Pipeline,
+    RegionCloser,
+    RegionOpener,
+    SideEffectOp,
+    StepSpan,
+    data_factory,
+    pipeline_factory,
+)
+from ml_pipes.tracing import _NoOpTrace, merge_traces
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -70,17 +86,6 @@ class FilterSyntaxError(ValueError):
 
 
 Submission = dict[str, object]
-
-
-@dataclass
-class PreparationStats:
-    scanned: int = 0
-    matched_filter: int = 0
-    below_min_length_dropped: int = 0
-    duplicate_dropped: int = 0
-    label_limit_dropped: int = 0
-    invalid_record_dropped: int = 0
-    kept: int = 0
 
 
 @dataclass(frozen=True)
@@ -144,6 +149,17 @@ class NormalizedSubmission:
 
 
 @dataclass(frozen=True)
+class DedupeReadySubmission:
+    scan_index: int
+    submission: Submission
+    label: str
+    raw_message: str
+    cleaned_message: str
+    normalized_message: str
+    dedupe_key: str
+
+
+@dataclass(frozen=True)
 class PreparedCandidate:
     label: str
     dedupe_key: str
@@ -152,16 +168,7 @@ class PreparedCandidate:
 
 @dataclass
 class PreparationRun:
-    items: Iterable[object]
-    stats: PreparationStats = field(default_factory=PreparationStats)
-    matched_label_counts: Counter[str] = field(default_factory=Counter)
-    kept_by_label: Counter[str] = field(default_factory=Counter)
-    below_min_length_by_label: Counter[str] = field(default_factory=Counter)
-    duplicate_by_label: Counter[str] = field(default_factory=Counter)
-    label_limit_skips_by_label: Counter[str] = field(default_factory=Counter)
-    seen_keys: set[str] = field(default_factory=set)
     records: list[PreparedSubmission] = field(default_factory=list)
-    started_at: float = field(default_factory=time.perf_counter)
 
 
 def _replace_pin(match: re.Match[str]) -> str:
@@ -586,30 +593,6 @@ def apply_sorted_label_shuffle(records: list[PreparedSubmission], *, seed: int) 
     return sorted_records
 
 
-def progress_message(
-    stats: PreparationStats,
-    kept_by_label: Counter[str],
-    *,
-    elapsed: float,
-    prefix: str = "Progress",
-) -> str:
-    elapsed = max(elapsed, 1e-9)
-    scan_rate = stats.scanned / elapsed
-    excluded = (
-        stats.below_min_length_dropped
-        + stats.duplicate_dropped
-        + stats.label_limit_dropped
-        + stats.invalid_record_dropped
-    )
-    return (
-        f"{prefix}: scanned={stats.scanned:,}, matched={stats.matched_filter:,}, "
-        f"kept={stats.kept:,}, excluded={excluded:,}, below_min_length={stats.below_min_length_dropped:,}, "
-        f"duplicates={stats.duplicate_dropped:,}, label_limit_skips={stats.label_limit_dropped:,}, "
-        f"invalid={stats.invalid_record_dropped:,}, rate={scan_rate:,.0f}/s, "
-        f"kept_by_label={dict(kept_by_label)}"
-    )
-
-
 def write_json(payload: dict[str, Any], output_path: Path, overwrite: bool) -> None:
     if output_path.exists() and not overwrite:
         raise FileExistsError(f"Output already exists: {output_path}. Use overwrite=true to replace it.")
@@ -662,112 +645,156 @@ class StreamSubmissions:
         return iterator()
 
 
-class StartPreparationRun:
-    """Create per-invocation state for the preparation pipeline."""
+class LoadSubmissionCollection:
+    """Load all submissions from the input files into one in-memory collection."""
 
-    def __call__(self, items: Iterable[object]) -> PreparationRun:
-        return PreparationRun(items=items)
+    def __call__(self, input_files: list[Path]) -> list[object]:
+        submissions: list[object] = []
+        for input_file in input_files:
+            with input_file.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if not isinstance(payload, dict):
+                raise TypeError(
+                    f"Dataset file must contain a JSON object at top level: {input_file}"
+                )
+            collection = payload.get(SUPPORTED_DATASET_TOP_LEVEL_KEY)
+            if not isinstance(collection, list):
+                raise TypeError(
+                    f"Dataset field {SUPPORTED_DATASET_TOP_LEVEL_KEY!r} must be a list in {input_file}"
+                )
+            submissions.extend(collection)
+        return submissions
 
 
-class ScanSubmissions:
-    """Enumerate streamed values and count all scanned source records."""
+class EndForEachSubmission(RegionCloser):
+    """Region boundary for the end of per-submission processing."""
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        output_type = list[current_output] if current_output is not None else list[Any]
+        return (Any,), output_type
 
-        def iterator() -> Iterator[ScannedItem]:
-            source = iter(source_items)
-            try:
-                for scan_index, value in enumerate(source, start=1):
-                    run.stats.scanned += 1
-                    yield ScannedItem(scan_index=scan_index, value=value)
-            finally:
-                close_iterable(source)
 
-        run.items = iterator()
-        return run
+class ForEachSubmission(RegionOpener):
+    """Run the enclosed operators once per source submission."""
+
+    closing_type = EndForEachSubmission
+
+    def run_region(
+        self,
+        current: Iterable[object],
+        label: str,
+        execute_region: Any,
+        trace: InvocationTrace | _NoOpTrace,
+        cfg: Any,
+    ) -> list[Any]:
+        collecting = isinstance(trace, InvocationTrace)
+        source = iter(current)
+        results: list[Any] = []
+        child_traces: list[InvocationTrace] = []
+        t_region = time.perf_counter()
+
+        try:
+            for scan_index, value in enumerate(source, start=1):
+                child_trace = InvocationTrace() if collecting else _NoOpTrace()
+                result, child_trace = execute_region(
+                    ScannedItem(scan_index=scan_index, value=value),
+                    child_trace,
+                )
+                results.append(result)
+                if collecting:
+                    child_traces.append(child_trace)
+        except Exception:
+            merged_trace = merge_traces(child_traces) if child_traces else None
+            trace.spans.append(
+                StepSpan(
+                    label,
+                    t_region,
+                    time.perf_counter() - t_region,
+                    error=True,
+                    child_trace=merged_trace if collecting else None,
+                    operator_type=type(self),
+                )
+            )
+            raise
+        finally:
+            close_iterable(source)
+
+        merged_trace = merge_traces(child_traces) if child_traces else None
+        trace.spans.append(
+            StepSpan(
+                label,
+                t_region,
+                time.perf_counter() - t_region,
+                child_trace=merged_trace if collecting else None,
+                operator_type=type(self),
+            )
+        )
+        return results
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        return (Any,), ScannedItem
 
 
 class RequireSubmissionMappings:
-    """Drop non-mapping streamed values and retain submission dictionaries only."""
+    """Drop non-mapping values and retain submission dictionaries only."""
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
-
-        def iterator() -> Iterator[ScannedSubmission]:
-            source = iter(source_items)
-            try:
-                for scanned in source:
-                    if not isinstance(scanned, ScannedItem):
-                        raise TypeError(f"RequireSubmissionMappings expected ScannedItem, got {type(scanned)!r}")
-                    if not isinstance(scanned.value, dict):
-                        run.stats.invalid_record_dropped += 1
-                        continue
-                    yield ScannedSubmission(scan_index=scanned.scan_index, submission=scanned.value)
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, scanned: ScannedItem | None) -> ScannedSubmission | None:
+        if scanned is None:
+            return None
+        if not isinstance(scanned, ScannedItem):
+            raise TypeError(f"RequireSubmissionMappings expected ScannedItem, got {type(scanned)!r}")
+        if not isinstance(scanned.value, dict):
+            return None
+        return ScannedSubmission(scan_index=scanned.scan_index, submission=scanned.value)
 
 
 class ApplySubmissionFilter:
-    """Apply the configured filter expression and count matched submissions."""
+    """Apply the configured filter expression to each submission."""
 
     def __init__(self, where: str = ""):
         self.where = where.strip() or None
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
-
-        def iterator() -> Iterator[ScannedSubmission]:
-            source = iter(source_items)
-            try:
-                for scanned in source:
-                    if not isinstance(scanned, ScannedSubmission):
-                        raise TypeError(f"ApplySubmissionFilter expected ScannedSubmission, got {type(scanned)!r}")
-                    if not matches_filter(self.where, scanned.submission):
-                        continue
-                    run.stats.matched_filter += 1
-                    yield scanned
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, scanned: ScannedSubmission | None) -> ScannedSubmission | None:
+        if scanned is None:
+            return None
+        if not isinstance(scanned, ScannedSubmission):
+            raise TypeError(f"ApplySubmissionFilter expected ScannedSubmission, got {type(scanned)!r}")
+        if not matches_filter(self.where, scanned.submission):
+            return None
+        return scanned
 
 
 class ExtractSubmissionLabel:
     """Extract and validate labels from matched submissions."""
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
-
-        def iterator() -> Iterator[LabeledSubmission]:
-            source = iter(source_items)
-            try:
-                for scanned in source:
-                    if not isinstance(scanned, ScannedSubmission):
-                        raise TypeError(f"ExtractSubmissionLabel expected ScannedSubmission, got {type(scanned)!r}")
-                    label_raw = scanned.submission.get("label")
-                    if label_raw is None:
-                        run.stats.invalid_record_dropped += 1
-                        continue
-                    label = str(label_raw).strip()
-                    if not label:
-                        run.stats.invalid_record_dropped += 1
-                        continue
-                    run.matched_label_counts[label] += 1
-                    yield LabeledSubmission(
-                        scan_index=scanned.scan_index,
-                        submission=scanned.submission,
-                        label=label,
-                    )
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, scanned: ScannedSubmission | None) -> LabeledSubmission | None:
+        if scanned is None:
+            return None
+        if not isinstance(scanned, ScannedSubmission):
+            raise TypeError(f"ExtractSubmissionLabel expected ScannedSubmission, got {type(scanned)!r}")
+        label_raw = scanned.submission.get("label")
+        if label_raw is None:
+            return None
+        label = str(label_raw).strip()
+        if not label:
+            return None
+        return LabeledSubmission(
+            scan_index=scanned.scan_index,
+            submission=scanned.submission,
+            label=label,
+        )
 
 
 class FilterConfiguredLabels:
@@ -776,124 +803,69 @@ class FilterConfiguredLabels:
     def __init__(self, label_limits: str | Mapping[str, int] | None = ""):
         self.label_limits = parse_label_limits(label_limits)
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        if not self.label_limits:
-            return run
-
-        source_items = run.items
-
-        def iterator() -> Iterator[LabeledSubmission]:
-            source = iter(source_items)
-            try:
-                for labeled in source:
-                    if not isinstance(labeled, LabeledSubmission):
-                        raise TypeError(f"FilterConfiguredLabels expected LabeledSubmission, got {type(labeled)!r}")
-                    if labeled.label not in self.label_limits:
-                        run.stats.label_limit_dropped += 1
-                        run.label_limit_skips_by_label[labeled.label] += 1
-                        continue
-                    yield labeled
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
-
-
-class SkipSatisfiedLabels:
-    """Short-circuit labels whose target counts have already been reached."""
-
-    def __init__(self, label_limits: str | Mapping[str, int] | None = ""):
-        self.label_limits = parse_label_limits(label_limits)
-
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        if not self.label_limits:
-            return run
-
-        source_items = run.items
-
-        def iterator() -> Iterator[LabeledSubmission]:
-            source = iter(source_items)
-            try:
-                for labeled in source:
-                    if not isinstance(labeled, LabeledSubmission):
-                        raise TypeError(f"SkipSatisfiedLabels expected LabeledSubmission, got {type(labeled)!r}")
-                    if run.kept_by_label[labeled.label] >= self.label_limits[labeled.label]:
-                        run.stats.label_limit_dropped += 1
-                        run.label_limit_skips_by_label[labeled.label] += 1
-                        continue
-                    yield labeled
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, labeled: LabeledSubmission | None) -> LabeledSubmission | None:
+        if labeled is None or not self.label_limits:
+            return labeled
+        if not isinstance(labeled, LabeledSubmission):
+            raise TypeError(f"FilterConfiguredLabels expected LabeledSubmission, got {type(labeled)!r}")
+        if labeled.label not in self.label_limits:
+            return None
+        return labeled
 
 
 class ExtractSubmissionMessage:
     """Extract and validate the source message payload for each labeled submission."""
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
-
-        def iterator() -> Iterator[MessageSubmission]:
-            source = iter(source_items)
-            try:
-                for labeled in source:
-                    if not isinstance(labeled, LabeledSubmission):
-                        raise TypeError(f"ExtractSubmissionMessage expected LabeledSubmission, got {type(labeled)!r}")
-                    content = labeled.submission.get("content")
-                    raw_message = content.get("msg") if isinstance(content, dict) else None
-                    if not isinstance(raw_message, str):
-                        run.stats.invalid_record_dropped += 1
-                        continue
-                    yield MessageSubmission(
-                        scan_index=labeled.scan_index,
-                        submission=labeled.submission,
-                        label=labeled.label,
-                        raw_message=raw_message,
-                    )
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, labeled: LabeledSubmission | None) -> MessageSubmission | None:
+        if labeled is None:
+            return None
+        if not isinstance(labeled, LabeledSubmission):
+            raise TypeError(f"ExtractSubmissionMessage expected LabeledSubmission, got {type(labeled)!r}")
+        content = labeled.submission.get("content")
+        raw_message = content.get("msg") if isinstance(content, dict) else None
+        if not isinstance(raw_message, str):
+            return None
+        return MessageSubmission(
+            scan_index=labeled.scan_index,
+            submission=labeled.submission,
+            label=labeled.label,
+            raw_message=raw_message,
+        )
 
 
 class PrepareGroupingText:
-    """Apply lightweight cleanup and enforce minimum grouping length."""
+    """Apply lightweight cleanup to the raw message."""
+
+    def __call__(self, message: MessageSubmission | None) -> GroupedSubmission | None:
+        if message is None:
+            return None
+        if not isinstance(message, MessageSubmission):
+            raise TypeError(f"PrepareGroupingText expected MessageSubmission, got {type(message)!r}")
+        return GroupedSubmission(
+            scan_index=message.scan_index,
+            submission=message.submission,
+            label=message.label,
+            raw_message=message.raw_message,
+            cleaned_message=prepare_message_for_grouping(message.raw_message),
+        )
+
+
+class RequireMinimumMessageLength:
+    """Drop messages whose cleaned form is shorter than the configured threshold."""
 
     def __init__(self, min_length: int | str = 2):
         self.min_length = int(min_length)
         if self.min_length < 0:
             raise ValueError("min_length must be >= 0.")
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
-
-        def iterator() -> Iterator[GroupedSubmission]:
-            source = iter(source_items)
-            try:
-                for message in source:
-                    if not isinstance(message, MessageSubmission):
-                        raise TypeError(f"PrepareGroupingText expected MessageSubmission, got {type(message)!r}")
-                    cleaned_message = prepare_message_for_grouping(message.raw_message)
-                    if len(cleaned_message.strip()) < self.min_length:
-                        run.stats.below_min_length_dropped += 1
-                        run.below_min_length_by_label[message.label] += 1
-                        continue
-                    yield GroupedSubmission(
-                        scan_index=message.scan_index,
-                        submission=message.submission,
-                        label=message.label,
-                        raw_message=message.raw_message,
-                        cleaned_message=cleaned_message,
-                    )
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, grouped: GroupedSubmission | None) -> GroupedSubmission | None:
+        if grouped is None:
+            return None
+        if not isinstance(grouped, GroupedSubmission):
+            raise TypeError(f"RequireMinimumMessageLength expected GroupedSubmission, got {type(grouped)!r}")
+        if len(grouped.cleaned_message.strip()) < self.min_length:
+            return None
+        return grouped
 
 
 class NormalizeTrainingText:
@@ -902,149 +874,179 @@ class NormalizeTrainingText:
     def __init__(self, is_jp: bool | str = True):
         self.is_jp = parse_bool(is_jp)
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
-
-        def iterator() -> Iterator[NormalizedSubmission]:
-            source = iter(source_items)
-            try:
-                for grouped in source:
-                    if not isinstance(grouped, GroupedSubmission):
-                        raise TypeError(f"NormalizeTrainingText expected GroupedSubmission, got {type(grouped)!r}")
-                    yield NormalizedSubmission(
-                        scan_index=grouped.scan_index,
-                        submission=grouped.submission,
-                        label=grouped.label,
-                        raw_message=grouped.raw_message,
-                        cleaned_message=grouped.cleaned_message,
-                        normalized_message=normalize_message_for_training(
-                            grouped.cleaned_message,
-                            is_jp=self.is_jp,
-                            already_prepared=True,
-                        ),
-                    )
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, grouped: GroupedSubmission | None) -> NormalizedSubmission | None:
+        if grouped is None:
+            return None
+        if not isinstance(grouped, GroupedSubmission):
+            raise TypeError(f"NormalizeTrainingText expected GroupedSubmission, got {type(grouped)!r}")
+        return NormalizedSubmission(
+            scan_index=grouped.scan_index,
+            submission=grouped.submission,
+            label=grouped.label,
+            raw_message=grouped.raw_message,
+            cleaned_message=grouped.cleaned_message,
+            normalized_message=normalize_message_for_training(
+                grouped.cleaned_message,
+                is_jp=self.is_jp,
+                already_prepared=True,
+            ),
+        )
 
 
-class BuildPreparedRecords:
-    """Choose the emitted message format and construct dedupe-ready output records."""
+class SelectDedupeKey:
+    """Choose the text representation used for deduplication."""
 
-    def __init__(
-        self,
-        *,
-        dedupe_key: str = "normalized",
-        message_format: str = "raw",
-        min_length: int | str = 2,
-    ):
+    def __init__(self, dedupe_key: str = "normalized"):
         self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
-        self.message_format = normalize_choice("message_format", message_format, {"raw", "cleaned", "normalized"})
+
+    def __call__(self, normalized: NormalizedSubmission | None) -> DedupeReadySubmission | None:
+        if normalized is None:
+            return None
+        if not isinstance(normalized, NormalizedSubmission):
+            raise TypeError(f"SelectDedupeKey expected NormalizedSubmission, got {type(normalized)!r}")
+        dedupe_key = (
+            normalized.cleaned_message
+            if self.dedupe_key == "cleaned"
+            else normalized.normalized_message
+        )
+        return DedupeReadySubmission(
+            scan_index=normalized.scan_index,
+            submission=normalized.submission,
+            label=normalized.label,
+            raw_message=normalized.raw_message,
+            cleaned_message=normalized.cleaned_message,
+            normalized_message=normalized.normalized_message,
+            dedupe_key=dedupe_key,
+        )
+
+
+class RequireMinimumDedupeLength:
+    """Drop submissions whose dedupe key is shorter than the configured threshold."""
+
+    def __init__(self, min_length: int | str = 2):
         self.min_length = int(min_length)
         if self.min_length < 0:
             raise ValueError("min_length must be >= 0.")
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
+    def __call__(self, ready: DedupeReadySubmission | None) -> DedupeReadySubmission | None:
+        if ready is None:
+            return None
+        if not isinstance(ready, DedupeReadySubmission):
+            raise TypeError(f"RequireMinimumDedupeLength expected DedupeReadySubmission, got {type(ready)!r}")
+        if len(ready.dedupe_key.strip()) < self.min_length:
+            return None
+        return ready
 
-        def iterator() -> Iterator[PreparedCandidate]:
-            source = iter(source_items)
-            try:
-                for normalized in source:
-                    if not isinstance(normalized, NormalizedSubmission):
-                        raise TypeError(f"BuildPreparedRecords expected NormalizedSubmission, got {type(normalized)!r}")
-                    dedupe_key = (
-                        normalized.cleaned_message
-                        if self.dedupe_key == "cleaned"
-                        else normalized.normalized_message
-                    )
-                    if len(dedupe_key.strip()) < self.min_length:
-                        run.stats.below_min_length_dropped += 1
-                        run.below_min_length_by_label[normalized.label] += 1
-                        continue
-                    output_message = choose_output_message(
-                        raw_message=normalized.raw_message,
-                        cleaned_message=normalized.cleaned_message,
-                        normalized_message=normalized.normalized_message,
-                        message_format=self.message_format,
-                    )
-                    yield PreparedCandidate(
-                        label=normalized.label,
-                        dedupe_key=dedupe_key,
-                        record=PreparedSubmission(
-                            label=normalized.label,
-                            sort_key=f"{normalized.label}\t{dedupe_key}\t{normalized.scan_index:012d}",
-                            output_submission=build_output_submission(normalized.submission, output_message),
-                        ),
-                    )
-            finally:
-                close_iterable(source)
 
-        run.items = iterator()
-        return run
+class BuildPreparedCandidate:
+    """Build the final output record for a dedupe-ready submission."""
+
+    def __init__(self, message_format: str = "raw"):
+        self.message_format = normalize_choice(
+            "message_format",
+            message_format,
+            {"raw", "cleaned", "normalized"},
+        )
+
+    def __call__(self, ready: DedupeReadySubmission | None) -> PreparedCandidate | None:
+        if ready is None:
+            return None
+        if not isinstance(ready, DedupeReadySubmission):
+            raise TypeError(f"BuildPreparedCandidate expected DedupeReadySubmission, got {type(ready)!r}")
+        output_message = choose_output_message(
+            raw_message=ready.raw_message,
+            cleaned_message=ready.cleaned_message,
+            normalized_message=ready.normalized_message,
+            message_format=self.message_format,
+        )
+        return PreparedCandidate(
+            label=ready.label,
+            dedupe_key=ready.dedupe_key,
+            record=PreparedSubmission(
+                label=ready.label,
+                sort_key=f"{ready.label}\t{ready.dedupe_key}\t{ready.scan_index:012d}",
+                output_submission=build_output_submission(ready.submission, output_message),
+            ),
+        )
+
+
+class CompactDroppedCandidates:
+    """Remove dropped entries emitted as None by per-item operators."""
+
+    def __call__(self, candidates: list[PreparedCandidate | None]) -> list[PreparedCandidate]:
+        kept: list[PreparedCandidate] = []
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            if not isinstance(candidate, PreparedCandidate):
+                raise TypeError(f"CompactDroppedCandidates expected PreparedCandidate | None, got {type(candidate)!r}")
+            kept.append(candidate)
+        return kept
 
 
 class DeduplicateSubmissions:
     """Drop repeated records using the configured dedupe key."""
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        source_items = run.items
-
-        def iterator() -> Iterator[PreparedCandidate]:
-            source = iter(source_items)
-            try:
-                for candidate in source:
-                    if not isinstance(candidate, PreparedCandidate):
-                        raise TypeError(f"DeduplicateSubmissions expected PreparedCandidate, got {type(candidate)!r}")
-                    if candidate.dedupe_key in run.seen_keys:
-                        run.stats.duplicate_dropped += 1
-                        run.duplicate_by_label[candidate.label] += 1
-                        continue
-                    run.seen_keys.add(candidate.dedupe_key)
-                    yield candidate
-            finally:
-                close_iterable(source)
-
-        run.items = iterator()
-        return run
+    def __call__(self, candidates: list[PreparedCandidate]) -> list[PreparedCandidate]:
+        seen_keys: set[str] = set()
+        deduped: list[PreparedCandidate] = []
+        for candidate in candidates:
+            if not isinstance(candidate, PreparedCandidate):
+                raise TypeError(f"DeduplicateSubmissions expected PreparedCandidate, got {type(candidate)!r}")
+            if candidate.dedupe_key in seen_keys:
+                continue
+            seen_keys.add(candidate.dedupe_key)
+            deduped.append(candidate)
+        return deduped
 
 
-class CollectPreparedRecords:
-    """Materialize prepared records and enforce unsatisfied label-limit failures."""
+class ApplyLabelLimits:
+    """Keep the first configured number of records per label."""
 
     def __init__(self, label_limits: str | Mapping[str, int] | None = ""):
         self.label_limits = parse_label_limits(label_limits)
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        run.records.clear()
-        source_items = run.items
-        source = iter(source_items)
-        try:
-            for candidate in source:
-                if not isinstance(candidate, PreparedCandidate):
-                    raise TypeError(f"CollectPreparedRecords expected PreparedCandidate, got {type(candidate)!r}")
-                run.records.append(candidate.record)
-                run.kept_by_label[candidate.label] += 1
-                run.stats.kept += 1
-                if label_targets_met(self.label_limits, run.kept_by_label):
-                    break
-        finally:
-            close_iterable(source)
+    def __call__(self, candidates: list[PreparedCandidate]) -> list[PreparedCandidate]:
+        if not self.label_limits:
+            return candidates
 
-        run.items = ()
-        if self.label_limits and not label_targets_met(self.label_limits, run.kept_by_label):
+        kept_by_label: Counter[str] = Counter()
+        limited: list[PreparedCandidate] = []
+        for candidate in candidates:
+            if not isinstance(candidate, PreparedCandidate):
+                raise TypeError(f"ApplyLabelLimits expected PreparedCandidate, got {type(candidate)!r}")
+            if candidate.label not in self.label_limits:
+                continue
+            if kept_by_label[candidate.label] >= self.label_limits[candidate.label]:
+                continue
+            limited.append(candidate)
+            kept_by_label[candidate.label] += 1
+            if label_targets_met(self.label_limits, kept_by_label):
+                break
+
+        if not label_targets_met(self.label_limits, kept_by_label):
             missing = {
-                label: limit - run.kept_by_label.get(label, 0)
+                label: limit - kept_by_label.get(label, 0)
                 for label, limit in self.label_limits.items()
-                if run.kept_by_label.get(label, 0) < limit
+                if kept_by_label.get(label, 0) < limit
             }
             raise ValueError(
                 "Unable to satisfy all label limits from the provided inputs. "
                 f"Missing counts: {missing}"
             )
-        return run
+        return limited
+
+
+class CollectPreparedRecords:
+    """Materialize prepared records into the final pipeline result."""
+
+    def __call__(self, candidates: list[PreparedCandidate]) -> PreparationRun:
+        records: list[PreparedSubmission] = []
+        for candidate in candidates:
+            if not isinstance(candidate, PreparedCandidate):
+                raise TypeError(f"CollectPreparedRecords expected PreparedCandidate, got {type(candidate)!r}")
+            records.append(candidate.record)
+        return PreparationRun(records=records)
 
 
 class FinalizeOrdering:
@@ -1085,17 +1087,7 @@ class WritePreparedDataset(SideEffectOp):
     def effect(self, run: PreparationRun) -> None:
         payload = {"submissions": [record.output_submission for record in run.records]}
         write_json(payload, self.output_path, self.overwrite)
-
-        elapsed = time.perf_counter() - run.started_at
-        print(
-            progress_message(
-                run.stats,
-                run.kept_by_label,
-                elapsed=elapsed,
-                prefix="Final summary",
-            ),
-            flush=True,
-        )
+        print(f"Final summary: kept={len(run.records):,}", flush=True)
         print(f"Output written to: {self.output_path}", flush=True)
 
 @data_factory
@@ -1106,6 +1098,45 @@ def prepare_dataset_input(input_path: str) -> InputFn:
         return (label, str(input_path), None, None)
 
     return fn
+
+
+def _build_prepare_dataset_processing_pipeline(
+    *,
+    output_path: str,
+    where: str = "",
+    label_limits: str = "",
+    dedupe_key: str = "normalized",
+    message_format: str = "raw",
+    min_length: int | str = 2,
+    is_jp: bool | str = True,
+    shuffle: int | str | None = "disabled",
+    sort_labels: bool | str = False,
+    overwrite: bool | str = False,
+) -> Pipeline:
+    pipeline = Pipeline(
+        [
+            ForEachSubmission(),
+            RequireSubmissionMappings(),
+            ApplySubmissionFilter(where=where),
+            ExtractSubmissionLabel(),
+            FilterConfiguredLabels(label_limits=label_limits),
+            ExtractSubmissionMessage(),
+            PrepareGroupingText(),
+            RequireMinimumMessageLength(min_length=min_length),
+            NormalizeTrainingText(is_jp=is_jp),
+            SelectDedupeKey(dedupe_key=dedupe_key),
+            RequireMinimumDedupeLength(min_length=min_length),
+            BuildPreparedCandidate(message_format=message_format),
+            EndForEachSubmission(),
+            CompactDroppedCandidates(),
+            DeduplicateSubmissions(),
+            ApplyLabelLimits(label_limits=label_limits),
+            CollectPreparedRecords(),
+            FinalizeOrdering(shuffle=shuffle, sort_labels=sort_labels),
+            WritePreparedDataset(output_path=output_path, overwrite=overwrite),
+        ]
+    )
+    return pipeline
 
 
 @pipeline_factory
@@ -1121,28 +1152,59 @@ def build_prepare_dataset_pipeline(
     sort_labels: bool | str = False,
     overwrite: bool | str = False,
 ) -> Pipeline:
-    return Pipeline(
+    pipeline = Pipeline(
         [
             ResolveInputFiles(),
             StreamSubmissions(),
-            StartPreparationRun(),
-            ScanSubmissions(),
-            RequireSubmissionMappings(),
-            ApplySubmissionFilter(where=where),
-            ExtractSubmissionLabel(),
-            FilterConfiguredLabels(label_limits=label_limits),
-            SkipSatisfiedLabels(label_limits=label_limits),
-            ExtractSubmissionMessage(),
-            PrepareGroupingText(min_length=min_length),
-            NormalizeTrainingText(is_jp=is_jp),
-            BuildPreparedRecords(
-                dedupe_key=dedupe_key,
-                message_format=message_format,
-                min_length=min_length,
-            ),
-            DeduplicateSubmissions(),
-            CollectPreparedRecords(label_limits=label_limits),
-            FinalizeOrdering(shuffle=shuffle, sort_labels=sort_labels),
-            WritePreparedDataset(output_path=output_path, overwrite=overwrite),
         ]
     )
+    processing_pipeline = _build_prepare_dataset_processing_pipeline(
+        output_path=output_path,
+        where=where,
+        label_limits=label_limits,
+        dedupe_key=dedupe_key,
+        message_format=message_format,
+        min_length=min_length,
+        is_jp=is_jp,
+        shuffle=shuffle,
+        sort_labels=sort_labels,
+        overwrite=overwrite,
+    )
+    pipeline.extend(processing_pipeline.operators)
+    pipeline.validate()
+    return pipeline
+
+
+def build_prepare_dataset_collection_pipeline(
+    output_path: str,
+    where: str = "",
+    label_limits: str = "",
+    dedupe_key: str = "normalized",
+    message_format: str = "raw",
+    min_length: int | str = 2,
+    is_jp: bool | str = True,
+    shuffle: int | str | None = "disabled",
+    sort_labels: bool | str = False,
+    overwrite: bool | str = False,
+) -> Pipeline:
+    pipeline = Pipeline(
+        [
+            ResolveInputFiles(),
+            LoadSubmissionCollection(),
+        ]
+    )
+    processing_pipeline = _build_prepare_dataset_processing_pipeline(
+        output_path=output_path,
+        where=where,
+        label_limits=label_limits,
+        dedupe_key=dedupe_key,
+        message_format=message_format,
+        min_length=min_length,
+        is_jp=is_jp,
+        shuffle=shuffle,
+        sort_labels=sort_labels,
+        overwrite=overwrite,
+    )
+    pipeline.extend(processing_pipeline.operators)
+    pipeline.validate()
+    return pipeline

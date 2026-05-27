@@ -43,17 +43,7 @@ def _prepared(label: str, msg: str, sort_key: str) -> prepare_dataset.PreparedSu
 def _result(
     records: list[prepare_dataset.PreparedSubmission],
 ) -> prepare_dataset.PreparationRun:
-    return prepare_dataset.PreparationRun(
-        items=(),
-        stats=prepare_dataset.PreparationStats(),
-        matched_label_counts=Counter(),
-        kept_by_label=Counter(record.label for record in records),
-        below_min_length_by_label=Counter(),
-        duplicate_by_label=Counter(),
-        label_limit_skips_by_label=Counter(),
-        records=records,
-        started_at=0.0,
-    )
+    return prepare_dataset.PreparationRun(records=records)
 
 
 def _prepare_run(
@@ -68,23 +58,23 @@ def _prepare_run(
 ) -> prepare_dataset.PreparationRun:
     pipeline = Pipeline(
         [
-            prepare_dataset.StartPreparationRun(),
-            prepare_dataset.ScanSubmissions(),
+            prepare_dataset.ForEachSubmission(),
             prepare_dataset.RequireSubmissionMappings(),
             prepare_dataset.ApplySubmissionFilter(where=where),
             prepare_dataset.ExtractSubmissionLabel(),
             prepare_dataset.FilterConfiguredLabels(label_limits=label_limits),
-            prepare_dataset.SkipSatisfiedLabels(label_limits=label_limits),
             prepare_dataset.ExtractSubmissionMessage(),
-            prepare_dataset.PrepareGroupingText(min_length=min_length),
+            prepare_dataset.PrepareGroupingText(),
+            prepare_dataset.RequireMinimumMessageLength(min_length=min_length),
             prepare_dataset.NormalizeTrainingText(is_jp=is_jp),
-            prepare_dataset.BuildPreparedRecords(
-                dedupe_key=dedupe_key,
-                message_format=message_format,
-                min_length=min_length,
-            ),
+            prepare_dataset.SelectDedupeKey(dedupe_key=dedupe_key),
+            prepare_dataset.RequireMinimumDedupeLength(min_length=min_length),
+            prepare_dataset.BuildPreparedCandidate(message_format=message_format),
+            prepare_dataset.EndForEachSubmission(),
+            prepare_dataset.CompactDroppedCandidates(),
             prepare_dataset.DeduplicateSubmissions(),
-            prepare_dataset.CollectPreparedRecords(label_limits=label_limits),
+            prepare_dataset.ApplyLabelLimits(label_limits=label_limits),
+            prepare_dataset.CollectPreparedRecords(),
         ]
     )
     return pipeline(submissions)
@@ -98,6 +88,17 @@ def test_resolve_input_files_expands_directory_in_sorted_order(tmp_path: Path) -
     resolved = prepare_dataset.ResolveInputFiles()(input_dir)
 
     assert [path.name for path in resolved] == ["a.json", "b.json"]
+
+
+def test_load_submission_collection_merges_files_in_sorted_order(tmp_path: Path) -> None:
+    input_dir = tmp_path / "collected"
+    _write_dataset(input_dir / "b.json", [_submission("spam", "second")])
+    _write_dataset(input_dir / "a.json", [_submission("ham", "first")])
+
+    input_files = prepare_dataset.ResolveInputFiles()(input_dir)
+    loaded = prepare_dataset.LoadSubmissionCollection()(input_files)
+
+    assert [item["content"]["msg"] for item in loaded if isinstance(item, dict)] == ["first", "second"]
 
 
 def test_resolve_input_path_checks_cwd_before_project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,8 +143,6 @@ def test_prepare_submissions_applies_filter_cleanup_and_message_format() -> None
         message_format="normalized",
     )
 
-    assert result.stats.scanned == 2
-    assert result.stats.matched_filter == 1
     assert len(result.records) == 1
     assert result.records[0].output_submission["content"]["msg"] == "visit <URL>"
     assert result.records[0].output_submission["content"]["gw"] == "rakuten"
@@ -160,7 +159,6 @@ def test_prepare_submissions_dedupe_respects_cleaned_vs_normalized() -> None:
 
     assert len(cleaned_result.records) == 2
     assert len(normalized_result.records) == 1
-    assert normalized_result.stats.duplicate_dropped == 1
 
 
 def test_prepare_submissions_enforces_label_limits_and_stops_early() -> None:
@@ -172,9 +170,11 @@ def test_prepare_submissions_enforces_label_limits_and_stops_early() -> None:
 
     result = _prepare_run(submissions, label_limits="ham=1,spam=1")
 
-    assert result.stats.scanned == 2
-    assert result.stats.kept == 2
-    assert result.kept_by_label == Counter({"ham": 1, "spam": 1})
+    assert [record.output_submission["content"]["msg"] for record in result.records] == [
+        "first ham",
+        "first spam",
+    ]
+    assert Counter(record.label for record in result.records) == Counter({"ham": 1, "spam": 1})
 
 
 def test_prepare_submissions_raises_when_label_limits_cannot_be_satisfied() -> None:
@@ -267,6 +267,46 @@ def test_prepare_dataset_pipeline_validates() -> None:
     assert contract is not None
 
 
+def test_build_prepare_dataset_collection_pipeline_matches_streaming_pipeline(tmp_path: Path) -> None:
+    input_file = tmp_path / "input.json"
+    stream_output = tmp_path / "prepared_stream.json"
+    collection_output = tmp_path / "prepared_collection.json"
+    _write_dataset(
+        input_file,
+        [
+            _submission("spam", "Visit https://one.example"),
+            _submission("ham", "Hello"),
+            _submission("spam", "Visit https://two.example"),
+            _submission("spam", "Unique offer", gw="rakuten"),
+        ],
+    )
+
+    stream_pipeline = prepare_dataset.build_prepare_dataset_pipeline(
+        {
+            "output_path": stream_output,
+            "message_format": "normalized",
+            "overwrite": "true",
+            "shuffle": 42,
+            "sort_labels": "true",
+        }
+    )
+    collection_pipeline = prepare_dataset.build_prepare_dataset_collection_pipeline(
+        output_path=collection_output,
+        message_format="normalized",
+        overwrite="true",
+        shuffle=42,
+        sort_labels="true",
+    )
+
+    stream_result = stream_pipeline(str(input_file))
+    collection_result = collection_pipeline(str(input_file))
+
+    assert json.loads(stream_output.read_text(encoding="utf-8")) == json.loads(
+        collection_output.read_text(encoding="utf-8")
+    )
+    assert stream_result.records == collection_result.records
+
+
 def test_prepare_dataset_pipeline_inspect_captures_streaming_steps(tmp_path: Path) -> None:
     input_file = tmp_path / "input.json"
     output_file = tmp_path / "prepared.json"
@@ -284,30 +324,90 @@ def test_prepare_dataset_pipeline_inspect_captures_streaming_steps(tmp_path: Pat
 
     result = pipeline.inspect(str(input_file))
 
-    assert len(result.spans) == 17
+    assert len(result.spans) == 9
     assert [span.label for span in result.spans] == [
         "0:ResolveInputFiles",
         "1:StreamSubmissions",
-        "2:StartPreparationRun",
-        "3:ScanSubmissions",
-        "4:RequireSubmissionMappings",
-        "5:ApplySubmissionFilter",
-        "6:ExtractSubmissionLabel",
-        "7:FilterConfiguredLabels",
-        "8:SkipSatisfiedLabels",
-        "9:ExtractSubmissionMessage",
-        "10:PrepareGroupingText",
-        "11:NormalizeTrainingText",
-        "12:BuildPreparedRecords",
-        "13:DeduplicateSubmissions",
-        "14:CollectPreparedRecords",
-        "15:FinalizeOrdering",
-        "16:WritePreparedDataset",
+        "2:ForEachSubmission",
+        "15:CompactDroppedCandidates",
+        "16:DeduplicateSubmissions",
+        "17:ApplyLabelLimits",
+        "18:CollectPreparedRecords",
+        "19:FinalizeOrdering",
+        "20:WritePreparedDataset",
     ]
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, str)
     assert "generator object" in result.spans[1].output_value
-    assert isinstance(result.spans[2].output_value.items, str)
+    assert result.spans[2].child_trace is not None
+    assert [span.label for span in result.spans[2].child_trace.spans] == [
+        "3:RequireSubmissionMappings",
+        "4:ApplySubmissionFilter",
+        "5:ExtractSubmissionLabel",
+        "6:FilterConfiguredLabels",
+        "7:ExtractSubmissionMessage",
+        "8:PrepareGroupingText",
+        "9:RequireMinimumMessageLength",
+        "10:NormalizeTrainingText",
+        "11:SelectDedupeKey",
+        "12:RequireMinimumDedupeLength",
+        "13:BuildPreparedCandidate",
+    ]
+    assert isinstance(result.spans[3].output_value, list)
+    assert len(result.spans[3].output_value) == 2
+    assert output_file.exists()
+
+
+def test_prepare_dataset_collection_pipeline_inspect_captures_collection_steps(tmp_path: Path) -> None:
+    input_file = tmp_path / "input.json"
+    output_file = tmp_path / "prepared.json"
+    _write_dataset(
+        input_file,
+        [
+            _submission("spam", "Visit https://one.example"),
+            _submission("ham", "Hello"),
+        ],
+    )
+
+    pipeline = prepare_dataset.build_prepare_dataset_collection_pipeline(
+        output_path=output_file,
+        message_format="normalized",
+        overwrite="true",
+    )
+
+    result = pipeline.inspect(str(input_file))
+
+    assert len(result.spans) == 9
+    assert [span.label for span in result.spans] == [
+        "0:ResolveInputFiles",
+        "1:LoadSubmissionCollection",
+        "2:ForEachSubmission",
+        "15:CompactDroppedCandidates",
+        "16:DeduplicateSubmissions",
+        "17:ApplyLabelLimits",
+        "18:CollectPreparedRecords",
+        "19:FinalizeOrdering",
+        "20:WritePreparedDataset",
+    ]
+    assert not any(span.error for span in result.spans)
+    assert isinstance(result.spans[1].output_value, list)
+    assert len(result.spans[1].output_value) == 2
+    assert result.spans[2].child_trace is not None
+    assert [span.label for span in result.spans[2].child_trace.spans] == [
+        "3:RequireSubmissionMappings",
+        "4:ApplySubmissionFilter",
+        "5:ExtractSubmissionLabel",
+        "6:FilterConfiguredLabels",
+        "7:ExtractSubmissionMessage",
+        "8:PrepareGroupingText",
+        "9:RequireMinimumMessageLength",
+        "10:NormalizeTrainingText",
+        "11:SelectDedupeKey",
+        "12:RequireMinimumDedupeLength",
+        "13:BuildPreparedCandidate",
+    ]
+    assert isinstance(result.spans[3].output_value, list)
+    assert len(result.spans[3].output_value) == 2
     assert output_file.exists()
 
 
@@ -328,6 +428,50 @@ def test_cmd_run_prepare_dataset_example(tmp_path: Path, capsys: pytest.CaptureF
         [
             "run",
             "examples.run_prepare_dataset",
+            "--data-arg",
+            f"input_path={input_file}",
+            "--arg",
+            f"output_path={output_file}",
+            "--arg",
+            "message_format=normalized",
+            "--arg",
+            "label_limits=ham=1,spam=1",
+            "--arg",
+            "shuffle=42",
+            "--arg",
+            "sort_labels=true",
+            "--arg",
+            "overwrite=true",
+        ]
+    )
+
+    code = cmd_run(args)
+    payload = json.loads(output_file.read_text(encoding="utf-8"))
+    stdout = capsys.readouterr().out
+
+    assert code == 0
+    assert len(payload["submissions"]) == 2
+    assert sorted(item["label"] for item in payload["submissions"]) == ["ham", "spam"]
+    assert "Final summary" in stdout
+
+
+def test_cmd_run_prepare_dataset_collection_example(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    input_file = tmp_path / "input.json"
+    output_file = tmp_path / "prepared.json"
+    _write_dataset(
+        input_file,
+        [
+            _submission("spam", "Visit https://one.example"),
+            _submission("ham", "Hello"),
+            _submission("spam", "Visit https://two.example"),
+        ],
+    )
+
+    parser = _build_parser()
+    args = parser.parse_args(
+        [
+            "run",
+            "examples.run_prepare_dataset:build_prepare_dataset_collection_pipeline",
             "--data-arg",
             f"input_path={input_file}",
             "--arg",
