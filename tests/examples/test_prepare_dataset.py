@@ -42,8 +42,8 @@ def _prepared(label: str, msg: str, sort_key: str) -> prepare_dataset.PreparedSu
 
 def _result(
     records: list[prepare_dataset.PreparedSubmission],
-) -> prepare_dataset.PreparationRun:
-    return prepare_dataset.PreparationRun(records=records)
+) -> list[prepare_dataset.PreparedSubmission]:
+    return records
 
 
 def _prepare_run(
@@ -55,7 +55,7 @@ def _prepare_run(
     message_format: str = "raw",
     min_length: int | str = 2,
     is_jp: bool | str = True,
-) -> prepare_dataset.PreparationRun:
+) -> list[prepare_dataset.PreparedSubmission]:
     pipeline = Pipeline(
         [
             prepare_dataset.ForEachSubmission(),
@@ -68,13 +68,18 @@ def _prepare_run(
             prepare_dataset.RequireMinimumMessageLength(min_length=min_length),
             prepare_dataset.NormalizeTrainingText(is_jp=is_jp),
             prepare_dataset.SelectDedupeKey(dedupe_key=dedupe_key),
-            prepare_dataset.RequireMinimumDedupeLength(min_length=min_length),
-            prepare_dataset.BuildPreparedCandidate(message_format=message_format),
+            prepare_dataset.RequireMinimumDedupeLength(
+                min_length=min_length,
+                dedupe_key=dedupe_key,
+            ),
             prepare_dataset.EndForEachSubmission(),
-            prepare_dataset.CompactDroppedCandidates(),
-            prepare_dataset.DeduplicateSubmissions(),
+            prepare_dataset.CompactDroppedSubmissions(),
+            prepare_dataset.DeduplicateSubmissions(dedupe_key=dedupe_key),
             prepare_dataset.ApplyLabelLimits(label_limits=label_limits),
-            prepare_dataset.CollectPreparedRecords(),
+            prepare_dataset.BuildPreparedRecords(
+                message_format=message_format,
+                dedupe_key=dedupe_key,
+            ),
         ]
     )
     return pipeline(submissions)
@@ -143,9 +148,9 @@ def test_prepare_submissions_applies_filter_cleanup_and_message_format() -> None
         message_format="normalized",
     )
 
-    assert len(result.records) == 1
-    assert result.records[0].output_submission["content"]["msg"] == "visit <URL>"
-    assert result.records[0].output_submission["content"]["gw"] == "rakuten"
+    assert len(result) == 1
+    assert result[0].output_submission["content"]["msg"] == "visit <URL>"
+    assert result[0].output_submission["content"]["gw"] == "rakuten"
 
 
 def test_prepare_submissions_dedupe_respects_cleaned_vs_normalized() -> None:
@@ -157,8 +162,8 @@ def test_prepare_submissions_dedupe_respects_cleaned_vs_normalized() -> None:
     cleaned_result = _prepare_run(submissions, dedupe_key="cleaned")
     normalized_result = _prepare_run(submissions, dedupe_key="normalized")
 
-    assert len(cleaned_result.records) == 2
-    assert len(normalized_result.records) == 1
+    assert len(cleaned_result) == 2
+    assert len(normalized_result) == 1
 
 
 def test_prepare_submissions_enforces_label_limits_and_stops_early() -> None:
@@ -170,11 +175,11 @@ def test_prepare_submissions_enforces_label_limits_and_stops_early() -> None:
 
     result = _prepare_run(submissions, label_limits="ham=1,spam=1")
 
-    assert [record.output_submission["content"]["msg"] for record in result.records] == [
+    assert [record.output_submission["content"]["msg"] for record in result] == [
         "first ham",
         "first spam",
     ]
-    assert Counter(record.label for record in result.records) == Counter({"ham": 1, "spam": 1})
+    assert Counter(record.label for record in result) == Counter({"ham": 1, "spam": 1})
 
 
 def test_prepare_submissions_raises_when_label_limits_cannot_be_satisfied() -> None:
@@ -199,7 +204,7 @@ def test_finalize_ordering_preserves_order_when_shuffle_is_disabled(tmp_path: Pa
 
     ordered = prepare_dataset.FinalizeOrdering()(result)
 
-    assert [record.output_submission["content"]["msg"] for record in ordered.records] == ["msg-1", "msg-2"]
+    assert [record.output_submission["content"]["msg"] for record in ordered] == ["msg-1", "msg-2"]
 
 
 def test_finalize_ordering_is_deterministic_with_seeded_shuffle(tmp_path: Path) -> None:
@@ -212,8 +217,8 @@ def test_finalize_ordering_is_deterministic_with_seeded_shuffle(tmp_path: Path) 
     first = prepare_dataset.FinalizeOrdering(shuffle=42)(_result(list(records)))
     second = prepare_dataset.FinalizeOrdering(shuffle=42)(_result(list(records)))
 
-    assert [record.output_submission["content"]["msg"] for record in first.records] == [
-        record.output_submission["content"]["msg"] for record in second.records
+    assert [record.output_submission["content"]["msg"] for record in first] == [
+        record.output_submission["content"]["msg"] for record in second
     ]
 
 
@@ -228,8 +233,8 @@ def test_finalize_ordering_sort_labels_ignores_collected_order(tmp_path: Path) -
     ordered_a = prepare_dataset.FinalizeOrdering(shuffle=42, sort_labels=True)(_result(records_a))
     ordered_b = prepare_dataset.FinalizeOrdering(shuffle=42, sort_labels=True)(_result(records_b))
 
-    assert [record.output_submission["content"]["msg"] for record in ordered_a.records] == [
-        record.output_submission["content"]["msg"] for record in ordered_b.records
+    assert [record.output_submission["content"]["msg"] for record in ordered_a] == [
+        record.output_submission["content"]["msg"] for record in ordered_b
     ]
 
 
@@ -251,8 +256,8 @@ def test_build_prepare_dataset_pipeline_writes_wrapper_and_respects_overwrite(tm
     result = pipeline(str(input_file))
     payload = json.loads(output_file.read_text(encoding="utf-8"))
 
-    assert isinstance(result, prepare_dataset.PreparationRun)
-    assert len(result.records) == 2
+    assert isinstance(result, list)
+    assert len(result) == 2
     assert list(payload) == ["submissions"]
     assert payload["submissions"][0]["content"]["msg"] == "Hello"
     assert output_file.read_text(encoding="utf-8").startswith('{\n  "submissions": [')
@@ -304,7 +309,7 @@ def test_build_prepare_dataset_collection_pipeline_matches_streaming_pipeline(tm
     assert json.loads(stream_output.read_text(encoding="utf-8")) == json.loads(
         collection_output.read_text(encoding="utf-8")
     )
-    assert stream_result.records == collection_result.records
+    assert stream_result == collection_result
 
 
 def test_prepare_dataset_pipeline_inspect_captures_streaming_steps(tmp_path: Path) -> None:
@@ -329,12 +334,12 @@ def test_prepare_dataset_pipeline_inspect_captures_streaming_steps(tmp_path: Pat
         "0:ResolveInputFiles",
         "1:StreamSubmissions",
         "2:ForEachSubmission",
-        "15:CompactDroppedCandidates",
-        "16:DeduplicateSubmissions",
-        "17:ApplyLabelLimits",
-        "18:CollectPreparedRecords",
-        "19:FinalizeOrdering",
-        "20:WritePreparedDataset",
+        "14:CompactDroppedSubmissions",
+        "15:DeduplicateSubmissions",
+        "16:ApplyLabelLimits",
+        "17:BuildPreparedRecords",
+        "18:FinalizeOrdering",
+        "19:WritePreparedDataset",
     ]
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, str)
@@ -351,7 +356,6 @@ def test_prepare_dataset_pipeline_inspect_captures_streaming_steps(tmp_path: Pat
         "10:NormalizeTrainingText",
         "11:SelectDedupeKey",
         "12:RequireMinimumDedupeLength",
-        "13:BuildPreparedCandidate",
     ]
     assert isinstance(result.spans[3].output_value, list)
     assert len(result.spans[3].output_value) == 2
@@ -382,12 +386,12 @@ def test_prepare_dataset_collection_pipeline_inspect_captures_collection_steps(t
         "0:ResolveInputFiles",
         "1:LoadSubmissionCollection",
         "2:ForEachSubmission",
-        "15:CompactDroppedCandidates",
-        "16:DeduplicateSubmissions",
-        "17:ApplyLabelLimits",
-        "18:CollectPreparedRecords",
-        "19:FinalizeOrdering",
-        "20:WritePreparedDataset",
+        "14:CompactDroppedSubmissions",
+        "15:DeduplicateSubmissions",
+        "16:ApplyLabelLimits",
+        "17:BuildPreparedRecords",
+        "18:FinalizeOrdering",
+        "19:WritePreparedDataset",
     ]
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, list)
@@ -404,7 +408,6 @@ def test_prepare_dataset_collection_pipeline_inspect_captures_collection_steps(t
         "10:NormalizeTrainingText",
         "11:SelectDedupeKey",
         "12:RequireMinimumDedupeLength",
-        "13:BuildPreparedCandidate",
     ]
     assert isinstance(result.spans[3].output_value, list)
     assert len(result.spans[3].output_value) == 2

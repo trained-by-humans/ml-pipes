@@ -249,7 +249,7 @@ def main() -> int:
             result = pipeline(str(args.input_path))
         finally:
             pipeline.set_tracing(None)
-        print(f"Prepared records: {len(result.records)}", file=sys.stderr)
+        print(f"Prepared records: {len(result)}", file=sys.stderr)
 
     if args.mode in {"inspect", "both"}:
         print("\n=== Inspection summary ===\n", file=sys.stderr)

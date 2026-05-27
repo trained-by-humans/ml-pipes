@@ -28,7 +28,7 @@ import re
 import time
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
@@ -102,73 +102,12 @@ class ShuffleConfig:
     seed_source: str
 
 
-@dataclass(frozen=True)
-class ScannedItem:
-    scan_index: int
-    value: object
-
-
-@dataclass(frozen=True)
-class ScannedSubmission:
-    scan_index: int
-    submission: Submission
-
-
-@dataclass(frozen=True)
-class LabeledSubmission:
-    scan_index: int
-    submission: Submission
-    label: str
-
-
-@dataclass(frozen=True)
-class MessageSubmission:
-    scan_index: int
-    submission: Submission
-    label: str
-    raw_message: str
-
-
-@dataclass(frozen=True)
-class GroupedSubmission:
-    scan_index: int
-    submission: Submission
-    label: str
-    raw_message: str
-    cleaned_message: str
-
-
-@dataclass(frozen=True)
-class NormalizedSubmission:
-    scan_index: int
-    submission: Submission
-    label: str
-    raw_message: str
-    cleaned_message: str
-    normalized_message: str
-
-
-@dataclass(frozen=True)
-class DedupeReadySubmission:
-    scan_index: int
-    submission: Submission
-    label: str
-    raw_message: str
-    cleaned_message: str
-    normalized_message: str
-    dedupe_key: str
-
-
-@dataclass(frozen=True)
-class PreparedCandidate:
-    label: str
-    dedupe_key: str
-    record: PreparedSubmission
-
-
 @dataclass
-class PreparationRun:
-    records: list[PreparedSubmission] = field(default_factory=list)
+class SubmissionState:
+    submission: Submission
+    label: str | None = None
+    cleaned_message: str | None = None
+    normalized_message: str | None = None
 
 
 def _replace_pin(match: re.Match[str]) -> str:
@@ -575,6 +514,17 @@ def choose_output_message(
     return raw_message
 
 
+def choose_dedupe_text(
+    *,
+    cleaned_message: str,
+    normalized_message: str,
+    dedupe_key: str,
+) -> str:
+    if dedupe_key == "cleaned":
+        return cleaned_message
+    return normalized_message
+
+
 def build_output_submission(submission: Mapping[str, object], output_message: str) -> Submission:
     output_submission: Submission = dict(submission)
     content = submission.get("content")
@@ -591,6 +541,12 @@ def apply_sorted_label_shuffle(records: list[PreparedSubmission], *, seed: int) 
     rng = random.Random(seed)
     rng.shuffle(sorted_records)
     return sorted_records
+
+
+def get_submission_message(submission: Mapping[str, object]) -> str | None:
+    content = submission.get("content")
+    raw_message = content.get("msg") if isinstance(content, dict) else None
+    return raw_message if isinstance(raw_message, str) else None
 
 
 def write_json(payload: dict[str, Any], output_path: Path, overwrite: bool) -> None:
@@ -700,12 +656,9 @@ class ForEachSubmission(RegionOpener):
         t_region = time.perf_counter()
 
         try:
-            for scan_index, value in enumerate(source, start=1):
+            for value in source:
                 child_trace = InvocationTrace() if collecting else _NoOpTrace()
-                result, child_trace = execute_region(
-                    ScannedItem(scan_index=scan_index, value=value),
-                    child_trace,
-                )
+                result, child_trace = execute_region(value, child_trace)
                 results.append(result)
                 if collecting:
                     child_traces.append(child_trace)
@@ -744,20 +697,18 @@ class ForEachSubmission(RegionOpener):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        return (Any,), ScannedItem
+        return (Any,), Any
 
 
 class RequireSubmissionMappings:
     """Drop non-mapping values and retain submission dictionaries only."""
 
-    def __call__(self, scanned: ScannedItem | None) -> ScannedSubmission | None:
-        if scanned is None:
+    def __call__(self, value: object | None) -> SubmissionState | None:
+        if value is None:
             return None
-        if not isinstance(scanned, ScannedItem):
-            raise TypeError(f"RequireSubmissionMappings expected ScannedItem, got {type(scanned)!r}")
-        if not isinstance(scanned.value, dict):
+        if not isinstance(value, dict):
             return None
-        return ScannedSubmission(scan_index=scanned.scan_index, submission=scanned.value)
+        return SubmissionState(submission=value)
 
 
 class ApplySubmissionFilter:
@@ -766,35 +717,32 @@ class ApplySubmissionFilter:
     def __init__(self, where: str = ""):
         self.where = where.strip() or None
 
-    def __call__(self, scanned: ScannedSubmission | None) -> ScannedSubmission | None:
-        if scanned is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(scanned, ScannedSubmission):
-            raise TypeError(f"ApplySubmissionFilter expected ScannedSubmission, got {type(scanned)!r}")
-        if not matches_filter(self.where, scanned.submission):
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"ApplySubmissionFilter expected SubmissionState, got {type(state)!r}")
+        if not matches_filter(self.where, state.submission):
             return None
-        return scanned
+        return state
 
 
 class ExtractSubmissionLabel:
     """Extract and validate labels from matched submissions."""
 
-    def __call__(self, scanned: ScannedSubmission | None) -> LabeledSubmission | None:
-        if scanned is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(scanned, ScannedSubmission):
-            raise TypeError(f"ExtractSubmissionLabel expected ScannedSubmission, got {type(scanned)!r}")
-        label_raw = scanned.submission.get("label")
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"ExtractSubmissionLabel expected SubmissionState, got {type(state)!r}")
+        label_raw = state.submission.get("label")
         if label_raw is None:
             return None
         label = str(label_raw).strip()
         if not label:
             return None
-        return LabeledSubmission(
-            scan_index=scanned.scan_index,
-            submission=scanned.submission,
-            label=label,
-        )
+        state.label = label
+        return state
 
 
 class FilterConfiguredLabels:
@@ -803,51 +751,44 @@ class FilterConfiguredLabels:
     def __init__(self, label_limits: str | Mapping[str, int] | None = ""):
         self.label_limits = parse_label_limits(label_limits)
 
-    def __call__(self, labeled: LabeledSubmission | None) -> LabeledSubmission | None:
-        if labeled is None or not self.label_limits:
-            return labeled
-        if not isinstance(labeled, LabeledSubmission):
-            raise TypeError(f"FilterConfiguredLabels expected LabeledSubmission, got {type(labeled)!r}")
-        if labeled.label not in self.label_limits:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None or not self.label_limits:
+            return state
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"FilterConfiguredLabels expected SubmissionState, got {type(state)!r}")
+        if state.label is None:
+            raise ValueError("FilterConfiguredLabels requires label to be extracted first.")
+        if state.label not in self.label_limits:
             return None
-        return labeled
+        return state
 
 
 class ExtractSubmissionMessage:
     """Extract and validate the source message payload for each labeled submission."""
 
-    def __call__(self, labeled: LabeledSubmission | None) -> MessageSubmission | None:
-        if labeled is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(labeled, LabeledSubmission):
-            raise TypeError(f"ExtractSubmissionMessage expected LabeledSubmission, got {type(labeled)!r}")
-        content = labeled.submission.get("content")
-        raw_message = content.get("msg") if isinstance(content, dict) else None
-        if not isinstance(raw_message, str):
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"ExtractSubmissionMessage expected SubmissionState, got {type(state)!r}")
+        if get_submission_message(state.submission) is None:
             return None
-        return MessageSubmission(
-            scan_index=labeled.scan_index,
-            submission=labeled.submission,
-            label=labeled.label,
-            raw_message=raw_message,
-        )
+        return state
 
 
 class PrepareGroupingText:
     """Apply lightweight cleanup to the raw message."""
 
-    def __call__(self, message: MessageSubmission | None) -> GroupedSubmission | None:
-        if message is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(message, MessageSubmission):
-            raise TypeError(f"PrepareGroupingText expected MessageSubmission, got {type(message)!r}")
-        return GroupedSubmission(
-            scan_index=message.scan_index,
-            submission=message.submission,
-            label=message.label,
-            raw_message=message.raw_message,
-            cleaned_message=prepare_message_for_grouping(message.raw_message),
-        )
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"PrepareGroupingText expected SubmissionState, got {type(state)!r}")
+        raw_message = get_submission_message(state.submission)
+        if raw_message is None:
+            raise ValueError("PrepareGroupingText requires message extraction first.")
+        state.cleaned_message = prepare_message_for_grouping(raw_message)
+        return state
 
 
 class RequireMinimumMessageLength:
@@ -858,14 +799,16 @@ class RequireMinimumMessageLength:
         if self.min_length < 0:
             raise ValueError("min_length must be >= 0.")
 
-    def __call__(self, grouped: GroupedSubmission | None) -> GroupedSubmission | None:
-        if grouped is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(grouped, GroupedSubmission):
-            raise TypeError(f"RequireMinimumMessageLength expected GroupedSubmission, got {type(grouped)!r}")
-        if len(grouped.cleaned_message.strip()) < self.min_length:
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"RequireMinimumMessageLength expected SubmissionState, got {type(state)!r}")
+        if state.cleaned_message is None:
+            raise ValueError("RequireMinimumMessageLength requires cleaned_message first.")
+        if len(state.cleaned_message.strip()) < self.min_length:
             return None
-        return grouped
+        return state
 
 
 class NormalizeTrainingText:
@@ -874,23 +817,19 @@ class NormalizeTrainingText:
     def __init__(self, is_jp: bool | str = True):
         self.is_jp = parse_bool(is_jp)
 
-    def __call__(self, grouped: GroupedSubmission | None) -> NormalizedSubmission | None:
-        if grouped is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(grouped, GroupedSubmission):
-            raise TypeError(f"NormalizeTrainingText expected GroupedSubmission, got {type(grouped)!r}")
-        return NormalizedSubmission(
-            scan_index=grouped.scan_index,
-            submission=grouped.submission,
-            label=grouped.label,
-            raw_message=grouped.raw_message,
-            cleaned_message=grouped.cleaned_message,
-            normalized_message=normalize_message_for_training(
-                grouped.cleaned_message,
-                is_jp=self.is_jp,
-                already_prepared=True,
-            ),
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"NormalizeTrainingText expected SubmissionState, got {type(state)!r}")
+        if state.cleaned_message is None:
+            raise ValueError("NormalizeTrainingText requires cleaned_message first.")
+        state.normalized_message = normalize_message_for_training(
+            state.cleaned_message,
+            is_jp=self.is_jp,
+            already_prepared=True,
         )
+        return state
 
 
 class SelectDedupeKey:
@@ -899,104 +838,84 @@ class SelectDedupeKey:
     def __init__(self, dedupe_key: str = "normalized"):
         self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
 
-    def __call__(self, normalized: NormalizedSubmission | None) -> DedupeReadySubmission | None:
-        if normalized is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(normalized, NormalizedSubmission):
-            raise TypeError(f"SelectDedupeKey expected NormalizedSubmission, got {type(normalized)!r}")
-        dedupe_key = (
-            normalized.cleaned_message
-            if self.dedupe_key == "cleaned"
-            else normalized.normalized_message
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"SelectDedupeKey expected SubmissionState, got {type(state)!r}")
+        if state.cleaned_message is None or state.normalized_message is None:
+            raise ValueError("SelectDedupeKey requires cleaned and normalized messages first.")
+        choose_dedupe_text(
+            cleaned_message=state.cleaned_message,
+            normalized_message=state.normalized_message,
+            dedupe_key=self.dedupe_key,
         )
-        return DedupeReadySubmission(
-            scan_index=normalized.scan_index,
-            submission=normalized.submission,
-            label=normalized.label,
-            raw_message=normalized.raw_message,
-            cleaned_message=normalized.cleaned_message,
-            normalized_message=normalized.normalized_message,
-            dedupe_key=dedupe_key,
-        )
+        return state
 
 
 class RequireMinimumDedupeLength:
     """Drop submissions whose dedupe key is shorter than the configured threshold."""
 
-    def __init__(self, min_length: int | str = 2):
+    def __init__(self, min_length: int | str = 2, dedupe_key: str = "normalized"):
         self.min_length = int(min_length)
+        self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
         if self.min_length < 0:
             raise ValueError("min_length must be >= 0.")
 
-    def __call__(self, ready: DedupeReadySubmission | None) -> DedupeReadySubmission | None:
-        if ready is None:
+    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+        if state is None:
             return None
-        if not isinstance(ready, DedupeReadySubmission):
-            raise TypeError(f"RequireMinimumDedupeLength expected DedupeReadySubmission, got {type(ready)!r}")
-        if len(ready.dedupe_key.strip()) < self.min_length:
+        if not isinstance(state, SubmissionState):
+            raise TypeError(f"RequireMinimumDedupeLength expected SubmissionState, got {type(state)!r}")
+        if state.cleaned_message is None or state.normalized_message is None:
+            raise ValueError("RequireMinimumDedupeLength requires cleaned and normalized messages first.")
+        dedupe_text = choose_dedupe_text(
+            cleaned_message=state.cleaned_message,
+            normalized_message=state.normalized_message,
+            dedupe_key=self.dedupe_key,
+        )
+        if len(dedupe_text.strip()) < self.min_length:
             return None
-        return ready
+        return state
 
 
-class BuildPreparedCandidate:
-    """Build the final output record for a dedupe-ready submission."""
-
-    def __init__(self, message_format: str = "raw"):
-        self.message_format = normalize_choice(
-            "message_format",
-            message_format,
-            {"raw", "cleaned", "normalized"},
-        )
-
-    def __call__(self, ready: DedupeReadySubmission | None) -> PreparedCandidate | None:
-        if ready is None:
-            return None
-        if not isinstance(ready, DedupeReadySubmission):
-            raise TypeError(f"BuildPreparedCandidate expected DedupeReadySubmission, got {type(ready)!r}")
-        output_message = choose_output_message(
-            raw_message=ready.raw_message,
-            cleaned_message=ready.cleaned_message,
-            normalized_message=ready.normalized_message,
-            message_format=self.message_format,
-        )
-        return PreparedCandidate(
-            label=ready.label,
-            dedupe_key=ready.dedupe_key,
-            record=PreparedSubmission(
-                label=ready.label,
-                sort_key=f"{ready.label}\t{ready.dedupe_key}\t{ready.scan_index:012d}",
-                output_submission=build_output_submission(ready.submission, output_message),
-            ),
-        )
-
-
-class CompactDroppedCandidates:
+class CompactDroppedSubmissions:
     """Remove dropped entries emitted as None by per-item operators."""
 
-    def __call__(self, candidates: list[PreparedCandidate | None]) -> list[PreparedCandidate]:
-        kept: list[PreparedCandidate] = []
-        for candidate in candidates:
-            if candidate is None:
+    def __call__(self, states: list[SubmissionState | None]) -> list[SubmissionState]:
+        kept: list[SubmissionState] = []
+        for state in states:
+            if state is None:
                 continue
-            if not isinstance(candidate, PreparedCandidate):
-                raise TypeError(f"CompactDroppedCandidates expected PreparedCandidate | None, got {type(candidate)!r}")
-            kept.append(candidate)
+            if not isinstance(state, SubmissionState):
+                raise TypeError(f"CompactDroppedSubmissions expected SubmissionState | None, got {type(state)!r}")
+            kept.append(state)
         return kept
 
 
 class DeduplicateSubmissions:
     """Drop repeated records using the configured dedupe key."""
 
-    def __call__(self, candidates: list[PreparedCandidate]) -> list[PreparedCandidate]:
+    def __init__(self, dedupe_key: str = "normalized"):
+        self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
+
+    def __call__(self, states: list[SubmissionState]) -> list[SubmissionState]:
         seen_keys: set[str] = set()
-        deduped: list[PreparedCandidate] = []
-        for candidate in candidates:
-            if not isinstance(candidate, PreparedCandidate):
-                raise TypeError(f"DeduplicateSubmissions expected PreparedCandidate, got {type(candidate)!r}")
-            if candidate.dedupe_key in seen_keys:
+        deduped: list[SubmissionState] = []
+        for state in states:
+            if not isinstance(state, SubmissionState):
+                raise TypeError(f"DeduplicateSubmissions expected SubmissionState, got {type(state)!r}")
+            if state.cleaned_message is None or state.normalized_message is None:
+                raise ValueError("DeduplicateSubmissions requires cleaned and normalized messages first.")
+            dedupe_text = choose_dedupe_text(
+                cleaned_message=state.cleaned_message,
+                normalized_message=state.normalized_message,
+                dedupe_key=self.dedupe_key,
+            )
+            if dedupe_text in seen_keys:
                 continue
-            seen_keys.add(candidate.dedupe_key)
-            deduped.append(candidate)
+            seen_keys.add(dedupe_text)
+            deduped.append(state)
         return deduped
 
 
@@ -1006,21 +925,23 @@ class ApplyLabelLimits:
     def __init__(self, label_limits: str | Mapping[str, int] | None = ""):
         self.label_limits = parse_label_limits(label_limits)
 
-    def __call__(self, candidates: list[PreparedCandidate]) -> list[PreparedCandidate]:
+    def __call__(self, states: list[SubmissionState]) -> list[SubmissionState]:
         if not self.label_limits:
-            return candidates
+            return states
 
         kept_by_label: Counter[str] = Counter()
-        limited: list[PreparedCandidate] = []
-        for candidate in candidates:
-            if not isinstance(candidate, PreparedCandidate):
-                raise TypeError(f"ApplyLabelLimits expected PreparedCandidate, got {type(candidate)!r}")
-            if candidate.label not in self.label_limits:
+        limited: list[SubmissionState] = []
+        for state in states:
+            if not isinstance(state, SubmissionState):
+                raise TypeError(f"ApplyLabelLimits expected SubmissionState, got {type(state)!r}")
+            if state.label is None:
+                raise ValueError("ApplyLabelLimits requires label first.")
+            if state.label not in self.label_limits:
                 continue
-            if kept_by_label[candidate.label] >= self.label_limits[candidate.label]:
+            if kept_by_label[state.label] >= self.label_limits[state.label]:
                 continue
-            limited.append(candidate)
-            kept_by_label[candidate.label] += 1
+            limited.append(state)
+            kept_by_label[state.label] += 1
             if label_targets_met(self.label_limits, kept_by_label):
                 break
 
@@ -1037,16 +958,46 @@ class ApplyLabelLimits:
         return limited
 
 
-class CollectPreparedRecords:
-    """Materialize prepared records into the final pipeline result."""
+class BuildPreparedRecords:
+    """Build the final output records from selected submission states."""
 
-    def __call__(self, candidates: list[PreparedCandidate]) -> PreparationRun:
+    def __init__(self, message_format: str = "raw", dedupe_key: str = "normalized"):
+        self.message_format = normalize_choice(
+            "message_format",
+            message_format,
+            {"raw", "cleaned", "normalized"},
+        )
+        self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
+
+    def __call__(self, states: list[SubmissionState]) -> list[PreparedSubmission]:
         records: list[PreparedSubmission] = []
-        for candidate in candidates:
-            if not isinstance(candidate, PreparedCandidate):
-                raise TypeError(f"CollectPreparedRecords expected PreparedCandidate, got {type(candidate)!r}")
-            records.append(candidate.record)
-        return PreparationRun(records=records)
+        for state in states:
+            if not isinstance(state, SubmissionState):
+                raise TypeError(f"BuildPreparedRecords expected SubmissionState, got {type(state)!r}")
+            raw_message = get_submission_message(state.submission)
+            if state.label is None or raw_message is None:
+                raise ValueError("BuildPreparedRecords requires label and message first.")
+            if state.cleaned_message is None or state.normalized_message is None:
+                raise ValueError("BuildPreparedRecords requires cleaned and normalized messages first.")
+            dedupe_text = choose_dedupe_text(
+                cleaned_message=state.cleaned_message,
+                normalized_message=state.normalized_message,
+                dedupe_key=self.dedupe_key,
+            )
+            output_message = choose_output_message(
+                raw_message=raw_message,
+                cleaned_message=state.cleaned_message,
+                normalized_message=state.normalized_message,
+                message_format=self.message_format,
+            )
+            records.append(
+                PreparedSubmission(
+                    label=state.label,
+                    sort_key=f"{state.label}\t{dedupe_text}",
+                    output_submission=build_output_submission(state.submission, output_message),
+                )
+            )
+        return records
 
 
 class FinalizeOrdering:
@@ -1063,18 +1014,17 @@ class FinalizeOrdering:
         if self.sort_labels and not self.shuffle.enabled:
             raise ValueError("sort_labels requires shuffle to be enabled.")
 
-    def __call__(self, run: PreparationRun) -> PreparationRun:
-        if not self.shuffle.enabled or not run.records:
-            return run
+    def __call__(self, records: list[PreparedSubmission]) -> list[PreparedSubmission]:
+        if not self.shuffle.enabled or not records:
+            return records
 
         if self.sort_labels:
-            run.records = apply_sorted_label_shuffle(run.records, seed=self.shuffle.seed or 0)
-        else:
-            records = list(run.records)
-            rng = random.Random(self.shuffle.seed)
-            rng.shuffle(records)
-            run.records = records
-        return run
+            return apply_sorted_label_shuffle(records, seed=self.shuffle.seed or 0)
+
+        shuffled = list(records)
+        rng = random.Random(self.shuffle.seed)
+        rng.shuffle(shuffled)
+        return shuffled
 
 
 class WritePreparedDataset(SideEffectOp):
@@ -1084,10 +1034,10 @@ class WritePreparedDataset(SideEffectOp):
         self.output_path = resolve_output_path(output_path)
         self.overwrite = parse_bool(overwrite)
 
-    def effect(self, run: PreparationRun) -> None:
-        payload = {"submissions": [record.output_submission for record in run.records]}
+    def effect(self, records: list[PreparedSubmission]) -> None:
+        payload = {"submissions": [record.output_submission for record in records]}
         write_json(payload, self.output_path, self.overwrite)
-        print(f"Final summary: kept={len(run.records):,}", flush=True)
+        print(f"Final summary: kept={len(records):,}", flush=True)
         print(f"Output written to: {self.output_path}", flush=True)
 
 @data_factory
@@ -1125,13 +1075,12 @@ def _build_prepare_dataset_processing_pipeline(
             RequireMinimumMessageLength(min_length=min_length),
             NormalizeTrainingText(is_jp=is_jp),
             SelectDedupeKey(dedupe_key=dedupe_key),
-            RequireMinimumDedupeLength(min_length=min_length),
-            BuildPreparedCandidate(message_format=message_format),
+            RequireMinimumDedupeLength(min_length=min_length, dedupe_key=dedupe_key),
             EndForEachSubmission(),
-            CompactDroppedCandidates(),
-            DeduplicateSubmissions(),
+            CompactDroppedSubmissions(),
+            DeduplicateSubmissions(dedupe_key=dedupe_key),
             ApplyLabelLimits(label_limits=label_limits),
-            CollectPreparedRecords(),
+            BuildPreparedRecords(message_format=message_format, dedupe_key=dedupe_key),
             FinalizeOrdering(shuffle=shuffle, sort_labels=sort_labels),
             WritePreparedDataset(output_path=output_path, overwrite=overwrite),
         ]
