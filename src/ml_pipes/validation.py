@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable, Mapping, MutableMapping, MutableSequence, MutableSet, Sequence, Set as AbstractSet
 import inspect
 from dataclasses import dataclass
 from types import UnionType
@@ -9,6 +10,9 @@ from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
 
 _UNBOUND = object()
+_COVARIANT = "covariant"
+_INVARIANT = "invariant"
+_CONTRAVARIANT = "contravariant"
 
 
 class PipelineValidationError(ValueError):
@@ -470,12 +474,16 @@ def merge_annotations(left: Any, right: Any) -> Any:
 
     left_args = get_args(left)
     right_args = get_args(right)
-    if len(left_args) != len(right_args):
+    arg_pairs = _generic_argument_pairs(left_origin, left_args, left_origin, right_args)
+    if arg_pairs is None:
         return _UNBOUND
 
     merged_args = []
-    for left_arg, right_arg in zip(left_args, right_args, strict=True):
-        merged_arg = merge_annotations(left_arg, right_arg)
+    for left_arg, right_arg, variance in arg_pairs:
+        if variance == _INVARIANT:
+            merged_arg = _merge_invariant_annotations(left_arg, right_arg)
+        else:
+            merged_arg = merge_annotations(left_arg, right_arg)
         if merged_arg is _UNBOUND:
             return _UNBOUND
         merged_args.append(merged_arg)
@@ -508,12 +516,18 @@ def can_refine_annotation(current: Any, candidate: Any) -> bool:
         return False
     candidate_args = get_args(candidate)
     current_args = get_args(current)
+    arg_pairs = _generic_argument_pairs(candidate_origin, candidate_args, current_origin, current_args)
     # Example: current=`tuple[int, Any]`, candidate=`tuple[int, str, float]` -> different arity cannot refine.
-    if len(candidate_args) != len(current_args):
+    if arg_pairs is None:
         return False
 
     changed = False
-    for cand_arg, curr_arg in zip(candidate_args, current_args, strict=True):
+    for cand_arg, curr_arg, variance in arg_pairs:
+        if variance == _INVARIANT:
+            if _can_invariant_annotation_refine(curr_arg, cand_arg):
+                changed = changed or cand_arg != curr_arg
+                continue
+            return False
         if curr_arg is Any:
             if cand_arg is Any:
                 continue
@@ -630,16 +644,124 @@ def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
         return False
     if expected_origin is None:
         return is_concrete_assignable(produced_origin, expected)
-    if produced_origin != expected_origin:
+    if not _generic_origins_compatible(produced_origin, expected_origin):
         return False
     produced_args = get_args(produced)
     expected_args = get_args(expected)
-    if len(produced_args) != len(expected_args):
+    arg_pairs = _generic_argument_pairs(produced_origin, produced_args, expected_origin, expected_args)
+    if arg_pairs is None:
         return False
     return all(
-        is_single_annotation_compatible(produced_arg, expected_arg)
-        for produced_arg, expected_arg in zip(produced_args, expected_args, strict=True)
+        _is_compatible_under_variance(produced_arg, expected_arg, variance)
+        for produced_arg, expected_arg, variance in arg_pairs
     )
+
+
+def _combine_annotations(*annotations: Any) -> Any:
+    if not annotations:
+        return Any
+    combined = annotations[0]
+    for annotation in annotations[1:]:
+        combined = combined | annotation
+    return combined
+
+
+def _generic_origins_compatible(produced_origin: Any, expected_origin: Any) -> bool:
+    if produced_origin == expected_origin:
+        return True
+    return is_concrete_assignable(produced_origin, expected_origin)
+
+
+def _generic_argument_pairs(
+    produced_origin: Any,
+    produced_args: tuple[Any, ...],
+    expected_origin: Any,
+    expected_args: tuple[Any, ...],
+) -> tuple[tuple[Any, Any, str], ...] | None:
+    adapted_produced_args = _adapt_generic_args_for_expected_origin(
+        produced_origin,
+        produced_args,
+        expected_origin,
+    )
+    if expected_origin is tuple and len(expected_args) == 2 and expected_args[1] is Ellipsis:
+        expected_item = expected_args[0]
+        if len(adapted_produced_args) == 2 and adapted_produced_args[1] is Ellipsis:
+            return ((adapted_produced_args[0], expected_item, _COVARIANT),)
+        if adapted_produced_args and adapted_produced_args[-1] is Ellipsis:
+            return None
+        return tuple(
+            (produced_arg, expected_item, _COVARIANT)
+            for produced_arg in adapted_produced_args
+        )
+
+    if len(adapted_produced_args) != len(expected_args):
+        return None
+
+    variances = _generic_variances(expected_origin, expected_args)
+    return tuple(
+        (produced_arg, expected_arg, variance)
+        for produced_arg, expected_arg, variance in zip(
+            adapted_produced_args,
+            expected_args,
+            variances,
+            strict=True,
+        )
+    )
+
+
+def _adapt_generic_args_for_expected_origin(
+    produced_origin: Any,
+    produced_args: tuple[Any, ...],
+    expected_origin: Any,
+) -> tuple[Any, ...]:
+    if produced_origin is tuple and expected_origin in {Collection, Iterable, Sequence}:
+        if not produced_args:
+            return (Any,)
+        if len(produced_args) == 2 and produced_args[1] is Ellipsis:
+            return (produced_args[0],)
+        return (_combine_annotations(*produced_args),)
+    return produced_args
+
+
+def _generic_variances(origin: Any, args: tuple[Any, ...]) -> tuple[str, ...]:
+    if origin in {AbstractSet, Collection, Iterable, Sequence, frozenset, tuple, type}:
+        return (_COVARIANT,) * len(args)
+    if origin is Mapping and len(args) == 2:
+        return (_INVARIANT, _COVARIANT)
+    return (_INVARIANT,) * len(args)
+
+
+def _is_compatible_under_variance(produced: Any, expected: Any, variance: str) -> bool:
+    if variance == _INVARIANT:
+        return (
+            is_single_annotation_compatible(produced, expected)
+            and is_single_annotation_compatible(expected, produced)
+        )
+    if variance == _CONTRAVARIANT:
+        return is_single_annotation_compatible(expected, produced)
+    return is_single_annotation_compatible(produced, expected)
+
+
+def _merge_invariant_annotations(left: Any, right: Any) -> Any:
+    if left is None or left is Any:
+        return right
+    if right is None or right is Any:
+        return left
+    if left is object:
+        return right
+    if right is object:
+        return left
+    if left == right:
+        return left
+    return _UNBOUND
+
+
+def _can_invariant_annotation_refine(current: Any, candidate: Any) -> bool:
+    if candidate is Any or candidate is None:
+        return False
+    if current is Any or current is None or current is object:
+        return True
+    return candidate == current
 
 
 def _rebuild_annotation(origin: Any, args: tuple[Any, ...]) -> Any:
@@ -672,6 +794,8 @@ def _bind_typevars_from_inputs(
 
     bindings: dict[TypeVar, Any] = {}
     for template_input, actual_input in zip(input_types, actual_input_types, strict=True):
+        if not is_single_annotation_compatible(actual_input, template_input):
+            return None
         if not _bind_typevars(template_input, actual_input, bindings):
             return None
     return bindings
@@ -686,15 +810,16 @@ def _bind_typevars(template: Any, value: Any, bindings: dict[TypeVar, Any]) -> b
         return True
 
     value_origin = get_origin(value)
-    if value_origin is None or value_origin != template_origin:
+    if value_origin is None or not _generic_origins_compatible(value_origin, template_origin):
         return True
 
     template_args = get_args(template)
     value_args = get_args(value)
-    if len(template_args) != len(value_args):
+    arg_pairs = _generic_argument_pairs(value_origin, value_args, template_origin, template_args)
+    if arg_pairs is None:
         return True
 
-    for template_arg, value_arg in zip(template_args, value_args, strict=True):
+    for value_arg, template_arg, _ in arg_pairs:
         if not _bind_typevars(template_arg, value_arg, bindings):
             return False
     return True
