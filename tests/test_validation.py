@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import pytest
 from typing import Any, TypeVar
 
@@ -434,6 +436,18 @@ def test_unbound_typevar_in_produced_accepts_anything():
     assert is_single_annotation_compatible(_U, _Base)
 
 
+def test_generic_subtyping_accepts_list_as_iterable():
+    assert is_single_annotation_compatible(list[int], Iterable[int])
+
+
+def test_generic_covariance_accepts_child_list_as_base_iterable():
+    assert is_single_annotation_compatible(list[_Child], Iterable[_Base])
+
+
+def test_generic_invariance_rejects_child_list_as_base_list():
+    assert not is_single_annotation_compatible(list[_Child], list[_Base])
+
+
 def test_typevar_output_resolved_when_same_typevar_flows_through_input():
     # ~_T in both input and output preserves the concrete subtype.
     class IdentityTypeVar:
@@ -499,6 +513,14 @@ def test_unbound_identity_typevar_preserves_declared_input_type():
 
 def test_resolve_typevar_output_recursively_specializes_nested_output():
     assert _resolve_typevar_output(list[_T], _Child, (_T,)) == list[_Child]
+
+
+def test_resolve_typevar_output_through_generic_subtyping():
+    assert _resolve_typevar_output(
+        list[_U],
+        list[int | None],
+        (Iterable[_U | None],),
+    ) == list[int]
 
 
 def test_typevar_output_resolved_from_multi_parameter_signature():
