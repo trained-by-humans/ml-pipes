@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 import sys
 
@@ -56,33 +58,63 @@ def _prepare_run(
     min_length: int | str = 2,
     is_jp: bool | str = True,
 ) -> list[prepare_dataset.PreparedSubmission]:
+    dedupe_selector = "cleaned_text" if dedupe_key == "cleaned" else "normalized_text"
+    output_message_selector = {
+        "raw": "submission.content.msg",
+        "cleaned": "cleaned_text",
+        "normalized": "normalized_text",
+    }[message_format]
+    normalize_training_text = partial(
+        prepare_dataset.normalize_text_for_training,
+        is_jp=prepare_dataset.parse_bool(is_jp),
+        already_prepared=True,
+    )
     pipeline = Pipeline(
         [
-            prepare_dataset.ForEachSubmission(),
-            prepare_dataset.RequireSubmissionMappings(),
-            prepare_dataset.ApplySubmissionFilter(where=where),
-            prepare_dataset.ExtractSubmissionLabel(),
-            prepare_dataset.FilterConfiguredLabels(label_limits=label_limits),
-            prepare_dataset.ExtractSubmissionMessage(),
-            prepare_dataset.PrepareGroupingText(),
-            prepare_dataset.RequireMinimumMessageLength(min_length=min_length),
-            prepare_dataset.NormalizeTrainingText(is_jp=is_jp),
-            prepare_dataset.SelectDedupeKey(dedupe_key=dedupe_key),
-            prepare_dataset.RequireMinimumDedupeLength(
-                min_length=min_length,
-                dedupe_key=dedupe_key,
+            prepare_dataset.ForEachItem(),
+            prepare_dataset.RequireMappingValue(
+                as_="submission",
+                state_factory=prepare_dataset.MessageState,
             ),
-            prepare_dataset.EndForEachSubmission(),
-            prepare_dataset.CompactDroppedSubmissions(),
-            prepare_dataset.DeduplicateSubmissions(dedupe_key=dedupe_key),
-            prepare_dataset.ApplyLabelLimits(label_limits=label_limits),
+            prepare_dataset.FilterByExpression(src="submission", expression=where),
+            prepare_dataset.RequireTextValue(src="submission.label", strip=True, allow_blank=False),
+            prepare_dataset.FilterByAllowedValues(
+                src="submission.label",
+                allowed_values=prepare_dataset.parse_label_limits(label_limits),
+            ),
+            prepare_dataset.RequireTextValue(src="submission.content.msg"),
+            prepare_dataset.MapValue(
+                src="submission.content.msg",
+                fn=prepare_dataset.prepare_text_content,
+                as_="cleaned_text",
+            ),
+            prepare_dataset.RequireMinimumLength(src="cleaned_text", min_length=min_length),
+            prepare_dataset.MapValue(
+                src="cleaned_text",
+                fn=normalize_training_text,
+                as_="normalized_text",
+            ),
+            prepare_dataset.RequireMinimumLength(src=dedupe_selector, min_length=min_length),
+            prepare_dataset.EndForEachItem(),
+            prepare_dataset.CompactDroppedItems(),
+            prepare_dataset.DeduplicateBy(src=dedupe_selector),
+            prepare_dataset.LimitByValue(src="submission.label", limits=label_limits),
             prepare_dataset.BuildPreparedRecords(
-                message_format=message_format,
-                dedupe_key=dedupe_key,
+                submission="submission",
+                label="submission.label",
+                text=output_message_selector,
+                sort_text=dedupe_selector,
             ),
         ]
     )
     return pipeline(submissions)
+
+
+@dataclass
+class CustomSubmissionCarrier:
+    payload: dict[str, object] | None = None
+    grouped_text: str | None = None
+    training_text: str | None = None
 
 
 def test_resolve_input_files_expands_directory_in_sorted_order(tmp_path: Path) -> None:
@@ -187,6 +219,62 @@ def test_prepare_submissions_raises_when_label_limits_cannot_be_satisfied() -> N
 
     with pytest.raises(ValueError, match="Missing counts"):
         _prepare_run(submissions, label_limits="ham=2")
+
+
+def test_prepare_submissions_accepts_custom_object_layout() -> None:
+    pipeline = Pipeline(
+        [
+            prepare_dataset.ForEachItem(),
+            prepare_dataset.RequireMappingValue(
+                as_="payload",
+                state_factory=CustomSubmissionCarrier,
+            ),
+            prepare_dataset.FilterByExpression(
+                src="payload",
+                expression='content.gw == "rakuten"',
+            ),
+            prepare_dataset.RequireTextValue(src="payload.label", strip=True, allow_blank=False),
+            prepare_dataset.FilterByAllowedValues(src="payload.label", allowed_values={"spam"}),
+            prepare_dataset.RequireTextValue(src="payload.content.msg"),
+            prepare_dataset.MapValue(
+                src="payload.content.msg",
+                fn=prepare_dataset.prepare_text_content,
+                as_="grouped_text",
+            ),
+            prepare_dataset.RequireMinimumLength(src="grouped_text", min_length=2),
+            prepare_dataset.MapValue(
+                src="grouped_text",
+                fn=partial(
+                    prepare_dataset.normalize_text_for_training,
+                    is_jp=True,
+                    already_prepared=True,
+                ),
+                as_="training_text",
+            ),
+            prepare_dataset.RequireMinimumLength(src="training_text", min_length=2),
+            prepare_dataset.EndForEachItem(),
+            prepare_dataset.CompactDroppedItems(),
+            prepare_dataset.DeduplicateBy(src="training_text"),
+            prepare_dataset.LimitByValue(src="payload.label", limits="spam=1"),
+            prepare_dataset.BuildPreparedRecords(
+                submission="payload",
+                label="payload.label",
+                text="training_text",
+                sort_text="training_text",
+            ),
+        ]
+    )
+
+    result = pipeline(
+        [
+            _submission("spam", " Visit https://one.example ", gw="rakuten"),
+            _submission("spam", "ignored", gw="other"),
+        ]
+    )
+
+    assert len(result) == 1
+    assert result[0].label == "spam"
+    assert result[0].output_submission["content"]["msg"] == "visit <URL>"
 
 
 def test_finalize_ordering_rejects_sort_labels_without_shuffle(tmp_path: Path) -> None:
@@ -333,29 +421,28 @@ def test_prepare_dataset_pipeline_inspect_captures_streaming_steps(tmp_path: Pat
     assert [span.label for span in result.spans] == [
         "0:ResolveInputFiles",
         "1:StreamSubmissions",
-        "2:ForEachSubmission",
-        "14:CompactDroppedSubmissions",
-        "15:DeduplicateSubmissions",
-        "16:ApplyLabelLimits",
-        "17:BuildPreparedRecords",
-        "18:FinalizeOrdering",
-        "19:WritePreparedDataset",
+        "2:ForEachItem",
+        "13:CompactDroppedItems",
+        "14:DeduplicateBy",
+        "15:LimitByValue",
+        "16:BuildPreparedRecords",
+        "17:FinalizeOrdering",
+        "18:WritePreparedDataset",
     ]
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, str)
     assert "generator object" in result.spans[1].output_value
     assert result.spans[2].child_trace is not None
     assert [span.label for span in result.spans[2].child_trace.spans] == [
-        "3:RequireSubmissionMappings",
-        "4:ApplySubmissionFilter",
-        "5:ExtractSubmissionLabel",
-        "6:FilterConfiguredLabels",
-        "7:ExtractSubmissionMessage",
-        "8:PrepareGroupingText",
-        "9:RequireMinimumMessageLength",
-        "10:NormalizeTrainingText",
-        "11:SelectDedupeKey",
-        "12:RequireMinimumDedupeLength",
+        "3:RequireMappingValue",
+        "4:FilterByExpression",
+        "5:RequireTextValue",
+        "6:FilterByAllowedValues",
+        "7:RequireTextValue",
+        "8:MapValue",
+        "9:RequireMinimumLength",
+        "10:MapValue",
+        "11:RequireMinimumLength",
     ]
     assert isinstance(result.spans[3].output_value, list)
     assert len(result.spans[3].output_value) == 2
@@ -385,29 +472,28 @@ def test_prepare_dataset_collection_pipeline_inspect_captures_collection_steps(t
     assert [span.label for span in result.spans] == [
         "0:ResolveInputFiles",
         "1:LoadSubmissionCollection",
-        "2:ForEachSubmission",
-        "14:CompactDroppedSubmissions",
-        "15:DeduplicateSubmissions",
-        "16:ApplyLabelLimits",
-        "17:BuildPreparedRecords",
-        "18:FinalizeOrdering",
-        "19:WritePreparedDataset",
+        "2:ForEachItem",
+        "13:CompactDroppedItems",
+        "14:DeduplicateBy",
+        "15:LimitByValue",
+        "16:BuildPreparedRecords",
+        "17:FinalizeOrdering",
+        "18:WritePreparedDataset",
     ]
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, list)
     assert len(result.spans[1].output_value) == 2
     assert result.spans[2].child_trace is not None
     assert [span.label for span in result.spans[2].child_trace.spans] == [
-        "3:RequireSubmissionMappings",
-        "4:ApplySubmissionFilter",
-        "5:ExtractSubmissionLabel",
-        "6:FilterConfiguredLabels",
-        "7:ExtractSubmissionMessage",
-        "8:PrepareGroupingText",
-        "9:RequireMinimumMessageLength",
-        "10:NormalizeTrainingText",
-        "11:SelectDedupeKey",
-        "12:RequireMinimumDedupeLength",
+        "3:RequireMappingValue",
+        "4:FilterByExpression",
+        "5:RequireTextValue",
+        "6:FilterByAllowedValues",
+        "7:RequireTextValue",
+        "8:MapValue",
+        "9:RequireMinimumLength",
+        "10:MapValue",
+        "11:RequireMinimumLength",
     ]
     assert isinstance(result.spans[3].output_value, list)
     assert len(result.spans[3].output_value) == 2

@@ -27,11 +27,12 @@ import random
 import re
 import time
 import unicodedata
+from collections.abc import Mapping, MutableMapping, Sequence
 from collections import Counter
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any, Callable, Iterable, Iterator
 
 from ml_pipes import (
     InputFn,
@@ -86,6 +87,8 @@ class FilterSyntaxError(ValueError):
 
 
 Submission = dict[str, object]
+SelectorPart = str | int
+Selector = SelectorPart | tuple[SelectorPart, ...]
 
 
 @dataclass(frozen=True)
@@ -103,11 +106,10 @@ class ShuffleConfig:
 
 
 @dataclass
-class SubmissionState:
-    submission: Submission
-    label: str | None = None
-    cleaned_message: str | None = None
-    normalized_message: str | None = None
+class MessageState:
+    submission: Submission | None = None
+    cleaned_text: str | None = None
+    normalized_text: str | None = None
 
 
 def _replace_pin(match: re.Match[str]) -> str:
@@ -118,7 +120,7 @@ def _replace_booking_code(match: re.Match[str]) -> str:
     return f"{match.group('prefix')}<CODE>"
 
 
-def normalize_text(text: str, *, to_lower: bool = True, is_jp: bool = True) -> str:
+def normalize_text_content(text: str, *, to_lower: bool = True, is_jp: bool = True) -> str:
     if text is None:
         return ""
 
@@ -175,7 +177,7 @@ def clean_escape_sequences(text: str) -> str:
     return text
 
 
-def prepare_message_for_grouping(msg: str | None) -> str:
+def prepare_text_content(msg: str | None) -> str:
     if msg is None:
         return ""
 
@@ -185,14 +187,14 @@ def prepare_message_for_grouping(msg: str | None) -> str:
     return cleaned
 
 
-def normalize_message_for_training(
+def normalize_text_for_training(
     msg: str | None,
     *,
     is_jp: bool = False,
     already_prepared: bool = False,
 ) -> str:
-    prepared = msg if already_prepared else prepare_message_for_grouping(msg)
-    return normalize_text(prepared, is_jp=is_jp)
+    prepared = msg if already_prepared else prepare_text_content(msg)
+    return normalize_text_content(prepared, is_jp=is_jp)
 
 
 def _coerce_path_string(path_str: str | Path) -> tuple[str, Path]:
@@ -494,35 +496,135 @@ def matches_filter(expression: str | None, submission: Mapping[str, object]) -> 
     return bool(evaluate_filter_node(tree, submission))
 
 
-def label_targets_met(label_limits: dict[str, int], kept_by_label: Counter[str]) -> bool:
-    if not label_limits:
+def limits_satisfied(limits: Mapping[str, int], kept_by_value: Counter[str]) -> bool:
+    if not limits:
         return False
-    return all(kept_by_label.get(label, 0) >= limit for label, limit in label_limits.items())
+    return all(kept_by_value.get(value, 0) >= limit for value, limit in limits.items())
 
 
-def choose_output_message(
+_MISSING = object()
+
+
+def _normalize_selector(selector: Selector) -> tuple[SelectorPart, ...]:
+    if isinstance(selector, tuple):
+        parts = selector
+    elif isinstance(selector, int):
+        parts = (selector,)
+    else:
+        raw_parts = selector.split(".")
+        if any(part == "" for part in raw_parts):
+            raise ValueError(f"Selector cannot contain empty path segments: {selector!r}")
+        parts = tuple(int(part) if part.isdigit() else part for part in raw_parts)
+    if not parts:
+        raise ValueError("Selector cannot be empty.")
+    return parts
+
+
+def _select_part(current: object, part: SelectorPart) -> object:
+    if isinstance(part, int):
+        if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+            try:
+                return current[part]
+            except IndexError:
+                return _MISSING
+        return _MISSING
+    if isinstance(current, Mapping):
+        return current.get(part, _MISSING)
+    return getattr(current, part, _MISSING)
+
+
+def _read_selector_or_missing(value: object, selector: Selector) -> object:
+    current = value
+    for part in _normalize_selector(selector):
+        current = _select_part(current, part)
+        if current is _MISSING:
+            return _MISSING
+    return current
+
+
+def _read_selector(value: object, selector: Selector, operator_name: str) -> object:
+    selected = _read_selector_or_missing(value, selector)
+    if selected is _MISSING:
+        raise TypeError(
+            f"{operator_name} requires selector {_normalize_selector(selector)!r} on {type(value)!r}."
+        )
+    return selected
+
+
+def _require_mapping_selector(value: object, selector: Selector, operator_name: str) -> Mapping[str, object]:
+    selected = _read_selector(value, selector, operator_name)
+    if not isinstance(selected, Mapping):
+        raise TypeError(
+            f"{operator_name} requires mapping at selector {_normalize_selector(selector)!r}, "
+            f"got {type(selected)!r}."
+        )
+    return selected
+
+
+def _read_optional_text(value: object, selector: Selector, *, strip: bool = False) -> str | None:
+    selected = _read_selector_or_missing(value, selector)
+    if selected is _MISSING or selected is None or not isinstance(selected, str):
+        return None
+    return selected.strip() if strip else selected
+
+
+def _require_text_selector(
+    value: object,
+    selector: Selector,
+    operator_name: str,
+    semantic_name: str,
     *,
-    raw_message: str,
-    cleaned_message: str,
-    normalized_message: str,
-    message_format: str,
+    strip: bool = False,
 ) -> str:
-    if message_format == "cleaned":
-        return cleaned_message
-    if message_format == "normalized":
-        return normalized_message
-    return raw_message
+    selected = _read_selector(value, selector, operator_name)
+    if selected is None:
+        raise ValueError(f"{operator_name} requires {semantic_name} first.")
+    if not isinstance(selected, str):
+        raise TypeError(
+            f"{operator_name} requires {semantic_name} to be str, got {type(selected)!r}."
+        )
+    return selected.strip() if strip else selected
 
 
-def choose_dedupe_text(
-    *,
-    cleaned_message: str,
-    normalized_message: str,
-    dedupe_key: str,
-) -> str:
-    if dedupe_key == "cleaned":
-        return cleaned_message
-    return normalized_message
+def _write_selector(value: object, selector: Selector, item: Any, operator_name: str) -> None:
+    parts = _normalize_selector(selector)
+    current = value
+    for part in parts[:-1]:
+        next_value = _select_part(current, part)
+        if next_value is _MISSING:
+            if isinstance(part, str) and isinstance(current, MutableMapping):
+                current[part] = {}
+                next_value = current[part]
+            else:
+                raise TypeError(
+                    f"{operator_name} cannot resolve parent selector {parts!r} on {type(value)!r}."
+                )
+        current = next_value
+
+    last = parts[-1]
+    if isinstance(last, int):
+        if not isinstance(current, list):
+            raise TypeError(
+                f"{operator_name} can only assign index selectors into list parents, got {type(current)!r}."
+            )
+        try:
+            current[last] = item
+        except IndexError as exc:
+            raise IndexError(
+                f"{operator_name} index selector {last} is out of range for parent list."
+            ) from exc
+        return
+
+    if isinstance(current, MutableMapping):
+        current[last] = item
+        return
+
+    try:
+        setattr(current, last, item)
+    except AttributeError as exc:
+        raise TypeError(
+            f"{operator_name} requires writable selector {parts!r} on {type(value)!r}."
+        ) from exc
 
 
 def build_output_submission(submission: Mapping[str, object], output_message: str) -> Submission:
@@ -541,12 +643,6 @@ def apply_sorted_label_shuffle(records: list[PreparedSubmission], *, seed: int) 
     rng = random.Random(seed)
     rng.shuffle(sorted_records)
     return sorted_records
-
-
-def get_submission_message(submission: Mapping[str, object]) -> str | None:
-    content = submission.get("content")
-    raw_message = content.get("msg") if isinstance(content, dict) else None
-    return raw_message if isinstance(raw_message, str) else None
 
 
 def write_json(payload: dict[str, Any], output_path: Path, overwrite: bool) -> None:
@@ -622,8 +718,8 @@ class LoadSubmissionCollection:
         return submissions
 
 
-class EndForEachSubmission(RegionCloser):
-    """Region boundary for the end of per-submission processing."""
+class EndForEachItem(RegionCloser):
+    """Region boundary for the end of per-item processing."""
 
     def resolve_contract(
         self,
@@ -636,10 +732,10 @@ class EndForEachSubmission(RegionCloser):
         return (Any,), output_type
 
 
-class ForEachSubmission(RegionOpener):
-    """Run the enclosed operators once per source submission."""
+class ForEachItem(RegionOpener):
+    """Run the enclosed operators once per source item."""
 
-    closing_type = EndForEachSubmission
+    closing_type = EndForEachItem
 
     def run_region(
         self,
@@ -700,301 +796,254 @@ class ForEachSubmission(RegionOpener):
         return (Any,), Any
 
 
-class RequireSubmissionMappings:
-    """Drop non-mapping values and retain submission dictionaries only."""
+class RequireMappingValue:
+    """Drop non-mapping values and store the mapping at the target selector."""
 
-    def __call__(self, value: object | None) -> SubmissionState | None:
+    def __init__(
+        self,
+        as_: Selector,
+        state_factory: Callable[[], object],
+    ):
+        self.as_ = as_
+        self.state_factory = state_factory
+
+    def __call__(self, value: object | None) -> object | None:
         if value is None:
             return None
-        if not isinstance(value, dict):
+        if not isinstance(value, Mapping):
             return None
-        return SubmissionState(submission=value)
+        state = self.state_factory()
+        _write_selector(state, self.as_, value, type(self).__name__)
+        return state
 
 
-class ApplySubmissionFilter:
-    """Apply the configured filter expression to each submission."""
+class FilterByExpression:
+    """Apply the configured filter expression to the selected mapping."""
 
-    def __init__(self, where: str = ""):
-        self.where = where.strip() or None
+    def __init__(self, src: Selector, expression: str = ""):
+        self.expression = expression.strip() or None
+        self.src = src
 
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+    def __call__(self, state: object | None) -> object | None:
         if state is None:
             return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"ApplySubmissionFilter expected SubmissionState, got {type(state)!r}")
-        if not matches_filter(self.where, state.submission):
+        mapping = _require_mapping_selector(state, self.src, type(self).__name__)
+        if not matches_filter(self.expression, mapping):
             return None
         return state
 
 
-class ExtractSubmissionLabel:
-    """Extract and validate labels from matched submissions."""
+class RequireTextValue:
+    """Drop values whose selected text is missing, non-string, or blank when configured."""
 
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+    def __init__(
+        self,
+        src: Selector,
+        *,
+        strip: bool = False,
+        allow_blank: bool = True,
+    ):
+        self.src = src
+        self.strip = strip
+        self.allow_blank = allow_blank
+
+    def __call__(self, state: object | None) -> object | None:
         if state is None:
             return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"ExtractSubmissionLabel expected SubmissionState, got {type(state)!r}")
-        label_raw = state.submission.get("label")
-        if label_raw is None:
+        text = _read_optional_text(state, self.src, strip=self.strip)
+        if text is None:
             return None
-        label = str(label_raw).strip()
-        if not label:
+        if not self.allow_blank and text == "":
             return None
-        state.label = label
         return state
 
 
-class FilterConfiguredLabels:
-    """Restrict the stream to configured labels when label limits are provided."""
+class FilterByAllowedValues:
+    """Drop records whose selected value is not present in the allowed set."""
 
-    def __init__(self, label_limits: str | Mapping[str, int] | None = ""):
-        self.label_limits = parse_label_limits(label_limits)
+    def __init__(
+        self,
+        src: Selector,
+        allowed_values: Mapping[object, Any] | set[object] | list[object] | tuple[object, ...] = (),
+    ):
+        self.src = src
+        if isinstance(allowed_values, Mapping):
+            self.allowed_values = set(allowed_values.keys())
+        else:
+            self.allowed_values = set(allowed_values)
 
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
-        if state is None or not self.label_limits:
+    def __call__(self, state: object | None) -> object | None:
+        if state is None or not self.allowed_values:
             return state
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"FilterConfiguredLabels expected SubmissionState, got {type(state)!r}")
-        if state.label is None:
-            raise ValueError("FilterConfiguredLabels requires label to be extracted first.")
-        if state.label not in self.label_limits:
+        value = _read_selector_or_missing(state, self.src)
+        if value is _MISSING:
+            return None
+        if value not in self.allowed_values:
             return None
         return state
 
 
-class ExtractSubmissionMessage:
-    """Extract and validate the source message payload for each labeled submission."""
+class MapValue:
+    """Apply a transformation function to a selected value and store the result at as_."""
 
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+    def __init__(self, src: Selector, fn: Callable[[Any], Any], as_: Selector):
+        self.src = src
+        self.fn = fn
+        self.as_ = as_
+
+    def __call__(self, state: object | None) -> object | None:
         if state is None:
             return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"ExtractSubmissionMessage expected SubmissionState, got {type(state)!r}")
-        if get_submission_message(state.submission) is None:
-            return None
+        value = _read_selector(state, self.src, type(self).__name__)
+        _write_selector(state, self.as_, self.fn(value), type(self).__name__)
         return state
 
 
-class PrepareGroupingText:
-    """Apply lightweight cleanup to the raw message."""
+class RequireMinimumLength:
+    """Drop values whose selected text is shorter than the configured threshold."""
 
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
-        if state is None:
-            return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"PrepareGroupingText expected SubmissionState, got {type(state)!r}")
-        raw_message = get_submission_message(state.submission)
-        if raw_message is None:
-            raise ValueError("PrepareGroupingText requires message extraction first.")
-        state.cleaned_message = prepare_message_for_grouping(raw_message)
-        return state
-
-
-class RequireMinimumMessageLength:
-    """Drop messages whose cleaned form is shorter than the configured threshold."""
-
-    def __init__(self, min_length: int | str = 2):
+    def __init__(self, src: Selector, min_length: int | str = 2, *, strip: bool = True):
+        self.src = src
         self.min_length = int(min_length)
+        self.strip = strip
         if self.min_length < 0:
             raise ValueError("min_length must be >= 0.")
 
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
+    def __call__(self, state: object | None) -> object | None:
         if state is None:
             return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"RequireMinimumMessageLength expected SubmissionState, got {type(state)!r}")
-        if state.cleaned_message is None:
-            raise ValueError("RequireMinimumMessageLength requires cleaned_message first.")
-        if len(state.cleaned_message.strip()) < self.min_length:
-            return None
-        return state
-
-
-class NormalizeTrainingText:
-    """Normalize cleaned messages into the training-time representation."""
-
-    def __init__(self, is_jp: bool | str = True):
-        self.is_jp = parse_bool(is_jp)
-
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
-        if state is None:
-            return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"NormalizeTrainingText expected SubmissionState, got {type(state)!r}")
-        if state.cleaned_message is None:
-            raise ValueError("NormalizeTrainingText requires cleaned_message first.")
-        state.normalized_message = normalize_message_for_training(
-            state.cleaned_message,
-            is_jp=self.is_jp,
-            already_prepared=True,
+        text = _require_text_selector(
+            state,
+            self.src,
+            type(self).__name__,
+            f"selector {_normalize_selector(self.src)!r}",
+            strip=self.strip,
         )
-        return state
-
-
-class SelectDedupeKey:
-    """Choose the text representation used for deduplication."""
-
-    def __init__(self, dedupe_key: str = "normalized"):
-        self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
-
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
-        if state is None:
-            return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"SelectDedupeKey expected SubmissionState, got {type(state)!r}")
-        if state.cleaned_message is None or state.normalized_message is None:
-            raise ValueError("SelectDedupeKey requires cleaned and normalized messages first.")
-        choose_dedupe_text(
-            cleaned_message=state.cleaned_message,
-            normalized_message=state.normalized_message,
-            dedupe_key=self.dedupe_key,
-        )
-        return state
-
-
-class RequireMinimumDedupeLength:
-    """Drop submissions whose dedupe key is shorter than the configured threshold."""
-
-    def __init__(self, min_length: int | str = 2, dedupe_key: str = "normalized"):
-        self.min_length = int(min_length)
-        self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
-        if self.min_length < 0:
-            raise ValueError("min_length must be >= 0.")
-
-    def __call__(self, state: SubmissionState | None) -> SubmissionState | None:
-        if state is None:
-            return None
-        if not isinstance(state, SubmissionState):
-            raise TypeError(f"RequireMinimumDedupeLength expected SubmissionState, got {type(state)!r}")
-        if state.cleaned_message is None or state.normalized_message is None:
-            raise ValueError("RequireMinimumDedupeLength requires cleaned and normalized messages first.")
-        dedupe_text = choose_dedupe_text(
-            cleaned_message=state.cleaned_message,
-            normalized_message=state.normalized_message,
-            dedupe_key=self.dedupe_key,
-        )
-        if len(dedupe_text.strip()) < self.min_length:
+        if len(text) < self.min_length:
             return None
         return state
 
 
-class CompactDroppedSubmissions:
+class CompactDroppedItems:
     """Remove dropped entries emitted as None by per-item operators."""
 
-    def __call__(self, states: list[SubmissionState | None]) -> list[SubmissionState]:
-        kept: list[SubmissionState] = []
-        for state in states:
-            if state is None:
-                continue
-            if not isinstance(state, SubmissionState):
-                raise TypeError(f"CompactDroppedSubmissions expected SubmissionState | None, got {type(state)!r}")
-            kept.append(state)
-        return kept
+    def __call__(self, states: list[object | None]) -> list[object]:
+        return [state for state in states if state is not None]
 
 
-class DeduplicateSubmissions:
-    """Drop repeated records using the configured dedupe key."""
+class DeduplicateBy:
+    """Drop repeated records using the selected text field."""
 
-    def __init__(self, dedupe_key: str = "normalized"):
-        self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
+    def __init__(self, src: Selector):
+        self.src = src
 
-    def __call__(self, states: list[SubmissionState]) -> list[SubmissionState]:
+    def __call__(self, states: list[object]) -> list[object]:
         seen_keys: set[str] = set()
-        deduped: list[SubmissionState] = []
+        deduped: list[object] = []
         for state in states:
-            if not isinstance(state, SubmissionState):
-                raise TypeError(f"DeduplicateSubmissions expected SubmissionState, got {type(state)!r}")
-            if state.cleaned_message is None or state.normalized_message is None:
-                raise ValueError("DeduplicateSubmissions requires cleaned and normalized messages first.")
-            dedupe_text = choose_dedupe_text(
-                cleaned_message=state.cleaned_message,
-                normalized_message=state.normalized_message,
-                dedupe_key=self.dedupe_key,
+            text = _require_text_selector(
+                state,
+                self.src,
+                type(self).__name__,
+                f"selector {_normalize_selector(self.src)!r}",
             )
-            if dedupe_text in seen_keys:
+            if text in seen_keys:
                 continue
-            seen_keys.add(dedupe_text)
+            seen_keys.add(text)
             deduped.append(state)
         return deduped
 
 
-class ApplyLabelLimits:
-    """Keep the first configured number of records per label."""
+class LimitByValue:
+    """Keep the first configured number of records per selected value."""
 
-    def __init__(self, label_limits: str | Mapping[str, int] | None = ""):
-        self.label_limits = parse_label_limits(label_limits)
+    def __init__(
+        self,
+        src: Selector,
+        limits: str | Mapping[str, int] | None = "",
+    ):
+        self.src = src
+        self.limits = parse_label_limits(limits)
 
-    def __call__(self, states: list[SubmissionState]) -> list[SubmissionState]:
-        if not self.label_limits:
+    def __call__(self, states: list[object]) -> list[object]:
+        if not self.limits:
             return states
 
-        kept_by_label: Counter[str] = Counter()
-        limited: list[SubmissionState] = []
+        kept_by_value: Counter[str] = Counter()
+        limited: list[object] = []
         for state in states:
-            if not isinstance(state, SubmissionState):
-                raise TypeError(f"ApplyLabelLimits expected SubmissionState, got {type(state)!r}")
-            if state.label is None:
-                raise ValueError("ApplyLabelLimits requires label first.")
-            if state.label not in self.label_limits:
+            value = _require_text_selector(
+                state,
+                self.src,
+                type(self).__name__,
+                "value",
+                strip=True,
+            )
+            if value not in self.limits:
                 continue
-            if kept_by_label[state.label] >= self.label_limits[state.label]:
+            if kept_by_value[value] >= self.limits[value]:
                 continue
             limited.append(state)
-            kept_by_label[state.label] += 1
-            if label_targets_met(self.label_limits, kept_by_label):
+            kept_by_value[value] += 1
+            if limits_satisfied(self.limits, kept_by_value):
                 break
 
-        if not label_targets_met(self.label_limits, kept_by_label):
+        if not limits_satisfied(self.limits, kept_by_value):
             missing = {
-                label: limit - kept_by_label.get(label, 0)
-                for label, limit in self.label_limits.items()
-                if kept_by_label.get(label, 0) < limit
+                label: limit - kept_by_value.get(label, 0)
+                for label, limit in self.limits.items()
+                if kept_by_value.get(label, 0) < limit
             }
             raise ValueError(
-                "Unable to satisfy all label limits from the provided inputs. "
+                "Unable to satisfy all configured value limits from the provided inputs. "
                 f"Missing counts: {missing}"
             )
         return limited
 
 
 class BuildPreparedRecords:
-    """Build the final output records from selected submission states."""
+    """Build the final output records from selected message state fields."""
 
-    def __init__(self, message_format: str = "raw", dedupe_key: str = "normalized"):
-        self.message_format = normalize_choice(
-            "message_format",
-            message_format,
-            {"raw", "cleaned", "normalized"},
-        )
-        self.dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
+    def __init__(
+        self,
+        submission: Selector = "submission",
+        label: Selector = "submission.label",
+        text: Selector = "submission.content.msg",
+        sort_text: Selector = "normalized_text",
+    ):
+        self.submission = submission
+        self.label = label
+        self.text = text
+        self.sort_text = sort_text
 
-    def __call__(self, states: list[SubmissionState]) -> list[PreparedSubmission]:
+    def __call__(self, states: list[object]) -> list[PreparedSubmission]:
         records: list[PreparedSubmission] = []
         for state in states:
-            if not isinstance(state, SubmissionState):
-                raise TypeError(f"BuildPreparedRecords expected SubmissionState, got {type(state)!r}")
-            raw_message = get_submission_message(state.submission)
-            if state.label is None or raw_message is None:
-                raise ValueError("BuildPreparedRecords requires label and message first.")
-            if state.cleaned_message is None or state.normalized_message is None:
-                raise ValueError("BuildPreparedRecords requires cleaned and normalized messages first.")
-            dedupe_text = choose_dedupe_text(
-                cleaned_message=state.cleaned_message,
-                normalized_message=state.normalized_message,
-                dedupe_key=self.dedupe_key,
+            submission = _require_mapping_selector(state, self.submission, type(self).__name__)
+            label = _require_text_selector(
+                state,
+                self.label,
+                type(self).__name__,
+                "label",
+                strip=True,
             )
-            output_message = choose_output_message(
-                raw_message=raw_message,
-                cleaned_message=state.cleaned_message,
-                normalized_message=state.normalized_message,
-                message_format=self.message_format,
+            output_message = _require_text_selector(
+                state,
+                self.text,
+                type(self).__name__,
+                "text",
+            )
+            sort_text = _require_text_selector(
+                state,
+                self.sort_text,
+                type(self).__name__,
+                "sort_text",
             )
             records.append(
                 PreparedSubmission(
-                    label=state.label,
-                    sort_key=f"{state.label}\t{dedupe_text}",
-                    output_submission=build_output_submission(state.submission, output_message),
+                    label=label,
+                    sort_key=f"{label}\t{sort_text}",
+                    output_submission=build_output_submission(submission, output_message),
                 )
             )
         return records
@@ -1063,24 +1112,48 @@ def _build_prepare_dataset_processing_pipeline(
     sort_labels: bool | str = False,
     overwrite: bool | str = False,
 ) -> Pipeline:
+    parsed_limits = parse_label_limits(label_limits)
+    normalized_dedupe_key = normalize_choice("dedupe_key", dedupe_key, {"cleaned", "normalized"})
+    normalized_message_format = normalize_choice(
+        "message_format",
+        message_format,
+        {"raw", "cleaned", "normalized"},
+    )
+    parsed_is_jp = parse_bool(is_jp)
+    dedupe_selector = "cleaned_text" if normalized_dedupe_key == "cleaned" else "normalized_text"
+    output_message_selector = {
+        "raw": "submission.content.msg",
+        "cleaned": "cleaned_text",
+        "normalized": "normalized_text",
+    }[normalized_message_format]
+    normalize_training_text = partial(
+        normalize_text_for_training,
+        is_jp=parsed_is_jp,
+        already_prepared=True,
+    )
+
     pipeline = Pipeline(
         [
-            ForEachSubmission(),
-            RequireSubmissionMappings(),
-            ApplySubmissionFilter(where=where),
-            ExtractSubmissionLabel(),
-            FilterConfiguredLabels(label_limits=label_limits),
-            ExtractSubmissionMessage(),
-            PrepareGroupingText(),
-            RequireMinimumMessageLength(min_length=min_length),
-            NormalizeTrainingText(is_jp=is_jp),
-            SelectDedupeKey(dedupe_key=dedupe_key),
-            RequireMinimumDedupeLength(min_length=min_length, dedupe_key=dedupe_key),
-            EndForEachSubmission(),
-            CompactDroppedSubmissions(),
-            DeduplicateSubmissions(dedupe_key=dedupe_key),
-            ApplyLabelLimits(label_limits=label_limits),
-            BuildPreparedRecords(message_format=message_format, dedupe_key=dedupe_key),
+            ForEachItem(),
+            RequireMappingValue(as_="submission", state_factory=MessageState),
+            FilterByExpression(src="submission", expression=where),
+            RequireTextValue(src="submission.label", strip=True, allow_blank=False),
+            FilterByAllowedValues(src="submission.label", allowed_values=parsed_limits),
+            RequireTextValue(src="submission.content.msg"),
+            MapValue(src="submission.content.msg", fn=prepare_text_content, as_="cleaned_text"),
+            RequireMinimumLength(src="cleaned_text", min_length=min_length),
+            MapValue(src="cleaned_text", fn=normalize_training_text, as_="normalized_text"),
+            RequireMinimumLength(src=dedupe_selector, min_length=min_length),
+            EndForEachItem(),
+            CompactDroppedItems(),
+            DeduplicateBy(src=dedupe_selector),
+            LimitByValue(src="submission.label", limits=parsed_limits),
+            BuildPreparedRecords(
+                submission="submission",
+                label="submission.label",
+                text=output_message_selector,
+                sort_text=dedupe_selector,
+            ),
             FinalizeOrdering(shuffle=shuffle, sort_labels=sort_labels),
             WritePreparedDataset(output_path=output_path, overwrite=overwrite),
         ]
