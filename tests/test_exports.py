@@ -26,8 +26,7 @@ def _public_operator_and_alias_names(module_path: Path) -> set[str]:
     return names
 
 
-def test_ml_pipes_exports_all_public_ops_and_aliases() -> None:
-    module_path = Path(__file__).resolve().parents[1] / "src" / "ml_pipes" / "ops.py"
+def _assert_module_exports(module_path: Path) -> None:
     expected = _public_operator_and_alias_names(module_path)
 
     missing_attrs = sorted(name for name in expected if not hasattr(ml_pipes, name))
@@ -37,6 +36,12 @@ def test_ml_pipes_exports_all_public_ops_and_aliases() -> None:
     assert missing_attrs == []
     assert missing_in_all == []
     assert invalid_in_all == []
+
+
+def test_ml_pipes_exports_all_public_ops_and_aliases() -> None:
+    root = Path(__file__).resolve().parents[1] / "src" / "ml_pipes"
+    _assert_module_exports(root / "ops.py")
+    _assert_module_exports(root / "data_ops.py")
 
 
 def test_ml_pipes_alias_exports_preserve_identity() -> None:

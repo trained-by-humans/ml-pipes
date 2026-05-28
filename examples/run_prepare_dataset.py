@@ -25,9 +25,8 @@ import json
 import operator
 import random
 import re
-import time
 import unicodedata
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections.abc import Mapping, Sequence
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache, partial
@@ -35,17 +34,20 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
 from ml_pipes import (
+    Distinct,
+    DropNone as DropNonePrimitive,
+    EndForEachItem,
+    Filter as FilterPrimitive,
+    ForEachItem,
     InputFn,
-    InvocationTrace,
+    Map as MapPrimitive,
     Pipeline,
-    RegionCloser,
-    RegionOpener,
+    RequireMappingValue,
+    RequireValue as RequireValuePrimitive,
     SideEffectOp,
-    StepSpan,
     data_factory,
     pipeline_factory,
 )
-from ml_pipes.tracing import _NoOpTrace, merge_traces
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -561,13 +563,6 @@ def _require_mapping_selector(value: object, selector: Selector, operator_name: 
     return selected
 
 
-def _read_optional_text(value: object, selector: Selector, *, strip: bool = False) -> str | None:
-    selected = _read_selector_or_missing(value, selector)
-    if selected is _MISSING or selected is None or not isinstance(selected, str):
-        return None
-    return selected.strip() if strip else selected
-
-
 def _require_text_selector(
     value: object,
     selector: Selector,
@@ -584,47 +579,6 @@ def _require_text_selector(
             f"{operator_name} requires {semantic_name} to be str, got {type(selected)!r}."
         )
     return selected.strip() if strip else selected
-
-
-def _write_selector(value: object, selector: Selector, item: Any, operator_name: str) -> None:
-    parts = _normalize_selector(selector)
-    current = value
-    for part in parts[:-1]:
-        next_value = _select_part(current, part)
-        if next_value is _MISSING:
-            if isinstance(part, str) and isinstance(current, MutableMapping):
-                current[part] = {}
-                next_value = current[part]
-            else:
-                raise TypeError(
-                    f"{operator_name} cannot resolve parent selector {parts!r} on {type(value)!r}."
-                )
-        current = next_value
-
-    last = parts[-1]
-    if isinstance(last, int):
-        if not isinstance(current, list):
-            raise TypeError(
-                f"{operator_name} can only assign index selectors into list parents, got {type(current)!r}."
-            )
-        try:
-            current[last] = item
-        except IndexError as exc:
-            raise IndexError(
-                f"{operator_name} index selector {last} is out of range for parent list."
-            ) from exc
-        return
-
-    if isinstance(current, MutableMapping):
-        current[last] = item
-        return
-
-    try:
-        setattr(current, last, item)
-    except AttributeError as exc:
-        raise TypeError(
-            f"{operator_name} requires writable selector {parts!r} on {type(value)!r}."
-        ) from exc
 
 
 def build_output_submission(submission: Mapping[str, object], output_message: str) -> Submission:
@@ -653,12 +607,6 @@ def write_json(payload: dict[str, Any], output_path: Path, overwrite: bool) -> N
     with output_path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
-
-
-def close_iterable(iterator: object) -> None:
-    close = getattr(iterator, "close", None)
-    if callable(close):
-        close()
 
 
 class ResolveInputFiles:
@@ -718,119 +666,27 @@ class LoadSubmissionCollection:
         return submissions
 
 
-class EndForEachItem(RegionCloser):
-    """Region boundary for the end of per-item processing."""
-
-    def resolve_contract(
-        self,
-        current_output: Any | None,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[tuple[Any, ...], Any]:
-        output_type = list[current_output] if current_output is not None else list[Any]
-        return (Any,), output_type
-
-
-class ForEachItem(RegionOpener):
-    """Run the enclosed operators once per source item."""
-
-    closing_type = EndForEachItem
-
-    def run_region(
-        self,
-        current: Iterable[object],
-        label: str,
-        execute_region: Any,
-        trace: InvocationTrace | _NoOpTrace,
-        cfg: Any,
-    ) -> list[Any]:
-        collecting = isinstance(trace, InvocationTrace)
-        source = iter(current)
-        results: list[Any] = []
-        child_traces: list[InvocationTrace] = []
-        t_region = time.perf_counter()
-
-        try:
-            for value in source:
-                child_trace = InvocationTrace() if collecting else _NoOpTrace()
-                result, child_trace = execute_region(value, child_trace)
-                results.append(result)
-                if collecting:
-                    child_traces.append(child_trace)
-        except Exception:
-            merged_trace = merge_traces(child_traces) if child_traces else None
-            trace.spans.append(
-                StepSpan(
-                    label,
-                    t_region,
-                    time.perf_counter() - t_region,
-                    error=True,
-                    child_trace=merged_trace if collecting else None,
-                    operator_type=type(self),
-                )
-            )
-            raise
-        finally:
-            close_iterable(source)
-
-        merged_trace = merge_traces(child_traces) if child_traces else None
-        trace.spans.append(
-            StepSpan(
-                label,
-                t_region,
-                time.perf_counter() - t_region,
-                child_trace=merged_trace if collecting else None,
-                operator_type=type(self),
-            )
-        )
-        return results
-
-    def resolve_contract(
-        self,
-        current_output: Any | None,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[tuple[Any, ...], Any]:
-        return (Any,), Any
-
-
-class RequireMappingValue:
-    """Drop non-mapping values and store the mapping at the target selector."""
-
-    def __init__(
-        self,
-        as_: Selector,
-        state_factory: Callable[[], object],
-    ):
-        self.as_ = as_
-        self.state_factory = state_factory
-
-    def __call__(self, value: object | None) -> object | None:
-        if value is None:
-            return None
-        if not isinstance(value, Mapping):
-            return None
-        state = self.state_factory()
-        _write_selector(state, self.as_, value, type(self).__name__)
-        return state
-
-
 class FilterByExpression:
     """Apply the configured filter expression to the selected mapping."""
 
     def __init__(self, src: Selector, expression: str = ""):
-        self.expression = expression.strip() or None
-        self.src = src
+        normalized_expression = expression.strip() or None
+
+        def predicate(value: object) -> bool:
+            if not isinstance(value, Mapping):
+                raise TypeError(
+                    f"{type(self).__name__} requires mapping at selector {_normalize_selector(src)!r}, "
+                    f"got {type(value)!r}."
+                )
+            return matches_filter(normalized_expression, value)
+
+        self._inner = FilterPrimitive(
+            src=src,
+            predicate=predicate,
+        )
 
     def __call__(self, state: object | None) -> object | None:
-        if state is None:
-            return None
-        mapping = _require_mapping_selector(state, self.src, type(self).__name__)
-        if not matches_filter(self.expression, mapping):
-            return None
-        return state
+        return self._inner(state)
 
 
 class RequireTextValue:
@@ -843,19 +699,21 @@ class RequireTextValue:
         strip: bool = False,
         allow_blank: bool = True,
     ):
-        self.src = src
-        self.strip = strip
-        self.allow_blank = allow_blank
+        self._require = RequireValuePrimitive(src=src)
+
+        def predicate(value: object) -> bool:
+            if not isinstance(value, str):
+                return False
+            candidate = value.strip() if strip else value
+            return allow_blank or candidate != ""
+
+        self._inner = FilterPrimitive(src=src, predicate=predicate)
 
     def __call__(self, state: object | None) -> object | None:
+        state = self._require(state)
         if state is None:
             return None
-        text = _read_optional_text(state, self.src, strip=self.strip)
-        if text is None:
-            return None
-        if not self.allow_blank and text == "":
-            return None
-        return state
+        return self._inner(state)
 
 
 class FilterByAllowedValues:
@@ -866,92 +724,62 @@ class FilterByAllowedValues:
         src: Selector,
         allowed_values: Mapping[object, Any] | set[object] | list[object] | tuple[object, ...] = (),
     ):
-        self.src = src
         if isinstance(allowed_values, Mapping):
-            self.allowed_values = set(allowed_values.keys())
+            normalized_values = set(allowed_values.keys())
         else:
-            self.allowed_values = set(allowed_values)
+            normalized_values = set(allowed_values)
+        self._inner = (
+            None
+            if not normalized_values
+            else FilterPrimitive(src=src, predicate=lambda value: value in normalized_values)
+        )
 
     def __call__(self, state: object | None) -> object | None:
-        if state is None or not self.allowed_values:
+        if self._inner is None:
             return state
-        value = _read_selector_or_missing(state, self.src)
-        if value is _MISSING:
-            return None
-        if value not in self.allowed_values:
-            return None
-        return state
+        return self._inner(state)
 
 
 class MapValue:
     """Apply a transformation function to a selected value and store the result at as_."""
 
     def __init__(self, src: Selector, fn: Callable[[Any], Any], as_: Selector):
-        self.src = src
-        self.fn = fn
-        self.as_ = as_
+        self._inner = MapPrimitive(fn=fn, src=src, as_=as_)
 
     def __call__(self, state: object | None) -> object | None:
-        if state is None:
-            return None
-        value = _read_selector(state, self.src, type(self).__name__)
-        _write_selector(state, self.as_, self.fn(value), type(self).__name__)
-        return state
+        return self._inner(state)
 
 
 class RequireMinimumLength:
     """Drop values whose selected text is shorter than the configured threshold."""
 
     def __init__(self, src: Selector, min_length: int | str = 2, *, strip: bool = True):
-        self.src = src
-        self.min_length = int(min_length)
-        self.strip = strip
-        if self.min_length < 0:
+        parsed_min_length = int(min_length)
+        if parsed_min_length < 0:
             raise ValueError("min_length must be >= 0.")
 
-    def __call__(self, state: object | None) -> object | None:
-        if state is None:
-            return None
-        text = _require_text_selector(
-            state,
-            self.src,
-            type(self).__name__,
-            f"selector {_normalize_selector(self.src)!r}",
-            strip=self.strip,
+        def predicate(value: object) -> bool:
+            if not isinstance(value, str):
+                raise TypeError(
+                    f"{type(self).__name__} requires selector {_normalize_selector(src)!r} to be str, "
+                    f"got {type(value)!r}."
+                )
+            return len(value.strip() if strip else value) >= parsed_min_length
+
+        self._inner = FilterPrimitive(
+            src=src,
+            predicate=predicate,
         )
-        if len(text) < self.min_length:
-            return None
-        return state
+
+    def __call__(self, state: object | None) -> object | None:
+        return self._inner(state)
 
 
 class CompactDroppedItems:
     """Remove dropped entries emitted as None by per-item operators."""
 
     def __call__(self, states: list[object | None]) -> list[object]:
-        return [state for state in states if state is not None]
-
-
-class DeduplicateBy:
-    """Drop repeated records using the selected text field."""
-
-    def __init__(self, src: Selector):
-        self.src = src
-
-    def __call__(self, states: list[object]) -> list[object]:
-        seen_keys: set[str] = set()
-        deduped: list[object] = []
-        for state in states:
-            text = _require_text_selector(
-                state,
-                self.src,
-                type(self).__name__,
-                f"selector {_normalize_selector(self.src)!r}",
-            )
-            if text in seen_keys:
-                continue
-            seen_keys.add(text)
-            deduped.append(state)
-        return deduped
+        return DropNonePrimitive()(states)
 
 
 class LimitByValue:
@@ -1146,7 +974,7 @@ def _build_prepare_dataset_processing_pipeline(
             RequireMinimumLength(src=dedupe_selector, min_length=min_length),
             EndForEachItem(),
             CompactDroppedItems(),
-            DeduplicateBy(src=dedupe_selector),
+            Distinct(src=dedupe_selector),
             LimitByValue(src="submission.label", limits=parsed_limits),
             BuildPreparedRecords(
                 submission="submission",
