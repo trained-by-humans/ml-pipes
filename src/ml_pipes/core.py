@@ -18,7 +18,6 @@ from .validation import PipelineValidationError, PipelineValidator, TypeContract
 Operator = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
 
 
-
 @dataclass(frozen=True)
 class Region:
     opening_op: type

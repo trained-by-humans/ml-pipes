@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -68,11 +67,6 @@ class AcceptOptionalCarrier:
 
 class AcceptIntList:
     def __call__(self, items: list[int]) -> str:
-        return ",".join(str(item) for item in items)
-
-
-class AcceptIntIterable:
-    def __call__(self, items: Iterable[int]) -> str:
         return ",".join(str(item) for item in items)
 
 
@@ -293,7 +287,7 @@ def test_take_and_skip_support_iterables() -> None:
     items = (value for value in range(5))
 
     assert Take(2)(items) == [0, 1]
-    assert list(Skip(2)(range(5))) == [2, 3, 4]
+    assert Skip(2)(range(5)) == [2, 3, 4]
 
 
 def test_take_closes_iterator_when_it_short_circuits() -> None:
@@ -306,15 +300,12 @@ def test_take_closes_iterator_when_it_short_circuits() -> None:
 def test_skip_does_not_explicitly_close_iterator_after_full_consumption() -> None:
     items = ClosableIterator([0, 1, 2, 3])
 
-    assert list(Skip(2)(items)) == [2, 3]
+    assert Skip(2)(items) == [2, 3]
     assert items.closed is False
 
 
-def test_take_closes_upstream_iterator_through_lazy_skip() -> None:
-    items = ClosableIterator([0, 1, 2, 3, 4])
-
-    assert Take(2)(Skip(1)(items)) == [1, 2]
-    assert items.closed is True
+def test_skip_then_take_materializes_expected_slice() -> None:
+    assert Take(2)(Skip(1)(range(5))) == [1, 2]
 
 
 def test_take_validation_uses_static_contract() -> None:
@@ -327,8 +318,8 @@ def test_take_validation_uses_static_contract() -> None:
     assert contract.output_type == str
 
 
-def test_skip_validation_uses_iterable_contract() -> None:
-    contract = Pipeline([Skip(2), AcceptIntIterable()]).validate(
+def test_skip_validation_uses_materialized_contract() -> None:
+    contract = Pipeline([Skip(2), AcceptIntList()]).validate(
         pipeline_input_type=tuple[int, ...],
         strict=True,
     )
@@ -387,6 +378,85 @@ def test_take_while_and_skip_while_validation_check_predicate_input_type() -> No
             pipeline_input_type=list[int],
             strict=True,
         )
+
+
+def test_skip_inside_for_each_uses_operator_held_state() -> None:
+    first_pipeline = Pipeline(
+        [
+            ForEachItem(),
+            Skip(1),
+            EndForEachItem(),
+            DropNone(),
+        ]
+    )
+    second_pipeline = Pipeline(
+        [
+            ForEachItem(),
+            Skip(1),
+            EndForEachItem(),
+            DropNone(),
+        ]
+    )
+
+    assert first_pipeline([1, 2, 3]) == [2, 3]
+    assert second_pipeline([1, 2, 3]) == [2, 3]
+
+
+def test_take_inside_for_each_drops_items_after_limit() -> None:
+    pipeline = Pipeline(
+        [
+            ForEachItem(),
+            Take(2),
+            EndForEachItem(),
+            DropNone(),
+        ]
+    )
+
+    assert pipeline([0, 1, 2, 3]) == [0, 1]
+
+
+def test_for_each_sequence_ops_validate_against_item_types() -> None:
+    contract = Pipeline(
+        [
+            ForEachItem(),
+            Skip(1),
+            Take(2),
+            EndForEachItem(),
+            DropNone(),
+            AcceptIntList(),
+        ]
+    ).validate(
+        pipeline_input_type=list[int],
+        strict=True,
+    )
+
+    assert contract.input_type == list[int]
+    assert contract.output_type == str
+
+
+def test_for_each_sequence_ops_are_visible_in_child_trace() -> None:
+    pipeline = Pipeline(
+        [
+            ForEachItem(),
+            Skip(1),
+            Take(2),
+            EndForEachItem(),
+            DropNone(),
+        ]
+    )
+
+    result = pipeline.inspect([0, 1, 2, 3])
+
+    assert [span.label for span in result.spans] == [
+        "0:ForEachItem",
+        "4:DropNone",
+    ]
+    assert result.spans[1].output_value == [1, 2]
+    assert result.spans[0].child_trace is not None
+    assert [span.label for span in result.spans[0].child_trace.spans] == [
+        "1:Skip",
+        "2:Take",
+    ]
 
 
 def test_for_each_item_pipeline_composes_primitives_for_dataset_processing() -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 import time
-from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, MutableMapping, Sequence
 from itertools import dropwhile, islice, takewhile
 from types import UnionType
 from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
@@ -32,6 +32,10 @@ def _close_iterable(iterator: object) -> None:
     close = getattr(iterator, "close", None)
     if callable(close):
         close()
+
+
+def _is_runtime_sequence_value(value: object) -> bool:
+    return isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray, Mapping))
 
 
 def _select_part(current: object, part: SelectorPart) -> object:
@@ -436,27 +440,6 @@ class ForEachItem(RegionOpener):
         return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
 
 
-class _ClosingIterable(Generic[ItemT]):
-    def __init__(self, iterator: Iterator[ItemT], *, parent: object | None = None):
-        self._iterator = iterator
-        self._parent = parent
-        self._closed = False
-
-    def __iter__(self) -> _ClosingIterable[ItemT]:
-        return self
-
-    def __next__(self) -> ItemT:
-        return next(self._iterator)
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        _close_iterable(self._iterator)
-        if self._parent is not None:
-            _close_iterable(self._parent)
-
-
 class RequireMappingValue(Generic[StateT]):
     """Drop non-mapping values and store the mapping at the target selector."""
 
@@ -687,15 +670,39 @@ class Take:
 
     def __init__(self, count: int | str):
         self.count = int(count)
+        self.remaining = self.count
         if self.count < 0:
             raise ValueError("count must be >= 0.")
 
-    def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
-        source = iter(items)
-        try:
-            return list(islice(source, self.count))
-        finally:
-            _close_iterable(source)
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+        if current is None:
+            return None
+        if _is_runtime_sequence_value(current):
+            source = iter(current)
+            try:
+                return list(islice(source, self.count))
+            finally:
+                _close_iterable(source)
+        if self.remaining <= 0:
+            return None
+        self.remaining -= 1
+        return current
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations, expand_output_annotation, validation_error_type
+        if current_output in {Any, object}:
+            return (Any,), Any
+        if _is_iterable_annotation(current_output):
+            item_type = _iterable_item_annotation(current_output)
+            input_type = _sequence_input_annotation(current_output)
+            return (input_type,), _list_annotation(item_type)
+        return (current_output,), _optional_annotation(current_output)
 
 
 class Skip:
@@ -703,12 +710,35 @@ class Skip:
 
     def __init__(self, count: int | str):
         self.count = int(count)
+        self.remaining = self.count
         if self.count < 0:
             raise ValueError("count must be >= 0.")
 
-    def __call__(self, items: Iterable[ItemT]) -> Iterable[ItemT]:
-        source = iter(items)
-        return _ClosingIterable(islice(source, self.count, None), parent=source)
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+        if current is None:
+            return None
+        if _is_runtime_sequence_value(current):
+            return list(islice(current, self.count, None))
+        if self.remaining > 0:
+            self.remaining -= 1
+            return None
+        return current
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations, expand_output_annotation, validation_error_type
+        if current_output in {Any, object}:
+            return (Any,), Any
+        if _is_iterable_annotation(current_output):
+            item_type = _iterable_item_annotation(current_output)
+            input_type = _sequence_input_annotation(current_output)
+            return (input_type,), _list_annotation(item_type)
+        return (current_output,), _optional_annotation(current_output)
 
 
 class TakeWhile(Generic[ItemT]):
@@ -716,13 +746,23 @@ class TakeWhile(Generic[ItemT]):
 
     def __init__(self, predicate: Predicate[ItemT]):
         self.predicate = predicate
+        self.active = True
 
-    def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
-        source = iter(items)
-        try:
-            return list(takewhile(self.predicate, source))
-        finally:
-            _close_iterable(source)
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+        if current is None:
+            return None
+        if _is_runtime_sequence_value(current):
+            source = iter(current)
+            try:
+                return list(takewhile(self.predicate, source))
+            finally:
+                _close_iterable(source)
+        if not self.active:
+            return None
+        if not self.predicate(current):
+            self.active = False
+            return None
+        return current
 
     def resolve_contract(
         self,
@@ -731,8 +771,15 @@ class TakeWhile(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        item_type = _iterable_item_annotation(current_output)
-        input_type = _sequence_input_annotation(current_output)
+        if current_output in {Any, object}:
+            item_type = Any
+            input_type = Any
+        elif _is_iterable_annotation(current_output):
+            item_type = _iterable_item_annotation(current_output)
+            input_type = _sequence_input_annotation(current_output)
+        else:
+            item_type = current_output
+            input_type = current_output
         _resolve_callable_contract(
             item_type,
             None,
@@ -744,7 +791,11 @@ class TakeWhile(Generic[ItemT]):
             operator_name=type(self).__name__,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (input_type,), _list_annotation(item_type)
+        if current_output in {Any, object}:
+            return (Any,), Any
+        if _is_iterable_annotation(current_output):
+            return (input_type,), _list_annotation(item_type)
+        return (input_type,), _optional_annotation(current_output)
 
 
 class SkipWhile(Generic[ItemT]):
@@ -752,9 +803,17 @@ class SkipWhile(Generic[ItemT]):
 
     def __init__(self, predicate: Predicate[ItemT]):
         self.predicate = predicate
+        self.skipping = True
 
-    def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
-        return list(dropwhile(self.predicate, items))
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+        if current is None:
+            return None
+        if _is_runtime_sequence_value(current):
+            return list(dropwhile(self.predicate, current))
+        if self.skipping and self.predicate(current):
+            return None
+        self.skipping = False
+        return current
 
     def resolve_contract(
         self,
@@ -763,8 +822,15 @@ class SkipWhile(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        item_type = _iterable_item_annotation(current_output)
-        input_type = _sequence_input_annotation(current_output)
+        if current_output in {Any, object}:
+            item_type = Any
+            input_type = Any
+        elif _is_iterable_annotation(current_output):
+            item_type = _iterable_item_annotation(current_output)
+            input_type = _sequence_input_annotation(current_output)
+        else:
+            item_type = current_output
+            input_type = current_output
         _resolve_callable_contract(
             item_type,
             None,
@@ -776,4 +842,8 @@ class SkipWhile(Generic[ItemT]):
             operator_name=type(self).__name__,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (input_type,), _list_annotation(item_type)
+        if current_output in {Any, object}:
+            return (Any,), Any
+        if _is_iterable_annotation(current_output):
+            return (input_type,), _list_annotation(item_type)
+        return (input_type,), _optional_annotation(current_output)
