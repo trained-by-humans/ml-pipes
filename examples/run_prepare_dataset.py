@@ -35,15 +35,14 @@ from typing import Any, Callable, Iterable, Iterator
 
 from ml_pipes import (
     Distinct,
-    DropShortCircuit as DropShortCircuitPrimitive,
     EndForEachItem,
     Filter as FilterPrimitive,
+    FilterNotNull as FilterNotNullPrimitive,
     ForEachItem,
     InputFn,
-    Map as MapPrimitive,
+    MapValue as MapValuePrimitive,
     Pipeline,
-    RequireMappingValue,
-    RequireValue as RequireValuePrimitive,
+    WrapMappingInObject,
     SideEffectOp,
     SHORT_CIRCUIT,
     data_factory,
@@ -649,8 +648,8 @@ class StreamSubmissions:
 class LoadSubmissionCollection:
     """Load all submissions from the input files into one in-memory collection."""
 
-    def __call__(self, input_files: list[Path]) -> list[object]:
-        submissions: list[object] = []
+    def __call__(self, input_files: list[Path]) -> list[Submission]:
+        submissions: list[Submission] = []
         for input_file in input_files:
             with input_file.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
@@ -700,7 +699,7 @@ class RequireTextValue:
         strip: bool = False,
         allow_blank: bool = True,
     ):
-        self._require = RequireValuePrimitive(src=src)
+        self._filter_not_null = FilterNotNullPrimitive(src=src)
 
         def predicate(value: object) -> bool:
             if not isinstance(value, str):
@@ -711,7 +710,7 @@ class RequireTextValue:
         self._inner = FilterPrimitive(src=src, predicate=predicate)
 
     def __call__(self, state: object | None) -> object:
-        state = self._require(state)
+        state = self._filter_not_null(state)
         if state is SHORT_CIRCUIT:
             return SHORT_CIRCUIT
         return self._inner(state)
@@ -745,7 +744,7 @@ class MapValue:
     """Apply a transformation function to a selected value and store the result at as_."""
 
     def __init__(self, src: Selector, fn: Callable[[Any], Any], as_: Selector):
-        self._inner = MapPrimitive(fn=fn, src=src, as_=as_)
+        self._inner = MapValuePrimitive(fn=fn, src=src, as_=as_)
 
     def __call__(self, state: object | None) -> object | None:
         return self._inner(state)
@@ -774,13 +773,6 @@ class RequireMinimumLength:
 
     def __call__(self, state: object | None) -> object | None:
         return self._inner(state)
-
-
-class CompactDroppedItems:
-    """Remove dropped entries emitted as SHORT_CIRCUIT by per-item operators."""
-
-    def __call__(self, states: list[object | None]) -> list[object]:
-        return DropShortCircuitPrimitive()(states)
 
 
 class LimitByValue:
@@ -964,7 +956,7 @@ def _build_prepare_dataset_processing_pipeline(
     pipeline = Pipeline(
         [
             ForEachItem(),
-            RequireMappingValue(as_="submission", state_factory=MessageState),
+            WrapMappingInObject(as_="submission", state_factory=MessageState),
             FilterByExpression(src="submission", expression=where),
             RequireTextValue(src="submission.label", strip=True, allow_blank=False),
             FilterByAllowedValues(src="submission.label", allowed_values=parsed_limits),
@@ -974,7 +966,6 @@ def _build_prepare_dataset_processing_pipeline(
             MapValue(src="cleaned_text", fn=normalize_training_text, as_="normalized_text"),
             RequireMinimumLength(src=dedupe_selector, min_length=min_length),
             EndForEachItem(),
-            CompactDroppedItems(),
             Distinct(src=dedupe_selector),
             LimitByValue(src="submission.label", limits=parsed_limits),
             BuildPreparedRecords(

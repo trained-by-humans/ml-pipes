@@ -7,16 +7,18 @@ import pytest
 
 from ml_pipes import (
     Distinct,
-    DropNone,
-    DropShortCircuit,
+    DistinctBy,
+    DropNull,
     EndForEachItem,
+    FilterNotNull,
     Filter,
     ForEachItem,
     Map,
+    MapNotNull,
+    MapValue,
     Pipeline,
     SHORT_CIRCUIT,
-    RequireMappingValue,
-    RequireValue,
+    WrapMappingInObject,
     Skip,
     SkipWhile,
     Take,
@@ -39,8 +41,22 @@ def _text_length(text: str) -> int:
     return len(text)
 
 
+def _optional_text_length(text: str | None) -> int:
+    return 0 if text is None else len(text)
+
+
+def _text_length_or_none(text: str) -> int | None:
+    if not text:
+        return None
+    return len(text)
+
+
 def _has_min_length(text: str) -> bool:
     return len(text) >= 5
+
+
+def _has_min_length_or_none(text: str | None) -> bool:
+    return text is not None and len(text) >= 5
 
 
 def _int_to_text(value: int) -> str:
@@ -52,19 +68,9 @@ class AcceptInt:
         return str(value)
 
 
-class AcceptOptionalInt:
-    def __call__(self, value: int | None) -> str:
-        return "" if value is None else str(value)
-
-
 class AcceptCarrier:
     def __call__(self, value: Carrier) -> str:
         return value.cleaned or ""
-
-
-class AcceptOptionalCarrier:
-    def __call__(self, value: Carrier | None) -> str:
-        return "" if value is None or value.cleaned is None else value.cleaned
 
 
 class AcceptIntList:
@@ -101,8 +107,16 @@ def _is_positive(value: int) -> bool:
     return value > 0
 
 
+def _is_positive_or_none(value: int | None) -> bool:
+    return value is None or value > 0
+
+
 def _hash_text(text: str) -> int:
     return len(text)
+
+
+def _hash_optional_text(text: str | None) -> int:
+    return 0 if text is None else len(text)
 
 
 def _short_circuit_on_two(value: int) -> int | object:
@@ -119,10 +133,19 @@ def test_map_transforms_current_value() -> None:
     assert Map(lambda value: value * 2)(3) == 6
 
 
-def test_map_updates_selected_field_in_place_when_src_is_set() -> None:
+def test_map_passes_none_to_mapper_when_mapper_accepts_optional() -> None:
+    assert Map(_optional_text_length)(None) == 0
+
+
+def test_map_not_null_short_circuits_none_result() -> None:
+    assert MapNotNull(_text_length_or_none)("") is SHORT_CIRCUIT
+    assert MapNotNull(_text_length_or_none)("abc") == 3
+
+
+def test_map_value_updates_selected_field_in_place_when_src_is_set() -> None:
     carrier = Carrier(payload={"msg": "  hello  "})
 
-    result = Map(str.strip, src="payload.msg")(carrier)
+    result = MapValue(str.strip, src="payload.msg")(carrier)
 
     assert result is carrier
     assert carrier.payload == {"msg": "hello"}
@@ -133,6 +156,10 @@ def test_filter_applies_predicate_to_current_value() -> None:
     assert Filter(lambda value: value > 1)(1) is SHORT_CIRCUIT
 
 
+def test_filter_passes_none_to_optional_aware_predicate() -> None:
+    assert Filter(_is_positive_or_none)(None) is None
+
+
 def test_filter_applies_predicate_to_selected_value() -> None:
     carrier = Carrier(payload={"msg": "hello"})
 
@@ -140,33 +167,46 @@ def test_filter_applies_predicate_to_selected_value() -> None:
     assert Filter(lambda text: text == "bye", src="payload.msg")(carrier) is SHORT_CIRCUIT
 
 
-def test_filter_validation_returns_optional_output_type() -> None:
+def test_filter_validation_returns_surviving_output_type() -> None:
     contract = Pipeline([Filter(_is_positive)]).validate(
         pipeline_input_type=int,
         strict=True,
     )
 
     assert contract.input_type == int
-    assert contract.output_type == int | None
+    assert contract.output_type == int
 
 
-def test_filter_validation_preserves_optional_none_when_input_is_unknown() -> None:
+def test_filter_validation_keeps_unknown_output_unknown() -> None:
     contract = Pipeline([Filter(_is_positive)]).validate()
 
-    assert contract.output_type == Any | None
+    assert contract.output_type == Any
 
 
-def test_filter_validation_requires_optional_aware_downstream_consumer() -> None:
-    Pipeline([Filter(_is_positive), AcceptOptionalInt()]).validate(
+def test_filter_validation_allows_non_optional_downstream_consumer() -> None:
+    contract = Pipeline([Filter(_is_positive), AcceptInt()]).validate(
         pipeline_input_type=int,
         strict=True,
     )
 
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([Filter(_is_positive), AcceptInt()]).validate(
-            pipeline_input_type=int,
+    assert contract.input_type == int
+    assert contract.output_type == str
+
+
+def test_filter_validation_requires_optional_aware_predicate_for_optional_input() -> None:
+    with pytest.raises(PipelineValidationError, match="predicate expects"):
+        Pipeline([Filter(_is_positive)]).validate(
+            pipeline_input_type=int | None,
             strict=True,
         )
+
+    contract = Pipeline([Filter(_is_positive_or_none)]).validate(
+        pipeline_input_type=int | None,
+        strict=True,
+    )
+
+    assert contract.input_type == int | None
+    assert contract.output_type == int | None
 
 
 def test_filter_validation_checks_selected_source_type_against_predicate() -> None:
@@ -177,61 +217,130 @@ def test_filter_validation_checks_selected_source_type_against_predicate() -> No
         )
 
 
-def test_map_validation_preserves_explicit_optional_input() -> None:
-    contract = Pipeline([Map(_text_length)]).validate(
-        pipeline_input_type=str | None,
-        strict=True,
-    )
-
-    assert contract.input_type == str | None
-    assert contract.output_type == int | None
-
-
-def test_map_validation_checks_selected_source_type_against_mapper() -> None:
-    with pytest.raises(PipelineValidationError, match="fn expects"):
-        Pipeline([Map(_int_to_text, src="cleaned")]).validate(
+def test_filter_validation_rejects_missing_selector_even_for_untyped_predicate() -> None:
+    with pytest.raises(PipelineValidationError, match="missing"):
+        Pipeline([Filter(lambda value: True, src="missing")]).validate(
             pipeline_input_type=StrictCarrier,
             strict=True,
         )
 
 
-def test_require_value_drops_missing_selector() -> None:
-    carrier = Carrier(payload={})
-
-    assert RequireValue("payload.msg")(carrier) is SHORT_CIRCUIT
-
-
-def test_require_value_keeps_present_selector() -> None:
-    carrier = Carrier(payload={"msg": "hello"})
-
-    assert RequireValue("payload.msg")(carrier) is carrier
+def test_map_validation_requires_optional_aware_mapper_for_optional_input() -> None:
+    with pytest.raises(PipelineValidationError, match="fn expects"):
+        Pipeline([Map(_text_length)]).validate(
+            pipeline_input_type=str | None,
+            strict=True,
+        )
 
 
-def test_require_value_validation_is_passthrough_without_selector() -> None:
-    contract = Pipeline([RequireValue(), AcceptInt()]).validate(
-        pipeline_input_type=int,
+def test_map_validation_accepts_optional_aware_mapper_for_optional_input() -> None:
+    contract = Pipeline([Map(_optional_text_length)]).validate(
+        pipeline_input_type=str | None,
         strict=True,
     )
 
-    assert contract.input_type == int
-    assert contract.output_type == str
+    assert contract.input_type == str | None
+    assert contract.output_type == int
 
 
-def test_require_value_validation_preserves_optional_none_when_input_is_unknown() -> None:
-    contract = Pipeline([RequireValue()]).validate()
+def test_map_not_null_validation_preserves_concrete_output_for_non_optional_mapper() -> None:
+    contract = Pipeline([MapNotNull(_text_length)]).validate(
+        pipeline_input_type=str,
+        strict=True,
+    )
 
-    assert contract.output_type == Any | None
+    assert contract.input_type == str
+    assert contract.output_type == int
 
 
-def test_require_value_validation_returns_optional_with_selector() -> None:
-    Pipeline([RequireValue("payload.msg"), AcceptOptionalCarrier()]).validate(
+def test_map_not_null_validation_returns_surviving_mapped_type() -> None:
+    contract = Pipeline([MapNotNull(_text_length_or_none)]).validate(
+        pipeline_input_type=str,
+        strict=True,
+    )
+
+    assert contract.input_type == str
+    assert contract.output_type == int
+
+    Pipeline([MapNotNull(_text_length_or_none), AcceptInt()]).validate(
+        pipeline_input_type=str,
+        strict=True,
+    )
+
+
+def test_map_not_null_validation_requires_optional_aware_mapper_for_optional_input() -> None:
+    with pytest.raises(PipelineValidationError, match="fn expects"):
+        Pipeline([MapNotNull(_text_length_or_none)]).validate(
+            pipeline_input_type=str | None,
+            strict=True,
+        )
+
+    Pipeline([MapNotNull(_optional_text_length), AcceptInt()]).validate(
+        pipeline_input_type=str | None,
+        strict=True,
+    )
+
+
+def test_map_value_validation_checks_selected_source_type_against_mapper() -> None:
+    with pytest.raises(PipelineValidationError, match="fn expects"):
+        Pipeline([MapValue(_int_to_text, src="cleaned")]).validate(
+            pipeline_input_type=StrictCarrier,
+            strict=True,
+        )
+
+
+def test_map_value_validation_requires_optional_aware_mapper_for_optional_selector() -> None:
+    with pytest.raises(PipelineValidationError, match="fn expects"):
+        Pipeline([MapValue(_text_length, src="cleaned")]).validate(
+            pipeline_input_type=Carrier,
+            strict=True,
+        )
+
+    Pipeline([MapValue(_optional_text_length, src="cleaned")]).validate(
         pipeline_input_type=Carrier,
         strict=True,
     )
 
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([RequireValue("payload.msg"), AcceptCarrier()]).validate(
-            pipeline_input_type=Carrier,
+
+def test_map_value_validation_rejects_missing_selector_even_for_untyped_mapper() -> None:
+    with pytest.raises(PipelineValidationError, match="missing"):
+        Pipeline([MapValue(lambda value: value, src="missing")]).validate(
+            pipeline_input_type=StrictCarrier,
+            strict=True,
+        )
+
+
+def test_filter_not_null_drops_missing_selector() -> None:
+    carrier = Carrier(payload={})
+
+    assert FilterNotNull("payload.msg")(carrier) is SHORT_CIRCUIT
+
+
+def test_filter_not_null_keeps_present_selector() -> None:
+    carrier = Carrier(payload={"msg": "hello"})
+
+    assert FilterNotNull("payload.msg")(carrier) is carrier
+
+
+def test_filter_not_null_validation_keeps_current_object_type() -> None:
+    contract = Pipeline([FilterNotNull("payload.msg")]).validate(
+        pipeline_input_type=Carrier,
+        strict=True,
+    )
+
+    assert contract.input_type == Carrier
+    assert contract.output_type == Carrier
+
+    Pipeline([FilterNotNull("payload.msg"), AcceptCarrier()]).validate(
+        pipeline_input_type=Carrier,
+        strict=True,
+    )
+
+
+def test_filter_not_null_validation_rejects_missing_selector() -> None:
+    with pytest.raises(PipelineValidationError, match="missing"):
+        Pipeline([FilterNotNull("missing")]).validate(
+            pipeline_input_type=StrictCarrier,
             strict=True,
         )
 
@@ -243,34 +352,31 @@ def test_filter_raises_on_missing_selector() -> None:
         Filter(lambda text: True, src="payload.msg")(carrier)
 
 
-def test_require_mapping_value_seeds_state_factory() -> None:
-    result = RequireMappingValue(as_="payload", state_factory=Carrier)(_message("spam", "hello"))
+def test_wrap_mapping_in_object_seeds_object_factory() -> None:
+    result = WrapMappingInObject(as_="payload", state_factory=Carrier)(_message("spam", "hello"))
 
     assert isinstance(result, Carrier)
     assert result.payload == {"label": "spam", "msg": "hello"}
 
 
-def test_require_mapping_value_validation_returns_optional_state_when_input_is_unknown() -> None:
-    contract = Pipeline([RequireMappingValue(as_="payload", state_factory=Carrier)]).validate()
+def test_wrap_mapping_in_object_validation_returns_factory_output_when_input_is_unknown() -> None:
+    contract = Pipeline([WrapMappingInObject(as_="payload", state_factory=Carrier)]).validate()
 
-    assert contract.output_type == Carrier | None
-
-
-def test_drop_none_removes_dropped_values() -> None:
-    assert DropNone()([1, None, 2, None]) == [1, 2]
+    assert contract.output_type == Carrier
 
 
-def test_drop_short_circuit_removes_short_circuited_values() -> None:
-    assert DropShortCircuit()([1, SHORT_CIRCUIT, 2, SHORT_CIRCUIT]) == [1, 2]
+def test_drop_null_short_circuits_none_current_value() -> None:
+    assert DropNull()(None) is SHORT_CIRCUIT
+    assert DropNull()(2) == 2
 
 
-def test_drop_none_validation_uses_static_contract() -> None:
-    contract = Pipeline([DropNone(), AcceptIntList()]).validate(
-        pipeline_input_type=tuple[int | None, ...],
+def test_drop_null_validation_uses_static_contract() -> None:
+    contract = Pipeline([DropNull(), AcceptInt()]).validate(
+        pipeline_input_type=int | None,
         strict=True,
     )
 
-    assert contract.input_type == tuple[int | None, ...]
+    assert contract.input_type == int | None
     assert contract.output_type == str
 
 
@@ -286,17 +392,59 @@ def test_distinct_deduplicates_by_selected_value() -> None:
     assert [item.payload["msg"] for item in result if item.payload is not None] == ["one", "three"]
 
 
-def test_distinct_validation_checks_key_input_type() -> None:
-    Pipeline([Distinct(key=_hash_text)]).validate(
+def test_distinct_validation_accepts_existing_selector() -> None:
+    Pipeline([Distinct(src="cleaned")]).validate(
+        pipeline_input_type=list[StrictCarrier],
+        strict=True,
+    )
+
+
+def test_distinct_validation_rejects_missing_selector() -> None:
+    with pytest.raises(PipelineValidationError, match="missing"):
+        Pipeline([Distinct(src="missing")]).validate(
+            pipeline_input_type=list[StrictCarrier],
+            strict=True,
+        )
+
+
+def test_distinct_validation_rejects_out_of_bounds_tuple_selector() -> None:
+    with pytest.raises(PipelineValidationError, match="out of bounds"):
+        Pipeline([Distinct(src=2)]).validate(
+            pipeline_input_type=list[tuple[str, int]],
+            strict=True,
+        )
+
+
+def test_distinct_by_deduplicates_by_computed_value() -> None:
+    result = DistinctBy(_hash_text)(["a", "bb", "cc", "d"])
+
+    assert result == ["a", "bb"]
+
+
+def test_distinct_by_validation_checks_fn_input_type() -> None:
+    Pipeline([DistinctBy(_hash_text)]).validate(
         pipeline_input_type=list[str],
         strict=True,
     )
 
-    with pytest.raises(PipelineValidationError, match="key expects"):
-        Pipeline([Distinct(key=_is_positive)]).validate(
+    with pytest.raises(PipelineValidationError, match="fn expects"):
+        Pipeline([DistinctBy(_is_positive)]).validate(
             pipeline_input_type=list[str],
             strict=True,
         )
+
+
+def test_distinct_by_validation_requires_optional_aware_key_fn_for_optional_items() -> None:
+    with pytest.raises(PipelineValidationError, match="fn expects"):
+        Pipeline([DistinctBy(_hash_text)]).validate(
+            pipeline_input_type=list[str | None],
+            strict=True,
+        )
+
+    Pipeline([DistinctBy(_hash_optional_text)]).validate(
+        pipeline_input_type=list[str | None],
+        strict=True,
+    )
 
 
 def test_take_and_skip_support_iterables() -> None:
@@ -402,7 +550,6 @@ def test_skip_inside_for_each_uses_operator_held_state() -> None:
             ForEachItem(),
             Skip(1),
             EndForEachItem(),
-            DropShortCircuit(),
         ]
     )
     second_pipeline = Pipeline(
@@ -410,12 +557,23 @@ def test_skip_inside_for_each_uses_operator_held_state() -> None:
             ForEachItem(),
             Skip(1),
             EndForEachItem(),
-            DropShortCircuit(),
         ]
     )
 
     assert first_pipeline([1, 2, 3]) == [2, 3]
     assert second_pipeline([1, 2, 3]) == [2, 3]
+
+
+def test_drop_null_inside_for_each_drops_none_items() -> None:
+    pipeline = Pipeline(
+        [
+            ForEachItem(),
+            DropNull(),
+            EndForEachItem(),
+        ]
+    )
+
+    assert pipeline([1, None, 2]) == [1, 2]
 
 
 def test_take_inside_for_each_drops_items_after_limit() -> None:
@@ -424,14 +582,13 @@ def test_take_inside_for_each_drops_items_after_limit() -> None:
             ForEachItem(),
             Take(2),
             EndForEachItem(),
-            DropShortCircuit(),
         ]
     )
 
     assert pipeline([0, 1, 2, 3]) == [0, 1]
 
 
-def test_for_each_keeps_short_circuited_item_results() -> None:
+def test_for_each_drops_short_circuited_items() -> None:
     pipeline = Pipeline(
         [
             ForEachItem(),
@@ -441,7 +598,7 @@ def test_for_each_keeps_short_circuited_item_results() -> None:
         ]
     )
 
-    assert pipeline([1, 2, 3]) == [10, SHORT_CIRCUIT, 30]
+    assert pipeline([1, 2, 3]) == [10, 30]
 
 
 def test_for_each_sequence_ops_validate_against_item_types() -> None:
@@ -451,7 +608,6 @@ def test_for_each_sequence_ops_validate_against_item_types() -> None:
             Skip(1),
             Take(2),
             EndForEachItem(),
-            DropShortCircuit(),
             AcceptIntList(),
         ]
     ).validate(
@@ -470,17 +626,13 @@ def test_for_each_sequence_ops_are_visible_in_child_trace() -> None:
             Skip(1),
             Take(2),
             EndForEachItem(),
-            DropShortCircuit(),
         ]
     )
 
     result = pipeline.inspect([0, 1, 2, 3])
 
-    assert [span.label for span in result.spans] == [
-        "0:ForEachItem",
-        "4:DropShortCircuit",
-    ]
-    assert result.spans[1].output_value == [1, 2]
+    assert [span.label for span in result.spans] == ["0:ForEachItem"]
+    assert result.spans[0].output_value == [1, 2]
     assert result.spans[0].child_trace is not None
     assert [span.label for span in result.spans[0].child_trace.spans] == [
         "1:Skip",
@@ -492,11 +644,11 @@ def test_for_each_item_pipeline_composes_primitives_for_dataset_processing() -> 
     pipeline = Pipeline(
         [
             ForEachItem(),
-            RequireMappingValue(as_="payload", state_factory=Carrier),
-            Map(str.strip, src="payload.msg", as_="cleaned"),
+            WrapMappingInObject(as_="payload", state_factory=Carrier),
+            MapValue(str.strip, src="payload.msg", as_="cleaned"),
+            FilterNotNull("cleaned"),
             Filter(lambda text: len(text) >= 5, src="cleaned"),
             EndForEachItem(),
-            DropShortCircuit(),
             Distinct(src="cleaned"),
             Take(1),
         ]
@@ -525,10 +677,10 @@ def test_map_validation_threads_annotated_mapper_output() -> None:
     assert contract.output_type == str
 
 
-def test_require_mapping_value_validation_resolves_factory_output() -> None:
+def test_wrap_mapping_in_object_validation_resolves_factory_output() -> None:
     contract = Pipeline(
         [
-            RequireMappingValue(as_="payload", state_factory=Carrier),
+            WrapMappingInObject(as_="payload", state_factory=Carrier),
             AcceptCarrier(),
         ]
     ).validate(
@@ -544,11 +696,11 @@ def test_region_and_sequence_ops_preserve_item_type_for_validation() -> None:
     contract = Pipeline(
         [
             ForEachItem(),
-            RequireMappingValue(as_="payload", state_factory=Carrier),
-            Map(str.strip, src="payload.msg", as_="cleaned"),
-            Filter(_has_min_length, src="cleaned"),
+            WrapMappingInObject(as_="payload", state_factory=Carrier),
+            MapValue(str.strip, src="payload.msg", as_="cleaned"),
+            FilterNotNull("cleaned"),
+            Filter(_has_min_length_or_none, src="cleaned"),
             EndForEachItem(),
-            DropShortCircuit(),
             Distinct(src="cleaned"),
             Take(1),
             AcceptCarrierList(),

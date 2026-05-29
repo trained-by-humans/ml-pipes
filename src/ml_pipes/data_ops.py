@@ -5,12 +5,12 @@ import time
 from collections.abc import Callable, Hashable, Iterable, Mapping, MutableMapping, Sequence
 from itertools import dropwhile, islice, takewhile
 from types import UnionType
-from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
+from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from .context import Selector, SelectorPart, _normalize_selector, _select_annotation
 from .control import SHORT_CIRCUIT
 from .region import RegionCloser, RegionOpener
-from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
+from .tracing import InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, merge_traces, operator_config, snapshot
 from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
 
 
@@ -21,6 +21,7 @@ MappedT = TypeVar("MappedT")
 ItemT = TypeVar("ItemT")
 AnyMapping = Mapping[Any, Any]
 Mapper = Callable[[ValueT], MappedT]
+NullableMapper = Callable[[ValueT], MappedT | None]
 Predicate = Callable[[ValueT], bool]
 KeySelector = Callable[[ItemT], Hashable]
 
@@ -59,6 +60,13 @@ def _read_selector_or_missing(value: object, selector: Selector) -> object:
         if current is _MISSING:
             return _MISSING
     return current
+
+
+def _read_selector_or_none(value: object, selector: Selector) -> object | None:
+    selected = _read_selector_or_missing(value, selector)
+    if selected is _MISSING:
+        return None
+    return selected
 
 
 def _read_selector(value: object, selector: Selector, operator_name: str) -> object:
@@ -134,12 +142,11 @@ def _resolve_callable_contract(
     expand_output_annotation: Any,
     validation_error_type: type[Exception],
     operator_name: str,
+    ignore_explicit_none: bool = True,
 ) -> tuple[Any, Any] | None:
     contract = _resolve_unary_callable_contract(function)
-    if contract is None or current_annotation in {None, Any}:
+    if current_annotation in {None, Any}:
         return contract
-
-    input_type, output_type = contract
     source_annotation = _selector_annotation(
         current_annotation,
         src,
@@ -147,7 +154,11 @@ def _resolve_callable_contract(
         validation_error_type=validation_error_type,
         operator_name=operator_name,
     )
-    comparable_source = _without_none(source_annotation)
+    if contract is None:
+        return None
+
+    input_type, output_type = contract
+    comparable_source = _without_none(source_annotation) if ignore_explicit_none else source_annotation
     if comparable_source is not Any and not is_annotation_compatible(comparable_source, (input_type,)):
         source_label = (
             f"src selector {_normalize_selector(src)!r}"
@@ -308,34 +319,6 @@ def _list_annotation(item_type: Any) -> Any:
     return list[item_type]
 
 
-def _optional_annotation(annotation: Any) -> Any:
-    if annotation is None:
-        return _NONE_TYPE
-    if annotation is Any:
-        return Any | None
-    if _is_union_annotation(annotation) and _NONE_TYPE in get_args(annotation):
-        return annotation
-    return annotation | None
-
-
-def _annotation_explicitly_allows_none(annotation: Any) -> bool:
-    if annotation in {None, _NONE_TYPE}:
-        return True
-    if not _is_union_annotation(annotation):
-        return False
-    return any(option in {None, _NONE_TYPE} for option in get_args(annotation))
-
-
-def _propagate_explicit_none(input_annotation: Any, output_annotation: Any) -> Any:
-    if input_annotation in {None, _NONE_TYPE}:
-        return _NONE_TYPE
-    if input_annotation is Any:
-        return _optional_annotation(output_annotation)
-    if _annotation_explicitly_allows_none(input_annotation):
-        return _optional_annotation(output_annotation)
-    return output_annotation
-
-
 def _normalize_annotation(annotation: Any) -> Any:
     return _NONE_TYPE if annotation is None else annotation
 
@@ -376,7 +359,11 @@ class EndForEachItem(RegionCloser):
 
 
 class ForEachItem(RegionOpener):
-    """Run the enclosed operators once per source item."""
+    """Run the enclosed operators once per source item.
+
+    Items that short-circuit inside the region are treated as dropped and are
+    omitted from the resulting collection.
+    """
 
     closing_type = EndForEachItem
 
@@ -388,7 +375,6 @@ class ForEachItem(RegionOpener):
         trace: InvocationTrace | _NoOpTrace,
         cfg: Any,
     ) -> list[Any]:
-        del cfg
         collecting = isinstance(trace, InvocationTrace)
         source = iter(current)
         results: list[Any] = []
@@ -399,7 +385,8 @@ class ForEachItem(RegionOpener):
             for value in source:
                 child_trace = InvocationTrace() if collecting else _NoOpTrace()
                 result, child_trace = execute_region(value, child_trace)
-                results.append(result)
+                if result is not SHORT_CIRCUIT:
+                    results.append(result)
                 if collecting:
                     child_traces.append(child_trace)
         except Exception:
@@ -424,6 +411,10 @@ class ForEachItem(RegionOpener):
                 label,
                 t_region,
                 time.perf_counter() - t_region,
+                operator_config=operator_config(self) if (cfg and cfg.capture_config) else {},
+                input_shape=_extract_shape(current) if (cfg and cfg.capture_shapes) else None,
+                output_shape=_extract_shape(results) if (cfg and cfg.capture_shapes) else None,
+                output_value=snapshot(results) if (cfg and cfg._capture_outputs) else None,
                 child_trace=merged_trace if collecting else None,
                 operator_type=type(self),
             )
@@ -441,14 +432,14 @@ class ForEachItem(RegionOpener):
         return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
 
 
-class RequireMappingValue(Generic[StateT]):
-    """Drop non-mapping values and store the mapping at the target selector."""
+class WrapMappingInObject(Generic[StateT]):
+    """Create a new object and store the current mapping at the target selector."""
 
     def __init__(self, as_: Selector, state_factory: Callable[[], StateT]):
         self.as_ = as_
         self.state_factory = state_factory
 
-    def __call__(self, value: AnyMapping | None) -> StateT | object:
+    def __call__(self, value: AnyMapping | None) -> StateT:
         if value is None:
             return SHORT_CIRCUIT
         if not isinstance(value, Mapping):
@@ -468,34 +459,93 @@ class RequireMappingValue(Generic[StateT]):
         factory_output = _resolve_nullary_callable_output(self.state_factory)
         input_type = _mapping_input_annotation(current_output)
         base_output = factory_output if factory_output is not None else object
-        if current_output in {None, _NONE_TYPE}:
-            return (input_type,), _NONE_TYPE
-        if current_output is not Any and _is_mapping_annotation(current_output) and not _annotation_explicitly_allows_none(current_output):
-            return (input_type,), base_output
-        return (input_type,), _optional_annotation(base_output)
+        return (input_type,), base_output
 
 
 class Map(Generic[ValueT, MappedT]):
-    """Apply a function to the current value or a selected field."""
+    """Apply a function to the current value."""
+
+    def __init__(self, fn: Mapper[ValueT, MappedT]):
+        self.fn = fn
+
+    def __call__(self, current: ValueT) -> MappedT:
+        return self.fn(current)
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        fn_contract = _resolve_callable_contract(
+            current_output,
+            None,
+            self.fn,
+            callable_label="fn",
+            current_label="current value",
+            expand_output_annotation=expand_output_annotation,
+            validation_error_type=validation_error_type,
+            operator_name=type(self).__name__,
+            ignore_explicit_none=False,
+        )
+
+        del stored_annotations, expand_output_annotation, validation_error_type
+        if fn_contract is None:
+            return (current_output,), Any
+
+        fn_input_type, fn_output_type = fn_contract
+        if current_output is not Any:
+            return (current_output,), fn_output_type
+        return (fn_input_type,), fn_output_type
+
+
+class MapNotNull(Generic[ValueT, MappedT]):
+    """Apply a function and short-circuit when the mapped result is None."""
+
+    def __init__(self, fn: NullableMapper[ValueT, MappedT]):
+        self.fn = fn
+        self.map = Map(fn)
+
+    def __call__(self, current: ValueT) -> MappedT:
+        mapped = self.map(current)
+        if mapped is None:
+            return SHORT_CIRCUIT
+        return mapped
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        input_types, mapped_output = self.map.resolve_contract(
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        )
+        return input_types, _without_none(mapped_output)
+
+
+class MapValue(Generic[ValueT, MappedT]):
+    """Apply a function to a selected value and store the result on the current object."""
 
     def __init__(
         self,
         fn: Mapper[ValueT, MappedT],
         *,
-        src: Selector | None = None,
+        src: Selector,
         as_: Selector | None = None,
     ):
-        if src is None and as_ is not None:
-            raise ValueError("Map(as_=...) requires src to be set.")
         self.fn = fn
         self.src = src
         self.as_ = src if as_ is None else as_
 
-    def __call__(self, current: CurrentT | None) -> CurrentT | MappedT | None:
+    def __call__(self, current: CurrentT | None) -> CurrentT | None:
         if current is None:
             return None
-        if self.src is None:
-            return self.fn(current)
         value = _read_selector(current, self.src, type(self).__name__)
         _write_selector(current, self.as_, self.fn(value), type(self).__name__)
         return current
@@ -507,7 +557,7 @@ class Map(Generic[ValueT, MappedT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        fn_contract = _resolve_callable_contract(
+        _resolve_callable_contract(
             current_output,
             self.src,
             self.fn,
@@ -516,52 +566,20 @@ class Map(Generic[ValueT, MappedT]):
             expand_output_annotation=expand_output_annotation,
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
+            ignore_explicit_none=False,
         )
 
         del stored_annotations, expand_output_annotation, validation_error_type
-        if self.src is not None:
-            return (current_output,), current_output
-
-        if fn_contract is None:
-            return (current_output,), _propagate_explicit_none(current_output, Any)
-
-        fn_input_type, fn_output_type = fn_contract
-        if current_output is not None and current_output is not Any:
-            return (current_output,), _propagate_explicit_none(current_output, fn_output_type)
-        return (fn_input_type,), fn_output_type
-
-
-class RequireValue:
-    """Keep the current value only when the selected value exists and is not None."""
-
-    def __init__(self, src: Selector | None = None):
-        self.src = src
-
-    def __call__(self, current: CurrentT | None) -> CurrentT | object:
-        if current is None:
-            return SHORT_CIRCUIT
-        if self.src is None:
-            return current
-        value = _read_selector_or_missing(current, self.src)
-        if value is _MISSING or value is None:
-            return SHORT_CIRCUIT
-        return current
-
-    def resolve_contract(
-        self,
-        current_output: Any,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
-        if self.src is None:
-            return (current_output,), _propagate_explicit_none(current_output, current_output)
-        return (current_output,), _optional_annotation(current_output)
+        return (current_output,), current_output
 
 
 class Filter(Generic[ValueT]):
-    """Keep the current value when a predicate matches the current or selected value."""
+    """Keep the current value when a predicate matches the current or selected value.
+
+    This operator does not treat ``None`` specially. If the current or selected
+    value can be ``None``, the predicate must decide how to handle it. Use
+    ``FilterNotNull`` when null-dropping should be explicit.
+    """
 
     def __init__(
         self,
@@ -572,14 +590,14 @@ class Filter(Generic[ValueT]):
         self.predicate = predicate
         self.src = src
 
-    def __call__(self, current: CurrentT | None) -> CurrentT | object:
-        if current is None:
-            return SHORT_CIRCUIT
-        if self.src is None:
-            value = current
-        else:
-            value = _read_selector(current, self.src, type(self).__name__)
+    def __call__(self, current: CurrentT) -> CurrentT:
+        value = self._read_value(current)
         return current if self.predicate(value) else SHORT_CIRCUIT
+
+    def _read_value(self, current: CurrentT) -> object:
+        if self.src is None:
+            return current
+        return _read_selector(current, self.src, type(self).__name__)
 
     def resolve_contract(
         self,
@@ -598,56 +616,67 @@ class Filter(Generic[ValueT]):
             expand_output_annotation=expand_output_annotation,
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
+            ignore_explicit_none=False,
         )
 
-        return (current_output,), _optional_annotation(current_output)
+        return (current_output,), current_output
 
 
-class DropNone:
-    """Remove `None` values from an iterable."""
+class FilterNotNull:
+    """Keep the current value only when the selected value exists and is not None."""
 
-    def __call__(self, items: Iterable[ItemT | None]) -> list[ItemT]:
-        return [item for item in items if item is not None]
-
-
-class DropShortCircuit:
-    """Remove dropped entries emitted as `SHORT_CIRCUIT` from an iterable."""
-
-    def __call__(self, items: Iterable[ItemT | None]) -> list[ItemT]:
-        return [item for item in items if item is not SHORT_CIRCUIT]
-
-
-class Distinct(Generic[ItemT]):
-    """Keep only the first item for each distinct key."""
-
-    def __init__(
-        self,
-        *,
-        src: Selector | None = None,
-        key: KeySelector[ItemT] | None = None,
-    ):
-        if src is not None and key is not None:
-            raise ValueError("Distinct accepts either src or key, not both.")
+    def __init__(self, src: Selector):
         self.src = src
-        self.key = key
+
+    def __call__(self, current: CurrentT) -> CurrentT:
+        value = _read_selector_or_none(current, self.src)
+        if value is None:
+            return SHORT_CIRCUIT
+        return current
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        _selector_annotation(
+            current_output,
+            self.src,
+            expand_output_annotation=expand_output_annotation,
+            validation_error_type=validation_error_type,
+            operator_name=type(self).__name__,
+        )
+        del stored_annotations, expand_output_annotation, validation_error_type
+        return (current_output,), _without_none(current_output)
+
+
+class DropNull:
+    """Short-circuit when the current value is `None`."""
+
+    def __call__(self, current: ItemT | None) -> ItemT:
+        if current is None:
+            return SHORT_CIRCUIT
+        return current
+
+
+class DistinctBy(Generic[ItemT]):
+    """Keep only the first item for each computed key."""
+
+    def __init__(self, fn: KeySelector[ItemT]):
+        self.fn = fn
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
-        seen: set[object] = set()
+        seen: set[Hashable] = set()
         deduped: list[ItemT] = []
         for item in items:
-            current_key = self._key_for(item)
+            current_key = self.fn(item)
             if current_key in seen:
                 continue
             seen.add(current_key)
             deduped.append(item)
         return deduped
-
-    def _key_for(self, item: ItemT) -> object:
-        if self.src is not None:
-            return _read_selector(item, self.src, type(self).__name__)
-        if self.key is not None:
-            return self.key(item)
-        return item
 
     def resolve_contract(
         self,
@@ -658,17 +687,55 @@ class Distinct(Generic[ItemT]):
     ) -> tuple[tuple[Any, ...], Any]:
         item_type = _iterable_item_annotation(current_output)
         input_type = _sequence_input_annotation(current_output)
-        if self.key is not None:
-            _resolve_callable_contract(
-                item_type,
-                None,
-                self.key,
-                callable_label="key",
-                current_label="current item",
-                expand_output_annotation=expand_output_annotation,
-                validation_error_type=validation_error_type,
-                operator_name=type(self).__name__,
-            )
+        _resolve_callable_contract(
+            item_type,
+            None,
+            self.fn,
+            callable_label="fn",
+            current_label="current item",
+            expand_output_annotation=expand_output_annotation,
+            validation_error_type=validation_error_type,
+            operator_name=type(self).__name__,
+            ignore_explicit_none=False,
+        )
+        del stored_annotations, expand_output_annotation, validation_error_type
+        return (input_type,), _list_annotation(item_type)
+
+
+class Distinct(Generic[ItemT]):
+    """Keep only the first item for each distinct selected value."""
+
+    def __init__(self, *, src: Selector):
+        self.src = src
+        self._inner = DistinctBy(self._selector_key(src))
+
+    def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
+        return self._inner(items)
+
+    def _selector_key(self, src: Selector) -> KeySelector[ItemT]:
+        operator_name = type(self).__name__
+
+        def key(item: ItemT) -> Hashable:
+            return cast(Hashable, _read_selector(item, src, operator_name))
+
+        return key
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        item_type = _iterable_item_annotation(current_output)
+        input_type = _sequence_input_annotation(current_output)
+        _selector_annotation(
+            item_type,
+            self.src,
+            expand_output_annotation=expand_output_annotation,
+            validation_error_type=validation_error_type,
+            operator_name=type(self).__name__,
+        )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (input_type,), _list_annotation(item_type)
 
@@ -682,7 +749,7 @@ class Take:
         if self.count < 0:
             raise ValueError("count must be >= 0.")
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
         if current is None:
             return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
@@ -710,7 +777,7 @@ class Take:
             item_type = _iterable_item_annotation(current_output)
             input_type = _sequence_input_annotation(current_output)
             return (input_type,), _list_annotation(item_type)
-        return (current_output,), _optional_annotation(current_output)
+        return (current_output,), _without_none(current_output)
 
 
 class Skip:
@@ -722,7 +789,7 @@ class Skip:
         if self.count < 0:
             raise ValueError("count must be >= 0.")
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
         if current is None:
             return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
@@ -746,7 +813,7 @@ class Skip:
             item_type = _iterable_item_annotation(current_output)
             input_type = _sequence_input_annotation(current_output)
             return (input_type,), _list_annotation(item_type)
-        return (current_output,), _optional_annotation(current_output)
+        return (current_output,), _without_none(current_output)
 
 
 class TakeWhile(Generic[ItemT]):
@@ -756,7 +823,7 @@ class TakeWhile(Generic[ItemT]):
         self.predicate = predicate
         self.active = True
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
         if current is None:
             return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
@@ -782,14 +849,17 @@ class TakeWhile(Generic[ItemT]):
         if current_output in {Any, object}:
             item_type = Any
             input_type = Any
+            predicate_input = Any
         elif _is_iterable_annotation(current_output):
             item_type = _iterable_item_annotation(current_output)
             input_type = _sequence_input_annotation(current_output)
+            predicate_input = item_type
         else:
-            item_type = current_output
+            item_type = _without_none(current_output)
             input_type = current_output
+            predicate_input = item_type
         _resolve_callable_contract(
-            item_type,
+            predicate_input,
             None,
             self.predicate,
             callable_label="predicate",
@@ -797,13 +867,14 @@ class TakeWhile(Generic[ItemT]):
             expand_output_annotation=expand_output_annotation,
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
+            ignore_explicit_none=False,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
         if current_output in {Any, object}:
             return (Any,), Any
         if _is_iterable_annotation(current_output):
             return (input_type,), _list_annotation(item_type)
-        return (input_type,), _optional_annotation(current_output)
+        return (input_type,), _without_none(current_output)
 
 
 class SkipWhile(Generic[ItemT]):
@@ -813,7 +884,7 @@ class SkipWhile(Generic[ItemT]):
         self.predicate = predicate
         self.skipping = True
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
         if current is None:
             return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
@@ -833,14 +904,17 @@ class SkipWhile(Generic[ItemT]):
         if current_output in {Any, object}:
             item_type = Any
             input_type = Any
+            predicate_input = Any
         elif _is_iterable_annotation(current_output):
             item_type = _iterable_item_annotation(current_output)
             input_type = _sequence_input_annotation(current_output)
+            predicate_input = item_type
         else:
-            item_type = current_output
+            item_type = _without_none(current_output)
             input_type = current_output
+            predicate_input = item_type
         _resolve_callable_contract(
-            item_type,
+            predicate_input,
             None,
             self.predicate,
             callable_label="predicate",
@@ -848,10 +922,11 @@ class SkipWhile(Generic[ItemT]):
             expand_output_annotation=expand_output_annotation,
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
+            ignore_explicit_none=False,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
         if current_output in {Any, object}:
             return (Any,), Any
         if _is_iterable_annotation(current_output):
             return (input_type,), _list_annotation(item_type)
-        return (input_type,), _optional_annotation(current_output)
+        return (input_type,), _without_none(current_output)

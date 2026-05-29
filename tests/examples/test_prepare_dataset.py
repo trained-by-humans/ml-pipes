@@ -72,7 +72,7 @@ def _prepare_run(
     pipeline = Pipeline(
         [
             prepare_dataset.ForEachItem(),
-            prepare_dataset.RequireMappingValue(
+            prepare_dataset.WrapMappingInObject(
                 as_="submission",
                 state_factory=prepare_dataset.MessageState,
             ),
@@ -96,7 +96,6 @@ def _prepare_run(
             ),
             prepare_dataset.RequireMinimumLength(src=dedupe_selector, min_length=min_length),
             prepare_dataset.EndForEachItem(),
-            prepare_dataset.CompactDroppedItems(),
             prepare_dataset.Distinct(src=dedupe_selector),
             prepare_dataset.LimitByValue(src="submission.label", limits=label_limits),
             prepare_dataset.BuildPreparedRecords(
@@ -225,7 +224,7 @@ def test_prepare_submissions_accepts_custom_object_layout() -> None:
     pipeline = Pipeline(
         [
             prepare_dataset.ForEachItem(),
-            prepare_dataset.RequireMappingValue(
+            prepare_dataset.WrapMappingInObject(
                 as_="payload",
                 state_factory=CustomSubmissionCarrier,
             ),
@@ -253,7 +252,6 @@ def test_prepare_submissions_accepts_custom_object_layout() -> None:
             ),
             prepare_dataset.RequireMinimumLength(src="training_text", min_length=2),
             prepare_dataset.EndForEachItem(),
-            prepare_dataset.CompactDroppedItems(),
             prepare_dataset.Distinct(src="training_text"),
             prepare_dataset.LimitByValue(src="payload.label", limits="spam=1"),
             prepare_dataset.BuildPreparedRecords(
@@ -417,24 +415,23 @@ def test_prepare_dataset_pipeline_inspect_captures_streaming_steps(tmp_path: Pat
 
     result = pipeline.inspect(str(input_file))
 
-    assert len(result.spans) == 9
+    assert len(result.spans) == 8
     assert [span.label for span in result.spans] == [
         "0:ResolveInputFiles",
         "1:StreamSubmissions",
         "2:ForEachItem",
-        "13:CompactDroppedItems",
-        "14:Distinct",
-        "15:LimitByValue",
-        "16:BuildPreparedRecords",
-        "17:FinalizeOrdering",
-        "18:WritePreparedDataset",
+        "13:Distinct",
+        "14:LimitByValue",
+        "15:BuildPreparedRecords",
+        "16:FinalizeOrdering",
+        "17:WritePreparedDataset",
     ]
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, str)
     assert "generator object" in result.spans[1].output_value
     assert result.spans[2].child_trace is not None
     assert [span.label for span in result.spans[2].child_trace.spans] == [
-        "3:RequireMappingValue",
+        "3:WrapMappingInObject",
         "4:FilterByExpression",
         "5:RequireTextValue",
         "6:FilterByAllowedValues",
@@ -468,24 +465,23 @@ def test_prepare_dataset_collection_pipeline_inspect_captures_collection_steps(t
 
     result = pipeline.inspect(str(input_file))
 
-    assert len(result.spans) == 9
+    assert len(result.spans) == 8
     assert [span.label for span in result.spans] == [
         "0:ResolveInputFiles",
         "1:LoadSubmissionCollection",
         "2:ForEachItem",
-        "13:CompactDroppedItems",
-        "14:Distinct",
-        "15:LimitByValue",
-        "16:BuildPreparedRecords",
-        "17:FinalizeOrdering",
-        "18:WritePreparedDataset",
+        "13:Distinct",
+        "14:LimitByValue",
+        "15:BuildPreparedRecords",
+        "16:FinalizeOrdering",
+        "17:WritePreparedDataset",
     ]
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, list)
     assert len(result.spans[1].output_value) == 2
     assert result.spans[2].child_trace is not None
     assert [span.label for span in result.spans[2].child_trace.spans] == [
-        "3:RequireMappingValue",
+        "3:WrapMappingInObject",
         "4:FilterByExpression",
         "5:RequireTextValue",
         "6:FilterByAllowedValues",
