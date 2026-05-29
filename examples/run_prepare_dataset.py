@@ -35,7 +35,7 @@ from typing import Any, Callable, Iterable, Iterator
 
 from ml_pipes import (
     Distinct,
-    DropNone as DropNonePrimitive,
+    DropShortCircuit as DropShortCircuitPrimitive,
     EndForEachItem,
     Filter as FilterPrimitive,
     ForEachItem,
@@ -45,6 +45,7 @@ from ml_pipes import (
     RequireMappingValue,
     RequireValue as RequireValuePrimitive,
     SideEffectOp,
+    SHORT_CIRCUIT,
     data_factory,
     pipeline_factory,
 )
@@ -709,10 +710,10 @@ class RequireTextValue:
 
         self._inner = FilterPrimitive(src=src, predicate=predicate)
 
-    def __call__(self, state: object | None) -> object | None:
+    def __call__(self, state: object | None) -> object:
         state = self._require(state)
-        if state is None:
-            return None
+        if state is SHORT_CIRCUIT:
+            return SHORT_CIRCUIT
         return self._inner(state)
 
 
@@ -776,10 +777,10 @@ class RequireMinimumLength:
 
 
 class CompactDroppedItems:
-    """Remove dropped entries emitted as None by per-item operators."""
+    """Remove dropped entries emitted as SHORT_CIRCUIT by per-item operators."""
 
     def __call__(self, states: list[object | None]) -> list[object]:
-        return DropNonePrimitive()(states)
+        return DropShortCircuitPrimitive()(states)
 
 
 class LimitByValue:

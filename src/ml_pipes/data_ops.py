@@ -8,6 +8,7 @@ from types import UnionType
 from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from .context import Selector, SelectorPart, _normalize_selector, _select_annotation
+from .control import SHORT_CIRCUIT
 from .region import RegionCloser, RegionOpener
 from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
 from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
@@ -447,11 +448,11 @@ class RequireMappingValue(Generic[StateT]):
         self.as_ = as_
         self.state_factory = state_factory
 
-    def __call__(self, value: AnyMapping | None) -> StateT | None:
+    def __call__(self, value: AnyMapping | None) -> StateT | object:
         if value is None:
-            return None
+            return SHORT_CIRCUIT
         if not isinstance(value, Mapping):
-            return None
+            return SHORT_CIRCUIT
         state = self.state_factory()
         _write_selector(state, self.as_, value, type(self).__name__)
         return state
@@ -536,14 +537,14 @@ class RequireValue:
     def __init__(self, src: Selector | None = None):
         self.src = src
 
-    def __call__(self, current: CurrentT | None) -> CurrentT | None:
+    def __call__(self, current: CurrentT | None) -> CurrentT | object:
         if current is None:
-            return None
+            return SHORT_CIRCUIT
         if self.src is None:
             return current
         value = _read_selector_or_missing(current, self.src)
         if value is _MISSING or value is None:
-            return None
+            return SHORT_CIRCUIT
         return current
 
     def resolve_contract(
@@ -571,14 +572,14 @@ class Filter(Generic[ValueT]):
         self.predicate = predicate
         self.src = src
 
-    def __call__(self, current: CurrentT | None) -> CurrentT | None:
+    def __call__(self, current: CurrentT | None) -> CurrentT | object:
         if current is None:
-            return None
+            return SHORT_CIRCUIT
         if self.src is None:
             value = current
         else:
             value = _read_selector(current, self.src, type(self).__name__)
-        return current if self.predicate(value) else None
+        return current if self.predicate(value) else SHORT_CIRCUIT
 
     def resolve_contract(
         self,
@@ -607,6 +608,13 @@ class DropNone:
 
     def __call__(self, items: Iterable[ItemT | None]) -> list[ItemT]:
         return [item for item in items if item is not None]
+
+
+class DropShortCircuit:
+    """Remove dropped entries emitted as `SHORT_CIRCUIT` from an iterable."""
+
+    def __call__(self, items: Iterable[ItemT | None]) -> list[ItemT]:
+        return [item for item in items if item is not SHORT_CIRCUIT]
 
 
 class Distinct(Generic[ItemT]):
@@ -674,9 +682,9 @@ class Take:
         if self.count < 0:
             raise ValueError("count must be >= 0.")
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
         if current is None:
-            return None
+            return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
             source = iter(current)
             try:
@@ -684,7 +692,7 @@ class Take:
             finally:
                 _close_iterable(source)
         if self.remaining <= 0:
-            return None
+            return SHORT_CIRCUIT
         self.remaining -= 1
         return current
 
@@ -714,14 +722,14 @@ class Skip:
         if self.count < 0:
             raise ValueError("count must be >= 0.")
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
         if current is None:
-            return None
+            return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
             return list(islice(current, self.count, None))
         if self.remaining > 0:
             self.remaining -= 1
-            return None
+            return SHORT_CIRCUIT
         return current
 
     def resolve_contract(
@@ -748,9 +756,9 @@ class TakeWhile(Generic[ItemT]):
         self.predicate = predicate
         self.active = True
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
         if current is None:
-            return None
+            return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
             source = iter(current)
             try:
@@ -758,10 +766,10 @@ class TakeWhile(Generic[ItemT]):
             finally:
                 _close_iterable(source)
         if not self.active:
-            return None
+            return SHORT_CIRCUIT
         if not self.predicate(current):
             self.active = False
-            return None
+            return SHORT_CIRCUIT
         return current
 
     def resolve_contract(
@@ -805,13 +813,13 @@ class SkipWhile(Generic[ItemT]):
         self.predicate = predicate
         self.skipping = True
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | None:
+    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT] | object:
         if current is None:
-            return None
+            return SHORT_CIRCUIT
         if _is_runtime_sequence_value(current):
             return list(dropwhile(self.predicate, current))
         if self.skipping and self.predicate(current):
-            return None
+            return SHORT_CIRCUIT
         self.skipping = False
         return current
 

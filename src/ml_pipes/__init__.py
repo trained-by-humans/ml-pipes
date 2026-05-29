@@ -33,6 +33,7 @@ from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeat
 from .data_ops import (
     Distinct,
     DropNone,
+    DropShortCircuit,
     EndForEachItem,
     Filter,
     ForEachItem,
@@ -162,6 +163,7 @@ __all__ = [
     "Detections",
     "Distribute",
     "DropNone",
+    "DropShortCircuit",
     "DrawBoxes",
     "DrawMasks",
     "EndForEachItem",

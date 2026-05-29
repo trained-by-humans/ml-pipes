@@ -8,6 +8,7 @@ import pytest
 from ml_pipes import (
     Distinct,
     DropNone,
+    DropShortCircuit,
     EndForEachItem,
     Filter,
     ForEachItem,
@@ -129,14 +130,14 @@ def test_map_updates_selected_field_in_place_when_src_is_set() -> None:
 
 def test_filter_applies_predicate_to_current_value() -> None:
     assert Filter(lambda value: value > 1)(2) == 2
-    assert Filter(lambda value: value > 1)(1) is None
+    assert Filter(lambda value: value > 1)(1) is SHORT_CIRCUIT
 
 
 def test_filter_applies_predicate_to_selected_value() -> None:
     carrier = Carrier(payload={"msg": "hello"})
 
     assert Filter(lambda text: text == "hello", src="payload.msg")(carrier) is carrier
-    assert Filter(lambda text: text == "bye", src="payload.msg")(carrier) is None
+    assert Filter(lambda text: text == "bye", src="payload.msg")(carrier) is SHORT_CIRCUIT
 
 
 def test_filter_validation_returns_optional_output_type() -> None:
@@ -197,7 +198,7 @@ def test_map_validation_checks_selected_source_type_against_mapper() -> None:
 def test_require_value_drops_missing_selector() -> None:
     carrier = Carrier(payload={})
 
-    assert RequireValue("payload.msg")(carrier) is None
+    assert RequireValue("payload.msg")(carrier) is SHORT_CIRCUIT
 
 
 def test_require_value_keeps_present_selector() -> None:
@@ -257,6 +258,10 @@ def test_require_mapping_value_validation_returns_optional_state_when_input_is_u
 
 def test_drop_none_removes_dropped_values() -> None:
     assert DropNone()([1, None, 2, None]) == [1, 2]
+
+
+def test_drop_short_circuit_removes_short_circuited_values() -> None:
+    assert DropShortCircuit()([1, SHORT_CIRCUIT, 2, SHORT_CIRCUIT]) == [1, 2]
 
 
 def test_drop_none_validation_uses_static_contract() -> None:
@@ -397,7 +402,7 @@ def test_skip_inside_for_each_uses_operator_held_state() -> None:
             ForEachItem(),
             Skip(1),
             EndForEachItem(),
-            DropNone(),
+            DropShortCircuit(),
         ]
     )
     second_pipeline = Pipeline(
@@ -405,7 +410,7 @@ def test_skip_inside_for_each_uses_operator_held_state() -> None:
             ForEachItem(),
             Skip(1),
             EndForEachItem(),
-            DropNone(),
+            DropShortCircuit(),
         ]
     )
 
@@ -419,7 +424,7 @@ def test_take_inside_for_each_drops_items_after_limit() -> None:
             ForEachItem(),
             Take(2),
             EndForEachItem(),
-            DropNone(),
+            DropShortCircuit(),
         ]
     )
 
@@ -446,7 +451,7 @@ def test_for_each_sequence_ops_validate_against_item_types() -> None:
             Skip(1),
             Take(2),
             EndForEachItem(),
-            DropNone(),
+            DropShortCircuit(),
             AcceptIntList(),
         ]
     ).validate(
@@ -465,7 +470,7 @@ def test_for_each_sequence_ops_are_visible_in_child_trace() -> None:
             Skip(1),
             Take(2),
             EndForEachItem(),
-            DropNone(),
+            DropShortCircuit(),
         ]
     )
 
@@ -473,7 +478,7 @@ def test_for_each_sequence_ops_are_visible_in_child_trace() -> None:
 
     assert [span.label for span in result.spans] == [
         "0:ForEachItem",
-        "4:DropNone",
+        "4:DropShortCircuit",
     ]
     assert result.spans[1].output_value == [1, 2]
     assert result.spans[0].child_trace is not None
@@ -491,7 +496,7 @@ def test_for_each_item_pipeline_composes_primitives_for_dataset_processing() -> 
             Map(str.strip, src="payload.msg", as_="cleaned"),
             Filter(lambda text: len(text) >= 5, src="cleaned"),
             EndForEachItem(),
-            DropNone(),
+            DropShortCircuit(),
             Distinct(src="cleaned"),
             Take(1),
         ]
@@ -543,7 +548,7 @@ def test_region_and_sequence_ops_preserve_item_type_for_validation() -> None:
             Map(str.strip, src="payload.msg", as_="cleaned"),
             Filter(_has_min_length, src="cleaned"),
             EndForEachItem(),
-            DropNone(),
+            DropShortCircuit(),
             Distinct(src="cleaned"),
             Take(1),
             AcceptCarrierList(),
