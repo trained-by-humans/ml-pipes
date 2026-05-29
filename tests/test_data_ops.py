@@ -13,6 +13,7 @@ from ml_pipes import (
     ForEachItem,
     Map,
     Pipeline,
+    SHORT_CIRCUIT,
     RequireMappingValue,
     RequireValue,
     Skip,
@@ -101,6 +102,16 @@ def _is_positive(value: int) -> bool:
 
 def _hash_text(text: str) -> int:
     return len(text)
+
+
+def _short_circuit_on_two(value: int) -> int | object:
+    if value == 2:
+        return SHORT_CIRCUIT
+    return value
+
+
+def _multiply_by_ten(value: int) -> int:
+    return value * 10
 
 
 def test_map_transforms_current_value() -> None:
@@ -413,6 +424,19 @@ def test_take_inside_for_each_drops_items_after_limit() -> None:
     )
 
     assert pipeline([0, 1, 2, 3]) == [0, 1]
+
+
+def test_for_each_keeps_short_circuited_item_results() -> None:
+    pipeline = Pipeline(
+        [
+            ForEachItem(),
+            _short_circuit_on_two,
+            _multiply_by_ten,
+            EndForEachItem(),
+        ]
+    )
+
+    assert pipeline([1, 2, 3]) == [10, SHORT_CIRCUIT, 30]
 
 
 def test_for_each_sequence_ops_validate_against_item_types() -> None:

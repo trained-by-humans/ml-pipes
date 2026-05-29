@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable
 _log = logging.getLogger(__name__)
 
 from .context import Context, ContextOp
+from .control import SHORT_CIRCUIT
 from .inspection import InspectionResult, _CaptureCollector
 from .region import RegionCloser, RegionOpener
 from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig, _NoOpTrace, _extract_shape, operator_config, snapshot
@@ -139,6 +140,9 @@ class Pipeline:
                 else:
                     current, context = self._step(i, current, context, trace, cfg)
                     i += 1
+
+                if current is SHORT_CIRCUIT:
+                    break
         finally:
             trace.total_duration_s = time.perf_counter() - t_start
         return current, trace

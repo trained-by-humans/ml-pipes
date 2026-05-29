@@ -10,6 +10,7 @@ from .benchmark import (
     MeasurementConfig,
 )
 from .factory import data_factory, pipeline_factory, InputFn
+from .control import SHORT_CIRCUIT
 from .context import Context, Recall, Store
 from .inspection import (
     GroupBlock,
@@ -133,6 +134,7 @@ __all__ = [
     "data_factory",
     "pipeline_factory",
     "InputFn",
+    "SHORT_CIRCUIT",
     "ArgMax",
     "AggregateCollector",
     "ConcurrentCollector",
