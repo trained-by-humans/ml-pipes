@@ -10,7 +10,7 @@ from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get
 from .context import Selector, SelectorPart, _normalize_selector, _select_annotation
 from .control import SHORT_CIRCUIT
 from .region import RegionCloser, RegionOpener
-from .tracing import InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, merge_traces, operator_config, snapshot
+from .tracing import PendingSpan, InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, capture_value, merge_traces, operator_config
 from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
 
 
@@ -319,6 +319,12 @@ def _list_annotation(item_type: Any) -> Any:
     return list[item_type]
 
 
+def _iterable_annotation(item_type: Any) -> Any:
+    if item_type is Any:
+        return Iterable[Any]
+    return Iterable[item_type]
+
+
 def _normalize_annotation(annotation: Any) -> Any:
     return _NONE_TYPE if annotation is None else annotation
 
@@ -356,6 +362,148 @@ class EndForEachItem(RegionCloser):
     ) -> tuple[tuple[Any, ...], Any]:
         output_type = _list_annotation(_normalize_annotation(current_output))
         return (Any,), output_type
+
+
+class _MeasuredIterable:
+    def __init__(
+        self,
+        current: Iterable[object],
+        execute_region: Any,
+        span: PendingSpan | None,
+        cfg: Any,
+    ) -> None:
+        self._source = iter(current)
+        self._execute_region = execute_region
+        self._span = span
+        self._cfg = cfg
+        self._item_span_operator_type = span.operator_type if span is not None else None
+        self._item_traces: InvocationTrace | None = InvocationTrace() if span is not None else None
+        self._seen = 0
+        self._emitted = 0
+        self._dropped = 0
+        self._closed_early = False
+        self._source_closed = False
+        self._finalized = False
+
+    def __iter__(self) -> "_MeasuredIterable":
+        return self
+
+    def __next__(self) -> Any:
+        if self._finalized:
+            raise StopIteration
+
+        while True:
+            try:
+                value = next(self._source)
+            except StopIteration:
+                self._finalize()
+                raise
+
+            self._seen += 1
+            collecting = self._is_collecting()
+            child_trace = InvocationTrace() if collecting else _NoOpTrace()
+            item_label = f"[{self._seen - 1}]"
+            try:
+                result, child_trace = self._execute_region(value, child_trace)
+            except Exception:
+                if collecting:
+                    incoming = cast(InvocationTrace, child_trace)
+                    if self._item_traces is not None:
+                        self._item_traces.spans.append(
+                            StepSpan(
+                                item_label,
+                                0.0,
+                                incoming.total_duration_s,
+                                error=True,
+                                child_trace=incoming,
+                                operator_type=self._item_span_operator_type,
+                            )
+                        )
+                        self._item_traces.total_duration_s += incoming.total_duration_s
+                self._finalize(error=True)
+                raise
+
+            if collecting:
+                incoming = cast(InvocationTrace, child_trace)
+                if self._item_traces is not None:
+                    self._item_traces.spans.append(
+                        StepSpan(
+                            item_label,
+                            0.0,
+                            incoming.total_duration_s,
+                            child_trace=incoming,
+                            operator_type=self._item_span_operator_type,
+                        )
+                    )
+                    self._item_traces.total_duration_s += incoming.total_duration_s
+
+            if result is SHORT_CIRCUIT:
+                self._dropped += 1
+                continue
+
+            self._emitted += 1
+            return result
+
+    def close(self) -> None:
+        if self._finalized:
+            return
+        self._closed_early = True
+        self._finalize()
+
+    def _disable_tracing(self) -> None:
+        self._span = None
+        self._cfg = None
+        self._item_span_operator_type = None
+        self._item_traces = None
+
+    def _is_collecting(self) -> bool:
+        if self._span is None:
+            return False
+        if self._span.is_closed:
+            self._disable_tracing()
+            return False
+        if self._item_traces is None:
+            self._item_traces = InvocationTrace()
+        return True
+
+    def _close_source(self) -> Exception | None:
+        if self._source_closed:
+            return None
+        self._source_closed = True
+        try:
+            _close_iterable(self._source)
+        except Exception as exc:
+            return exc
+        return None
+
+    def _finalize(self, *, error: bool = False) -> None:
+        if self._finalized:
+            return
+        self._finalized = True
+        # Finalization must remain best-effort even when source cleanup fails so
+        # traces/callbacks are not lost during early termination.
+        close_error = self._close_source()
+        span = self._span
+        cfg = self._cfg
+        child_trace = self._item_traces
+
+        self._source = iter(())
+        self._execute_region = None
+        self._disable_tracing()
+
+        if span is not None and not span.is_closed:
+            span.duration_s = child_trace.total_duration_s if child_trace is not None else 0.0
+            span.error = error or close_error is not None
+            span.attributes = {
+                "seen": self._seen,
+                "emitted": self._emitted,
+                "dropped": self._dropped,
+                "closed_early": self._closed_early,
+            }
+            if cfg and cfg.capture_shapes:
+                span.output_shape = f"list [{self._emitted}]"
+            if child_trace is not None:
+                span.child_trace = child_trace
 
 
 class ForEachItem(RegionOpener):
@@ -414,12 +562,64 @@ class ForEachItem(RegionOpener):
                 operator_config=operator_config(self) if (cfg and cfg.capture_config) else {},
                 input_shape=_extract_shape(current) if (cfg and cfg.capture_shapes) else None,
                 output_shape=_extract_shape(results) if (cfg and cfg.capture_shapes) else None,
-                output_value=snapshot(results) if (cfg and cfg._capture_outputs) else None,
+                output_value=capture_value(results) if (cfg and cfg._capture_outputs) else None,
                 child_trace=merged_trace if collecting else None,
                 operator_type=type(self),
             )
         )
         return results
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations, expand_output_annotation, validation_error_type
+        return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
+
+
+class EndLazyForEachItem(RegionCloser):
+    """Region boundary for lazy per-item processing."""
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations, expand_output_annotation, validation_error_type
+        output_type = _iterable_annotation(_normalize_annotation(current_output))
+        return (Any,), output_type
+
+
+class LazyForEachItem(RegionOpener):
+    """Run the enclosed operators once per source item and stream results lazily."""
+
+    closing_type = EndLazyForEachItem
+
+    def run_region(
+        self,
+        current: Iterable[object],
+        label: str,
+        execute_region: Any,
+        trace: InvocationTrace | _NoOpTrace,
+        cfg: Any,
+    ) -> _MeasuredIterable:
+        span = None
+        if isinstance(trace, InvocationTrace):
+            span = PendingSpan(
+                label,
+                time.perf_counter(),
+                0.0,
+                operator_config=operator_config(self) if (cfg and cfg.capture_config) else {},
+                input_shape=_extract_shape(current) if (cfg and cfg.capture_shapes) else None,
+                operator_type=type(self),
+            )
+            cast(list[Any], trace.spans).append(span)
+        return _MeasuredIterable(current, execute_region, span, cfg)
 
     def resolve_contract(
         self,

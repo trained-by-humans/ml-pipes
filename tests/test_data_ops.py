@@ -10,9 +10,11 @@ from ml_pipes import (
     DistinctBy,
     DropNull,
     EndForEachItem,
+    EndLazyForEachItem,
     FilterNotNull,
     Filter,
     ForEachItem,
+    LazyForEachItem,
     Map,
     MapNotNull,
     MapValue,
@@ -638,6 +640,110 @@ def test_for_each_sequence_ops_are_visible_in_child_trace() -> None:
         "1:Skip",
         "2:Take",
     ]
+
+
+def test_lazy_for_each_only_processes_consumed_items() -> None:
+    seen: list[int] = []
+
+    def mark(value: int) -> int:
+        seen.append(value)
+        return value * 10
+
+    pipeline = Pipeline(
+        [
+            LazyForEachItem(),
+            mark,
+            EndLazyForEachItem(),
+            Take(2),
+        ]
+    )
+
+    assert pipeline([1, 2, 3, 4]) == [10, 20]
+    assert seen == [1, 2]
+
+
+def test_lazy_for_each_returns_measured_iterable_when_it_is_terminal() -> None:
+    pipeline = Pipeline(
+        [
+            LazyForEachItem(),
+            _multiply_by_ten,
+            EndLazyForEachItem(),
+        ]
+    )
+
+    result = pipeline([1, 2, 3])
+
+    assert not isinstance(result, list)
+    assert iter(result) is result
+    assert list(result) == [10, 20, 30]
+
+
+def test_inspect_does_not_materialize_terminal_lazy_stream() -> None:
+    seen: list[int] = []
+
+    def mark(value: int) -> int:
+        seen.append(value)
+        return value * 10
+
+    pipeline = Pipeline(
+        [
+            LazyForEachItem(),
+            mark,
+            EndLazyForEachItem(),
+        ]
+    )
+
+    result = pipeline.inspect([1, 2, 3])
+
+    assert seen == []
+    assert [span.label for span in result.spans] == ["0:LazyForEachItem"]
+    assert result.spans[0].duration_s == 0.0
+    assert result.spans[0].attributes == {}
+    assert result.spans[0].child_trace is None
+
+
+def test_lazy_for_each_trace_resolves_when_downstream_take_closes_stream() -> None:
+    pipeline = Pipeline(
+        [
+            LazyForEachItem(),
+            _multiply_by_ten,
+            EndLazyForEachItem(),
+            Take(2),
+        ]
+    )
+
+    result = pipeline.inspect([1, 2, 3, 4])
+
+    assert [span.label for span in result.spans] == ["0:LazyForEachItem", "3:Take"]
+    assert result.spans[0].attributes == {
+        "seen": 2,
+        "emitted": 2,
+        "dropped": 0,
+        "closed_early": True,
+    }
+    assert result.spans[0].output_value is None
+    assert result.spans[0].child_trace is not None
+    assert [span.label for span in result.spans[0].child_trace.spans] == ["[0]", "[1]"]
+    assert all(span.child_trace is not None for span in result.spans[0].child_trace.spans)
+    assert [span.label for span in result.spans[0].child_trace.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
+
+
+def test_lazy_for_each_validates_as_sequence_for_downstream_collection_ops() -> None:
+    contract = Pipeline(
+        [
+            LazyForEachItem(),
+            Map(_text_length),
+            EndLazyForEachItem(),
+            Take(2),
+            AcceptIntList(),
+        ]
+    ).validate(
+        pipeline_input_type=list[str],
+        strict=True,
+    )
+
+    assert contract.input_type == list[str]
+    assert contract.output_type == str
 
 
 def test_for_each_item_pipeline_composes_primitives_for_dataset_processing() -> None:

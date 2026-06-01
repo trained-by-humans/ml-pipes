@@ -8,15 +8,19 @@ import pytest
 
 from ml_pipes import (
     Batch,
+    EndLazyForEachItem,
     InspectionSerializer,
     InvocationTrace,
+    LazyForEachItem,
     Pipeline,
     PrintCollector,
     SHORT_CIRCUIT,
+    StepSpan,
     TraceCollector,
     TracingConfig,
     UnBatch,
 )
+from ml_pipes.tracing import PendingSpan, freeze_trace
 from ml_pipes.types import TensorPayload
 
 
@@ -30,6 +34,24 @@ class _Capture(TraceCollector):
 
     def on_trace(self, trace: InvocationTrace) -> None:
         self.traces.append(trace)
+
+
+class _ClosableSource:
+    def __init__(self, values: list[int], *, fail_on_close: bool = False) -> None:
+        self._values = iter(values)
+        self.fail_on_close = fail_on_close
+        self.close_calls = 0
+
+    def __iter__(self) -> "_ClosableSource":
+        return self
+
+    def __next__(self) -> int:
+        return next(self._values)
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.fail_on_close:
+            raise RuntimeError("close failed")
 
 
 def _double(x: int) -> int:
@@ -64,6 +86,91 @@ def test_collector_called_once_per_invocation():
     p(1)
     p(2)
     assert len(cap.traces) == 2
+
+
+def test_lazy_top_level_trace_delivered_immediately_as_unmaterialized() -> None:
+    p, cap = _make_pipeline([LazyForEachItem(), _double, EndLazyForEachItem()])
+
+    result = p([1, 2, 3])
+
+    assert len(cap.traces) == 1
+    assert cap.traces[0].spans[0].duration_s == 0.0
+    assert cap.traces[0].spans[0].attributes == {}
+    assert cap.traces[0].spans[0].child_trace is None
+    assert list(result) == [2, 4, 6]
+    assert cap.traces[0].spans[0].attributes == {}
+    assert cap.traces[0].spans[0].child_trace is None
+
+
+def test_freeze_trace_closes_pending_spans_and_returns_detached_step_spans() -> None:
+    child_pending = PendingSpan(
+        label="[0]",
+        start_time=0.0,
+        duration_s=0.01,
+        attributes={"seen": 1},
+    )
+    parent_pending = PendingSpan(
+        label="0:LazyForEachItem",
+        start_time=0.0,
+        duration_s=0.02,
+        attributes={"seen": 1, "emitted": 1},
+        child_trace=InvocationTrace(
+            spans=[child_pending],
+            total_duration_s=0.01,
+        ),
+    )
+    trace = InvocationTrace(spans=[parent_pending], total_duration_s=0.02)
+
+    frozen = freeze_trace(trace)
+
+    assert isinstance(frozen.spans[0], StepSpan)
+    assert frozen.spans[0].attributes == {"seen": 1, "emitted": 1}
+    assert frozen.spans[0].child_trace is not None
+    assert isinstance(frozen.spans[0].child_trace.spans[0], StepSpan)
+    assert frozen.spans[0].child_trace.spans[0].attributes == {"seen": 1}
+    assert parent_pending.is_closed is True
+    assert child_pending.is_closed is True
+
+    parent_pending.attributes = {"seen": 9}
+    child_pending.duration_s = 9.0
+
+    assert frozen.spans[0].attributes == {"seen": 1, "emitted": 1}
+    assert frozen.spans[0].child_trace.spans[0].duration_s == 0.01
+
+
+def test_lazy_top_level_close_only_closes_source_once() -> None:
+    source = _ClosableSource([1, 2, 3])
+    p, cap = _make_pipeline([LazyForEachItem(), _double, EndLazyForEachItem()])
+
+    result = p(source)
+    assert len(cap.traces) == 1
+    assert cap.traces[0].spans[0].attributes == {}
+    assert next(result) == 2
+
+    result.close()
+
+    assert source.close_calls == 1
+    assert len(cap.traces) == 1
+    assert cap.traces[0].spans[0].attributes == {}
+    assert cap.traces[0].spans[0].child_trace is None
+
+
+def test_lazy_top_level_close_failure_does_not_rewrite_delivered_trace() -> None:
+    source = _ClosableSource([1, 2, 3], fail_on_close=True)
+    p, cap = _make_pipeline([LazyForEachItem(), _double, EndLazyForEachItem()])
+
+    result = p(source)
+    assert len(cap.traces) == 1
+    assert cap.traces[0].spans[0].attributes == {}
+    assert next(result) == 2
+
+    result.close()
+
+    assert source.close_calls == 1
+    assert len(cap.traces) == 1
+    assert cap.traces[0].spans[0].error is False
+    assert cap.traces[0].spans[0].attributes == {}
+    assert cap.traces[0].spans[0].child_trace is None
 
 
 def test_spans_ordered_and_labelled():
