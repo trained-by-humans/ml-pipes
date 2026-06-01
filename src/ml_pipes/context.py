@@ -8,6 +8,7 @@ from .operator import Operator
 
 SelectorPart = str | int
 Selector = SelectorPart | tuple[SelectorPart, ...]
+_MISSING_ANNOTATION = object()
 
 
 def _normalize_selector(selector: Selector | None) -> tuple[SelectorPart, ...]:
@@ -47,7 +48,7 @@ def _select_annotation(
             return Any
         if isinstance(part, int):
             parts = expand_output_annotation(current)
-            if part >= len(parts):
+            if not (-len(parts) <= part < len(parts)):
                 if validation_error_type is not None:
                     raise validation_error_type(
                         f"Store({store_name!r}, {selector_label}) is out of bounds "
@@ -56,16 +57,27 @@ def _select_annotation(
                 return Any
             current = parts[part]
             continue
-        current = _attribute_annotation(current, part)
+        current = _attribute_annotation(
+            current,
+            part,
+            validation_error_type=validation_error_type,
+            owner_label=f"{store_name}({selector_label})",
+        )
     return current
 
 
-def _attribute_annotation(annotation: Any, attribute: str) -> Any:
+def _attribute_annotation(
+    annotation: Any,
+    attribute: str,
+    *,
+    validation_error_type: type[Exception] | None = None,
+    owner_label: str | None = None,
+) -> Any:
     owner = annotation if isinstance(annotation, type) else None
     if owner is None:
         return Any
 
-    property_obj = getattr(owner, attribute, None)
+    property_obj = getattr(owner, attribute, _MISSING_ANNOTATION)
     if isinstance(property_obj, property):
         try:
             return get_type_hints(property_obj.fget).get("return", Any)
@@ -73,9 +85,15 @@ def _attribute_annotation(annotation: Any, attribute: str) -> Any:
             return Any
 
     try:
-        return get_type_hints(owner).get(attribute, Any)
+        hints = get_type_hints(owner)
     except Exception:
         return Any
+    if attribute in hints:
+        return hints[attribute]
+    if validation_error_type is not None and property_obj is _MISSING_ANNOTATION:
+        label = owner_label or repr(owner)
+        raise validation_error_type(f"{label} has no attribute {attribute!r}")
+    return Any
 
 
 @dataclass(frozen=True)
