@@ -5,7 +5,7 @@ import inspect
 from typing import Any, TypeVar
 
 _CAPTURED_ARGS_ATTR = "__ml_pipes_operator_args__"
-_SIGNATURE_ATTR = "__ml_pipes_operator_signature__"
+_CONSTRUCTOR_SIGNATURE_ATTR = "__ml_pipes_operator_constructor_signature__"
 _WRAPPED_ATTR = "__ml_pipes_operator_wrapped__"
 _EXCLUDED_ARGUMENTS = {"self", "pipeline"}
 
@@ -19,30 +19,33 @@ def Operator(cls: _OperatorType) -> _OperatorType:
 
     init = cls.__init__
     target = getattr(init, "__wrapped__", init)
-    signature = inspect.signature(target)
-    public_signature = _public_signature(signature)
-    setattr(cls, _SIGNATURE_ATTR, public_signature)
+    constructor_signature = inspect.signature(target)
+    public_constructor_signature = _public_constructor_signature(constructor_signature)
+    setattr(cls, _CONSTRUCTOR_SIGNATURE_ATTR, public_constructor_signature)
 
     if getattr(init, _WRAPPED_ATTR, False):
         return cls
 
     @functools.wraps(target)
     def wrapped(self, *args, **kwargs):
-        bound = signature.bind(self, *args, **kwargs)
-        object.__setattr__(self, _CAPTURED_ARGS_ATTR, _capture_arguments(signature, bound.arguments))
+        bound = constructor_signature.bind(self, *args, **kwargs)
+        object.__setattr__(self, _CAPTURED_ARGS_ATTR, _capture_arguments(constructor_signature, bound.arguments))
         return target(self, *args, **kwargs)
 
-    wrapped.__signature__ = signature
+    wrapped.__signature__ = constructor_signature
     setattr(wrapped, _WRAPPED_ATTR, True)
     cls.__init__ = wrapped
     return cls
 
 
-def get_operator_signature(operator: Any) -> inspect.Signature | None:
+def get_operator_constructor_signature(operator: Any) -> inspect.Signature | None:
+    if inspect.isfunction(operator) or inspect.ismethod(operator) or inspect.isbuiltin(operator):
+        return None
+
     target = operator if inspect.isclass(operator) else type(operator)
-    signature = getattr(target, _SIGNATURE_ATTR, None)
-    if isinstance(signature, inspect.Signature):
-        return signature
+    constructor_signature = getattr(target, _CONSTRUCTOR_SIGNATURE_ATTR, None)
+    if isinstance(constructor_signature, inspect.Signature):
+        return constructor_signature
 
     init = getattr(target, "__init__", None)
     if init is None:
@@ -50,7 +53,7 @@ def get_operator_signature(operator: Any) -> inspect.Signature | None:
 
     raw_target = getattr(init, "__wrapped__", init)
     try:
-        return _public_signature(inspect.signature(raw_target))
+        return _public_constructor_signature(inspect.signature(raw_target))
     except (TypeError, ValueError):
         return None
 
@@ -64,11 +67,11 @@ def get_operator_args(operator: Any, *, include_defaults: bool = False) -> dict[
     if not include_defaults:
         return result
 
-    signature = get_operator_signature(operator)
-    if signature is None:
+    constructor_signature = get_operator_constructor_signature(operator)
+    if constructor_signature is None:
         return result
 
-    for name, parameter in signature.parameters.items():
+    for name, parameter in constructor_signature.parameters.items():
         if name in result:
             continue
         if parameter.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
@@ -81,11 +84,11 @@ def get_operator_args(operator: Any, *, include_defaults: bool = False) -> dict[
 
 
 def _capture_arguments(
-    signature: inspect.Signature,
+    constructor_signature: inspect.Signature,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     captured: dict[str, Any] = {}
-    for name, parameter in signature.parameters.items():
+    for name, parameter in constructor_signature.parameters.items():
         if name in _EXCLUDED_ARGUMENTS:
             continue
         if name not in arguments:
@@ -100,11 +103,11 @@ def _capture_arguments(
     return captured
 
 
-def _public_signature(signature: inspect.Signature) -> inspect.Signature:
-    return signature.replace(
+def _public_constructor_signature(constructor_signature: inspect.Signature) -> inspect.Signature:
+    return constructor_signature.replace(
         parameters=[
             parameter
-            for parameter in signature.parameters.values()
+            for parameter in constructor_signature.parameters.values()
             if parameter.name not in _EXCLUDED_ARGUMENTS
         ]
     )

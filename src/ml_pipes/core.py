@@ -98,7 +98,7 @@ class Pipeline:
         return InspectionResult(collector.trace.spans)
 
     def describe(self, expand_embedded: bool = True) -> PipelineDescription:
-        """Describe, print, and return the static pipeline structure."""
+        """Describe, print, and return the operator chain."""
         description = self._describe(expand_embedded=expand_embedded)
         print(description)
         return description
@@ -107,8 +107,7 @@ class Pipeline:
         return _build_pipeline_description(
             operators=self.operators,
             expand_embedded=expand_embedded,
-            label_for=lambda i: self._label_for(i),
-            is_pipeline_operator=lambda operator: isinstance(operator, Embed),
+            is_embedded_operator=lambda operator: isinstance(operator, Embed),
         )
 
     def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
