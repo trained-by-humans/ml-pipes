@@ -1,8 +1,10 @@
+from collections.abc import Iterable
+
 import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Pipeline, PipelineValidationError, Scatter, Gather, Batch, UnBatch
-from ml_pipes.validation import is_single_annotation_compatible
+from ml_pipes.validation import _resolve_typevar_output, is_single_annotation_compatible
 
 
 class IntToString:
@@ -434,6 +436,18 @@ def test_unbound_typevar_in_produced_accepts_anything():
     assert is_single_annotation_compatible(_U, _Base)
 
 
+def test_generic_subtyping_accepts_list_as_iterable():
+    assert is_single_annotation_compatible(list[int], Iterable[int])
+
+
+def test_generic_covariance_accepts_child_list_as_base_iterable():
+    assert is_single_annotation_compatible(list[_Child], Iterable[_Base])
+
+
+def test_generic_invariance_rejects_child_list_as_base_list():
+    assert not is_single_annotation_compatible(list[_Child], list[_Base])
+
+
 def test_typevar_output_resolved_when_same_typevar_flows_through_input():
     # ~_T in both input and output preserves the concrete subtype.
     class IdentityTypeVar:
@@ -497,30 +511,40 @@ def test_unbound_identity_typevar_preserves_declared_input_type():
     pipeline.validate(pipeline_input_type=_Child)
 
 
-def test_typevar_output_not_resolved_from_multi_parameter_signature():
+def test_resolve_typevar_output_recursively_specializes_nested_output():
+    assert _resolve_typevar_output(list[_T], _Child, (_T,)) == list[_Child]
+
+
+def test_resolve_typevar_output_through_generic_subtyping():
+    assert _resolve_typevar_output(
+        list[_U],
+        list[int | None],
+        (Iterable[_U | None],),
+    ) == list[int]
+
+
+def test_typevar_output_resolved_from_multi_parameter_signature():
     class MultiInputTypeVar:
         def __call__(self, x: _T, y: int) -> _T: ...  # type: ignore[empty-body]
 
     class ConsumesChild:
         def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
 
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([MultiInputTypeVar(), ConsumesChild()]).validate(
-            pipeline_input_type=tuple[_Child, int]
-        )
+    Pipeline([MultiInputTypeVar(), ConsumesChild()]).validate(
+        pipeline_input_type=tuple[_Child, int]
+    )
 
 
-def test_nested_typevar_output_is_not_recursively_specialized():
+def test_nested_typevar_output_is_recursively_specialized():
     class WrapTypeVarInList:
         def __call__(self, x: _T) -> list[_T]: ...  # type: ignore[empty-body]
 
     class ConsumesChildList:
         def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
 
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([WrapTypeVarInList(), ConsumesChildList()]).validate(
-            pipeline_input_type=_Child
-        )
+    Pipeline([WrapTypeVarInList(), ConsumesChildList()]).validate(
+        pipeline_input_type=_Child
+    )
 
 
 def test_typevar_pipeline_rejects_narrower_consumer():

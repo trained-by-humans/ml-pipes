@@ -1,55 +1,7 @@
 from __future__ import annotations
 
 from .concurrent_collector import ConcurrentCollector
-from ..tracing import InvocationTrace, StepSpan
-
-
-def _update_optional_mean(current: float | None, incoming: float | None, n: int) -> float | None:
-    if incoming is None:
-        return current
-    if current is None or n <= 1:
-        return incoming
-    return current + (incoming - current) / n
-
-
-def _aggregate_traces(avg: InvocationTrace, incoming: InvocationTrace, n: int) -> None:
-    """Update *avg* in-place with a new *incoming* trace using an incremental mean.
-
-    *n* is the new total call count (already incremented by the caller) so that
-    avg = prev_avg + (incoming - prev_avg) / n.
-    """
-    avg.total_duration_s += (incoming.total_duration_s - avg.total_duration_s) / n
-    avg.batch_size = _update_optional_mean(avg.batch_size, incoming.batch_size, n)
-
-    incoming_by_label = {s.label: s for s in incoming.spans}
-
-    for span in avg.spans:
-        inc = incoming_by_label.get(span.label)
-        if inc is None:
-            continue
-        span.duration_s += (inc.duration_s - span.duration_s) / n
-        if span.child_trace is not None and inc.child_trace is not None:
-            span.child_trace.workers = inc.child_trace.workers
-            _aggregate_traces(span.child_trace, inc.child_trace, n)
-
-    existing_labels = {s.label for s in avg.spans}
-    for label, inc in incoming_by_label.items():
-        if label not in existing_labels:
-            child = (
-                InvocationTrace(
-                    batch_size=inc.child_trace.batch_size,
-                    workers=inc.child_trace.workers,
-                )
-                if inc.child_trace is not None else None
-            )
-            avg.spans.append(StepSpan(
-                label=label,
-                start_time=0.0,
-                duration_s=inc.duration_s,
-                child_trace=child,
-            ))
-            if child is not None:
-                _aggregate_traces(child, inc.child_trace, 1)
+from ..tracing import InvocationTrace, accumulate_trace_mean
 
 
 class AggregateCollector(ConcurrentCollector):
@@ -68,7 +20,7 @@ class AggregateCollector(ConcurrentCollector):
 
     def _collect(self, trace: InvocationTrace) -> None:
         self._calls += 1
-        _aggregate_traces(self._avg_trace, trace, self._calls)
+        accumulate_trace_mean(self._avg_trace, trace, self._calls)
 
     @property
     def total_calls(self) -> int:

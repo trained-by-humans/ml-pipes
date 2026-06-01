@@ -17,16 +17,11 @@ from .tracing import (
     TracingConfig,
     _NoOpTrace,
     _extract_shape,
+    capture_value,
+    freeze_trace,
     operator_config,
-    snapshot,
 )
-from .validation import (
-    PipelineValidationError,
-    PipelineValidator,
-    TypeContract,
-    format_annotation,
-    is_annotation_compatible,
-)
+from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
 
 _log = logging.getLogger(__name__)
 
@@ -119,13 +114,13 @@ class Pipeline:
         trace = InvocationTrace() if cfg is not None else _NoOpTrace()
         try:
             result, trace = self._execute(value, trace=trace, cfg=cfg)
+            return result
         finally:
             if cfg is not None:
                 try:
-                    cfg.collector.on_trace(trace)
+                    cfg.collector.on_trace(freeze_trace(trace))
                 except Exception:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
-        return result
 
     def validate(
         self,
@@ -240,7 +235,7 @@ class Pipeline:
                 operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
                 input_shape=_extract_shape(current) if capture else None,
                 output_shape=_extract_shape(result) if capture else None,
-                output_value=snapshot(result) if (cfg and cfg._capture_outputs) else None,
+                output_value=capture_value(result) if (cfg and cfg._capture_outputs) else None,
                 operator_type=type(operator),
             )
         )
