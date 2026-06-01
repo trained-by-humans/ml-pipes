@@ -83,6 +83,86 @@ class _Capture(TraceCollector):
         del trace
 
 
+def _named_identity(value: Any) -> Any:
+    return value
+
+
+_MODULE_LAMBDA = lambda value: value
+
+
+class _CallableArg:
+    def __call__(self, value: Any) -> Any:
+        return value
+
+
+class _CustomArg:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"_CustomArg(name={self.name!r})"
+
+
+@Operator
+class PrimitiveArgsOp:
+    def __init__(
+        self,
+        flag: bool,
+        count: int,
+        ratio: float,
+        label: str,
+        payload: bytes,
+        maybe: None,
+    ) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
+class StructuredArgsOp:
+    def __init__(
+        self,
+        coords: tuple[int, int],
+        names: list[str],
+        mapping: dict[str, int],
+        classes: set[int],
+        frozen: frozenset[str],
+    ) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
+class CallableArgOp:
+    def __init__(self, fn: Any) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
+class CustomObjectArgOp:
+    def __init__(self, payload: Any) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
+class VariadicArgsOp:
+    def __init__(self, *items: str, **named: Any) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
 def test_describe_flat_typed_pipeline_uses_static_signatures_and_args():
     description = Pipeline([ConfiguredIntToString(prefix="id:"), StringToFloat()]).describe()
 
@@ -117,6 +197,103 @@ def test_get_operator_args_can_expand_defaults_on_read():
 
     assert get_operator_args(operator) == {}
     assert get_operator_args(operator, include_defaults=True) == {"prefix": ""}
+
+
+def test_describe_formats_primitive_constructor_args():
+    description = Pipeline([
+        PrimitiveArgsOp(
+            flag=True,
+            count=3,
+            ratio=0.5,
+            label="hello",
+            payload=b"data",
+            maybe=None,
+        )
+    ]).describe()
+
+    assert description.steps[0].operator_args == {
+        "flag": True,
+        "count": 3,
+        "ratio": 0.5,
+        "label": "hello",
+        "payload": b"data",
+        "maybe": None,
+    }
+    assert (
+        "{'flag': True, 'count': 3, 'ratio': 0.5, 'label': 'hello', "
+        "'payload': b'data', 'maybe': None}"
+    ) in repr(description)
+
+
+def test_describe_formats_structured_constructor_args():
+    description = Pipeline([
+        StructuredArgsOp(
+            coords=(1, 2),
+            names=["a", "b"],
+            mapping={"left": 1, "right": 2},
+            classes={2, 0},
+            frozen=frozenset({"beta", "alpha"}),
+        )
+    ]).describe()
+
+    assert description.steps[0].operator_args == {
+        "coords": (1, 2),
+        "names": ["a", "b"],
+        "mapping": {"left": 1, "right": 2},
+        "classes": {0, 2},
+        "frozen": frozenset({"alpha", "beta"}),
+    }
+    assert (
+        "{'coords': (1, 2), 'names': ['a', 'b'], 'mapping': {'left': 1, 'right': 2}, "
+        "'classes': {0, 2}, 'frozen': frozenset({'alpha', 'beta'})}"
+    ) in repr(description)
+
+
+def test_operator_args_capture_lambda_and_describe_with_lambda_label():
+    operator = CallableArgOp(_MODULE_LAMBDA)
+    description = Pipeline([operator]).describe()
+
+    assert get_operator_args(operator)["fn"] is _MODULE_LAMBDA
+    assert "'fn': <lambda>" in repr(description)
+
+
+def test_operator_args_capture_function_and_describe_with_function_name():
+    operator = CallableArgOp(_named_identity)
+    description = Pipeline([operator]).describe()
+
+    assert get_operator_args(operator)["fn"] is _named_identity
+    assert "'fn': _named_identity" in repr(description)
+
+
+def test_operator_args_capture_callable_object_and_describe_with_type_name():
+    callable_object = _CallableArg()
+    operator = CallableArgOp(callable_object)
+    description = Pipeline([operator]).describe()
+
+    assert get_operator_args(operator)["fn"] is callable_object
+    assert "'fn': _CallableArg" in repr(description)
+
+
+def test_operator_args_capture_custom_object_and_describe_with_repr():
+    payload = _CustomArg("example")
+    operator = CustomObjectArgOp(payload)
+    description = Pipeline([operator]).describe()
+
+    assert get_operator_args(operator)["payload"] is payload
+    assert "'payload': _CustomArg(name='example')" in repr(description)
+
+
+def test_get_operator_args_captures_varargs_and_kwargs():
+    operator = VariadicArgsOp("first", "second", alpha=1, beta="two")
+
+    assert get_operator_args(operator) == {
+        "items": ("first", "second"),
+        "named": {"alpha": 1, "beta": "two"},
+    }
+    assert (
+        "{'items': ('first', 'second'), 'named': {'alpha': 1, 'beta': 'two'}}"
+        in repr(Pipeline([operator]).describe())
+    )
 
 
 def test_describe_prints_description_once_for_top_level_call(capsys):
