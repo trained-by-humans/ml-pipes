@@ -35,6 +35,7 @@ from .data_ops import (
 from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
 from .factory import data_factory, pipeline_factory, InputFn
 from .inspection import (
+    GroupBlock,
     HtmlRenderer,
     ImageBlock,
     InspectionResult,
@@ -202,6 +203,7 @@ __all__ = [
     "Filter",
     "FilterNotNull",
     "HtmlRenderer",
+    "GroupBlock",
     "ImagePayload",
     "InspectionResult",
     "InspectionSerializer",
