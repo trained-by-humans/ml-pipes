@@ -8,9 +8,11 @@ import pytest
 
 from ml_pipes import (
     Batch,
+    InspectionSerializer,
     InvocationTrace,
     Pipeline,
     PrintCollector,
+    SHORT_CIRCUIT,
     TraceCollector,
     TracingConfig,
     UnBatch,
@@ -36,6 +38,11 @@ def _double(x: int) -> int:
 
 def _add_one(x: int) -> int:
     return x + 1
+
+
+def _short_circuit(x: int) -> object:
+    del x
+    return SHORT_CIRCUIT
 
 
 def _failing(x: int) -> int:
@@ -108,6 +115,20 @@ def test_error_trace_contains_completed_and_error_spans():
     assert any(s.label.endswith("_failing") and s.error for s in trace.spans)
     # _add_one never ran — should not appear
     assert not any(s.label.endswith("_add_one") for s in trace.spans)
+
+
+def test_inspect_short_circuit_stops_downstream_and_round_trips() -> None:
+    pipeline = Pipeline([_double, _short_circuit, _add_one])
+
+    result = pipeline.inspect(3)
+
+    assert [span.label for span in result.spans] == ["0:_double", "1:_short_circuit"]
+    assert result.spans[1].output_value is SHORT_CIRCUIT
+
+    restored = InspectionSerializer().loads(InspectionSerializer().dumps(result))
+
+    assert [span.label for span in restored.spans] == ["0:_double", "1:_short_circuit"]
+    assert restored.spans[1].output_value is SHORT_CIRCUIT
 
 
 def test_set_tracing_window():

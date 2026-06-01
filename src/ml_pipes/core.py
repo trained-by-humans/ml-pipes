@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
 from .context import Context, ContextOp
+from .control import SHORT_CIRCUIT
 from .inspection import InspectionResult, _CaptureCollector
 from .operator import Operator, OperatorDescription
 from .region import RegionCloser, RegionOpener
@@ -201,6 +202,9 @@ class Pipeline:
                 else:
                     current, context = self._step(i, current, context, trace, cfg)
                     i += 1
+
+                if current is SHORT_CIRCUIT:
+                    break
         finally:
             trace.total_duration_s = time.perf_counter() - t_start
         return current, trace

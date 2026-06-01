@@ -11,6 +11,7 @@ from .benchmark import (
 )
 from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
 from .context import Context, Recall, Store
+from .control import SHORT_CIRCUIT
 from .core import Pipeline, PipelineDescription, Embed, embed, Inline, inline, Operator, OperatorLike
 from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
 from .factory import data_factory, pipeline_factory, InputFn
@@ -26,6 +27,7 @@ from .inspection import (
     StepView,
     TextBlock,
 )
+from .operator import OperatorArgument, OperatorDescription
 from .ops import (
     AsType,
     ArgMax,
@@ -104,7 +106,6 @@ from .types import (
     TensorRegistry,
 )
 from .validation import PipelineValidationError, TypeContract
-from .operator import OperatorArgument, OperatorDescription
 
 __all__ = [
     "Benchmark",
@@ -119,6 +120,7 @@ __all__ = [
     "data_factory",
     "pipeline_factory",
     "InputFn",
+    "SHORT_CIRCUIT",
     "ArgMax",
     "AggregateCollector",
     "ConcurrentCollector",

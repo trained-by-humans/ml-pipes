@@ -1,4 +1,4 @@
-from ml_pipes import Context, Pipeline
+from ml_pipes import Context, Pipeline, SHORT_CIRCUIT
 
 
 class IntToString:
@@ -14,6 +14,22 @@ class StringToFloat:
 class BoolToBytes:
     def __call__(self, value: bool) -> bytes:
         return b"1" if value else b"0"
+
+
+class ReturnShortCircuit:
+    def __call__(self, value: object) -> object:
+        del value
+        return SHORT_CIRCUIT
+
+
+class FailIfCalled:
+    def __init__(self) -> None:
+        self.called = False
+
+    def __call__(self, value: object) -> object:
+        del value
+        self.called = True
+        raise AssertionError("downstream operator should not run after SHORT_CIRCUIT")
 
 
 def test_context_add_returns_new_context():
@@ -78,3 +94,11 @@ def test_pipeline_can_store_select_and_recall_values():
     )
 
     assert pipeline(9) == "9|9"
+
+
+def test_pipeline_short_circuit_stops_execution() -> None:
+    fail = FailIfCalled()
+    pipeline = Pipeline([IntToString(), ReturnShortCircuit(), fail])
+
+    assert pipeline(7) is SHORT_CIRCUIT
+    assert fail.called is False
