@@ -3,12 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 from ml_pipes import (
+    AsType,
     Batch,
     Extract,
+    FilterPredictionsByClass,
+    FilterPredictionsByScore,
+    FilterTensorsByScore,
     Gather,
     ImagePayload,
-    Infer,
     InvocationTrace,
+    Operator,
     Pipeline,
     Recall,
     ResizeTransform,
@@ -19,8 +23,10 @@ from ml_pipes import (
     UnBatch,
     embed,
 )
+from ml_pipes.operator import get_operator_args
 
 
+@Operator
 class ConfiguredIntToString:
     def __init__(self, prefix: str = "") -> None:
         self.prefix = prefix
@@ -64,34 +70,24 @@ class ImageOp:
         raise NotImplementedError
 
 
+class LegacyConfiguredIntToString:
+    def __init__(self, prefix: str = "") -> None:
+        self.prefix = prefix
+
+    def __call__(self, value: int) -> str:
+        return f"{self.prefix}{value}"
+
+
 class _Capture(TraceCollector):
     def on_trace(self, trace: InvocationTrace) -> None:
         del trace
 
 
-class _FakeSession:
-    def __init__(self, providers: tuple[str, ...]) -> None:
-        self._providers = providers
-
-    def get_providers(self) -> tuple[str, ...]:
-        return self._providers
-
-
-class _FakeDType:
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-
-class _FakeLock:
-    def acquire(self) -> None:
-        return None
-
-
-def test_describe_flat_typed_pipeline_uses_static_signatures_and_config():
+def test_describe_flat_typed_pipeline_uses_static_signatures_and_args():
     description = Pipeline([ConfiguredIntToString(prefix="id:"), StringToFloat()]).describe()
 
     assert [
-        (step.label, step.kind, step.input_type, step.output_type, step.operator_config)
+        (step.label, step.kind, step.input_type, step.output_type, step.operator_args)
         for step in description.steps
     ] == [
         ("0:ConfiguredIntToString", "operator", int, str, {"prefix": "id:"}),
@@ -103,11 +99,24 @@ def test_describe_flat_typed_pipeline_uses_static_signatures_and_config():
     assert text.startswith("PipelineDescription\n\n")
     assert "Step" in text and " | " in text
     assert "-+-" in text
-    assert "Cfg" in text
+    assert "Args" in text
     assert "0:ConfiguredIntToString" in text
     assert "1:StringToFloat" in text
     assert "{'prefix': 'id:'}" in text
     assert "operator" not in text
+
+
+def test_describe_operator_config_aliases_operator_args():
+    step = Pipeline([ConfiguredIntToString(prefix="id:")]).describe().steps[0]
+
+    assert step.operator_config is step.operator_args
+
+
+def test_get_operator_args_can_expand_defaults_on_read():
+    operator = ConfiguredIntToString()
+
+    assert get_operator_args(operator) == {}
+    assert get_operator_args(operator, include_defaults=True) == {"prefix": ""}
 
 
 def test_describe_prints_description_once_for_top_level_call(capsys):
@@ -136,8 +145,8 @@ def test_describe_context_ops_fall_back_to_any_without_validation():
         (Any, Any),
         (Any, Any),
     ]
-    assert description.steps[0].operator_config == {"name": "saved"}
-    assert description.steps[1].operator_config == {"name": "saved"}
+    assert description.steps[0].operator_args == {"name": "saved"}
+    assert description.steps[1].operator_args == {"name": "saved"}
 
 
 def test_describe_always_groups_batch_region():
@@ -150,9 +159,9 @@ def test_describe_always_groups_batch_region():
     assert region.kind == "region"
     assert region.input_type is Any
     assert region.output_type is Any
-    assert region.operator_config == {"size": 2, "timeout": 0.05}
+    assert region.operator_args == {"size": 2}
     assert [
-        (step.label, step.kind, step.input_type, step.output_type, step.operator_config)
+        (step.label, step.kind, step.input_type, step.output_type, step.operator_args)
         for step in region.children
     ] == [
         ("1:ListIdentity", "operator", list[int], list[int], {}),
@@ -169,12 +178,12 @@ def test_describe_always_groups_scatter_region():
     assert region.kind == "region"
     assert region.input_type is Any
     assert region.output_type is Any
-    assert region.operator_config == {"max_concurrency": 1}
+    assert region.operator_args == {"max_concurrency": 1}
     assert [
-        (step.label, step.input_type, step.output_type, step.operator_config)
+        (step.label, step.input_type, step.output_type, step.operator_args)
         for step in region.children
     ] == [
-        ("1:ConfiguredIntToString", int, str, {"prefix": ""}),
+        ("1:ConfiguredIntToString", int, str, {}),
     ]
 
 
@@ -189,12 +198,12 @@ def test_describe_expands_embedded_pipeline_by_default():
     assert embedded.kind == "pipeline"
     assert embedded.input_type is int
     assert embedded.output_type is float
-    assert embedded.operator_config == {}
+    assert embedded.operator_args == {}
     assert [
-        (step.label, step.kind, step.input_type, step.output_type, step.operator_config)
+        (step.label, step.kind, step.input_type, step.output_type, step.operator_args)
         for step in embedded.children
     ] == [
-        ("0:ConfiguredIntToString", "operator", int, str, {"prefix": ""}),
+        ("0:ConfiguredIntToString", "operator", int, str, {}),
         ("1:StringToFloat", "operator", str, float, {}),
     ]
 
@@ -279,31 +288,39 @@ def test_describe_leaves_unmatched_regions_as_plain_operators():
 def test_describe_preserves_extract_constructor_config():
     description = Pipeline([Extract("output0", as_="preds")]).describe()
 
-    assert description.steps[0].operator_config == {
-        "names": "output0",
+    assert description.steps[0].operator_args == {
+        "names": ("output0",),
         "as_": "preds",
     }
 
 
-def test_describe_preserves_infer_constructor_config_from_normalized_state():
-    infer = object.__new__(Infer)
-    infer.model_path = "model.onnx"
-    infer.session = _FakeSession(("CPUExecutionProvider",))
-    infer.input_name = "images"
-    infer.input_layout = "NCHW"
-    infer.model_dtype = _FakeDType("float16")
-    infer.output_layouts = ("NCHW",)
-    infer._lock = _FakeLock()
-    infer.output_names = ("output0",)
+def test_describe_preserves_explicit_none_constructor_args():
+    description = Pipeline([Extract("output0", as_=None)]).describe()
 
-    description = Pipeline([infer]).describe()
-
-    assert description.steps[0].operator_config == {
-        "model_path": "model.onnx",
-        "providers": ("CPUExecutionProvider",),
-        "input_name": "images",
-        "input_layout": "NCHW",
-        "dtype": "float16",
-        "output_layouts": ("NCHW",),
-        "serialize": True,
+    assert description.steps[0].operator_args == {
+        "names": ("output0",),
+        "as_": None,
     }
+
+
+def test_describe_captures_wrapper_constructor_args():
+    assert Pipeline([FilterPredictionsByClass({0, 2})]).describe().steps[0].operator_args == {
+        "classes": {0, 2},
+    }
+    assert Pipeline([FilterPredictionsByScore(0.7)]).describe().steps[0].operator_args == {
+        "min_score": 0.7,
+    }
+    assert Pipeline([FilterTensorsByScore("boxes", score="scores", min_score=0.75)]).describe().steps[0].operator_args == {
+        "srcs": ("boxes",),
+        "score": "scores",
+        "min_score": 0.75,
+    }
+    assert Pipeline([AsType("float16")]).describe().steps[0].operator_args == {
+        "dtype": "float16",
+    }
+
+
+def test_describe_undecorated_custom_operator_shows_no_args():
+    description = Pipeline([LegacyConfiguredIntToString(prefix="id:")]).describe()
+
+    assert description.steps[0].operator_args == {}

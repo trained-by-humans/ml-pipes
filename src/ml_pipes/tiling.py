@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .operator import Operator
 from .types import Detections, ImagePayload
 
 
@@ -37,6 +38,7 @@ def _compute_tile_rects(
     return rects
 
 
+@Operator
 class Tile:
     """Slice an ImagePayload into overlapping tiles.
 

@@ -6,10 +6,8 @@ from dataclasses import dataclass, field
 from types import UnionType
 from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
+from .operator import get_operator_args
 from .region import RegionOpener
-
-_MISSING = object()
-_DISPLAY_SAFE = (bool, int, float, str, bytes, type(None))
 
 
 # ---------------------------------------------------------------------------
@@ -28,22 +26,46 @@ class _TableLayout:
     label_width: int
     input_width: int
     output_width: int
-    config_width: int
-    show_config: bool
+    args_width: int
+    show_args: bool
     base_indent: int
 
 
-@dataclass
+@dataclass(init=False)
 class StepDescription:
     label: str
     kind: str
     input_type: Any
     output_type: Any
-    operator_config: dict[str, Any] = field(default_factory=dict)
+    operator_args: dict[str, Any] = field(default_factory=dict)
     children: list["StepDescription"] = field(default_factory=list)
+
+    def __init__(
+        self,
+        label: str,
+        kind: str,
+        input_type: Any,
+        output_type: Any,
+        operator_args: dict[str, Any] | None = None,
+        *,
+        operator_config: dict[str, Any] | None = None,
+        children: list["StepDescription"] | None = None,
+    ) -> None:
+        self.label = label
+        self.kind = kind
+        self.input_type = input_type
+        self.output_type = output_type
+        self.operator_args = operator_args if operator_args is not None else (
+            operator_config if operator_config is not None else {}
+        )
+        self.children = children if children is not None else []
 
     def __repr__(self) -> str:
         return _format_step_line(self)
+
+    @property
+    def operator_config(self) -> dict[str, Any]:
+        return self.operator_args
 
 
 @dataclass
@@ -116,7 +138,7 @@ def _build_description_steps(
     while i < end:
         operator = operators[i]
         label = label_for(i)
-        operator_config = _describe_operator_config(operator)
+        operator_args = _describe_operator_args(operator)
         step_boundary = step_boundaries[i]
 
         if isinstance(operator, RegionOpener):
@@ -134,7 +156,7 @@ def _build_description_steps(
                         kind="region",
                         input_type=Any,
                         output_type=Any,
-                        operator_config=operator_config,
+                        operator_args=operator_args,
                         children=_build_description_steps(
                             operators=operators,
                             step_boundaries=step_boundaries,
@@ -163,7 +185,7 @@ def _build_description_steps(
                     kind="pipeline",
                     input_type=embedded_boundary.input_type,
                     output_type=embedded_boundary.output_type,
-                    operator_config=operator_config,
+                    operator_args=operator_args,
                     children=embedded_description.steps if expand_embedded else [],
                 )
             )
@@ -176,7 +198,7 @@ def _build_description_steps(
                 kind="operator",
                 input_type=step_boundary.input_type,
                 output_type=step_boundary.output_type,
-                operator_config=operator_config,
+                operator_args=operator_args,
             )
         )
         i += 1
@@ -307,95 +329,14 @@ def _collapse_input_types(input_types: tuple[Any, ...]) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Operator config extraction
+# Operator argument extraction
 # ---------------------------------------------------------------------------
 
 
-def _describe_operator_config(operator: Any) -> dict[str, Any]:
+def _describe_operator_args(operator: Any) -> dict[str, Any]:
     if inspect.isfunction(operator) or inspect.ismethod(operator):
         return {}
-
-    try:
-        signature = inspect.signature(type(operator).__init__)
-    except (TypeError, ValueError):
-        return {}
-
-    config: dict[str, Any] = {}
-    for parameter in signature.parameters.values():
-        if parameter.name in {"self", "pipeline"}:
-            continue
-        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
-            continue
-
-        value = _lookup_constructor_arg(operator, parameter.name)
-        if value is _MISSING or value is None:
-            continue
-        config[parameter.name] = _normalize_config_value(value)
-
-    return config
-
-
-def _lookup_constructor_arg(operator: Any, name: str) -> Any:
-    for owner in (operator, getattr(operator, "gate", None), getattr(operator, "_inner", None)):
-        if owner is None:
-            continue
-        for attr_name in (name, f"_{name}"):
-            if hasattr(owner, attr_name):
-                return getattr(owner, attr_name)
-    return _lookup_derived_config_arg(operator, name)
-
-
-def _lookup_derived_config_arg(operator: Any, name: str) -> Any:
-    if hasattr(operator, "_mapping"):
-        mapping = getattr(operator, "_mapping")
-        if isinstance(mapping, dict):
-            names = tuple(mapping)
-            aliases = tuple(mapping.values())
-            if name == "names":
-                return _collapse_variadic_config_value(names)
-            if name == "as_" and aliases != names:
-                return _collapse_variadic_config_value(aliases)
-
-    if name == "providers":
-        session = getattr(operator, "session", None)
-        get_providers = getattr(session, "get_providers", None)
-        if callable(get_providers):
-            try:
-                return tuple(get_providers())
-            except Exception:
-                return _MISSING
-
-    if name == "dtype" and hasattr(operator, "model_dtype"):
-        dtype = getattr(operator, "model_dtype")
-        if dtype is None:
-            return None
-        dtype_name = getattr(dtype, "name", None)
-        if isinstance(dtype_name, str):
-            return dtype_name
-        return str(dtype)
-
-    if name == "serialize" and hasattr(operator, "_lock"):
-        return hasattr(getattr(operator, "_lock"), "acquire")
-
-    return _MISSING
-
-
-def _collapse_variadic_config_value(values: tuple[Any, ...]) -> Any:
-    if len(values) == 1:
-        return values[0]
-    return values
-
-
-def _normalize_config_value(value: Any) -> Any:
-    if isinstance(value, _DISPLAY_SAFE):
-        return value
-    if isinstance(value, tuple):
-        return tuple(_normalize_config_value(item) for item in value)
-    if isinstance(value, list):
-        return [_normalize_config_value(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _normalize_config_value(item) for key, item in value.items()}
-    return repr(value)
+    return get_operator_args(operator)
 
 
 # ---------------------------------------------------------------------------
@@ -411,17 +352,17 @@ def _build_table_layout(
     label_width = len((" " * base_indent) + "Step")
     input_width = len("Input")
     output_width = len("Output")
-    config_width = len("Cfg")
-    show_config = False
+    args_width = len("Args")
+    show_args = False
 
     def visit(items: list[StepDescription], indent: int) -> None:
-        nonlocal label_width, input_width, output_width, config_width, show_config
+        nonlocal label_width, input_width, output_width, args_width, show_args
         for step in items:
             label_width = max(label_width, len((" " * indent) + step.label))
             input_width = max(input_width, len(_format_annotation(step.input_type)))
             output_width = max(output_width, len(_format_annotation(step.output_type)))
-            config_width = max(config_width, len(_format_config(step.operator_config)))
-            show_config = show_config or bool(step.operator_config)
+            args_width = max(args_width, len(_format_args(step.operator_args)))
+            show_args = show_args or bool(step.operator_args)
             if step.children:
                 visit(step.children, indent + 2)
 
@@ -430,8 +371,8 @@ def _build_table_layout(
         label_width=label_width,
         input_width=input_width,
         output_width=output_width,
-        config_width=config_width,
-        show_config=show_config,
+        args_width=args_width,
+        show_args=show_args,
         base_indent=base_indent,
     )
 
@@ -444,12 +385,12 @@ def _format_step_line(
     label = (" " * indent) + step.label
     input_type = _format_annotation(step.input_type)
     output_type = _format_annotation(step.output_type)
-    config = _format_config(step.operator_config)
+    args = _format_args(step.operator_args)
 
     if layout is None:
         line = f"{label}  Input: {input_type}  Output: {output_type}"
-        if config:
-            line += f"  Cfg: {config}"
+        if args:
+            line += f"  Args: {args}"
         return line
 
     line = (
@@ -457,8 +398,8 @@ def _format_step_line(
         f"{input_type:<{layout.input_width}} | "
         f"{output_type:<{layout.output_width}}"
     )
-    if layout.show_config:
-        line += f" | {config:<{layout.config_width}}"
+    if layout.show_args:
+        line += f" | {args:<{layout.args_width}}"
     return line.rstrip()
 
 
@@ -468,8 +409,8 @@ def _format_table_header(layout: _TableLayout) -> str:
         f"{'Input':<{layout.input_width}} | "
         f"{'Output':<{layout.output_width}}"
     )
-    if layout.show_config:
-        line += f" | {'Cfg':<{layout.config_width}}"
+    if layout.show_args:
+        line += f" | {'Args':<{layout.args_width}}"
     return line
 
 
@@ -479,13 +420,55 @@ def _format_table_separator(layout: _TableLayout) -> str:
         f"-+-{'-' * layout.input_width}"
         f"-+-{'-' * layout.output_width}"
     )
-    if layout.show_config:
-        line += f"-+-{'-' * layout.config_width}"
+    if layout.show_args:
+        line += f"-+-{'-' * layout.args_width}"
     return line
 
 
-def _format_config(config: dict[str, Any]) -> str:
-    return repr(config) if config else ""
+def _format_args(args: dict[str, Any]) -> str:
+    if not args:
+        return ""
+    return "{" + ", ".join(f"{key!r}: {_format_arg_value(value)}" for key, value in args.items()) + "}"
+
+
+def _format_arg_value(value: Any) -> str:
+    if isinstance(value, (bool, int, float, str, bytes, type(None))):
+        return repr(value)
+    if isinstance(value, tuple):
+        items = ", ".join(_format_arg_value(item) for item in value)
+        if len(value) == 1:
+            items += ","
+        return f"({items})"
+    if isinstance(value, list):
+        return "[" + ", ".join(_format_arg_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(
+            f"{_format_arg_value(key)}: {_format_arg_value(item)}"
+            for key, item in value.items()
+        ) + "}"
+    if isinstance(value, set):
+        if not value:
+            return "set()"
+        items = sorted((_format_arg_value(item) for item in value), key=str)
+        return "{" + ", ".join(items) + "}"
+    if isinstance(value, frozenset):
+        if not value:
+            return "frozenset()"
+        items = sorted((_format_arg_value(item) for item in value), key=str)
+        return "frozenset({" + ", ".join(items) + "})"
+    if callable(value):
+        return _callable_label(value)
+    return repr(value)
+
+
+def _callable_label(value: Any) -> str:
+    qualname = getattr(value, "__qualname__", None)
+    if isinstance(qualname, str):
+        return qualname
+    name = getattr(value, "__name__", None)
+    if isinstance(name, str):
+        return name
+    return type(value).__qualname__
 
 
 def _format_annotation(annotation: Any) -> str:

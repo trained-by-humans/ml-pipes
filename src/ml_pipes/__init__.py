@@ -11,7 +11,7 @@ from .benchmark import (
 )
 from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
 from .context import Context, Recall, Store
-from .core import Pipeline, Embed, embed, Inline, inline, Operator
+from .core import Pipeline, Embed, embed, Inline, inline, Operator, OperatorLike
 from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
 from .description import PipelineDescription, StepDescription
 from .factory import data_factory, pipeline_factory, InputFn
@@ -192,6 +192,7 @@ __all__ = [
     "MapToObjects",
     "NMM",
     "Operator",
+    "OperatorLike",
     "NMS",
     "Normalize",
     "Pick",

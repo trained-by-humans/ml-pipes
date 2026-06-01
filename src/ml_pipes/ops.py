@@ -15,6 +15,7 @@ import numpy as np
 
 from .batch import BatchGate, LeaderBatch
 from .context import Selector, SelectorPart, _attribute_annotation, _normalize_selector
+from .operator import Operator
 from .region import RegionCloser, RegionOpener
 from .scatter import ScatterGate
 from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
@@ -71,6 +72,7 @@ class Decode:
         return ImagePayload(array=image, color_space="BGR", layout="HWC")
 
 
+@Operator
 class Resize:
     def __init__(
         self,
@@ -165,6 +167,7 @@ class Resize:
         return mapping[self.interpolation]
 
 
+@Operator
 class ConvertColorSpace:
     def __init__(self, output_color_space: Literal["RGB", "BGR"]):
         if output_color_space not in {"RGB", "BGR"}:
@@ -198,6 +201,7 @@ class ConvertColorSpace:
         )
 
 
+@Operator
 class Normalize:
     def __init__(
         self,
@@ -255,6 +259,7 @@ class Normalize:
         return payload
 
 
+@Operator
 class AsType:
     def __init__(self, dtype: str, src: str | None = None, as_: str | None = None):
         self.dtype = np.dtype(dtype)
@@ -310,6 +315,7 @@ class AsType:
 # Inference
 # ---------------------------------------------------------------------------
 
+@Operator
 class Infer:
     def __init__(
         self,
@@ -382,6 +388,7 @@ class Infer:
 # Registry creation
 # ---------------------------------------------------------------------------
 
+@Operator
 class Extract:
     """Extracts named tensors from RuntimeOutputs into a TensorRegistry.
 
@@ -418,6 +425,7 @@ class Extract:
 # Tensor shape manipulation
 # ---------------------------------------------------------------------------
 
+@Operator
 class Squeeze:
     """Removes size-1 dimensions from a named tensor."""
 
@@ -432,6 +440,7 @@ class Squeeze:
         return registry
 
 
+@Operator
 class Transpose:
     """Transposes a named tensor."""
 
@@ -449,6 +458,7 @@ class Transpose:
 # Tensor indexing
 # ---------------------------------------------------------------------------
 
+@Operator
 class Slice:
     """Slices columns from a 2D named tensor: as_ = src[:, s].
 
@@ -465,6 +475,7 @@ class Slice:
         return registry
 
 
+@Operator
 class GatherRows:
     """Gathers values: as_ = src[arange(N), indices].
 
@@ -483,6 +494,7 @@ class GatherRows:
         return registry
 
 
+@Operator
 class TopK:
     """Selects the top-k values and indices from a 1D named tensor."""
 
@@ -510,6 +522,7 @@ class TopK:
         return registry
 
 
+@Operator
 class TopKIndices2D:
     """Selects top-k values from a 2D named tensor and returns row/column indices."""
 
@@ -552,6 +565,7 @@ class TopKIndices2D:
 # Math / activations
 # ---------------------------------------------------------------------------
 
+@Operator
 class ArgMax:
     """Computes argmax along an axis: as_ = argmax(src, axis).
 
@@ -576,6 +590,7 @@ class ArgMax:
 GatherScores = GatherRows
 
 
+@Operator
 class Softmax:
     """Applies softmax along an axis.
 
@@ -599,6 +614,7 @@ class Softmax:
         return registry
 
 
+@Operator
 class Sigmoid:
     """Applies sigmoid elementwise.
 
@@ -620,6 +636,7 @@ class Sigmoid:
         return registry
 
 
+@Operator
 class MultiplyTensors:
     """Multiplies two registry tensors elementwise using NumPy broadcasting.
 
@@ -640,6 +657,7 @@ class MultiplyTensors:
 # Geometry
 # ---------------------------------------------------------------------------
 
+@Operator
 class Scale:
     """Multiplies a tensor element-wise by a scalar or a per-column broadcast array.
 
@@ -667,6 +685,7 @@ BoxFormat = Literal["xyxy", "xywh", "cxcywh"]
 _BOX_FORMATS: frozenset[str] = frozenset(get_args(BoxFormat))
 
 
+@Operator
 class ConvertBoxFormat:
     """Converts bounding boxes between coordinate formats.
 
@@ -729,6 +748,7 @@ class ConvertBoxFormat:
 # Detection
 # ---------------------------------------------------------------------------
 
+@Operator
 class NMS:
     """Non-Maximum Suppression on named tensors in a TensorRegistry.
 
@@ -830,6 +850,7 @@ class NMS:
         return intersection / union
 
 
+@Operator
 class NMM:
     """Non-Maximum Merge on a Detections object.
 
@@ -892,6 +913,7 @@ class NMM:
         return Detections(boxes=merged_boxes, scores=merged_scores, classes=merged_classes)
 
 
+@Operator
 class CreateTensorMask:
     """Creates a boolean mask tensor from one source tensor."""
 
@@ -908,6 +930,7 @@ class CreateTensorMask:
 BinarizeTensor = CreateTensorMask
 
 
+@Operator
 class CreateTensorMaskByThreshold:
     """Creates a boolean mask tensor by thresholding one source tensor."""
 
@@ -946,6 +969,7 @@ def _resolve_multi_output_names(
     return tuple(as_)
 
 
+@Operator
 class ApplyTensorMask:
     """Applies one boolean mask to one or more tensors in-place."""
 
@@ -961,6 +985,7 @@ class ApplyTensorMask:
         return registry
 
 
+@Operator
 class SelectTensors:
     """Applies one integer index tensor to one or more tensors in-place."""
 
@@ -976,6 +1001,7 @@ class SelectTensors:
         return registry
 
 
+@Operator
 class FilterTensors:
     """Filters one or more tensors using a single user-supplied predicate.
 
@@ -1003,6 +1029,7 @@ class FilterTensors:
         return registry
 
 
+@Operator
 class FilterTensorsByScore:
     """Shorthand for FilterTensors with a score threshold predicate.
 
@@ -1030,6 +1057,7 @@ class FilterTensorsByScore:
         return self._inner(registry)
 
 
+@Operator
 class FilterTensorsByMasksArea:
     """Filters tensors by the minimum foreground area of one masks tensor."""
 
@@ -1055,6 +1083,7 @@ class FilterTensorsByMasksArea:
         return registry
 
 
+@Operator
 class MapTensor:
     """Applies a function to a tensor and writes the result to as_ (defaults to src).
 
@@ -1072,6 +1101,7 @@ class MapTensor:
         return registry
 
 
+@Operator
 class SortTensorsBy:
     """Sorts one or more registry tensors by the values of a key tensor."""
 
@@ -1097,6 +1127,7 @@ class SortTensorsBy:
         return registry
 
 
+@Operator
 class WeightMasksByScores:
     """Weights each mask by its corresponding 1D score.
 
@@ -1124,6 +1155,7 @@ class WeightMasksByScores:
 # ---------------------------------------------------------------------------
 
 
+@Operator
 class ResizeMasks:
     """Resizes a stack of masks to a target shape."""
 
@@ -1145,6 +1177,7 @@ class ResizeMasks:
         return registry
 
 
+@Operator
 class MeanMaskScores:
     """Computes one mean score per mask from dense mask values.
 
@@ -1177,6 +1210,7 @@ class MeanMaskScores:
         return registry
 
 
+@Operator
 class MasksToBoxes:
     """Converts binary masks into xyxy boxes."""
 
@@ -1205,6 +1239,7 @@ class MasksToBoxes:
         return registry
 
 
+@Operator
 class ReconstructMasks:
     """Reconstructs raw segmentation masks from coefficients and prototypes.
 
@@ -1229,6 +1264,7 @@ class ReconstructMasks:
 # Projection
 # ---------------------------------------------------------------------------
 
+@Operator
 class ProjectBoxes:
     """Projects boxes from model space to original image space.
 
@@ -1252,6 +1288,7 @@ class ProjectBoxes:
         return registry
 
 
+@Operator
 class ProjectMasks:
     """Zeros prototype masks outside each bounding box, then upsamples to original image size.
 
@@ -1311,6 +1348,7 @@ class ProjectMasks:
         return registry
 
 
+@Operator
 class ProjectRoIMasks:
     """Resizes per-instance RoI masks to their bounding boxes and embeds them into a full-image canvas.
 
@@ -1355,6 +1393,7 @@ class ProjectRoIMasks:
 # Output conversion
 # ---------------------------------------------------------------------------
 
+@Operator
 class ToDetections:
     """Converts named tensors in a TensorRegistry to a Detections output."""
 
@@ -1371,6 +1410,7 @@ class ToDetections:
         )
 
 
+@Operator
 class ToSegmentations:
     """Converts named tensors in a TensorRegistry to a Segmentations output."""
 
@@ -1403,6 +1443,7 @@ class ToSegmentations:
 PredictionT = TypeVar("PredictionT", bound=Prediction)
 
 
+@Operator
 class FilterPredictions:
     """Filters a Prediction (or any subclass) using a user-supplied predicate.
 
@@ -1420,6 +1461,7 @@ class FilterPredictions:
         return prediction.filter(self.predicate(prediction))
 
 
+@Operator
 class FilterPredictionsByClass:
     """Keep only predictions whose class is in the given set."""
 
@@ -1430,6 +1472,7 @@ class FilterPredictionsByClass:
         return self._inner(prediction)
 
 
+@Operator
 class FilterPredictionsByScore:
     """Drop predictions below min_score."""
 
@@ -1440,6 +1483,7 @@ class FilterPredictionsByScore:
         return self._inner(prediction)
 
 
+@Operator
 class FilterPredictionsByArea:
     """Drop predictions whose box area (xyxy) falls outside [min_area, max_area] pixel²."""
 
@@ -1498,6 +1542,7 @@ class SideEffectOp(ABC):
 # Visualization / side-effects
 # ---------------------------------------------------------------------------
 
+@Operator
 class DrawBoxes:
     def __init__(
         self,
@@ -1546,6 +1591,7 @@ class DrawBoxes:
         return f"{name} {score:.2f}"
 
 
+@Operator
 class DrawMasks:
     def __init__(
         self,
@@ -1579,6 +1625,7 @@ class DrawMasks:
         )
 
 
+@Operator
 class SaveImage(SideEffectOp):
     def __init__(self, output_path: str | Path, at: int | None = None):
         self.output_path = Path(output_path)
@@ -1597,6 +1644,7 @@ class SaveImage(SideEffectOp):
             raise ValueError(f"Failed to write image: {self.output_path}")
 
 
+@Operator
 class MapToObjects:
     # Intentionally uses `object → Any`: output type depends on runtime `at` indexing
     # and cannot be resolved without custom resolve_contract. Not a SideEffectOp.
@@ -1633,6 +1681,7 @@ class MapToObjects:
         return records
 
 
+@Operator
 class LogDetections(SideEffectOp):
     def __init__(
         self,
@@ -1670,6 +1719,7 @@ class LogDetections(SideEffectOp):
 # Control
 # ---------------------------------------------------------------------------
 
+@Operator
 class Select:
     def __init__(self, *selector: SelectorPart):
         if not selector:
@@ -1743,6 +1793,7 @@ class Select:
         return (current_output,), selected
 
 
+@Operator
 class Pick:
     """Selects one or more elements from a tuple by index, discarding the rest.
 
@@ -1821,6 +1872,7 @@ class UnBatch(RegionCloser):
         return (Any,), Any
 
 
+@Operator
 class Batch(RegionOpener):
     """
     Batch coordination entry point.
@@ -1929,6 +1981,7 @@ class Gather(RegionCloser):
         return (Any,), out
 
 
+@Operator
 class Scatter(RegionOpener):
     """
     Scatter/Gather entry point.

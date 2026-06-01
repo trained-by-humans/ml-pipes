@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Mapping, get_type_hints
 
+from .operator import Operator
+
 SelectorPart = str | int
 Selector = SelectorPart | tuple[SelectorPart, ...]
 
@@ -128,6 +130,7 @@ class ContextOp(ABC):
         raise NotImplementedError
 
 
+@Operator
 class Store(ContextOp):
     def __init__(
         self,
@@ -192,6 +195,7 @@ class Store(ContextOp):
         )
 
 
+@Operator
 class Recall(ContextOp):
     def __init__(self, name: str, index: int | None = None):
         self.name = name

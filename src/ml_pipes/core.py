@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable
 from .context import Context, ContextOp
 from .description import PipelineDescription, _build_pipeline_description
 from .inspection import InspectionResult, _CaptureCollector
+from .operator import Operator
 from .region import RegionCloser, RegionOpener
 from .tracing import (
     InvocationTrace,
@@ -26,7 +27,7 @@ from .validation import PipelineValidationError, PipelineValidator, TypeContract
 _log = logging.getLogger(__name__)
 
 # An operator is anything the pipeline can execute as a step.
-Operator = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
+OperatorLike = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class Region:
 class Pipeline:
     def __init__(
         self,
-        operators: Iterable[Operator],
+        operators: Iterable[OperatorLike],
         auto_validate: bool = False,
         tracing: TracingConfig | None = None,
     ):
@@ -62,7 +63,7 @@ class Pipeline:
             if collector is not None else None
         )
 
-    def extend(self, operators: Iterable[Operator]) -> Pipeline:
+    def extend(self, operators: Iterable[OperatorLike]) -> Pipeline:
         """Append *operators* to this pipeline in place and return self."""
         self.operators.extend(self._flatten(list(operators)))
         if self._auto_validate:
@@ -255,7 +256,7 @@ class Pipeline:
         return j - 1
 
     @staticmethod
-    def _flatten(operators: list[Operator]) -> list[Operator]:
+    def _flatten(operators: list[OperatorLike]) -> list[OperatorLike]:
         flat = []
         for op in operators:
             if isinstance(op, Inline):
@@ -318,6 +319,7 @@ def inline(pipeline: Pipeline) -> Inline:
     return Inline(pipeline)
 
 
+@Operator
 class Embed:
     """
     Embed a pipeline as a single isolated step inside an outer pipeline.
