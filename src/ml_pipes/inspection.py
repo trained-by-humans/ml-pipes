@@ -303,6 +303,12 @@ def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
     return [TextBlock(span.label.split(":", 1)[-1], rows)]
 
 
+def _build_span_metadata(span: StepSpan) -> dict[str, Any]:
+    metadata = dict(span.operator_config)
+    metadata.update({f"attributes.{key}": value for key, value in span.attributes.items()})
+    return metadata
+
+
 # ---------------------------------------------------------------------------
 # Formatter registries and builtin registration
 # ---------------------------------------------------------------------------
@@ -436,7 +442,7 @@ def _register_builtin_formatters() -> None:
         span: StepSpan,
         last_image: np.ndarray | None,
     ) -> tuple[StepView, np.ndarray | None]:
-        return StepView(span.label, span.operator_config, _region_summary_block(span)), last_image
+        return StepView(span.label, _build_span_metadata(span), _region_summary_block(span)), last_image
 
     def _tile_span_formatter(
         span: StepSpan,
@@ -445,7 +451,7 @@ def _register_builtin_formatters() -> None:
         val = span.output_value
         raw_blocks = _format_tiles_with_overlay(val[0], val[1]) if val is not None else []
         blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
-        return StepView(span.label, span.operator_config, blocks), image_to_carry
+        return StepView(span.label, _build_span_metadata(span), blocks), image_to_carry
 
     _SPAN_FORMATTERS[RegionOpener] = _region_span_formatter
     _SPAN_FORMATTERS[Tile]         = _tile_span_formatter
@@ -553,7 +559,7 @@ class PipelineInspector:
     ) -> tuple[StepView, np.ndarray | None]:
         if span.error:
             children, _ = self._trace_to_views(span.child_trace, last_image)
-            return StepView(span.label, span.operator_config, [], error=True, children=children), last_image
+            return StepView(span.label, _build_span_metadata(span), [], error=True, children=children), last_image
 
         op_type = span.operator_type
         formatter = (
@@ -570,7 +576,7 @@ class PipelineInspector:
         raw_blocks = self._output_to_blocks(span.output_value)
         blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
         children, _ = self._trace_to_views(span.child_trace, image_to_carry)
-        return StepView(span.label, span.operator_config, blocks, children=children), image_to_carry
+        return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
 
     def _trace_to_views(
         self,
