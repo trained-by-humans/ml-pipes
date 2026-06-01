@@ -335,6 +335,12 @@ def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
     return [TextBlock(span.label.split(":", 1)[-1], rows)]
 
 
+def _build_span_metadata(span: StepSpan) -> dict[str, Any]:
+    metadata = dict(span.operator_config)
+    metadata.update({f"attributes.{key}": value for key, value in span.attributes.items()})
+    return metadata
+
+
 def _normalize_html_orientation(orientation: str) -> str:
     normalized = orientation.strip().lower()
     if normalized not in _HTML_ORIENTATIONS:
@@ -471,7 +477,7 @@ def _register_builtin_formatters() -> None:
         span: StepSpan,
         last_image: np.ndarray | None,
     ) -> tuple[StepView, np.ndarray | None]:
-        return StepView(span.label, span.operator_config, _region_summary_block(span)), last_image
+        return StepView(span.label, _build_span_metadata(span), _region_summary_block(span)), last_image
 
     def _tile_span_formatter(
         span: StepSpan,
@@ -644,7 +650,7 @@ class PipelineInspector:
     ) -> tuple[StepView, np.ndarray | None]:
         if span.error:
             children, _ = self._trace_to_views(span.child_trace, last_image)
-            return StepView(span.label, span.operator_config, [], error=True, children=children), last_image
+            return StepView(span.label, _build_span_metadata(span), [], error=True, children=children), last_image
 
         op_type = span.operator_type
         formatter = (
@@ -661,7 +667,7 @@ class PipelineInspector:
         raw_blocks = self._output_to_blocks(span.output_value)
         blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
         children, _ = self._trace_to_views(span.child_trace, image_to_carry)
-        return StepView(span.label, span.operator_config, blocks, children=children), image_to_carry
+        return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
 
     def _trace_to_views(
         self,
