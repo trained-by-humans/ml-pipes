@@ -723,9 +723,7 @@ def test_lazy_for_each_trace_resolves_when_downstream_take_closes_stream() -> No
     }
     assert result.spans[0].output_value is None
     assert result.spans[0].child_trace is not None
-    assert [span.label for span in result.spans[0].child_trace.spans] == ["[0]", "[1]"]
-    assert all(span.child_trace is not None for span in result.spans[0].child_trace.spans)
-    assert [span.label for span in result.spans[0].child_trace.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
+    assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
 
 
 def test_lazy_for_each_validates_as_sequence_for_downstream_collection_ops() -> None:

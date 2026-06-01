@@ -376,8 +376,8 @@ class _MeasuredIterable:
         self._execute_region = execute_region
         self._span = span
         self._cfg = cfg
-        self._item_span_operator_type = span.operator_type if span is not None else None
-        self._item_traces: InvocationTrace | None = InvocationTrace() if span is not None else None
+        self._item_traces: list[InvocationTrace] | None = [] if span is not None else None
+        self._item_trace_duration_s = 0.0
         self._seen = 0
         self._emitted = 0
         self._dropped = 0
@@ -402,40 +402,22 @@ class _MeasuredIterable:
             self._seen += 1
             collecting = self._is_collecting()
             child_trace = InvocationTrace() if collecting else _NoOpTrace()
-            item_label = f"[{self._seen - 1}]"
             try:
                 result, child_trace = self._execute_region(value, child_trace)
             except Exception:
                 if collecting:
                     incoming = cast(InvocationTrace, child_trace)
                     if self._item_traces is not None:
-                        self._item_traces.spans.append(
-                            StepSpan(
-                                item_label,
-                                0.0,
-                                incoming.total_duration_s,
-                                error=True,
-                                child_trace=incoming,
-                                operator_type=self._item_span_operator_type,
-                            )
-                        )
-                        self._item_traces.total_duration_s += incoming.total_duration_s
+                        self._item_traces.append(incoming)
+                        self._item_trace_duration_s += incoming.total_duration_s
                 self._finalize(error=True)
                 raise
 
             if collecting:
                 incoming = cast(InvocationTrace, child_trace)
                 if self._item_traces is not None:
-                    self._item_traces.spans.append(
-                        StepSpan(
-                            item_label,
-                            0.0,
-                            incoming.total_duration_s,
-                            child_trace=incoming,
-                            operator_type=self._item_span_operator_type,
-                        )
-                    )
-                    self._item_traces.total_duration_s += incoming.total_duration_s
+                    self._item_traces.append(incoming)
+                    self._item_trace_duration_s += incoming.total_duration_s
 
             if result is SHORT_CIRCUIT:
                 self._dropped += 1
@@ -453,7 +435,6 @@ class _MeasuredIterable:
     def _disable_tracing(self) -> None:
         self._span = None
         self._cfg = None
-        self._item_span_operator_type = None
         self._item_traces = None
 
     def _is_collecting(self) -> bool:
@@ -463,7 +444,7 @@ class _MeasuredIterable:
             self._disable_tracing()
             return False
         if self._item_traces is None:
-            self._item_traces = InvocationTrace()
+            self._item_traces = []
         return True
 
     def _close_source(self) -> Exception | None:
@@ -485,14 +466,15 @@ class _MeasuredIterable:
         close_error = self._close_source()
         span = self._span
         cfg = self._cfg
-        child_trace = self._item_traces
+        item_traces = self._item_traces
 
         self._source = iter(())
         self._execute_region = None
         self._disable_tracing()
 
         if span is not None and not span.is_closed:
-            span.duration_s = child_trace.total_duration_s if child_trace is not None else 0.0
+            child_trace = merge_traces(item_traces) if item_traces else None
+            span.duration_s = self._item_trace_duration_s
             span.error = error or close_error is not None
             span.attributes = {
                 "seen": self._seen,
