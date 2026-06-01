@@ -30,6 +30,7 @@ pip-wheel-metadata/
 # Downloaded demo assets and runtime outputs
 .example_assets/
 examples/.example_assets/
+dataset/
 *.onnx
 *.pt
 *.jpg
