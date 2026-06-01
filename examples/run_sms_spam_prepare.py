@@ -29,7 +29,7 @@ import urllib.request
 import zipfile
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,6 @@ from ml_pipes import (
     EndForEachItem,
     EndLazyForEachItem,
     Filter,
-    FilterNotNull,
     ForEachItem,
     InputFn,
     LazyForEachItem,
@@ -77,12 +76,12 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 @dataclass
 class PreparedSmsExample:
-    raw: dict[str, str] | None = None
-    label: int | None = None
-    label_name: str | None = None
-    text: str | None = None
-    dedupe_key: str | None = None
-    split: str | None = None
+    raw: dict[str, str] = field(default_factory=dict)
+    label: int = 0
+    label_name: str = ""
+    text: str = ""
+    dedupe_key: str = ""
+    split: str = ""
     char_count: int = 0
     token_count: int = 0
 
@@ -147,20 +146,24 @@ def read_sms_spam_rows(dataset_path: Path | str) -> list[dict[str, str]]:
     return rows
 
 
-def _normalize_label(label: str) -> int | None:
+def _has_known_label(label: str) -> bool:
+    return label.strip().lower() in {"ham", "spam"}
+
+
+def _normalize_label(label: str) -> int:
     normalized = label.strip().lower()
     if normalized == "ham":
         return 0
     if normalized == "spam":
         return 1
-    return None
+    raise ValueError(f"Unsupported SMS spam label: {label!r}")
 
 
 def _label_name(label: int) -> str:
     return "spam" if label == 1 else "ham"
 
 
-def _normalize_sms_text(text: str) -> str | None:
+def _normalize_sms_text_or_none(text: str) -> str | None:
     normalized = unicodedata.normalize("NFKC", html.unescape(text))
     normalized = normalized.replace("\u00a0", " ").replace("\ufeff", " ")
     normalized = _CONTROL_RE.sub(" ", normalized)
@@ -177,6 +180,17 @@ def _normalize_sms_text(text: str) -> str | None:
     return normalized
 
 
+def _has_normalized_sms_text(text: str) -> bool:
+    return _normalize_sms_text_or_none(text) is not None
+
+
+def _normalize_sms_text(text: str) -> str:
+    normalized = _normalize_sms_text_or_none(text)
+    if normalized is None:
+        raise ValueError("SMS text became empty after normalization.")
+    return normalized
+
+
 def _text_char_count(text: str) -> int:
     return len(text)
 
@@ -185,10 +199,10 @@ def _text_token_count(text: str) -> int:
     return len(text.split())
 
 
-def _dedupe_key(text: str) -> str | None:
+def _dedupe_key(text: str) -> str:
     cleaned = text.strip()
     if not cleaned:
-        return None
+        raise ValueError("Dedupe key cannot be empty.")
     return cleaned
 
 
@@ -248,17 +262,16 @@ def build_sms_spam_prepare_pipeline(
     operators: list[Any] = [
         region_open,
         WrapMappingInObject(as_="raw", state_factory=PreparedSmsExample),
+        Filter(_has_known_label, src="raw.label"),
         MapValue(_normalize_label, src="raw.label", as_="label"),
-        FilterNotNull("label"),
         MapValue(_label_name, src="label", as_="label_name"),
+        Filter(_has_normalized_sms_text, src="raw.text"),
         MapValue(_normalize_sms_text, src="raw.text", as_="text"),
-        FilterNotNull("text"),
         MapValue(_text_char_count, src="text", as_="char_count"),
         Filter(_minimum_value_filter(min_chars), src="char_count"),
         MapValue(_text_token_count, src="text", as_="token_count"),
         Filter(_minimum_value_filter(min_tokens), src="token_count"),
         MapValue(_dedupe_key, src="text", as_="dedupe_key"),
-        FilterNotNull("dedupe_key"),
         MapValue(splitter, src="dedupe_key", as_="split"),
         region_close,
     ]
@@ -308,8 +321,6 @@ def sms_spam_collection_input(
 
 
 def _serialize_record(record: PreparedSmsExample) -> dict[str, Any]:
-    if record.raw is None:
-        raise ValueError("Prepared record is missing raw metadata.")
     return {
         "id": record.raw["id"],
         "label": record.label,

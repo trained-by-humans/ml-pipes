@@ -49,6 +49,15 @@ def test_sms_spam_collection_input_uses_cached_dataset(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("lazy", [False, True])
+def test_sms_spam_prepare_pipeline_validates(lazy: bool) -> None:
+    pipeline = build_sms_spam_prepare_pipeline(lazy=lazy)
+
+    contract = pipeline.validate()
+
+    assert contract is not None
+
+
+@pytest.mark.parametrize("lazy", [False, True])
 def test_sms_spam_prepare_pipeline_normalizes_filters_and_dedupes(tmp_path: Path, lazy: bool) -> None:
     dataset_path = tmp_path / SMS_SPAM_MEMBER_NAME
     _write_sms_dataset(
