@@ -80,14 +80,6 @@ class PendingSpan:
         return frozen
 
 
-def _fmt_batch_size(batch_size: float | None) -> str:
-    if batch_size is None:
-        return "?"
-    if float(batch_size).is_integer():
-        return str(int(batch_size))
-    return f"{batch_size:.1f}"
-
-
 @dataclass
 class InvocationTrace:
     spans: list[StepSpan] = field(default_factory=list)
@@ -104,23 +96,38 @@ class InvocationTrace:
         return _fmt_trace(self)
 
 
-def _freeze_span(span: StepSpan | PendingSpan) -> StepSpan:
-    if isinstance(span, PendingSpan):
-        return span.freeze()
+@dataclass
+class TracingConfig:
+    collector: TraceCollector
+    operator_labels: list[str] | None = None
+    capture_config: bool = False
+    capture_shapes: bool = False
+    _capture_outputs: bool = False  # used internally by Pipeline.inspect(); not exposed via set_tracing()
 
-    return StepSpan(
-        label=span.label,
-        start_time=span.start_time,
-        duration_s=span.duration_s,
-        error=span.error,
-        operator_config=copy.deepcopy(span.operator_config),
-        attributes=copy.deepcopy(span.attributes),
-        input_shape=copy.deepcopy(span.input_shape),
-        output_shape=copy.deepcopy(span.output_shape),
-        output_value=capture_value(span.output_value),
-        child_trace=freeze_trace(span.child_trace) if span.child_trace is not None else None,
-        operator_type=span.operator_type,
-    )
+
+class TraceCollector(ABC):
+    @abstractmethod
+    def on_trace(self, trace: InvocationTrace) -> None: ...
+
+
+class _NoOpSpanList:
+    """Accepts appends and discards them — used by _NoOpTrace."""
+
+    def append(self, _: Any) -> None:
+        pass
+
+
+class _NoOpTrace:
+    """Stands in for InvocationTrace when no collector is attached.
+
+    All mutations are accepted and silently discarded so _step and
+    _step_into_batch need no if-guards — there is one code path.
+    """
+
+    def __init__(self, batch_size: int | None = None) -> None:
+        self.spans: Any = _NoOpSpanList()
+        self.total_duration_s: float = 0.0
+        self.batch_size = batch_size
 
 
 def freeze_trace(trace: InvocationTrace) -> InvocationTrace:
@@ -130,43 +137,6 @@ def freeze_trace(trace: InvocationTrace) -> InvocationTrace:
         batch_size=trace.batch_size,
         workers=trace.workers,
     )
-
-
-def _fmt_trace(trace: "InvocationTrace", indent: int = 0) -> str:
-    prefix = "  " * indent
-    fracs = trace.span_fractions()
-    lines = []
-    for span in trace.spans:
-        mark = " !" if span.error else ""
-        shape = f"  → {span.output_shape}" if span.output_shape else ""
-        config = f"  cfg={span.operator_config}" if span.operator_config else ""
-        attributes = f"  attributes={span.attributes}" if span.attributes else ""
-        label = span.label[:29] + "…" if len(span.label) > 30 else span.label
-        lines.append(
-            f"{prefix}  {label:30s} {span.duration_s * 1000:7.2f}ms"
-            f"  ({fracs[span.label] * 100:4.1f}%){mark}{shape}{config}{attributes}"
-        )
-        if span.child_trace is not None:
-            ct = span.child_trace
-            if ct.workers is not None:
-                annotation = f" [n_items={_fmt_batch_size(ct.batch_size)}, concurrency={ct.workers}]"
-            elif ct.batch_size is not None:
-                annotation = f" [batch_size={_fmt_batch_size(ct.batch_size)}]"
-            else:
-                annotation = ""
-            lines.append(f"{prefix}    ↳ child trace{annotation}:")
-            lines.append(_fmt_trace(span.child_trace, indent + 2))
-    lines.append(f"{prefix}  {'total':30s} {trace.total_duration_s * 1000:7.2f}ms")
-    return "\n".join(lines)
-
-
-@dataclass
-class TracingConfig:
-    collector: TraceCollector
-    operator_labels: list[str] | None = None
-    capture_config: bool = False
-    capture_shapes: bool = False
-    _capture_outputs: bool = False  # used internally by Pipeline.inspect(); not exposed via set_tracing()
 
 
 def capture_value(value: Any) -> Any:
@@ -180,62 +150,6 @@ def capture_value(value: Any) -> Any:
         return copy.deepcopy(value)
     except Exception:
         return _capture_value_fallback(value, seen=set())
-
-
-_CAPTURE_VALUE_PRIMITIVES = (bool, int, float, str, bytes, type(None))
-
-
-def _capture_value_fallback(value: Any, *, seen: set[int]) -> Any:
-    if isinstance(value, _CAPTURE_VALUE_PRIMITIVES):
-        return value
-
-    value_id = id(value)
-    if value_id in seen:
-        return "<cycle>"
-    seen.add(value_id)
-    try:
-        if isinstance(value, (GeneratorType, Iterator)):
-            return repr(value)
-
-        if dataclasses.is_dataclass(value) and not isinstance(value, type):
-            field_values = {
-                field.name: _capture_value_fallback(getattr(value, field.name), seen=seen)
-                for field in dataclasses.fields(value)
-            }
-            try:
-                return type(value)(**field_values)
-            except Exception:
-                return field_values
-
-        if isinstance(value, Mapping):
-            snapshot_mapping = {}
-            for key, item in value.items():
-                snapshot_key = _capture_value_fallback(key, seen=seen)
-                try:
-                    hash(snapshot_key)
-                except Exception:
-                    snapshot_key = repr(key)
-                snapshot_mapping[snapshot_key] = _capture_value_fallback(item, seen=seen)
-            return snapshot_mapping
-
-        if isinstance(value, list):
-            return [_capture_value_fallback(item, seen=seen) for item in value]
-
-        if isinstance(value, tuple):
-            items = tuple(_capture_value_fallback(item, seen=seen) for item in value)
-            if hasattr(value, "_fields"):
-                try:
-                    return type(value)(*items)
-                except Exception:
-                    return items
-            return items
-
-        if isinstance(value, set):
-            return sorted((_capture_value_fallback(item, seen=seen) for item in value), key=repr)
-
-        return repr(value)
-    finally:
-        seen.discard(value_id)
 
 
 _PICKLE_SAFE = (bool, int, float, str, bytes, type(None))
@@ -256,37 +170,6 @@ def operator_config(op: Any) -> dict[str, Any]:
         for k, v in attrs.items()
         if not k.startswith("_") and k != "pipeline"
     }
-
-
-class TraceCollector(ABC):
-    @abstractmethod
-    def on_trace(self, trace: InvocationTrace) -> None: ...
-
-
-class _NoOpSpanList:
-    """Accepts appends and discards them — used by _NoOpTrace."""
-    def append(self, _: Any) -> None:
-        pass
-
-
-class _NoOpTrace:
-    """Stands in for InvocationTrace when no collector is attached.
-
-    All mutations are accepted and silently discarded so _step and
-    _step_into_batch need no if-guards — there is one code path.
-    """
-    def __init__(self, batch_size: int | None = None) -> None:
-        self.spans: Any = _NoOpSpanList()
-        self.total_duration_s: float = 0.0
-        self.batch_size = batch_size
-
-
-def _update_optional_mean(current: float | None, incoming: float | None, n: int) -> float | None:
-    if incoming is None:
-        return current
-    if current is None or n <= 1:
-        return incoming
-    return current + (incoming - current) / n
 
 
 def accumulate_trace_mean(avg: InvocationTrace, incoming: InvocationTrace, n: int) -> None:
@@ -446,3 +329,122 @@ def _extract_shape(value: Any) -> str | None:
     if isinstance(value, list):
         return f"{name} [{len(value)}]"
     return name
+
+
+def _freeze_span(span: StepSpan | PendingSpan) -> StepSpan:
+    if isinstance(span, PendingSpan):
+        return span.freeze()
+
+    return StepSpan(
+        label=span.label,
+        start_time=span.start_time,
+        duration_s=span.duration_s,
+        error=span.error,
+        operator_config=copy.deepcopy(span.operator_config),
+        attributes=copy.deepcopy(span.attributes),
+        input_shape=copy.deepcopy(span.input_shape),
+        output_shape=copy.deepcopy(span.output_shape),
+        output_value=capture_value(span.output_value),
+        child_trace=freeze_trace(span.child_trace) if span.child_trace is not None else None,
+        operator_type=span.operator_type,
+    )
+
+
+def _fmt_batch_size(batch_size: float | None) -> str:
+    if batch_size is None:
+        return "?"
+    if float(batch_size).is_integer():
+        return str(int(batch_size))
+    return f"{batch_size:.1f}"
+
+
+def _fmt_trace(trace: "InvocationTrace", indent: int = 0) -> str:
+    prefix = "  " * indent
+    fracs = trace.span_fractions()
+    lines = []
+    for span in trace.spans:
+        mark = " !" if span.error else ""
+        shape = f"  → {span.output_shape}" if span.output_shape else ""
+        config = f"  cfg={span.operator_config}" if span.operator_config else ""
+        attributes = f"  attributes={span.attributes}" if span.attributes else ""
+        label = span.label[:29] + "…" if len(span.label) > 30 else span.label
+        lines.append(
+            f"{prefix}  {label:30s} {span.duration_s * 1000:7.2f}ms"
+            f"  ({fracs[span.label] * 100:4.1f}%){mark}{shape}{config}{attributes}"
+        )
+        if span.child_trace is not None:
+            ct = span.child_trace
+            if ct.workers is not None:
+                annotation = f" [n_items={_fmt_batch_size(ct.batch_size)}, concurrency={ct.workers}]"
+            elif ct.batch_size is not None:
+                annotation = f" [batch_size={_fmt_batch_size(ct.batch_size)}]"
+            else:
+                annotation = ""
+            lines.append(f"{prefix}    ↳ child trace{annotation}:")
+            lines.append(_fmt_trace(span.child_trace, indent + 2))
+    lines.append(f"{prefix}  {'total':30s} {trace.total_duration_s * 1000:7.2f}ms")
+    return "\n".join(lines)
+
+
+_CAPTURE_VALUE_PRIMITIVES = (bool, int, float, str, bytes, type(None))
+
+
+def _capture_value_fallback(value: Any, *, seen: set[int]) -> Any:
+    if isinstance(value, _CAPTURE_VALUE_PRIMITIVES):
+        return value
+
+    value_id = id(value)
+    if value_id in seen:
+        return "<cycle>"
+    seen.add(value_id)
+    try:
+        if isinstance(value, (GeneratorType, Iterator)):
+            return repr(value)
+
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            field_values = {
+                field.name: _capture_value_fallback(getattr(value, field.name), seen=seen)
+                for field in dataclasses.fields(value)
+            }
+            try:
+                return type(value)(**field_values)
+            except Exception:
+                return field_values
+
+        if isinstance(value, Mapping):
+            snapshot_mapping = {}
+            for key, item in value.items():
+                snapshot_key = _capture_value_fallback(key, seen=seen)
+                try:
+                    hash(snapshot_key)
+                except Exception:
+                    snapshot_key = repr(key)
+                snapshot_mapping[snapshot_key] = _capture_value_fallback(item, seen=seen)
+            return snapshot_mapping
+
+        if isinstance(value, list):
+            return [_capture_value_fallback(item, seen=seen) for item in value]
+
+        if isinstance(value, tuple):
+            items = tuple(_capture_value_fallback(item, seen=seen) for item in value)
+            if hasattr(value, "_fields"):
+                try:
+                    return type(value)(*items)
+                except Exception:
+                    return items
+            return items
+
+        if isinstance(value, set):
+            return sorted((_capture_value_fallback(item, seen=seen) for item in value), key=repr)
+
+        return repr(value)
+    finally:
+        seen.discard(value_id)
+
+
+def _update_optional_mean(current: float | None, incoming: float | None, n: int) -> float | None:
+    if incoming is None:
+        return current
+    if current is None or n <= 1:
+        return incoming
+    return current + (incoming - current) / n
