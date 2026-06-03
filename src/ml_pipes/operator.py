@@ -89,7 +89,12 @@ def Operator(cls: _OperatorType) -> _OperatorType:
     if not inspect.isclass(cls):
         raise TypeError("@Operator can only be applied to classes")
 
-    cls = _ensure_capture_storage_class(cls)
+    if not _supports_instance_attribute(cls, _CAPTURED_ARGUMENTS_ATTR):
+        raise TypeError(
+            "@Operator requires classes that can store captured constructor "
+            f"args; {cls.__name__} does not allow the internal "
+            f"{_CAPTURED_ARGUMENTS_ATTR!r} attribute"
+        )
     init = cls.__init__
     target = getattr(init, "__wrapped__", init)
     constructor_signature = inspect.signature(target)
@@ -347,19 +352,6 @@ def _is_bare_callable(value: Any) -> bool:
         or inspect.isbuiltin(value)
         or inspect.isclass(value)
     )
-
-
-def _ensure_capture_storage_class(cls: _OperatorType) -> _OperatorType:
-    if _supports_instance_attribute(cls, _CAPTURED_ARGUMENTS_ATTR):
-        return cls
-
-    namespace = {
-        "__slots__": (_CAPTURED_ARGUMENTS_ATTR,),
-        "__module__": cls.__module__,
-        "__qualname__": cls.__qualname__,
-        "__doc__": cls.__doc__,
-    }
-    return type(cls.__name__, (cls,), namespace)
 
 
 def _supports_instance_attribute(cls: type, name: str) -> bool:

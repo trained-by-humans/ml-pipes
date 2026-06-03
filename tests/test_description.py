@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
+
 from ml_pipes import (
     AsType,
     Batch,
@@ -164,26 +166,6 @@ class VariadicArgsOp:
 
 
 @Operator
-class SlottedOp:
-    __slots__ = ("prefix",)
-
-    def __init__(self, prefix: str = "") -> None:
-        self.prefix = prefix
-
-    def __call__(self, value: int) -> int:
-        return value
-
-
-@Operator
-@dataclass(slots=True)
-class SlottedDataclassOp:
-    prefix: str = ""
-
-    def __call__(self, value: int) -> int:
-        return value
-
-
-@Operator
 class CustomRenderedOp:
     def __init__(self, value: str, flag: bool = False) -> None:
         self.value = value
@@ -262,18 +244,28 @@ def test_decorated_operator_describe_returns_operator_description():
     assert tuple(description.constructor_signature.parameters) == ("prefix",)
 
 
-def test_slotted_operator_construction_and_capture_work():
-    operator = SlottedOp("id:")
+def test_operator_rejects_slotted_classes():
+    with pytest.raises(TypeError, match="captured constructor args"):
+        @Operator
+        class SlottedOp:
+            __slots__ = ("prefix",)
 
-    assert repr(operator) == "SlottedOp('id:')"
-    assert operator.describe().passed_args == {"prefix": "id:"}
+            def __init__(self, prefix: str = "") -> None:
+                self.prefix = prefix
+
+            def __call__(self, value: int) -> int:
+                return value
 
 
-def test_slotted_dataclass_operator_construction_and_capture_work():
-    operator = SlottedDataclassOp("id:")
+def test_operator_rejects_slotted_dataclass_classes():
+    with pytest.raises(TypeError, match="captured constructor args"):
+        @Operator
+        @dataclass(slots=True)
+        class SlottedDataclassOp:
+            prefix: str = ""
 
-    assert operator.describe().passed_args == {"prefix": "id:"}
-    assert Pipeline([operator]).describe().operators[0].passed_args == {"prefix": "id:"}
+            def __call__(self, value: int) -> int:
+                return value
 
 
 def test_function_operator_has_no_constructor_signature():
