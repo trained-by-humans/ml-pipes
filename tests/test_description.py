@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from ml_pipes import (
@@ -163,6 +164,26 @@ class VariadicArgsOp:
 
 
 @Operator
+class SlottedOp:
+    __slots__ = ("prefix",)
+
+    def __init__(self, prefix: str = "") -> None:
+        self.prefix = prefix
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
+@dataclass(slots=True)
+class SlottedDataclassOp:
+    prefix: str = ""
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
 class CustomRenderedOp:
     def __init__(self, value: str, flag: bool = False) -> None:
         self.value = value
@@ -239,6 +260,20 @@ def test_decorated_operator_describe_returns_operator_description():
     assert description.default_args == {"prefix": ""}
     assert description.constructor_signature is not None
     assert tuple(description.constructor_signature.parameters) == ("prefix",)
+
+
+def test_slotted_operator_construction_and_capture_work():
+    operator = SlottedOp("id:")
+
+    assert repr(operator) == "SlottedOp('id:')"
+    assert operator.describe().passed_args == {"prefix": "id:"}
+
+
+def test_slotted_dataclass_operator_construction_and_capture_work():
+    operator = SlottedDataclassOp("id:")
+
+    assert operator.describe().passed_args == {"prefix": "id:"}
+    assert Pipeline([operator]).describe().operators[0].passed_args == {"prefix": "id:"}
 
 
 def test_function_operator_has_no_constructor_signature():

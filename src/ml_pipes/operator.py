@@ -89,6 +89,7 @@ def Operator(cls: _OperatorType) -> _OperatorType:
     if not inspect.isclass(cls):
         raise TypeError("@Operator can only be applied to classes")
 
+    cls = _ensure_capture_storage_class(cls)
     init = cls.__init__
     target = getattr(init, "__wrapped__", init)
     constructor_signature = inspect.signature(target)
@@ -346,6 +347,34 @@ def _is_bare_callable(value: Any) -> bool:
         or inspect.isbuiltin(value)
         or inspect.isclass(value)
     )
+
+
+def _ensure_capture_storage_class(cls: _OperatorType) -> _OperatorType:
+    if _supports_instance_attribute(cls, _CAPTURED_ARGUMENTS_ATTR):
+        return cls
+
+    namespace = {
+        "__slots__": (_CAPTURED_ARGUMENTS_ATTR,),
+        "__module__": cls.__module__,
+        "__qualname__": cls.__qualname__,
+        "__doc__": cls.__doc__,
+    }
+    return type(cls.__name__, (cls,), namespace)
+
+
+def _supports_instance_attribute(cls: type, name: str) -> bool:
+    for current in cls.__mro__[:-1]:
+        slots = current.__dict__.get("__slots__", None)
+        if slots is None:
+            return True
+
+        if isinstance(slots, str):
+            slots = (slots,)
+
+        if name in slots or "__dict__" in slots:
+            return True
+
+    return False
 
 
 def _effective_repr(target: type) -> Any:
