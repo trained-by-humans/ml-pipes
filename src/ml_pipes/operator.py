@@ -73,7 +73,7 @@ class OperatorDescription:
         show_defaults: bool = False,
         verbose: bool = False,
     ) -> str:
-        return _format_operator_call(
+        return _format_operator_description(
             name=self.name,
             arguments=self.arguments,
             bare_callable=self.bare_callable,
@@ -85,6 +85,7 @@ class OperatorDescription:
         return self.render()
 
     __str__ = __repr__
+
 
 def Operator(cls: _OperatorType) -> _OperatorType:
     """Capture constructor arguments for operator instances."""
@@ -274,7 +275,43 @@ def _capture_arguments(
     return tuple(captured)
 
 
-def _format_operator_call(
+def _excluded_argument_names(target: Any) -> set[str]:
+    cls = target if inspect.isclass(target) else type(target)
+    excluded = getattr(cls, _EXCLUDED_OPERATOR_ARGUMENTS_ATTR, ())
+    if isinstance(excluded, str):
+        excluded = (excluded,)
+    return _EXCLUDED_ARGUMENTS.union(excluded)
+
+
+def _public_constructor_signature(
+    constructor_signature: inspect.Signature,
+    excluded_arguments: set[str],
+) -> inspect.Signature:
+    return constructor_signature.replace(
+        parameters=[
+            parameter
+            for parameter in constructor_signature.parameters.values()
+            if parameter.name not in excluded_arguments
+        ]
+    )
+
+
+def _supports_instance_attribute(cls: type, name: str) -> bool:
+    for current in cls.__mro__[:-1]:
+        slots = current.__dict__.get("__slots__", None)
+        if slots is None:
+            return True
+
+        if isinstance(slots, str):
+            slots = (slots,)
+
+        if name in slots or "__dict__" in slots:
+            return True
+
+    return False
+
+
+def _format_operator_description(
     *,
     name: str,
     arguments: tuple[OperatorArgument, ...],
@@ -286,7 +323,7 @@ def _format_operator_call(
         return name
 
     rendered_arguments = _format_call_arguments(
-        _filter_arguments(
+        _select_render_arguments(
             arguments,
             include_defaults=show_defaults,
             verbose=verbose,
@@ -294,6 +331,23 @@ def _format_operator_call(
         verbose=verbose,
     )
     return f"{name}({rendered_arguments})"
+
+
+def _select_render_arguments(
+    arguments: tuple[OperatorArgument, ...],
+    *,
+    include_defaults: bool,
+    verbose: bool,
+) -> tuple[OperatorArgument, ...]:
+    visible_arguments = arguments if include_defaults else tuple(
+        argument for argument in arguments if argument.is_passed
+    )
+    if verbose:
+        return visible_arguments
+    return tuple(
+        argument for argument in visible_arguments
+        if not _is_pipeline_instance(argument.value)
+    )
 
 
 def _format_call_arguments(
@@ -338,7 +392,7 @@ def _format_arg_value(value: Any, *, verbose: bool) -> str:
     if isinstance(value, (str, bytes, int, float, bool)) or value is None:
         return repr(value)
     if inspect.isfunction(value) or inspect.ismethod(value) or inspect.isbuiltin(value):
-        return _callable_label(value)
+        return _format_callable_value(value)
     if inspect.isclass(value):
         return value.__name__
     if callable(value):
@@ -382,25 +436,20 @@ def _format_dict_value(value: dict[Any, Any], *, verbose: bool) -> str:
 def _format_set_value(value: set[Any], *, verbose: bool) -> str:
     if not value:
         return "set()"
-
-    items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
-    items, truncated = _truncate_collection_items(tuple(items), verbose=verbose)
-    rendered_items = list(items)
-    if truncated:
-        rendered_items.append("...")
-    return "{" + ", ".join(rendered_items) + "}"
+    return "{" + ", ".join(_format_set_items(value, verbose=verbose)) + "}"
 
 
 def _format_frozenset_value(value: frozenset[Any], *, verbose: bool) -> str:
     if not value:
         return "frozenset()"
+    return "frozenset({" + ", ".join(_format_set_items(value, verbose=verbose)) + "})"
 
-    items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
-    items, truncated = _truncate_collection_items(tuple(items), verbose=verbose)
-    rendered_items = list(items)
-    if truncated:
-        rendered_items.append("...")
-    return "frozenset({" + ", ".join(rendered_items) + "})"
+
+def _format_set_items(value: set[Any] | frozenset[Any], *, verbose: bool) -> list[str]:
+    rendered_items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
+    if not verbose and len(rendered_items) > _CONCISE_COLLECTION_ITEM_LIMIT:
+        return rendered_items[:_CONCISE_COLLECTION_ITEM_LIMIT] + ["..."]
+    return rendered_items
 
 
 def _truncate_collection_items(
@@ -413,7 +462,7 @@ def _truncate_collection_items(
     return items[:_CONCISE_COLLECTION_ITEM_LIMIT], True
 
 
-def _callable_label(value: Any) -> str:
+def _format_callable_value(value: Any) -> str:
     if inspect.isfunction(value) or inspect.ismethod(value) or inspect.isbuiltin(value):
         return getattr(value, "__name__", type(value).__name__)
     if inspect.isclass(value):
@@ -423,21 +472,12 @@ def _callable_label(value: Any) -> str:
     return repr(value)
 
 
-def _filter_arguments(
-    arguments: tuple[OperatorArgument, ...],
-    *,
-    include_defaults: bool,
-    verbose: bool,
-) -> tuple[OperatorArgument, ...]:
-    visible_arguments = arguments if include_defaults else tuple(
-        argument for argument in arguments if argument.is_passed
-    )
-    if verbose:
-        return visible_arguments
-    return tuple(
-        argument for argument in visible_arguments
-        if not _is_pipeline_instance(argument.value)
-    )
+def _is_pipeline_instance(value: Any) -> bool:
+    try:
+        from .core import Pipeline
+    except Exception:
+        return False
+    return isinstance(value, Pipeline)
 
 
 def _is_bare_callable(value: Any) -> bool:
@@ -449,49 +489,5 @@ def _is_bare_callable(value: Any) -> bool:
     )
 
 
-def _supports_instance_attribute(cls: type, name: str) -> bool:
-    for current in cls.__mro__[:-1]:
-        slots = current.__dict__.get("__slots__", None)
-        if slots is None:
-            return True
-
-        if isinstance(slots, str):
-            slots = (slots,)
-
-        if name in slots or "__dict__" in slots:
-            return True
-
-    return False
-
-
-def _excluded_argument_names(target: Any) -> set[str]:
-    cls = target if inspect.isclass(target) else type(target)
-    excluded = getattr(cls, _EXCLUDED_OPERATOR_ARGUMENTS_ATTR, ())
-    if isinstance(excluded, str):
-        excluded = (excluded,)
-    return _EXCLUDED_ARGUMENTS.union(excluded)
-
-
-def _is_pipeline_instance(value: Any) -> bool:
-    try:
-        from .core import Pipeline
-    except Exception:
-        return False
-    return isinstance(value, Pipeline)
-
-
 def _effective_repr(target: type) -> Any:
     return getattr(target, "__repr__", object.__repr__)
-
-
-def _public_constructor_signature(
-    constructor_signature: inspect.Signature,
-    excluded_arguments: set[str],
-) -> inspect.Signature:
-    return constructor_signature.replace(
-        parameters=[
-            parameter
-            for parameter in constructor_signature.parameters.values()
-            if parameter.name not in excluded_arguments
-        ]
-    )

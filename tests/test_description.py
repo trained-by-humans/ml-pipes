@@ -266,21 +266,18 @@ def test_pipeline_repr_renders_flat_operator_chain_with_named_args():
     assert repr(description) == repr(pipeline)
 
 
-def test_operator_argument_to_dict_can_expand_defaults_on_read():
-    operator = ConfiguredIntToString()
-
-    assert _argument_dict(operator) == {}
-    assert _argument_dict(operator, include_defaults=True) == {"prefix": ""}
-
-
 def test_decorated_operator_describe_returns_operator_description():
     description = ConfiguredIntToString().describe()
 
     assert isinstance(description, OperatorDescription)
     assert description.name == "ConfiguredIntToString"
+    assert description.passed_args == {}
     assert description.default_args == {"prefix": ""}
+    assert description.all_args == {"prefix": ""}
     assert description.constructor_signature is not None
     assert tuple(description.constructor_signature.parameters) == ("prefix",)
+    assert repr(description) == "ConfiguredIntToString()"
+    assert description.render(show_defaults=True, verbose=True) == "ConfiguredIntToString(prefix='')"
 
 
 def test_operator_rejects_slotted_classes():
@@ -384,40 +381,25 @@ def test_concise_render_truncates_long_collection_args():
     )
 
 
-def test_operator_args_capture_lambda_and_render_with_lambda_label():
-    operator = CallableArgOp(_MODULE_LAMBDA)
+@pytest.mark.parametrize(
+    ("callable_factory", "expected_render"),
+    [
+        (lambda: _MODULE_LAMBDA, "CallableArgOp(<lambda>)"),
+        (lambda: _named_identity, "CallableArgOp(_named_identity)"),
+        (lambda: _CallableArg(), "CallableArgOp(_CallableArg)"),
+        (
+            lambda: _CallableArgWithRepr("mapper"),
+            "CallableArgOp(_CallableArgWithRepr(name='mapper'))",
+        ),
+    ],
+)
+def test_callable_args_render_expected_label(callable_factory, expected_render):
+    callable_arg = callable_factory()
+    operator = CallableArgOp(callable_arg)
     description = Pipeline([operator]).describe()
 
-    assert _argument_dict(operator)["fn"] is _MODULE_LAMBDA
-    assert repr(description) == _pipeline_text("CallableArgOp(<lambda>)")
-
-
-def test_operator_args_capture_function_and_render_with_function_name():
-    operator = CallableArgOp(_named_identity)
-    description = Pipeline([operator]).describe()
-
-    assert _argument_dict(operator)["fn"] is _named_identity
-    assert repr(description) == _pipeline_text("CallableArgOp(_named_identity)")
-
-
-def test_operator_args_capture_callable_object_and_render_with_type_name():
-    callable_object = _CallableArg()
-    operator = CallableArgOp(callable_object)
-    description = Pipeline([operator]).describe()
-
-    assert _argument_dict(operator)["fn"] is callable_object
-    assert repr(description) == _pipeline_text("CallableArgOp(_CallableArg)")
-
-
-def test_operator_args_capture_callable_object_with_custom_repr():
-    callable_object = _CallableArgWithRepr("mapper")
-    operator = CallableArgOp(callable_object)
-    description = Pipeline([operator]).describe()
-
-    assert _argument_dict(operator)["fn"] is callable_object
-    assert repr(description) == _pipeline_text(
-        "CallableArgOp(_CallableArgWithRepr(name='mapper'))"
-    )
+    assert _argument_dict(operator)["fn"] is callable_arg
+    assert repr(description) == _pipeline_text(expected_render)
 
 
 def test_operator_args_capture_custom_object_and_render_with_repr():
@@ -470,17 +452,6 @@ def test_describe_prints_requested_view_once_for_top_level_call(capsys):
     assert description.render(show_defaults=True) == _pipeline_text(
         "ConfiguredIntToString(prefix='')"
     )
-
-
-def test_operator_description_tracks_passed_and_default_args():
-    description = Pipeline([ConfiguredIntToString()]).describe()
-    operator = description.operators[0]
-
-    assert operator.passed_args == {}
-    assert operator.default_args == {"prefix": ""}
-    assert operator.all_args == {"prefix": ""}
-    assert repr(operator) == "ConfiguredIntToString()"
-    assert operator.render(show_defaults=True, verbose=True) == "ConfiguredIntToString(prefix='')"
 
 
 def test_describe_renders_context_operators_with_captured_args():
@@ -557,24 +528,18 @@ def test_describe_ignores_custom_operator_labels_when_present():
     ]
 
 
-def test_describe_preserves_extract_constructor_config():
-    description = Pipeline([Extract("output0", as_="preds")]).describe()
+@pytest.mark.parametrize(
+    ("as_value", "expected_args", "expected_render"),
+    [
+        ("preds", {"names": ("output0",), "as_": "preds"}, "Extract('output0', as_='preds')"),
+        (None, {"names": ("output0",), "as_": None}, "Extract('output0', as_=None)"),
+    ],
+)
+def test_describe_preserves_extract_constructor_config(as_value, expected_args, expected_render):
+    description = Pipeline([Extract("output0", as_=as_value)]).describe()
 
-    assert description.operators[0].passed_args == {
-        "names": ("output0",),
-        "as_": "preds",
-    }
-    assert repr(description) == _pipeline_text("Extract('output0', as_='preds')")
-
-
-def test_describe_preserves_explicit_none_constructor_args():
-    description = Pipeline([Extract("output0", as_=None)]).describe()
-
-    assert description.operators[0].passed_args == {
-        "names": ("output0",),
-        "as_": None,
-    }
-    assert repr(description) == _pipeline_text("Extract('output0', as_=None)")
+    assert description.operators[0].passed_args == expected_args
+    assert repr(description) == _pipeline_text(expected_render)
 
 
 def test_describe_captures_wrapper_constructor_args():
@@ -621,23 +586,33 @@ def test_description_ignores_custom_operator_repr():
     assert description.render(verbose=True) == _pipeline_text("ReprOnlyLegacyOp()")
 
 
-def test_pipeline_ignores_custom_operator_repr_and_describe():
-    pipeline = Pipeline([CustomRenderedOp("x")])
+@pytest.mark.parametrize(
+    ("operator_factory", "expected_repr", "expected_verbose"),
+    [
+        (
+            lambda: CustomRenderedOp("x"),
+            "CustomRenderedOp('x')",
+            "CustomRenderedOp('x', flag=False)",
+        ),
+        (
+            lambda: InvalidRenderedOp("x"),
+            "InvalidRenderedOp('x')",
+            "InvalidRenderedOp('x', flag=False)",
+        ),
+    ],
+)
+def test_pipeline_ignores_custom_operator_repr_and_describe(
+    operator_factory,
+    expected_repr,
+    expected_verbose,
+):
+    operator = operator_factory()
+    pipeline = Pipeline([operator])
     description = pipeline.describe(show_defaults=True)
 
-    assert repr(pipeline) == _pipeline_text("CustomRenderedOp('x')")
+    assert repr(pipeline) == _pipeline_text(expected_repr)
     assert description.render(show_defaults=True, verbose=True) == _pipeline_text(
-        "CustomRenderedOp('x', flag=False)"
-    )
-
-
-def test_pipeline_ignores_invalid_custom_operator_repr_and_describe():
-    pipeline = Pipeline([InvalidRenderedOp("x")])
-    description = pipeline.describe(show_defaults=True)
-
-    assert repr(pipeline) == _pipeline_text("InvalidRenderedOp('x')")
-    assert description.render(show_defaults=True, verbose=True) == _pipeline_text(
-        "InvalidRenderedOp('x', flag=False)"
+        expected_verbose
     )
 
 
