@@ -11,9 +11,8 @@ from .benchmark import (
 )
 from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
 from .context import Context, Recall, Store
-from .core import Pipeline, Embed, embed, Inline, inline, Operator, OperatorLike
+from .core import Pipeline, PipelineDescription, Embed, embed, Inline, inline, Operator, OperatorLike
 from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
-from .description import OperatorDescription, PipelineDescription
 from .factory import data_factory, pipeline_factory, InputFn
 from .inspection import (
     HtmlRenderer,
@@ -105,7 +104,7 @@ from .types import (
     TensorRegistry,
 )
 from .validation import PipelineValidationError, TypeContract
-from .operator import OperatorArgument
+from .operator import OperatorArgument, OperatorDescription
 
 __all__ = [
     "Benchmark",

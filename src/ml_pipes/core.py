@@ -3,13 +3,12 @@ from __future__ import annotations
 import inspect
 import logging
 import time
-from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from dataclasses import dataclass, field
+from typing import Any, Callable, Iterable, Literal
 
 from .context import Context, ContextOp
-from .description import PipelineDescription, _build_pipeline_description
 from .inspection import InspectionResult, _CaptureCollector
-from .operator import Operator
+from .operator import Operator, OperatorDescription
 from .region import RegionCloser, RegionOpener
 from .tracing import (
     InvocationTrace,
@@ -35,6 +34,38 @@ class Region:
     opening_op: type
     closing_op: type
     name: str
+
+
+@dataclass(frozen=True)
+class PipelineDescription:
+    operators: list[OperatorDescription] = field(default_factory=list)
+
+    def render(
+        self,
+        *,
+        show_defaults: bool = False,
+        mode: Literal["repr", "describe"] = "repr",
+    ) -> str:
+        if not self.operators:
+            return "Pipeline([])"
+
+        lines = ["Pipeline(["]
+        for operator in self.operators:
+            rendered = operator.render(show_defaults=show_defaults, mode=mode)
+            operator_lines = rendered.splitlines() or [""]
+            for line in operator_lines[:-1]:
+                lines.append(f"  {line}")
+            lines.append(f"  {operator_lines[-1]},")
+        lines.append("])")
+        return "\n".join(lines)
+
+    def describe(self, *, show_defaults: bool = False) -> str:
+        return self.render(show_defaults=show_defaults, mode="describe")
+
+    def __repr__(self) -> str:
+        return self.render()
+
+    __str__ = __repr__
 
 
 class Pipeline:
@@ -109,7 +140,9 @@ class Pipeline:
         return description
 
     def _describe(self) -> PipelineDescription:
-        return _build_pipeline_description(operators=self.operators)
+        return PipelineDescription(
+            operators=[OperatorDescription.from_operator(operator) for operator in self.operators]
+        )
 
     def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
         trace = InvocationTrace() if cfg is not None else _NoOpTrace()
@@ -292,7 +325,6 @@ class Pipeline:
         if inspect.isfunction(operator) or inspect.ismethod(operator):
             return operator
         return getattr(operator, "__call__")
-
 
 class Inline:
     """

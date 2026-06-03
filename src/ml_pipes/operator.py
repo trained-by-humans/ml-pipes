@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar
 
 _CAPTURED_ARGUMENTS_ATTR = "__ml_pipes_operator_argument_entries__"
@@ -35,6 +35,58 @@ class OperatorArgument:
             argument.name: argument.value
             for argument in arguments
         }
+
+
+@dataclass(frozen=True)
+class OperatorDescription:
+    name: str
+    arguments: tuple[OperatorArgument, ...] = field(default_factory=tuple)
+    _operator: Any | None = field(default=None, repr=False, compare=False)
+
+    @classmethod
+    def from_operator(cls, operator: Any) -> "OperatorDescription":
+        return cls(
+            name=get_operator_name(operator),
+            arguments=get_operator_argument_entries(operator),
+            _operator=operator,
+        )
+
+    @property
+    def passed_args(self) -> dict[str, Any]:
+        return OperatorArgument.to_dict(argument for argument in self.arguments if argument.is_passed)
+
+    @property
+    def default_args(self) -> dict[str, Any]:
+        return OperatorArgument.to_dict(argument for argument in self.arguments if argument.is_default)
+
+    @property
+    def all_args(self) -> dict[str, Any]:
+        return OperatorArgument.to_dict(self.arguments)
+
+    def render(
+        self,
+        *,
+        show_defaults: bool = False,
+        mode: Literal["repr", "describe"] = "repr",
+    ) -> str:
+        return render_operator(
+            self._operator if self._operator is not None else _FALLBACK_OPERATOR,
+            name=self.name,
+            arguments=self.arguments,
+            show_defaults=show_defaults,
+            mode=mode,
+        )
+
+    def describe(self, *, show_defaults: bool = False) -> str:
+        return self.render(show_defaults=show_defaults, mode="describe")
+
+    def __repr__(self) -> str:
+        return self.render()
+
+    __str__ = __repr__
+
+
+_FALLBACK_OPERATOR = object()
 
 
 def Operator(cls: _OperatorType) -> _OperatorType:
