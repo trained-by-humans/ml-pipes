@@ -183,6 +183,20 @@ class CustomRenderedOp:
 
 
 @Operator
+class DescribeOnlyOp:
+    def __init__(self, value: str, flag: bool = False) -> None:
+        self.value = value
+        self.flag = flag
+
+    def __call__(self, value: int) -> int:
+        return value
+
+    def describe(self, *, show_defaults: bool = False) -> str:
+        suffix = ", flag=False" if show_defaults else ""
+        return f"DescribeOnly(value={self.value!r}{suffix})"
+
+
+@Operator
 class InvalidRenderedOp:
     def __init__(self, value: str, flag: bool = False) -> None:
         pass
@@ -549,3 +563,10 @@ def test_pipeline_ignores_invalid_custom_operator_repr_and_describe():
     assert description.render(show_defaults=True, verbose=True) == _pipeline_text(
         "InvalidRenderedOp('x', flag=False)"
     )
+
+
+def test_default_operator_repr_falls_back_when_describe_returns_non_description():
+    operator = DescribeOnlyOp("x")
+
+    assert repr(operator) == "DescribeOnlyOp('x')"
+    assert operator.describe() == "DescribeOnly(value='x')"

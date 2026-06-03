@@ -103,7 +103,14 @@ def Operator(cls: _OperatorType) -> _OperatorType:
 
     if _effective_repr(cls) is object.__repr__:
         def _default_operator_repr(self: Any) -> str:
-            return self.describe().render()
+            try:
+                description = self.describe()
+            except Exception:
+                description = None
+
+            if isinstance(description, OperatorDescription):
+                return description.render()
+            return OperatorDescription.from_operator(self).render()
 
         cls.__repr__ = _default_operator_repr
 
