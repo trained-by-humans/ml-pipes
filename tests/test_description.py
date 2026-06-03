@@ -139,6 +139,22 @@ class StructuredArgsOp:
 
 
 @Operator
+class LongCollectionArgsOp:
+    def __init__(
+        self,
+        items: list[int],
+        names: tuple[str, ...],
+        mapping: dict[str, int],
+        classes: set[int],
+        frozen: frozenset[str],
+    ) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
 class CallableArgOp:
     def __init__(self, fn: Any) -> None:
         pass
@@ -345,6 +361,26 @@ def test_describe_formats_structured_constructor_args():
     assert repr(description) == _pipeline_text(
         "StructuredArgsOp(coords=(1, 2), names=['a', 'b'], mapping={'left': 1, 'right': 2}, "
         "classes={0, 2}, frozen=frozenset({'alpha', 'beta'}))"
+    )
+
+
+def test_concise_render_truncates_long_collection_args():
+    operator = LongCollectionArgsOp(
+        [0, 1, 2, 3, 4],
+        ("alpha", "beta", "gamma", "delta"),
+        {"a": 1, "b": 2, "c": 3, "d": 4},
+        {0, 1, 2, 3},
+        frozenset({"alpha", "beta", "gamma", "delta"}),
+    )
+    description = Pipeline([operator]).describe()
+
+    assert repr(description) == _pipeline_text(
+        "LongCollectionArgsOp([0, 1, 2, ...], ('alpha', 'beta', 'gamma', ...), "
+        "{'a': 1, 'b': 2, 'c': 3, ...}, {0, 1, 2, ...}, frozenset({'alpha', 'beta', 'delta', ...}))"
+    )
+    assert description.render(verbose=True) == _pipeline_text(
+        "LongCollectionArgsOp([0, 1, 2, 3, 4], ('alpha', 'beta', 'gamma', 'delta'), "
+        "{'a': 1, 'b': 2, 'c': 3, 'd': 4}, {0, 1, 2, 3}, frozenset({'alpha', 'beta', 'delta', 'gamma'}))"
     )
 
 

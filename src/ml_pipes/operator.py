@@ -10,6 +10,7 @@ _CONSTRUCTOR_SIGNATURE_ATTR = "__ml_pipes_operator_constructor_signature__"
 _EXCLUDED_OPERATOR_ARGUMENTS_ATTR = "__ml_pipes_operator_excluded_arguments__"
 _WRAPPED_ATTR = "__ml_pipes_operator_wrapped__"
 _EXCLUDED_ARGUMENTS = {"self"}
+_CONCISE_COLLECTION_ITEM_LIMIT = 3
 
 _OperatorType = TypeVar("_OperatorType", bound=type)
 
@@ -325,26 +326,15 @@ def _format_arg_value(value: Any, *, verbose: bool) -> str:
     if _is_pipeline_instance(value):
         return repr(value) if verbose else type(value).__name__
     if isinstance(value, tuple):
-        if len(value) == 1:
-            return f"({_format_arg_value(value[0], verbose=verbose)},)"
-        return "(" + ", ".join(_format_arg_value(item, verbose=verbose) for item in value) + ")"
+        return _format_tuple_value(value, verbose=verbose)
     if isinstance(value, list):
-        return "[" + ", ".join(_format_arg_value(item, verbose=verbose) for item in value) + "]"
+        return _format_list_value(value, verbose=verbose)
     if isinstance(value, dict):
-        return "{" + ", ".join(
-            f"{_format_arg_value(key, verbose=verbose)}: {_format_arg_value(item, verbose=verbose)}"
-            for key, item in value.items()
-        ) + "}"
+        return _format_dict_value(value, verbose=verbose)
     if isinstance(value, set):
-        if not value:
-            return "set()"
-        items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
-        return "{" + ", ".join(items) + "}"
+        return _format_set_value(value, verbose=verbose)
     if isinstance(value, frozenset):
-        if not value:
-            return "frozenset()"
-        items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
-        return "frozenset({" + ", ".join(items) + "})"
+        return _format_frozenset_value(value, verbose=verbose)
     if isinstance(value, (str, bytes, int, float, bool)) or value is None:
         return repr(value)
     if inspect.isfunction(value) or inspect.ismethod(value) or inspect.isbuiltin(value):
@@ -356,6 +346,71 @@ def _format_arg_value(value: Any, *, verbose: bool) -> str:
             return type(value).__name__
         return repr(value)
     return repr(value)
+
+
+def _format_tuple_value(value: tuple[Any, ...], *, verbose: bool) -> str:
+    items, truncated = _truncate_collection_items(value, verbose=verbose)
+    rendered_items = [_format_arg_value(item, verbose=verbose) for item in items]
+
+    if len(value) == 1:
+        return f"({rendered_items[0]},)"
+
+    if truncated:
+        rendered_items.append("...")
+    return "(" + ", ".join(rendered_items) + ")"
+
+
+def _format_list_value(value: list[Any], *, verbose: bool) -> str:
+    items, truncated = _truncate_collection_items(value, verbose=verbose)
+    rendered_items = [_format_arg_value(item, verbose=verbose) for item in items]
+    if truncated:
+        rendered_items.append("...")
+    return "[" + ", ".join(rendered_items) + "]"
+
+
+def _format_dict_value(value: dict[Any, Any], *, verbose: bool) -> str:
+    items, truncated = _truncate_collection_items(tuple(value.items()), verbose=verbose)
+    rendered_items = [
+        f"{_format_arg_value(key, verbose=verbose)}: {_format_arg_value(item, verbose=verbose)}"
+        for key, item in items
+    ]
+    if truncated:
+        rendered_items.append("...")
+    return "{" + ", ".join(rendered_items) + "}"
+
+
+def _format_set_value(value: set[Any], *, verbose: bool) -> str:
+    if not value:
+        return "set()"
+
+    items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
+    items, truncated = _truncate_collection_items(tuple(items), verbose=verbose)
+    rendered_items = list(items)
+    if truncated:
+        rendered_items.append("...")
+    return "{" + ", ".join(rendered_items) + "}"
+
+
+def _format_frozenset_value(value: frozenset[Any], *, verbose: bool) -> str:
+    if not value:
+        return "frozenset()"
+
+    items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
+    items, truncated = _truncate_collection_items(tuple(items), verbose=verbose)
+    rendered_items = list(items)
+    if truncated:
+        rendered_items.append("...")
+    return "frozenset({" + ", ".join(rendered_items) + "})"
+
+
+def _truncate_collection_items(
+    items: tuple[Any, ...] | list[Any],
+    *,
+    verbose: bool,
+) -> tuple[tuple[Any, ...] | list[Any], bool]:
+    if verbose or len(items) <= _CONCISE_COLLECTION_ITEM_LIMIT:
+        return items, False
+    return items[:_CONCISE_COLLECTION_ITEM_LIMIT], True
 
 
 def _callable_label(value: Any) -> str:
