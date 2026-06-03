@@ -231,6 +231,16 @@ def test_operator_argument_to_dict_can_expand_defaults_on_read():
     assert _argument_dict(operator, include_defaults=True) == {"prefix": ""}
 
 
+def test_decorated_operator_describe_returns_operator_description():
+    description = ConfiguredIntToString().describe()
+
+    assert isinstance(description, OperatorDescription)
+    assert description.name == "ConfiguredIntToString"
+    assert description.default_args == {"prefix": ""}
+    assert description.constructor_signature is not None
+    assert tuple(description.constructor_signature.parameters) == ("prefix",)
+
+
 def test_function_operator_has_no_constructor_signature():
     assert get_operator_constructor_signature(_named_identity) is None
 
@@ -353,9 +363,9 @@ def test_describe_prints_requested_view_once_for_top_level_call(capsys):
 
     captured = capsys.readouterr()
 
-    assert captured.out == description.describe(show_defaults=True) + "\n"
+    assert captured.out == description.render(show_defaults=True, verbose=True) + "\n"
     assert repr(description) == _pipeline_text("ConfiguredIntToString()")
-    assert description.describe(show_defaults=True) == _pipeline_text(
+    assert description.render(show_defaults=True, verbose=True) == _pipeline_text(
         "ConfiguredIntToString(prefix='')"
     )
 
@@ -368,7 +378,7 @@ def test_operator_description_tracks_passed_and_default_args():
     assert operator.default_args == {"prefix": ""}
     assert operator.all_args == {"prefix": ""}
     assert repr(operator) == "ConfiguredIntToString()"
-    assert operator.describe(show_defaults=True) == "ConfiguredIntToString(prefix='')"
+    assert operator.render(show_defaults=True, verbose=True) == "ConfiguredIntToString(prefix='')"
 
 
 def test_describe_renders_context_operators_with_captured_args():
@@ -487,28 +497,28 @@ def test_describe_undecorated_custom_operator_shows_no_args():
     assert repr(description) == _pipeline_text("LegacyConfiguredIntToString()")
 
 
-def test_describe_uses_custom_repr_when_no_custom_describe_exists():
+def test_description_ignores_custom_operator_repr():
     description = Pipeline([ReprOnlyLegacyOp()]).describe()
 
-    assert repr(description) == _pipeline_text("LegacyCustom")
-    assert description.describe() == _pipeline_text("LegacyCustom")
+    assert repr(description) == _pipeline_text("ReprOnlyLegacyOp()")
+    assert description.render(verbose=True) == _pipeline_text("ReprOnlyLegacyOp()")
 
 
-def test_pipeline_uses_custom_operator_repr_and_describe():
+def test_pipeline_ignores_custom_operator_repr_and_describe():
     pipeline = Pipeline([CustomRenderedOp("x")])
     description = pipeline.describe(show_defaults=True)
 
-    assert repr(pipeline) == _pipeline_text("Custom<'x'>")
-    assert description.describe(show_defaults=True) == _pipeline_text(
-        "CustomDescribe(value='x', flag=False)"
+    assert repr(pipeline) == _pipeline_text("CustomRenderedOp('x')")
+    assert description.render(show_defaults=True, verbose=True) == _pipeline_text(
+        "CustomRenderedOp('x', flag=False)"
     )
 
 
-def test_pipeline_falls_back_when_custom_operator_repr_or_describe_are_invalid():
+def test_pipeline_ignores_invalid_custom_operator_repr_and_describe():
     pipeline = Pipeline([InvalidRenderedOp("x")])
     description = pipeline.describe(show_defaults=True)
 
     assert repr(pipeline) == _pipeline_text("InvalidRenderedOp('x')")
-    assert description.describe(show_defaults=True) == _pipeline_text(
+    assert description.render(show_defaults=True, verbose=True) == _pipeline_text(
         "InvalidRenderedOp('x', flag=False)"
     )

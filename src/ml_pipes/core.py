@@ -4,7 +4,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Callable, Iterable
 
 from .context import Context, ContextOp
 from .inspection import InspectionResult, _CaptureCollector
@@ -44,23 +44,20 @@ class PipelineDescription:
         self,
         *,
         show_defaults: bool = False,
-        mode: Literal["repr", "describe"] = "repr",
+        verbose: bool = False,
     ) -> str:
         if not self.operators:
             return "Pipeline([])"
 
         lines = ["Pipeline(["]
         for operator in self.operators:
-            rendered = operator.render(show_defaults=show_defaults, mode=mode)
+            rendered = operator.render(show_defaults=show_defaults, verbose=verbose)
             operator_lines = rendered.splitlines() or [""]
             for line in operator_lines[:-1]:
                 lines.append(f"  {line}")
             lines.append(f"  {operator_lines[-1]},")
         lines.append("])")
         return "\n".join(lines)
-
-    def describe(self, *, show_defaults: bool = False) -> str:
-        return self.render(show_defaults=show_defaults, mode="describe")
 
     def __repr__(self) -> str:
         return self.render()
@@ -129,14 +126,14 @@ class Pipeline:
         return InspectionResult(collector.trace.spans)
 
     def __repr__(self) -> str:
-        return self._describe().render(mode="repr")
+        return self._describe().render()
 
     __str__ = __repr__
 
     def describe(self, *, show_defaults: bool = False) -> PipelineDescription:
         """Describe, print, and return the operator chain."""
         description = self._describe()
-        print(description.render(show_defaults=show_defaults, mode="describe"))
+        print(description.render(show_defaults=show_defaults, verbose=True))
         return description
 
     def _describe(self) -> PipelineDescription:

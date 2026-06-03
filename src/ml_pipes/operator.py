@@ -41,14 +41,16 @@ class OperatorArgument:
 class OperatorDescription:
     name: str
     arguments: tuple[OperatorArgument, ...] = field(default_factory=tuple)
-    _operator: Any | None = field(default=None, repr=False, compare=False)
+    constructor_signature: inspect.Signature | None = None
+    bare_callable: bool = False
 
     @classmethod
     def from_operator(cls, operator: Any) -> "OperatorDescription":
         return cls(
             name=get_operator_name(operator),
             arguments=get_operator_argument_entries(operator),
-            _operator=operator,
+            constructor_signature=get_operator_constructor_signature(operator),
+            bare_callable=_is_bare_callable(operator),
         )
 
     @property
@@ -67,27 +69,20 @@ class OperatorDescription:
         self,
         *,
         show_defaults: bool = False,
-        mode: Literal["repr", "describe"] = "repr",
+        verbose: bool = False,
     ) -> str:
-        return render_operator(
-            self._operator if self._operator is not None else _FALLBACK_OPERATOR,
+        return _format_operator_call(
             name=self.name,
             arguments=self.arguments,
+            bare_callable=self.bare_callable,
             show_defaults=show_defaults,
-            mode=mode,
+            verbose=verbose,
         )
-
-    def describe(self, *, show_defaults: bool = False) -> str:
-        return self.render(show_defaults=show_defaults, mode="describe")
 
     def __repr__(self) -> str:
         return self.render()
 
     __str__ = __repr__
-
-
-_FALLBACK_OPERATOR = object()
-
 
 def Operator(cls: _OperatorType) -> _OperatorType:
     """Capture constructor arguments for operator instances."""
@@ -101,10 +96,16 @@ def Operator(cls: _OperatorType) -> _OperatorType:
     setattr(cls, _CONSTRUCTOR_SIGNATURE_ATTR, public_constructor_signature)
 
     if _effective_repr(cls) is object.__repr__:
-        cls.__repr__ = _describe_captured_operator
+        def _default_operator_repr(self: Any) -> str:
+            return self.describe().render()
+
+        cls.__repr__ = _default_operator_repr
 
     if getattr(cls, "describe", None) is None:
-        cls.describe = _describe_captured_operator
+        def _default_operator_describe(self: Any) -> OperatorDescription:
+            return OperatorDescription.from_operator(self)
+
+        cls.describe = _default_operator_describe
 
     if getattr(init, _WRAPPED_ATTR, False):
         return cls
@@ -158,28 +159,6 @@ def get_operator_argument_entries(
         return captured
 
     return ()
-
-
-def render_operator(
-    operator: Any,
-    *,
-    show_defaults: bool = False,
-    mode: Literal["repr", "describe"] = "repr",
-    name: str | None = None,
-    arguments: tuple[OperatorArgument, ...] | None = None,
-) -> str:
-    operator_name = name or get_operator_name(operator)
-    operator_arguments = arguments
-    if operator_arguments is None:
-        operator_arguments = get_operator_argument_entries(operator)
-    operator_arguments = _filter_arguments(operator_arguments, include_defaults=show_defaults)
-    return _render_operator_mode(
-        operator,
-        name=operator_name,
-        arguments=operator_arguments,
-        show_defaults=show_defaults,
-        mode=mode,
-    )
 
 
 def _capture_arguments(
@@ -265,104 +244,22 @@ def _capture_arguments(
 
     return tuple(captured)
 
-def _describe_captured_operator(
-    operator: Any,
-    *,
-    show_defaults: bool = False,
-) -> str:
-    return _format_operator_call(
-        operator=operator,
-        name=get_operator_name(operator),
-        arguments=_filter_arguments(
-            get_operator_argument_entries(operator),
-            include_defaults=show_defaults,
-        ),
-    )
-
-
-def _render_operator_mode(
-    operator: Any,
-    *,
-    name: str,
-    arguments: tuple[OperatorArgument, ...],
-    show_defaults: bool,
-    mode: Literal["repr", "describe"],
-) -> str:
-    if mode == "describe":
-        description = _try_operator_describe(operator, show_defaults=show_defaults)
-        if description is not None:
-            return description
-
-        if not show_defaults:
-            representation = _try_operator_repr(operator)
-            if representation is not None:
-                return representation
-
-        return _format_operator_call(operator=operator, name=name, arguments=arguments)
-
-    if mode == "repr":
-        representation = _try_operator_repr(operator)
-        if representation is not None:
-            return representation
-        return _format_operator_call(operator=operator, name=name, arguments=arguments)
-
-    raise ValueError(f"Unsupported operator render mode: {mode!r}")
-
-
-def _try_operator_describe(operator: Any, *, show_defaults: bool) -> str | None:
-    method = getattr(operator, "describe", None)
-    if not callable(method):
-        return None
-
-    try:
-        description = _invoke_operator_describe(method, show_defaults=show_defaults)
-    except Exception:
-        return None
-
-    if isinstance(description, str):
-        return description
-    return None
-
-
-def _invoke_operator_describe(method: Any, *, show_defaults: bool) -> Any:
-    try:
-        signature = inspect.signature(method)
-    except (TypeError, ValueError):
-        return method(show_defaults=show_defaults)
-
-    parameters = tuple(signature.parameters.values())
-    if (
-        "show_defaults" in signature.parameters
-        or any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters)
-    ):
-        return method(show_defaults=show_defaults)
-    if not parameters:
-        return method()
-    return method()
-
-
-def _try_operator_repr(operator: Any) -> str | None:
-    if _is_bare_callable(operator):
-        return None
-    if _effective_repr(type(operator)) is object.__repr__:
-        return None
-
-    try:
-        return repr(operator)
-    except Exception:
-        return None
-
 
 def _format_operator_call(
     *,
-    operator: Any,
     name: str,
     arguments: tuple[OperatorArgument, ...],
+    bare_callable: bool,
+    show_defaults: bool,
+    verbose: bool,
 ) -> str:
-    if _is_bare_callable(operator):
+    filtered_arguments = _filter_arguments(arguments, include_defaults=show_defaults)
+    del verbose
+
+    if bare_callable:
         return name
 
-    return f"{name}({_format_call_arguments(arguments)})"
+    return f"{name}({_format_call_arguments(filtered_arguments)})"
 
 
 def _format_call_arguments(arguments: tuple[OperatorArgument, ...]) -> str:
