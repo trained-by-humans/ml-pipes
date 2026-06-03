@@ -46,9 +46,11 @@ def test_ml_pipes_alias_exports_preserve_identity() -> None:
 
 
 def test_ml_pipes_exports_description_types() -> None:
-    assert hasattr(ml_pipes, "StepDescription")
+    assert hasattr(ml_pipes, "OperatorArgument")
+    assert hasattr(ml_pipes, "OperatorDescription")
     assert hasattr(ml_pipes, "PipelineDescription")
-    assert "StepDescription" in ml_pipes.__all__
+    assert "OperatorArgument" in ml_pipes.__all__
+    assert "OperatorDescription" in ml_pipes.__all__
     assert "PipelineDescription" in ml_pipes.__all__
 
 

@@ -97,18 +97,19 @@ class Pipeline:
             pass
         return InspectionResult(collector.trace.spans)
 
-    def describe(self, expand_embedded: bool = True) -> PipelineDescription:
+    def __repr__(self) -> str:
+        return self._describe().render(mode="repr")
+
+    __str__ = __repr__
+
+    def describe(self, *, show_defaults: bool = False) -> PipelineDescription:
         """Describe, print, and return the operator chain."""
-        description = self._describe(expand_embedded=expand_embedded)
-        print(description)
+        description = self._describe()
+        print(description.render(show_defaults=show_defaults, mode="describe"))
         return description
 
-    def _describe(self, expand_embedded: bool = True) -> PipelineDescription:
-        return _build_pipeline_description(
-            operators=self.operators,
-            expand_embedded=expand_embedded,
-            is_embedded_operator=lambda operator: isinstance(operator, Embed),
-        )
+    def _describe(self) -> PipelineDescription:
+        return _build_pipeline_description(operators=self.operators)
 
     def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
         trace = InvocationTrace() if cfg is not None else _NoOpTrace()

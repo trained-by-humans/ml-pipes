@@ -13,7 +13,7 @@ from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector,
 from .context import Context, Recall, Store
 from .core import Pipeline, Embed, embed, Inline, inline, Operator, OperatorLike
 from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
-from .description import PipelineDescription, StepDescription
+from .description import OperatorDescription, PipelineDescription
 from .factory import data_factory, pipeline_factory, InputFn
 from .inspection import (
     HtmlRenderer,
@@ -105,6 +105,7 @@ from .types import (
     TensorRegistry,
 )
 from .validation import PipelineValidationError, TypeContract
+from .operator import OperatorArgument
 
 __all__ = [
     "Benchmark",
@@ -184,8 +185,9 @@ __all__ = [
     "Renderer",
     "StepView",
     "TextBlock",
+    "OperatorArgument",
+    "OperatorDescription",
     "PipelineDescription",
-    "StepDescription",
     "Infer",
     "LoadFile",
     "LogDetections",

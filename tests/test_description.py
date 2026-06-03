@@ -12,6 +12,8 @@ from ml_pipes import (
     Gather,
     InvocationTrace,
     Operator,
+    OperatorArgument,
+    OperatorDescription,
     Pipeline,
     Recall,
     Scatter,
@@ -21,7 +23,7 @@ from ml_pipes import (
     UnBatch,
     embed,
 )
-from ml_pipes.operator import get_operator_args, get_operator_constructor_signature
+from ml_pipes.operator import get_operator_constructor_signature
 
 
 @Operator
@@ -56,6 +58,14 @@ class LegacyConfiguredIntToString:
         return f"{self.prefix}{value}"
 
 
+class ReprOnlyLegacyOp:
+    def __call__(self, value: int) -> int:
+        return value
+
+    def __repr__(self) -> str:
+        return "LegacyCustom"
+
+
 class _Capture(TraceCollector):
     def on_trace(self, trace: InvocationTrace) -> None:
         del trace
@@ -71,6 +81,17 @@ _MODULE_LAMBDA = lambda value: value
 class _CallableArg:
     def __call__(self, value: Any) -> Any:
         return value
+
+
+class _CallableArgWithRepr:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __call__(self, value: Any) -> Any:
+        return value
+
+    def __repr__(self) -> str:
+        return f"_CallableArgWithRepr(name={self.name!r})"
 
 
 class _CustomArg:
@@ -141,29 +162,81 @@ class VariadicArgsOp:
         return value
 
 
-def test_describe_renders_flat_operator_chain_with_named_args():
-    description = Pipeline([ConfiguredIntToString(prefix="id:"), StringToFloat()]).describe()
+@Operator
+class CustomRenderedOp:
+    def __init__(self, value: str, flag: bool = False) -> None:
+        self.value = value
+        self.flag = flag
 
-    assert [(step.label, step.kind, step.operator_args) for step in description.steps] == [
-        ("ConfiguredIntToString", "operator", {"prefix": "id:"}),
-        ("StringToFloat", "operator", {}),
+    def __call__(self, value: int) -> int:
+        return value
+
+    def __repr__(self) -> str:
+        return f"Custom<{self.value!r}>"
+
+    def describe(self, *, show_defaults: bool = False) -> str:
+        suffix = ", flag=False" if show_defaults else ""
+        return f"CustomDescribe(value={self.value!r}{suffix})"
+
+
+@Operator
+class InvalidRenderedOp:
+    def __init__(self, value: str, flag: bool = False) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+    def __repr__(self) -> str:
+        raise RuntimeError("bad repr")
+
+    def describe(self, *, show_defaults: bool = False) -> int:
+        del show_defaults
+        return 123
+
+
+def _pipeline_text(*operators: str) -> str:
+    if not operators:
+        return "Pipeline([])"
+    return "Pipeline([\n" + "\n".join(f"  {operator}," for operator in operators) + "\n])"
+
+
+def _argument_dict(operator: Any, *, include_defaults: bool = False) -> dict[str, Any]:
+    arguments = OperatorDescription.from_operator(operator).arguments
+    if not include_defaults:
+        arguments = tuple(argument for argument in arguments if argument.is_passed)
+    return OperatorArgument.to_dict(arguments)
+
+
+def test_pipeline_repr_renders_flat_operator_chain_with_named_args():
+    pipeline = Pipeline([ConfiguredIntToString(prefix="id:"), StringToFloat()])
+    description = pipeline.describe()
+
+    assert isinstance(description.operators[0], OperatorDescription)
+    assert [(operator.name, operator.passed_args) for operator in description.operators] == [
+        ("ConfiguredIntToString", {"prefix": "id:"}),
+        ("StringToFloat", {}),
     ]
-    assert repr(description) == (
-        "Pipeline[\n"
-        "  0:ConfiguredIntToString(prefix='id:')\n"
-        "  1:StringToFloat()\n"
-        "]"
+    assert repr(pipeline) == _pipeline_text(
+        "ConfiguredIntToString(prefix='id:')",
+        "StringToFloat()",
     )
+    assert repr(description) == repr(pipeline)
 
-def test_get_operator_args_can_expand_defaults_on_read():
+
+def test_operator_argument_to_dict_can_expand_defaults_on_read():
     operator = ConfiguredIntToString()
 
-    assert get_operator_args(operator) == {}
-    assert get_operator_args(operator, include_defaults=True) == {"prefix": ""}
+    assert _argument_dict(operator) == {}
+    assert _argument_dict(operator, include_defaults=True) == {"prefix": ""}
 
 
 def test_function_operator_has_no_constructor_signature():
     assert get_operator_constructor_signature(_named_identity) is None
+
+
+def test_pipeline_repr_uses_function_name_for_function_operators():
+    assert repr(Pipeline([_named_identity])) == _pipeline_text("_named_identity")
 
 
 def test_describe_formats_primitive_constructor_args():
@@ -178,7 +251,7 @@ def test_describe_formats_primitive_constructor_args():
         )
     ]).describe()
 
-    assert description.steps[0].operator_args == {
+    assert description.operators[0].passed_args == {
         "flag": True,
         "count": 3,
         "ratio": 0.5,
@@ -186,11 +259,8 @@ def test_describe_formats_primitive_constructor_args():
         "payload": b"data",
         "maybe": None,
     }
-    assert (
-        repr(description)
-        == "Pipeline[\n"
-        "  0:PrimitiveArgsOp(flag=True, count=3, ratio=0.5, label='hello', payload=b'data', maybe=None)\n"
-        "]"
+    assert repr(description) == _pipeline_text(
+        "PrimitiveArgsOp(flag=True, count=3, ratio=0.5, label='hello', payload=b'data', maybe=None)"
     )
 
 
@@ -205,145 +275,145 @@ def test_describe_formats_structured_constructor_args():
         )
     ]).describe()
 
-    assert description.steps[0].operator_args == {
+    assert description.operators[0].passed_args == {
         "coords": (1, 2),
         "names": ["a", "b"],
         "mapping": {"left": 1, "right": 2},
         "classes": {0, 2},
         "frozen": frozenset({"alpha", "beta"}),
     }
-    assert (
-        repr(description)
-        == "Pipeline[\n"
-        "  0:StructuredArgsOp(coords=(1, 2), names=['a', 'b'], mapping={'left': 1, 'right': 2}, "
-        "classes={0, 2}, frozen=frozenset({'alpha', 'beta'}))\n"
-        "]"
+    assert repr(description) == _pipeline_text(
+        "StructuredArgsOp(coords=(1, 2), names=['a', 'b'], mapping={'left': 1, 'right': 2}, "
+        "classes={0, 2}, frozen=frozenset({'alpha', 'beta'}))"
     )
 
 
-def test_operator_args_capture_lambda_and_describe_with_lambda_label():
+def test_operator_args_capture_lambda_and_render_with_lambda_label():
     operator = CallableArgOp(_MODULE_LAMBDA)
     description = Pipeline([operator]).describe()
 
-    assert get_operator_args(operator)["fn"] is _MODULE_LAMBDA
-    assert repr(description) == "Pipeline[\n  0:CallableArgOp(fn=<lambda>)\n]"
+    assert _argument_dict(operator)["fn"] is _MODULE_LAMBDA
+    assert repr(description) == _pipeline_text("CallableArgOp(<lambda>)")
 
 
-def test_operator_args_capture_function_and_describe_with_function_name():
+def test_operator_args_capture_function_and_render_with_function_name():
     operator = CallableArgOp(_named_identity)
     description = Pipeline([operator]).describe()
 
-    assert get_operator_args(operator)["fn"] is _named_identity
-    assert repr(description) == "Pipeline[\n  0:CallableArgOp(fn=_named_identity)\n]"
+    assert _argument_dict(operator)["fn"] is _named_identity
+    assert repr(description) == _pipeline_text("CallableArgOp(_named_identity)")
 
 
-def test_operator_args_capture_callable_object_and_describe_with_type_name():
+def test_operator_args_capture_callable_object_and_render_with_type_name():
     callable_object = _CallableArg()
     operator = CallableArgOp(callable_object)
     description = Pipeline([operator]).describe()
 
-    assert get_operator_args(operator)["fn"] is callable_object
-    assert repr(description) == "Pipeline[\n  0:CallableArgOp(fn=_CallableArg)\n]"
+    assert _argument_dict(operator)["fn"] is callable_object
+    assert repr(description) == _pipeline_text("CallableArgOp(_CallableArg)")
 
 
-def test_operator_args_capture_custom_object_and_describe_with_repr():
+def test_operator_args_capture_callable_object_with_custom_repr():
+    callable_object = _CallableArgWithRepr("mapper")
+    operator = CallableArgOp(callable_object)
+    description = Pipeline([operator]).describe()
+
+    assert _argument_dict(operator)["fn"] is callable_object
+    assert repr(description) == _pipeline_text(
+        "CallableArgOp(_CallableArgWithRepr(name='mapper'))"
+    )
+
+
+def test_operator_args_capture_custom_object_and_render_with_repr():
     payload = _CustomArg("example")
     operator = CustomObjectArgOp(payload)
     description = Pipeline([operator]).describe()
 
-    assert get_operator_args(operator)["payload"] is payload
-    assert repr(description) == "Pipeline[\n  0:CustomObjectArgOp(payload=_CustomArg(name='example'))\n]"
+    assert _argument_dict(operator)["payload"] is payload
+    assert repr(description) == _pipeline_text(
+        "CustomObjectArgOp(_CustomArg(name='example'))"
+    )
 
 
-def test_get_operator_args_captures_varargs_and_kwargs():
+def test_operator_argument_to_dict_captures_varargs_and_kwargs():
     operator = VariadicArgsOp("first", "second", alpha=1, beta="two")
 
-    assert get_operator_args(operator) == {
+    assert _argument_dict(operator) == {
         "items": ("first", "second"),
         "named": {"alpha": 1, "beta": "two"},
     }
-    assert repr(Pipeline([operator]).describe()) == "Pipeline[\n  0:VariadicArgsOp('first', 'second', alpha=1, beta='two')\n]"
+    assert repr(Pipeline([operator])) == _pipeline_text(
+        "VariadicArgsOp('first', 'second', alpha=1, beta='two')"
+    )
 
 
-def test_describe_prints_description_once_for_top_level_call(capsys):
-    inner = Pipeline([ConfiguredIntToString(), StringToFloat()])
-    description = Pipeline([embed(inner), FloatToBool()]).describe()
+def test_describe_prints_requested_view_once_for_top_level_call(capsys):
+    pipeline = Pipeline([ConfiguredIntToString()])
+    description = pipeline.describe(show_defaults=True)
 
     captured = capsys.readouterr()
 
-    assert captured.out == repr(description) + "\n"
+    assert captured.out == description.describe(show_defaults=True) + "\n"
+    assert repr(description) == _pipeline_text("ConfiguredIntToString()")
+    assert description.describe(show_defaults=True) == _pipeline_text(
+        "ConfiguredIntToString(prefix='')"
+    )
+
+
+def test_operator_description_tracks_passed_and_default_args():
+    description = Pipeline([ConfiguredIntToString()]).describe()
+    operator = description.operators[0]
+
+    assert operator.passed_args == {}
+    assert operator.default_args == {"prefix": ""}
+    assert operator.all_args == {"prefix": ""}
+    assert repr(operator) == "ConfiguredIntToString()"
+    assert operator.describe(show_defaults=True) == "ConfiguredIntToString(prefix='')"
 
 
 def test_describe_renders_context_operators_with_captured_args():
     description = Pipeline([Store("saved"), Recall("saved")]).describe()
 
-    assert [step.operator_args for step in description.steps] == [
+    assert [operator.passed_args for operator in description.operators] == [
         {"name": "saved"},
         {"name": "saved"},
     ]
-    assert repr(description) == "Pipeline[\n  0:Store(name='saved')\n  1:Recall(name='saved')\n]"
+    assert repr(description) == _pipeline_text("Store('saved')", "Recall('saved')")
 
 
 def test_describe_keeps_batch_region_operators_in_chain_order():
     description = Pipeline([Batch(size=2), ListIdentity(), UnBatch()]).describe()
 
-    assert [(step.label, step.kind) for step in description.steps] == [
-        ("Batch", "operator"),
-        ("ListIdentity", "operator"),
-        ("UnBatch", "operator"),
+    assert [operator.name for operator in description.operators] == [
+        "Batch",
+        "ListIdentity",
+        "UnBatch",
     ]
-    assert repr(description) == "Pipeline[\n  0:Batch(size=2)\n  1:ListIdentity()\n  2:UnBatch()\n]"
+    assert repr(description) == _pipeline_text("Batch(size=2)", "ListIdentity()", "UnBatch()")
 
 
 def test_describe_keeps_scatter_region_operators_in_chain_order():
     description = Pipeline([Scatter(max_concurrency=1), ConfiguredIntToString(), Gather()]).describe()
 
-    assert [(step.label, step.kind) for step in description.steps] == [
-        ("Scatter", "operator"),
-        ("ConfiguredIntToString", "operator"),
-        ("Gather", "operator"),
+    assert [operator.name for operator in description.operators] == [
+        "Scatter",
+        "ConfiguredIntToString",
+        "Gather",
     ]
-    assert repr(description) == (
-        "Pipeline[\n"
-        "  0:Scatter(max_concurrency=1)\n"
-        "  1:ConfiguredIntToString()\n"
-        "  2:Gather()\n"
-        "]"
+    assert repr(description) == _pipeline_text(
+        "Scatter(max_concurrency=1)",
+        "ConfiguredIntToString()",
+        "Gather()",
     )
 
 
-def test_describe_expands_embedded_pipeline_by_default():
+def test_describe_keeps_embed_flat_and_opaque():
     inner = Pipeline([ConfiguredIntToString(), StringToFloat()])
     description = Pipeline([embed(inner), FloatToBool()]).describe()
 
-    assert len(description.steps) == 2
-    assert description.steps[0].label == "Embed"
-    assert description.steps[0].kind == "pipeline"
-    assert [child.label for child in description.steps[0].children] == [
-        "ConfiguredIntToString",
-        "StringToFloat",
-    ]
-    assert repr(description) == (
-        "Pipeline[\n"
-        "  0:Embed()\n"
-        "    0:ConfiguredIntToString()\n"
-        "    1:StringToFloat()\n"
-        "  1:FloatToBool()\n"
-        "]"
-    )
-
-
-def test_describe_can_collapse_embedded_pipeline():
-    inner = Pipeline([ConfiguredIntToString(), StringToFloat()])
-    description = Pipeline([embed(inner), FloatToBool()]).describe(expand_embedded=False)
-
-    assert description.steps[0].children == []
-    assert repr(description) == (
-        "Pipeline[\n"
-        "  0:Embed()\n"
-        "  1:FloatToBool()\n"
-        "]"
-    )
+    assert len(description.operators) == 2
+    assert [operator.name for operator in description.operators] == ["Embed", "FloatToBool"]
+    assert repr(description) == _pipeline_text("Embed()", "FloatToBool()")
 
 
 def test_describe_ignores_custom_operator_labels_when_present():
@@ -354,61 +424,91 @@ def test_describe_ignores_custom_operator_labels_when_present():
 
     description = pipeline.describe()
 
-    assert [step.label for step in description.steps] == ["ConfiguredIntToString", "StringToFloat"]
+    assert [operator.name for operator in description.operators] == [
+        "ConfiguredIntToString",
+        "StringToFloat",
+    ]
 
 
 def test_describe_preserves_extract_constructor_config():
     description = Pipeline([Extract("output0", as_="preds")]).describe()
 
-    assert description.steps[0].operator_args == {
+    assert description.operators[0].passed_args == {
         "names": ("output0",),
         "as_": "preds",
     }
-    assert repr(description) == "Pipeline[\n  0:Extract('output0', as_='preds')\n]"
+    assert repr(description) == _pipeline_text("Extract('output0', as_='preds')")
 
 
 def test_describe_preserves_explicit_none_constructor_args():
     description = Pipeline([Extract("output0", as_=None)]).describe()
 
-    assert description.steps[0].operator_args == {
+    assert description.operators[0].passed_args == {
         "names": ("output0",),
         "as_": None,
     }
-    assert repr(description) == "Pipeline[\n  0:Extract('output0', as_=None)\n]"
+    assert repr(description) == _pipeline_text("Extract('output0', as_=None)")
 
 
 def test_describe_captures_wrapper_constructor_args():
-    assert Pipeline([FilterPredictionsByClass({0, 2})]).describe().steps[0].operator_args == {
+    assert Pipeline([FilterPredictionsByClass({0, 2})]).describe().operators[0].passed_args == {
         "classes": {0, 2},
     }
-    assert repr(Pipeline([FilterPredictionsByClass({0, 2})]).describe()) == (
-        "Pipeline[\n  0:FilterPredictionsByClass(classes={0, 2})\n]"
+    assert repr(Pipeline([FilterPredictionsByClass({0, 2})])) == _pipeline_text(
+        "FilterPredictionsByClass({0, 2})"
     )
 
-    assert Pipeline([FilterPredictionsByScore(0.7)]).describe().steps[0].operator_args == {
+    assert Pipeline([FilterPredictionsByScore(0.7)]).describe().operators[0].passed_args == {
         "min_score": 0.7,
     }
-    assert repr(Pipeline([FilterPredictionsByScore(0.7)]).describe()) == (
-        "Pipeline[\n  0:FilterPredictionsByScore(min_score=0.7)\n]"
+    assert repr(Pipeline([FilterPredictionsByScore(0.7)])) == _pipeline_text(
+        "FilterPredictionsByScore(0.7)"
     )
 
-    assert Pipeline([FilterTensorsByScore("boxes", score="scores", min_score=0.75)]).describe().steps[0].operator_args == {
+    assert Pipeline([FilterTensorsByScore("boxes", score="scores", min_score=0.75)]).describe().operators[0].passed_args == {
         "srcs": ("boxes",),
         "score": "scores",
         "min_score": 0.75,
     }
-    assert repr(Pipeline([FilterTensorsByScore("boxes", score="scores", min_score=0.75)]).describe()) == (
-        "Pipeline[\n  0:FilterTensorsByScore('boxes', score='scores', min_score=0.75)\n]"
+    assert repr(Pipeline([FilterTensorsByScore("boxes", score="scores", min_score=0.75)])) == _pipeline_text(
+        "FilterTensorsByScore('boxes', score='scores', min_score=0.75)"
     )
 
-    assert Pipeline([AsType("float16")]).describe().steps[0].operator_args == {
+    assert Pipeline([AsType("float16")]).describe().operators[0].passed_args == {
         "dtype": "float16",
     }
-    assert repr(Pipeline([AsType("float16")]).describe()) == "Pipeline[\n  0:AsType(dtype='float16')\n]"
+    assert repr(Pipeline([AsType("float16")])) == _pipeline_text("AsType('float16')")
 
 
 def test_describe_undecorated_custom_operator_shows_no_args():
     description = Pipeline([LegacyConfiguredIntToString(prefix="id:")]).describe()
 
-    assert description.steps[0].operator_args == {}
-    assert repr(description) == "Pipeline[\n  0:LegacyConfiguredIntToString()\n]"
+    assert description.operators[0].passed_args == {}
+    assert repr(description) == _pipeline_text("LegacyConfiguredIntToString()")
+
+
+def test_describe_uses_custom_repr_when_no_custom_describe_exists():
+    description = Pipeline([ReprOnlyLegacyOp()]).describe()
+
+    assert repr(description) == _pipeline_text("LegacyCustom")
+    assert description.describe() == _pipeline_text("LegacyCustom")
+
+
+def test_pipeline_uses_custom_operator_repr_and_describe():
+    pipeline = Pipeline([CustomRenderedOp("x")])
+    description = pipeline.describe(show_defaults=True)
+
+    assert repr(pipeline) == _pipeline_text("Custom<'x'>")
+    assert description.describe(show_defaults=True) == _pipeline_text(
+        "CustomDescribe(value='x', flag=False)"
+    )
+
+
+def test_pipeline_falls_back_when_custom_operator_repr_or_describe_are_invalid():
+    pipeline = Pipeline([InvalidRenderedOp("x")])
+    description = pipeline.describe(show_defaults=True)
+
+    assert repr(pipeline) == _pipeline_text("InvalidRenderedOp('x')")
+    assert description.describe(show_defaults=True) == _pipeline_text(
+        "InvalidRenderedOp('x', flag=False)"
+    )
