@@ -166,6 +166,15 @@ class VariadicArgsOp:
 
 
 @Operator
+class PipelineParamOp:
+    def __init__(self, pipeline: str, other: str) -> None:
+        pass
+
+    def __call__(self, value: int) -> int:
+        return value
+
+
+@Operator
 class CustomRenderedOp:
     def __init__(self, value: str, flag: bool = False) -> None:
         self.value = value
@@ -398,15 +407,31 @@ def test_operator_argument_to_dict_captures_varargs_and_kwargs():
     )
 
 
+def test_operator_capture_keeps_real_pipeline_parameter_aligned():
+    operator = PipelineParamOp("inner", "other")
+    description = operator.describe()
+
+    assert description.passed_args == {
+        "pipeline": "inner",
+        "other": "other",
+    }
+    assert tuple(description.constructor_signature.parameters) == ("pipeline", "other")
+    assert repr(operator) == "PipelineParamOp('inner', 'other')"
+    assert Pipeline([operator]).describe().operators[0].passed_args == {
+        "pipeline": "inner",
+        "other": "other",
+    }
+
+
 def test_describe_prints_requested_view_once_for_top_level_call(capsys):
     pipeline = Pipeline([ConfiguredIntToString()])
     description = pipeline.describe(show_defaults=True)
 
     captured = capsys.readouterr()
 
-    assert captured.out == description.render(show_defaults=True, verbose=True) + "\n"
+    assert captured.out == description.render(show_defaults=True) + "\n"
     assert repr(description) == _pipeline_text("ConfiguredIntToString()")
-    assert description.render(show_defaults=True, verbose=True) == _pipeline_text(
+    assert description.render(show_defaults=True) == _pipeline_text(
         "ConfiguredIntToString(prefix='')"
     )
 
@@ -464,7 +489,22 @@ def test_describe_keeps_embed_flat_and_opaque():
 
     assert len(description.operators) == 2
     assert [operator.name for operator in description.operators] == ["Embed", "FloatToBool"]
+    assert description.operators[0].passed_args["pipeline"] is inner
     assert repr(description) == _pipeline_text("Embed()", "FloatToBool()")
+
+
+def test_describe_verbose_expands_embed_pipeline(capsys):
+    inner = Pipeline([ConfiguredIntToString(), StringToFloat()])
+    pipeline = Pipeline([embed(inner), FloatToBool()])
+    description = pipeline.describe(verbose=True)
+
+    captured = capsys.readouterr()
+
+    assert description.render(verbose=True) == _pipeline_text(
+        "Embed(Pipeline([\n    ConfiguredIntToString(),\n    StringToFloat(),\n  ]))",
+        "FloatToBool()",
+    )
+    assert captured.out == description.render(verbose=True) + "\n"
 
 
 def test_describe_ignores_custom_operator_labels_when_present():

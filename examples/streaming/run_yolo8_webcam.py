@@ -49,7 +49,7 @@ def main() -> int:
 
     pipeline = build_pipeline(model_path)
     pipeline.validate()
-    pipeline.describe()
+    pipeline.describe(verbose=True)
 
     try:
         reader = FrameReader(0)

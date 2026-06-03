@@ -7,8 +7,9 @@ from typing import Any, Literal, TypeVar
 
 _CAPTURED_ARGUMENTS_ATTR = "__ml_pipes_operator_argument_entries__"
 _CONSTRUCTOR_SIGNATURE_ATTR = "__ml_pipes_operator_constructor_signature__"
+_EXCLUDED_OPERATOR_ARGUMENTS_ATTR = "__ml_pipes_operator_excluded_arguments__"
 _WRAPPED_ATTR = "__ml_pipes_operator_wrapped__"
-_EXCLUDED_ARGUMENTS = {"self", "pipeline"}
+_EXCLUDED_ARGUMENTS = {"self"}
 
 _OperatorType = TypeVar("_OperatorType", bound=type)
 
@@ -98,7 +99,11 @@ def Operator(cls: _OperatorType) -> _OperatorType:
     init = cls.__init__
     target = getattr(init, "__wrapped__", init)
     constructor_signature = inspect.signature(target)
-    public_constructor_signature = _public_constructor_signature(constructor_signature)
+    excluded_arguments = _excluded_argument_names(cls)
+    public_constructor_signature = _public_constructor_signature(
+        constructor_signature,
+        excluded_arguments,
+    )
     setattr(cls, _CONSTRUCTOR_SIGNATURE_ATTR, public_constructor_signature)
 
     if _effective_repr(cls) is object.__repr__:
@@ -126,7 +131,12 @@ def Operator(cls: _OperatorType) -> _OperatorType:
     @functools.wraps(target)
     def wrapped(self, *args, **kwargs):
         constructor_signature.bind(self, *args, **kwargs)
-        captured_arguments = _capture_arguments(constructor_signature, args, kwargs)
+        captured_arguments = _capture_arguments(
+            constructor_signature,
+            args,
+            kwargs,
+            excluded_arguments=excluded_arguments,
+        )
         object.__setattr__(self, _CAPTURED_ARGUMENTS_ATTR, captured_arguments)
         return target(self, *args, **kwargs)
 
@@ -159,7 +169,10 @@ def get_operator_constructor_signature(operator: Any) -> inspect.Signature | Non
 
     raw_target = getattr(init, "__wrapped__", init)
     try:
-        return _public_constructor_signature(inspect.signature(raw_target))
+        return _public_constructor_signature(
+            inspect.signature(raw_target),
+            _excluded_argument_names(target),
+        )
     except (TypeError, ValueError):
         return None
 
@@ -178,6 +191,8 @@ def _capture_arguments(
     constructor_signature: inspect.Signature,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    *,
+    excluded_arguments: set[str],
 ) -> tuple[OperatorArgument, ...]:
     captured: list[OperatorArgument] = []
     consumed_keywords: set[str] = set()
@@ -185,7 +200,7 @@ def _capture_arguments(
     parameters = tuple(constructor_signature.parameters.values())
 
     for parameter in parameters:
-        if parameter.name in _EXCLUDED_ARGUMENTS:
+        if parameter.name in excluded_arguments:
             continue
 
         if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
@@ -266,58 +281,69 @@ def _format_operator_call(
     show_defaults: bool,
     verbose: bool,
 ) -> str:
-    filtered_arguments = _filter_arguments(arguments, include_defaults=show_defaults)
-    del verbose
-
     if bare_callable:
         return name
 
-    return f"{name}({_format_call_arguments(filtered_arguments)})"
+    rendered_arguments = _format_call_arguments(
+        _filter_arguments(
+            arguments,
+            include_defaults=show_defaults,
+            verbose=verbose,
+        ),
+        verbose=verbose,
+    )
+    return f"{name}({rendered_arguments})"
 
 
-def _format_call_arguments(arguments: tuple[OperatorArgument, ...]) -> str:
+def _format_call_arguments(
+    arguments: tuple[OperatorArgument, ...],
+    *,
+    verbose: bool,
+) -> str:
     parts: list[str] = []
     for argument in arguments:
         if argument.kind is inspect.Parameter.POSITIONAL_ONLY:
-            parts.append(_format_arg_value(argument.value))
+            parts.append(_format_arg_value(argument.value, verbose=verbose))
             continue
         if argument.kind is inspect.Parameter.VAR_POSITIONAL:
-            parts.extend(_format_arg_value(item) for item in argument.value)
+            parts.extend(_format_arg_value(item, verbose=verbose) for item in argument.value)
             continue
         if argument.kind is inspect.Parameter.VAR_KEYWORD:
             parts.extend(
-                f"{name}={_format_arg_value(item)}"
+                f"{name}={_format_arg_value(item, verbose=verbose)}"
                 for name, item in argument.value.items()
             )
             continue
         if argument.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD and not argument.passed_by_keyword and argument.is_passed:
-            parts.append(_format_arg_value(argument.value))
+            parts.append(_format_arg_value(argument.value, verbose=verbose))
             continue
-        parts.append(f"{argument.name}={_format_arg_value(argument.value)}")
+        parts.append(f"{argument.name}={_format_arg_value(argument.value, verbose=verbose)}")
     return ", ".join(parts)
 
 
-def _format_arg_value(value: Any) -> str:
+def _format_arg_value(value: Any, *, verbose: bool) -> str:
+    if _is_pipeline_instance(value):
+        return repr(value) if verbose else type(value).__name__
     if isinstance(value, tuple):
         if len(value) == 1:
-            return f"({_format_arg_value(value[0])},)"
-        return "(" + ", ".join(_format_arg_value(item) for item in value) + ")"
+            return f"({_format_arg_value(value[0], verbose=verbose)},)"
+        return "(" + ", ".join(_format_arg_value(item, verbose=verbose) for item in value) + ")"
     if isinstance(value, list):
-        return "[" + ", ".join(_format_arg_value(item) for item in value) + "]"
+        return "[" + ", ".join(_format_arg_value(item, verbose=verbose) for item in value) + "]"
     if isinstance(value, dict):
         return "{" + ", ".join(
-            f"{_format_arg_value(key)}: {_format_arg_value(item)}"
+            f"{_format_arg_value(key, verbose=verbose)}: {_format_arg_value(item, verbose=verbose)}"
             for key, item in value.items()
         ) + "}"
     if isinstance(value, set):
         if not value:
             return "set()"
-        items = sorted(_format_arg_value(item) for item in value)
+        items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
         return "{" + ", ".join(items) + "}"
     if isinstance(value, frozenset):
         if not value:
             return "frozenset()"
-        items = sorted(_format_arg_value(item) for item in value)
+        items = sorted(_format_arg_value(item, verbose=verbose) for item in value)
         return "frozenset({" + ", ".join(items) + "})"
     if isinstance(value, (str, bytes, int, float, bool)) or value is None:
         return repr(value)
@@ -346,10 +372,17 @@ def _filter_arguments(
     arguments: tuple[OperatorArgument, ...],
     *,
     include_defaults: bool,
+    verbose: bool,
 ) -> tuple[OperatorArgument, ...]:
-    if include_defaults:
-        return arguments
-    return tuple(argument for argument in arguments if argument.is_passed)
+    visible_arguments = arguments if include_defaults else tuple(
+        argument for argument in arguments if argument.is_passed
+    )
+    if verbose:
+        return visible_arguments
+    return tuple(
+        argument for argument in visible_arguments
+        if not _is_pipeline_instance(argument.value)
+    )
 
 
 def _is_bare_callable(value: Any) -> bool:
@@ -376,15 +409,34 @@ def _supports_instance_attribute(cls: type, name: str) -> bool:
     return False
 
 
+def _excluded_argument_names(target: Any) -> set[str]:
+    cls = target if inspect.isclass(target) else type(target)
+    excluded = getattr(cls, _EXCLUDED_OPERATOR_ARGUMENTS_ATTR, ())
+    if isinstance(excluded, str):
+        excluded = (excluded,)
+    return _EXCLUDED_ARGUMENTS.union(excluded)
+
+
+def _is_pipeline_instance(value: Any) -> bool:
+    try:
+        from .core import Pipeline
+    except Exception:
+        return False
+    return isinstance(value, Pipeline)
+
+
 def _effective_repr(target: type) -> Any:
     return getattr(target, "__repr__", object.__repr__)
 
 
-def _public_constructor_signature(constructor_signature: inspect.Signature) -> inspect.Signature:
+def _public_constructor_signature(
+    constructor_signature: inspect.Signature,
+    excluded_arguments: set[str],
+) -> inspect.Signature:
     return constructor_signature.replace(
         parameters=[
             parameter
             for parameter in constructor_signature.parameters.values()
-            if parameter.name not in _EXCLUDED_ARGUMENTS
+            if parameter.name not in excluded_arguments
         ]
     )

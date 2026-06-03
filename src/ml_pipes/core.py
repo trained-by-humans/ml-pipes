@@ -130,10 +130,10 @@ class Pipeline:
 
     __str__ = __repr__
 
-    def describe(self, *, show_defaults: bool = False) -> PipelineDescription:
+    def describe(self, *, show_defaults: bool = False, verbose: bool = False) -> PipelineDescription:
         """Describe, print, and return the operator chain."""
         description = self._describe()
-        print(description.render(show_defaults=show_defaults, verbose=True))
+        print(description.render(show_defaults=show_defaults, verbose=verbose))
         return description
 
     def _describe(self) -> PipelineDescription:
