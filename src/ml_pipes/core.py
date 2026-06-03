@@ -3,13 +3,12 @@ from __future__ import annotations
 import inspect
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
-
-_log = logging.getLogger(__name__)
 
 from .context import Context, ContextOp
 from .inspection import InspectionResult, _CaptureCollector
+from .operator import Operator, OperatorDescription
 from .region import RegionCloser, RegionOpener
 from .tracing import (
     InvocationTrace,
@@ -24,9 +23,10 @@ from .tracing import (
 )
 from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
 
-# An operator is anything the pipeline can execute as a step.
-Operator = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
+_log = logging.getLogger(__name__)
 
+# An operator is anything the pipeline can execute as a step.
+OperatorLike = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
 
 
 @dataclass(frozen=True)
@@ -36,10 +36,39 @@ class Region:
     name: str
 
 
+@dataclass(frozen=True)
+class PipelineDescription:
+    operators: list[OperatorDescription] = field(default_factory=list)
+
+    def render(
+        self,
+        *,
+        show_defaults: bool = False,
+        verbose: bool = False,
+    ) -> str:
+        if not self.operators:
+            return "Pipeline([])"
+
+        lines = ["Pipeline(["]
+        for operator in self.operators:
+            rendered = operator.render(show_defaults=show_defaults, verbose=verbose)
+            operator_lines = rendered.splitlines() or [""]
+            for line in operator_lines[:-1]:
+                lines.append(f"  {line}")
+            lines.append(f"  {operator_lines[-1]},")
+        lines.append("])")
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        return self.render()
+
+    __str__ = __repr__
+
+
 class Pipeline:
     def __init__(
         self,
-        operators: Iterable[Operator],
+        operators: Iterable[OperatorLike],
         auto_validate: bool = False,
         tracing: TracingConfig | None = None,
     ):
@@ -62,7 +91,7 @@ class Pipeline:
             if collector is not None else None
         )
 
-    def extend(self, operators: Iterable[Operator]) -> Pipeline:
+    def extend(self, operators: Iterable[OperatorLike]) -> Pipeline:
         """Append *operators* to this pipeline in place and return self."""
         self.operators.extend(self._flatten(list(operators)))
         if self._auto_validate:
@@ -95,6 +124,22 @@ class Pipeline:
         except Exception:
             pass
         return InspectionResult(collector.trace.spans)
+
+    def __repr__(self) -> str:
+        return self._describe().render()
+
+    __str__ = __repr__
+
+    def describe(self, *, show_defaults: bool = False, verbose: bool = False) -> PipelineDescription:
+        """Describe, print, and return the operator chain."""
+        description = self._describe()
+        print(description.render(show_defaults=show_defaults, verbose=verbose))
+        return description
+
+    def _describe(self) -> PipelineDescription:
+        return PipelineDescription(
+            operators=[OperatorDescription.from_operator(operator) for operator in self.operators]
+        )
 
     def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
         trace = InvocationTrace() if cfg is not None else _NoOpTrace()
@@ -135,7 +180,13 @@ class Pipeline:
             inference=inference,
         )
 
-    def _execute(self, value: Any, trace: Any, cfg: TracingConfig | None, region: tuple[int, int] | None = None) -> tuple[Any, Any]:
+    def _execute(
+        self,
+        value: Any,
+        trace: Any,
+        cfg: TracingConfig | None,
+        region: tuple[int, int] | None = None,
+    ) -> tuple[Any, Any]:
         start, end = region if region is not None else (0, len(self.operators))
         context = Context()
         current = value
@@ -154,14 +205,23 @@ class Pipeline:
             trace.total_duration_s = time.perf_counter() - t_start
         return current, trace
 
-    def _step_into_region(self, i: int, current: Any, context: Context, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context]:
+    def _step_into_region(
+        self,
+        i: int,
+        current: Any,
+        context: Context,
+        trace: Any,
+        cfg: TracingConfig | None,
+    ) -> tuple[Any, Context]:
         operator = self.operators[i]
         label = self._label_for(i, cfg.operator_labels if cfg else None)
         region_start = i + 1
         region_end = self._find_region_end(region_start, type(operator), operator.closing_type)
+
         # Bounded executor: the operator can only run operators within its own region.
         def execute_region(value: Any, child_trace: Any) -> Any:
             return self._execute(value, trace=child_trace, cfg=cfg, region=(region_start, region_end))
+
         result = operator.run_region(current, label, execute_region, trace, cfg)
         return result, context
 
@@ -172,7 +232,14 @@ class Pipeline:
         name = op.__name__ if inspect.isfunction(op) or inspect.ismethod(op) else type(op).__name__
         return f"{i}:{name}"
 
-    def _step(self, i: int, current: Any, context: Context, trace: Any, cfg: TracingConfig | None) -> tuple[Any, Context]:
+    def _step(
+        self,
+        i: int,
+        current: Any,
+        context: Context,
+        trace: Any,
+        cfg: TracingConfig | None,
+    ) -> tuple[Any, Context]:
         operator = self.operators[i]
         label = self._label_for(i, cfg.operator_labels if cfg else None)
         capture = cfg.capture_shapes if cfg else False
@@ -185,17 +252,24 @@ class Pipeline:
                 result = operator(*args)
                 ctx_out = context
         except Exception:
-            trace.spans.append(StepSpan(label, t, time.perf_counter() - t, error=True,
-                                        operator_type=type(operator)))
+            trace.spans.append(
+                StepSpan(
+                    label, t, time.perf_counter() - t, error=True, operator_type=type(operator)
+                )
+            )
             raise
-        trace.spans.append(StepSpan(
-            label, t, time.perf_counter() - t,
-            operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
-            input_shape=_extract_shape(current) if capture else None,
-            output_shape=_extract_shape(result) if capture else None,
-            output_value=capture_value(result) if (cfg and cfg._capture_outputs) else None,
-            operator_type=type(operator),
-        ))
+        trace.spans.append(
+            StepSpan(
+                label,
+                t,
+                time.perf_counter() - t,
+                operator_config=operator_config(operator) if (cfg and cfg.capture_config) else {},
+                input_shape=_extract_shape(current) if capture else None,
+                output_shape=_extract_shape(result) if capture else None,
+                output_value=capture_value(result) if (cfg and cfg._capture_outputs) else None,
+                operator_type=type(operator),
+            )
+        )
         return result, ctx_out
 
     def _find_region_end(self, start: int, opening_op: type, closing_op: type) -> int:
@@ -204,13 +278,15 @@ class Pipeline:
         j = start
         while j < len(self.operators) and depth > 0:
             op = self.operators[j]
-            if isinstance(op, opening_op): depth += 1
-            elif isinstance(op, closing_op): depth -= 1
+            if isinstance(op, opening_op):
+                depth += 1
+            elif isinstance(op, closing_op):
+                depth -= 1
             j += 1
         return j - 1
 
     @staticmethod
-    def _flatten(operators: list[Operator]) -> list[Operator]:
+    def _flatten(operators: list[OperatorLike]) -> list[OperatorLike]:
         flat = []
         for op in operators:
             if isinstance(op, Inline):
@@ -247,7 +323,6 @@ class Pipeline:
             return operator
         return getattr(operator, "__call__")
 
-
 class Inline:
     """
     Marker that expands a pipeline's operators into the parent at construction time.
@@ -273,6 +348,7 @@ def inline(pipeline: Pipeline) -> Inline:
     return Inline(pipeline)
 
 
+@Operator
 class Embed:
     """
     Embed a pipeline as a single isolated step inside an outer pipeline.

@@ -116,6 +116,7 @@ def main() -> int:
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
     pipeline.validate()
+    pipeline.describe()
     pipeline(image_path)
     print(f"Output written to {output_path}", file=sys.stderr)
     return 0

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ..tracing import InvocationTrace, accumulate_trace_mean
 from .concurrent_collector import ConcurrentCollector
+from ..tracing import InvocationTrace, accumulate_trace_mean
 
 
 class AggregateCollector(ConcurrentCollector):

@@ -8,9 +8,9 @@ from typing import Any
 import numpy as np
 import torch
 
+from ml_pipes.operator import Operator
 from ml_pipes.types import TensorPayload, TensorRegistry
 from ml_pipes.validation import is_annotation_compatible
-
 from .types import (
     TorchRuntimeOutputs,
     TorchTensorPayload,
@@ -104,6 +104,7 @@ def _convert_torch_tensor_to_numpy(
     return array
 
 
+@Operator
 class ToTorch:
     def __init__(self, device: str = "cpu", dtype: str | None = None, copy: bool = False):
         self.device = canonical_torch_device(device)
@@ -126,6 +127,7 @@ class ToTorch:
         )
 
 
+@Operator
 class ToNumpy:
     def __init__(self, dtype: str | None = None, copy: bool = False):
         self.dtype = dtype
@@ -141,6 +143,7 @@ class ToNumpy:
         return TensorPayload(array=array, layout=tensor_payload.layout, dtype=str(array.dtype))
 
 
+@Operator
 class ToTorchRegistry:
     def __init__(self, device: str = "cpu", dtype: str | None = None, copy: bool = False):
         self.device = canonical_torch_device(device)
@@ -160,6 +163,7 @@ class ToTorchRegistry:
         return TorchTensorRegistry(tensors)
 
 
+@Operator
 class ToNumpyRegistry:
     def __init__(self, dtype: str | None = None, copy: bool = False):
         self.dtype = dtype
@@ -177,6 +181,7 @@ class ToNumpyRegistry:
         return TensorRegistry(arrays)
 
 
+@Operator
 class ToDevice:
     def __init__(self, device: str):
         self.device = canonical_torch_device(device)
@@ -228,6 +233,7 @@ class TorchSynchronizeTensors:
         return value
 
 
+@Operator
 class TorchAsType:
     def __init__(self, dtype: str, src: str | None = None, as_: str | None = None):
         self.dtype = dtype
@@ -294,6 +300,7 @@ class TorchAsType:
         return value.to(dtype=self._torch_dtype)
 
 
+@Operator
 class TorchArgMax:
     def __init__(self, src: str, axis: int = -1, as_: str | None = None):
         self.src = src
@@ -316,6 +323,7 @@ class TorchArgMax:
         return registry
 
 
+@Operator
 class TorchGatherRows:
     def __init__(self, src: str, indices: str, as_: str | None = None):
         self.src = src
@@ -329,6 +337,7 @@ class TorchGatherRows:
         return registry
 
 
+@Operator
 class TorchTopK:
     def __init__(self, src: str, k: int, values_as: str = "top_values", indices_as: str = "top_indices"):
         self.src = src
@@ -351,6 +360,7 @@ class TorchTopK:
         return registry
 
 
+@Operator
 class TorchTopKIndices2D:
     def __init__(
         self,
@@ -390,6 +400,7 @@ class TorchTopKIndices2D:
 TorchGatherScores = TorchGatherRows
 
 
+@Operator
 class TorchSlice:
     def __init__(self, src: str, at: slice, as_: str | None = None):
         self.src = src
@@ -401,6 +412,7 @@ class TorchSlice:
         return registry
 
 
+@Operator
 class TorchSoftmax:
     def __init__(self, src: str, axis: int = -1, as_: str | None = None):
         self.src = src
@@ -412,6 +424,7 @@ class TorchSoftmax:
         return registry
 
 
+@Operator
 class TorchSigmoid:
     def __init__(self, src: str, as_: str | None = None):
         self.src = src
@@ -422,6 +435,7 @@ class TorchSigmoid:
         return registry
 
 
+@Operator
 class TorchMultiplyTensors:
     def __init__(self, left: str, right: str, as_: str | None = None):
         self.left = left
@@ -433,6 +447,7 @@ class TorchMultiplyTensors:
         return registry
 
 
+@Operator
 class TorchCreateTensorMask:
     def __init__(self, src: str, predicate: Callable[[torch.Tensor], Any], as_: str):
         self.src = src
@@ -453,6 +468,7 @@ class TorchCreateTensorMask:
 TorchBinarizeTensor = TorchCreateTensorMask
 
 
+@Operator
 class TorchCreateTensorMaskByThreshold:
     def __init__(self, src: str, threshold: float, as_: str | None = None):
         self._inner = TorchCreateTensorMask(
@@ -489,6 +505,7 @@ def _resolve_multi_output_names(
     return tuple(as_)
 
 
+@Operator
 class TorchApplyTensorMask:
     def __init__(self, *srcs: str, mask: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
@@ -502,6 +519,7 @@ class TorchApplyTensorMask:
         return registry
 
 
+@Operator
 class TorchSelectTensors:
     def __init__(self, *srcs: str, indices: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
@@ -515,6 +533,7 @@ class TorchSelectTensors:
         return registry
 
 
+@Operator
 class TorchFilterTensorsByScore:
     def __init__(
         self,
@@ -536,6 +555,7 @@ class TorchFilterTensorsByScore:
         return registry
 
 
+@Operator
 class TorchFilterTensorsByMasksArea:
     def __init__(
         self,
@@ -559,6 +579,7 @@ class TorchFilterTensorsByMasksArea:
         return registry
 
 
+@Operator
 class TorchSortTensorsBy:
     def __init__(
         self,
@@ -580,6 +601,7 @@ class TorchSortTensorsBy:
         return registry
 
 
+@Operator
 class TorchWeightMasksByScores:
     def __init__(self, masks: str = "masks", scores: str = "scores", *, as_: str):
         self.masks = masks
@@ -594,6 +616,7 @@ class TorchWeightMasksByScores:
         return registry
 
 
+@Operator
 class TorchResizeMasks:
     """Resizes a stack of masks to a target shape."""
 
@@ -613,6 +636,7 @@ class TorchResizeMasks:
         return registry
 
 
+@Operator
 class TorchMeanMaskScores:
     """Computes one mean score per mask from dense mask values.
 
@@ -648,6 +672,7 @@ class TorchMeanMaskScores:
         return registry
 
 
+@Operator
 class TorchMasksToBoxes:
     def __init__(self, masks: str = "masks", *, as_: str):
         self.masks = masks
@@ -674,6 +699,7 @@ class TorchMasksToBoxes:
         return registry
 
 
+@Operator
 class TorchInfer:
     def __init__(
         self,
@@ -750,6 +776,7 @@ class TorchInfer:
         return TorchRuntimeOutputs(tensors=tensors, names=output_names)
 
 
+@Operator
 class TorchExtract:
     def __init__(self, *names: str, as_: str | tuple[str, ...] | None = None):
         if not names:
@@ -811,6 +838,7 @@ class TorchDistribute:
         return result
 
 
+@Operator
 class TorchNMS:
     def __init__(
         self,

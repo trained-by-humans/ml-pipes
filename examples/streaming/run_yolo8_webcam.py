@@ -48,6 +48,8 @@ def main() -> int:
         return 1
 
     pipeline = build_pipeline(model_path)
+    pipeline.validate()
+    pipeline.describe(verbose=True)
 
     try:
         reader = FrameReader(0)

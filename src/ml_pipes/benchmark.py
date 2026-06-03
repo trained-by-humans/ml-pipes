@@ -6,14 +6,13 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeAlias
-
-from .factory import InputFn
+from typing import Callable, TypeAlias
 
 import numpy as np
 
 from .collectors.concurrent_collector import ConcurrentCollector
 from .core import Pipeline
+from .factory import InputFn
 from .tracing import InvocationTrace
 
 PipelineFactory: TypeAlias = Callable[[dict], Pipeline]

@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Mapping, get_type_hints
 
+from .operator import Operator
 
 SelectorPart = str | int
 Selector = SelectorPart | tuple[SelectorPart, ...]
@@ -129,6 +130,7 @@ class ContextOp(ABC):
         raise NotImplementedError
 
 
+@Operator
 class Store(ContextOp):
     def __init__(
         self,
@@ -155,7 +157,11 @@ class Store(ContextOp):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        stored_annotations[self.name] = self._extract_annotation(current_output, expand_output_annotation, validation_error_type)
+        stored_annotations[self.name] = self._extract_annotation(
+            current_output,
+            expand_output_annotation,
+            validation_error_type,
+        )
         return (Any,), current_output
 
     def _extract(self, current: Any) -> Any:
@@ -171,7 +177,12 @@ class Store(ContextOp):
             selected = getattr(selected, part)
         return selected
 
-    def _extract_annotation(self, annotation: Any | None, expand_output_annotation: Any, validation_error_type: type[Exception] | None = None) -> Any:
+    def _extract_annotation(
+        self,
+        annotation: Any | None,
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception] | None = None,
+    ) -> Any:
         if not self.selector:
             return annotation
         return _select_annotation(
@@ -184,6 +195,7 @@ class Store(ContextOp):
         )
 
 
+@Operator
 class Recall(ContextOp):
     def __init__(self, name: str, index: int | None = None):
         self.name = name

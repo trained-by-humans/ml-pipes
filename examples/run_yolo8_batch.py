@@ -158,6 +158,7 @@ def main() -> int:
 
     pipeline = build_pipeline(model_path, args.batch_size, args.timeout,
                               serialize=not args.no_serialize)
+    pipeline.describe()
     pipeline.set_tracing(PrintCollector())
 
     print(

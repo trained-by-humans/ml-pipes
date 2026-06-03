@@ -59,6 +59,7 @@ def main() -> int:
     infer_pipe = yolo8_inference_pipeline(model_path)
     pipeline: Pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
     pipeline.validate()
+    pipeline.describe()
 
     # --- single detailed trace (warm-up run) ---
     print("\n=== Single invocation trace (warm-up run) ===\n")

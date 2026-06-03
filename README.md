@@ -50,6 +50,13 @@ detections = pipeline("image.jpg")
 print(detections.boxes, detections.scores, detections.classes)
 ```
 
+You can also inspect the static pipeline shape without running it:
+
+```python
+repr(pipeline)
+pipeline.describe(show_defaults=True)
+```
+
 ## Benchmarking
 
 For per-operator latency profiling, config sweeps, result diffs, saved

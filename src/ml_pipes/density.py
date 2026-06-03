@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from .operator import Operator
 from .types import ImagePayload, TensorRegistry
 
 
@@ -25,6 +26,7 @@ class SumDensity:
         return float(prediction.density_map.sum())
 
 
+@Operator
 class ToDensityPrediction:
     def __init__(self, src: str = "density") -> None:
         self.src = src
@@ -35,6 +37,7 @@ class ToDensityPrediction:
         )
 
 
+@Operator
 class DensityToHeatmap:
     def __init__(
         self,
@@ -56,6 +59,7 @@ class DensityToHeatmap:
         return source_image, ImagePayload(array=heatmap, color_space="BGR", layout="HWC")
 
 
+@Operator
 class BlendImages:
     def __init__(self, base_weight: float = 0.60, overlay_weight: float = 0.40) -> None:
         self.base_weight = base_weight

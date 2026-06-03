@@ -77,6 +77,7 @@ class AddOne:
 
 def run_mid_pipeline() -> Any:
     pipeline = Pipeline([MakeArray(), _ScaleArray(2.0), Fail(), AddOne()])
+    pipeline.describe()
     result = pipeline.inspect(100)
     print(result)
     return result
@@ -84,6 +85,7 @@ def run_mid_pipeline() -> Any:
 
 def run_first_step() -> Any:
     pipeline = Pipeline([Fail("bad input"), _ScaleArray(1.5), AddOne()])
+    pipeline.describe()
     result = pipeline.inspect(42)
     print(result)
     return result
@@ -96,6 +98,7 @@ def run_nested() -> Any:
         Inline(inner),
         Gather(),
     ])
+    pipeline.describe()
     arrays = [np.full((4, 4, 3), v, dtype=np.uint8) for v in (50, 60)]
     result = pipeline.inspect(arrays)
     print(result)

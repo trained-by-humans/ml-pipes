@@ -45,6 +45,22 @@ def test_ml_pipes_alias_exports_preserve_identity() -> None:
     assert ml_pipes.BinarizeTensorByThreshold is ml_pipes.CreateTensorMaskByThreshold
 
 
+def test_ml_pipes_exports_description_types() -> None:
+    assert hasattr(ml_pipes, "OperatorArgument")
+    assert hasattr(ml_pipes, "OperatorDescription")
+    assert hasattr(ml_pipes, "PipelineDescription")
+    assert "OperatorArgument" in ml_pipes.__all__
+    assert "OperatorDescription" in ml_pipes.__all__
+    assert "PipelineDescription" in ml_pipes.__all__
+
+
+def test_ml_pipes_exports_operator_decorator_and_type_alias() -> None:
+    assert callable(ml_pipes.Operator)
+    assert hasattr(ml_pipes, "OperatorLike")
+    assert "Operator" in ml_pipes.__all__
+    assert "OperatorLike" in ml_pipes.__all__
+
+
 def test_ml_pipes_torch_exports_all_public_ops_and_aliases() -> None:
     torch = pytest.importorskip("torch")
     del torch
