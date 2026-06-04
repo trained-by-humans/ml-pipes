@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import inspect
 import time
-from collections.abc import Callable, Hashable, Iterable, Mapping, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from itertools import dropwhile, islice, takewhile
 from types import UnionType
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from .control import SHORT_CIRCUIT
 from .region import RegionCloser, RegionOpener
-from .selector import Selector, SelectorInput, _normalize_selector
+from .selector import Selector, SelectorInput
 from .tracing import PendingSpan, InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, capture_value, merge_traces, operator_config
 from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
 
@@ -25,8 +25,6 @@ NullableMapper = Callable[[ValueT], MappedT | None]
 Predicate = Callable[[ValueT], bool]
 KeySelector = Callable[[ItemT], Hashable]
 
-
-_MISSING = object()
 _NONE_TYPE = type(None)
 
 
@@ -40,114 +38,21 @@ def _is_runtime_sequence_value(value: object) -> bool:
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray, Mapping))
 
 
-def _read_selector_or_missing(value: object, selector: Selector | SelectorInput) -> object:
-    selector_obj = Selector.ensure(selector)
-    selected = selector_obj.select_value_or_missing(value, missing=_MISSING)
-    if selected is _MISSING:
-        return _MISSING
-    return selected
-
-
-def _read_selector_or_none(value: object, selector: Selector | SelectorInput) -> object | None:
-    selected = _read_selector_or_missing(value, selector)
-    if selected is _MISSING:
-        return None
-    return selected
-
-
-def _read_selector(value: object, selector: Selector | SelectorInput, operator_name: str) -> object:
-    selector_obj = Selector.ensure(selector)
-    return selector_obj.select_value(
-        value,
-        error_prefix=f"{operator_name} selector",
-    )
-
-
-def _write_selector(value: object, selector: Selector | SelectorInput, item: object, operator_name: str) -> None:
-    selector_obj = Selector.ensure(selector)
-    if not selector_obj:
-        raise ValueError(f"{operator_name} requires a non-empty selector.")
-    field = selector_obj.select_field(
-        value,
-        create_missing_mappings=True,
-        error_prefix=f"{operator_name} target selector",
-    )
-    field.set(item)
-
-
-def _resolve_unary_callable_contract(function: Callable[..., Any]) -> tuple[Any, Any] | None:
-    try:
-        input_types, output_type = resolve_operator_contract(function)
-    except (PipelineValidationError, StaticContractUnavailableError):
-        return None
-    if len(input_types) != 1:
-        return None
-    return input_types[0], output_type
-
-
-def _resolve_callable_contract(
-    current_annotation: Any,
-    src: Selector | SelectorInput | None,
-    function: Callable[..., Any],
-    *,
-    callable_label: str,
-    current_label: str,
-    expand_output_annotation: Any,
-    validation_error_type: type[Exception],
+def _resolve_selector(
     operator_name: str,
-    ignore_explicit_none: bool = True,
-) -> tuple[Any, Any] | None:
-    contract = _resolve_unary_callable_contract(function)
-    if current_annotation in {None, Any}:
-        return contract
-    source_annotation = _selector_annotation(
-        current_annotation,
-        src,
-        expand_output_annotation=expand_output_annotation,
-        validation_error_type=validation_error_type,
-        operator_name=operator_name,
-    )
-    if contract is None:
-        return None
-
-    input_type, output_type = contract
-    comparable_source = _without_none(source_annotation) if ignore_explicit_none else source_annotation
-    if comparable_source is not Any and not is_annotation_compatible(comparable_source, (input_type,)):
-        source_label = (
-            f"src selector {_normalize_selector(src)!r}"
-            if src is not None
-            else current_label
-        )
-        raise validation_error_type(
-            f"{operator_name} {callable_label} expects {input_type} "
-            f"but {source_label} resolves to {source_annotation}"
-        )
-    return input_type, output_type
+    *,
+    name: str,
+    value: SelectorInput | None = None,
+    required: bool = False,
+) -> Selector:
+    selector = Selector.from_input(value)
+    if required and not selector:
+        raise ValueError(f"{operator_name} requires a non-empty {name} selector")
+    return selector
 
 
-def _resolve_nullary_callable_output(function: Callable[..., Any]) -> Any | None:
-    if inspect.isclass(function):
-        return function
-
-    try:
-        target = function if inspect.isfunction(function) or inspect.ismethod(function) else getattr(function, "__call__")
-    except AttributeError:
-        return None
-
-    try:
-        hints = get_type_hints(target)
-        signature = inspect.signature(target)
-    except (TypeError, ValueError, NameError):
-        return None
-
-    parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
-    if parameters:
-        return None
-    return hints.get("return")
+def _normalize_annotation(annotation: Any) -> Any:
+    return _NONE_TYPE if annotation is None else annotation
 
 
 def _is_union_annotation(annotation: Any) -> bool:
@@ -278,41 +183,83 @@ def _iterable_annotation(item_type: Any) -> Any:
     return Iterable[item_type]
 
 
-def _normalize_annotation(annotation: Any) -> Any:
-    return _NONE_TYPE if annotation is None else annotation
+def _resolve_unary_callable_contract(function: Callable[..., Any]) -> tuple[Any, Any] | None:
+    try:
+        input_types, output_type = resolve_operator_contract(function)
+    except (PipelineValidationError, StaticContractUnavailableError):
+        return None
+    if len(input_types) != 1:
+        return None
+    return input_types[0], output_type
 
 
-def _selector_annotation(
-    annotation: Any,
-    selector: Selector | SelectorInput | None,
+def _resolve_callable_contract(
+    source_annotation: Any,
+    function: Callable[..., Any],
     *,
-    expand_output_annotation: Any,
-    validation_error_type: type[Exception] | None,
+    callable_label: str,
+    source_label: str,
+    validation_error_type: type[Exception],
     operator_name: str,
-) -> Any:
-    del expand_output_annotation
-    selector_obj = Selector.ensure(selector)
-    if not selector_obj:
-        return annotation
-    return selector_obj.validate_read(
-        annotation,
-        validation_error_type=validation_error_type,
-        error_prefix=f"{operator_name}(src={selector_obj.steps!r})",
-    )
+    ignore_explicit_none: bool = True,
+) -> tuple[Any, Any] | None:
+    contract = _resolve_unary_callable_contract(function)
+    if source_annotation in {None, Any}:
+        return contract
+    if contract is None:
+        return None
+
+    input_type, output_type = contract
+    comparable_source = _without_none(source_annotation) if ignore_explicit_none else source_annotation
+    if comparable_source is not Any and not is_annotation_compatible(comparable_source, (input_type,)):
+        raise validation_error_type(
+            f"{operator_name} {callable_label} expects {input_type} "
+            f"but {source_label} resolves to {source_annotation}"
+        )
+    return input_type, output_type
 
 
-def _selector_target_annotation(
-    annotation: Any,
-    selector: Selector | SelectorInput,
+def _resolve_nullary_callable_output(function: Callable[..., Any]) -> Any | None:
+    if inspect.isclass(function):
+        return function
+
+    try:
+        target = function if inspect.isfunction(function) or inspect.ismethod(function) else getattr(function, "__call__")
+    except AttributeError:
+        return None
+
+    try:
+        hints = get_type_hints(target)
+        signature = inspect.signature(target)
+    except (TypeError, ValueError, NameError):
+        return None
+
+    parameters = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if parameters:
+        return None
+    return hints.get("return")
+
+
+def _require_assignment_compatible(
+    value_annotation: Any,
+    target_annotation: Any,
     *,
-    validation_error_type: type[Exception] | None,
     operator_name: str,
-) -> Any:
-    selector_obj = Selector.ensure(selector)
-    return selector_obj.validate_write(
-        annotation,
-        validation_error_type=validation_error_type,
-        error_prefix=f"{operator_name}(target={selector_obj.steps!r})",
+    source_label: str,
+    target_label: str,
+    validation_error_type: type[Exception],
+) -> None:
+    if value_annotation is Any or target_annotation is Any:
+        return
+    if is_annotation_compatible(value_annotation, (target_annotation,)):
+        return
+    raise validation_error_type(
+        f"{operator_name} {target_label} expects {target_annotation} "
+        f"but {source_label} resolves to {value_annotation}"
     )
 
 
@@ -583,8 +530,18 @@ class LazyForEachItem(RegionOpener):
 class WrapMappingInObject(Generic[StateT]):
     """Create a new object and store the current mapping at the target selector."""
 
-    def __init__(self, as_: SelectorInput, state_factory: Callable[[], StateT]):
-        self.as_ = as_
+    def __init__(
+        self,
+        *,
+        target: SelectorInput,
+        state_factory: Callable[[], StateT],
+    ):
+        self._target = _resolve_selector(
+            type(self).__name__,
+            name="target",
+            value=target,
+            required=True,
+        )
         self.state_factory = state_factory
 
     def __call__(self, value: AnyMapping | None) -> StateT:
@@ -593,7 +550,12 @@ class WrapMappingInObject(Generic[StateT]):
         if not isinstance(value, Mapping):
             return SHORT_CIRCUIT
         state = self.state_factory()
-        _write_selector(state, self.as_, value, type(self).__name__)
+        target = self._target.select_field(state)
+        target.set(
+            value,
+            create_missing_mappings=True,
+            error_prefix=f"{type(self).__name__}(target={self._target!r})",
+        )
         return state
 
     def resolve_contract(
@@ -607,12 +569,20 @@ class WrapMappingInObject(Generic[StateT]):
         factory_output = _resolve_nullary_callable_output(self.state_factory)
         input_type = _mapping_input_annotation(current_output)
         base_output = factory_output if factory_output is not None else object
-        _selector_target_annotation(
+        target_annotation = self._target.validate_write(
             base_output,
-            self.as_,
             validation_error_type=validation_error_type,
-            operator_name=type(self).__name__,
+            error_prefix=f"{type(self).__name__}(target={self._target!r})",
         )
+        if _is_mapping_annotation(current_output):
+            _require_assignment_compatible(
+                current_output,
+                target_annotation,
+                operator_name=type(self).__name__,
+                source_label="current mapping",
+                target_label=f"target {self._target!r}",
+                validation_error_type=validation_error_type,
+            )
         return (input_type,), base_output
 
 
@@ -634,11 +604,9 @@ class Map(Generic[ValueT, MappedT]):
     ) -> tuple[tuple[Any, ...], Any]:
         fn_contract = _resolve_callable_contract(
             current_output,
-            None,
             self.fn,
             callable_label="fn",
-            current_label="current value",
-            expand_output_annotation=expand_output_annotation,
+            source_label="current value",
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
             ignore_explicit_none=False,
@@ -684,24 +652,45 @@ class MapNotNull(Generic[ValueT, MappedT]):
 
 
 class MapValue(Generic[ValueT, MappedT]):
-    """Apply a function to a selected value and store the result on the current object."""
+    """Apply a function to a source value and store the result on the current object."""
 
     def __init__(
         self,
         fn: Mapper[ValueT, MappedT],
         *,
-        src: SelectorInput,
-        as_: SelectorInput | None = None,
+        source: SelectorInput,
+        target: SelectorInput | None = None,
     ):
         self.fn = fn
-        self.src = src
-        self.as_ = src if as_ is None else as_
+        self._source = _resolve_selector(
+            type(self).__name__,
+            name="source",
+            value=source,
+            required=True,
+        )
+        if target is None:
+            self._target = self._source
+        else:
+            self._target = _resolve_selector(
+                type(self).__name__,
+                name="target",
+                value=target,
+                required=True,
+            )
 
     def __call__(self, current: CurrentT | None) -> CurrentT | None:
         if current is None:
             return None
-        value = _read_selector(current, self.src, type(self).__name__)
-        _write_selector(current, self.as_, self.fn(value), type(self).__name__)
+        value = self._source.select_value(
+            current,
+            error_prefix=f"{type(self).__name__}(source={self._source!r})",
+        )
+        target = self._target.select_field(current)
+        target.set(
+            self.fn(value),
+            create_missing_mappings=True,
+            error_prefix=f"{type(self).__name__}(target={self._target!r})",
+        )
         return current
 
     def resolve_contract(
@@ -711,31 +700,43 @@ class MapValue(Generic[ValueT, MappedT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        _resolve_callable_contract(
+        source_annotation = self._source.validate_read(
             current_output,
-            self.src,
+            validation_error_type=validation_error_type,
+            error_prefix=f"{type(self).__name__}(source={self._source!r})",
+        )
+        fn_contract = _resolve_callable_contract(
+            source_annotation,
             self.fn,
             callable_label="fn",
-            current_label="current value",
-            expand_output_annotation=expand_output_annotation,
+            source_label=f"source {self._source!r}",
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
             ignore_explicit_none=False,
         )
-        _selector_target_annotation(
+        target_annotation = self._target.validate_write(
             current_output,
-            self.as_,
             validation_error_type=validation_error_type,
-            operator_name=type(self).__name__,
+            error_prefix=f"{type(self).__name__}(target={self._target!r})",
         )
+        if fn_contract is not None:
+            _, mapped_annotation = fn_contract
+            _require_assignment_compatible(
+                mapped_annotation,
+                target_annotation,
+                operator_name=type(self).__name__,
+                source_label="fn return value",
+                target_label=f"target {self._target!r}",
+                validation_error_type=validation_error_type,
+            )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (current_output,), current_output
 
 
 class Filter(Generic[ValueT]):
-    """Keep the current value when a predicate matches the current or selected value.
+    """Keep the current value when a predicate matches the current or source value.
 
-    This operator does not treat ``None`` specially. If the current or selected
+    This operator does not treat ``None`` specially. If the current or source
     value can be ``None``, the predicate must decide how to handle it. Use
     ``FilterNotNull`` when null-dropping should be explicit.
     """
@@ -744,19 +745,24 @@ class Filter(Generic[ValueT]):
         self,
         predicate: Predicate[ValueT],
         *,
-        src: SelectorInput | None = None,
+        source: SelectorInput | None = None,
     ):
         self.predicate = predicate
-        self.src = src
+        self._source = _resolve_selector(
+            type(self).__name__,
+            name="source",
+            value=source,
+        )
 
     def __call__(self, current: CurrentT) -> CurrentT:
-        value = self._read_value(current)
+        if self._source:
+            value = self._source.select_value(
+                current,
+                error_prefix=f"{type(self).__name__}(source={self._source!r})",
+            )
+        else:
+            value = current
         return current if self.predicate(value) else SHORT_CIRCUIT
-
-    def _read_value(self, current: CurrentT) -> object:
-        if self.src is None:
-            return current
-        return _read_selector(current, self.src, type(self).__name__)
 
     def resolve_contract(
         self,
@@ -766,13 +772,20 @@ class Filter(Generic[ValueT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations
+        source_annotation = current_output
+        source_label = "current value"
+        if self._source:
+            source_annotation = self._source.validate_read(
+                current_output,
+                validation_error_type=validation_error_type,
+                error_prefix=f"{type(self).__name__}(source={self._source!r})",
+            )
+            source_label = f"source {self._source!r}"
         _resolve_callable_contract(
-            current_output,
-            self.src,
+            source_annotation,
             self.predicate,
             callable_label="predicate",
-            current_label="current value",
-            expand_output_annotation=expand_output_annotation,
+            source_label=source_label,
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
             ignore_explicit_none=False,
@@ -782,13 +795,18 @@ class Filter(Generic[ValueT]):
 
 
 class FilterNotNull:
-    """Keep the current value only when the selected value exists and is not None."""
+    """Keep the current value only when the source value exists and is not None."""
 
-    def __init__(self, src: SelectorInput):
-        self.src = src
+    def __init__(self, *, source: SelectorInput):
+        self._source = _resolve_selector(
+            type(self).__name__,
+            name="source",
+            value=source,
+            required=True,
+        )
 
     def __call__(self, current: CurrentT) -> CurrentT:
-        value = _read_selector_or_none(current, self.src)
+        value = self._source.select_value_or_missing(current, missing=None)
         if value is None:
             return SHORT_CIRCUIT
         return current
@@ -800,12 +818,10 @@ class FilterNotNull:
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        _selector_annotation(
+        self._source.validate_read(
             current_output,
-            self.src,
-            expand_output_annotation=expand_output_annotation,
             validation_error_type=validation_error_type,
-            operator_name=type(self).__name__,
+            error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (current_output,), _without_none(current_output)
@@ -848,11 +864,9 @@ class DistinctBy(Generic[ItemT]):
         input_type = _sequence_input_annotation(current_output)
         _resolve_callable_contract(
             item_type,
-            None,
             self.fn,
             callable_label="fn",
-            current_label="current item",
-            expand_output_annotation=expand_output_annotation,
+            source_label="current item",
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
             ignore_explicit_none=False,
@@ -862,22 +876,32 @@ class DistinctBy(Generic[ItemT]):
 
 
 class Distinct(Generic[ItemT]):
-    """Keep only the first item for each distinct selected value."""
+    """Keep only the first item for each distinct source value."""
 
-    def __init__(self, *, src: SelectorInput):
-        self.src = src
-        self._inner = DistinctBy(self._selector_key(src))
+    def __init__(self, *, source: SelectorInput):
+        self._source = _resolve_selector(
+            type(self).__name__,
+            name="source",
+            value=source,
+            required=True,
+        )
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
-        return self._inner(items)
-
-    def _selector_key(self, src: SelectorInput) -> KeySelector[ItemT]:
-        operator_name = type(self).__name__
-
-        def key(item: ItemT) -> Hashable:
-            return cast(Hashable, _read_selector(item, src, operator_name))
-
-        return key
+        seen: set[Hashable] = set()
+        deduped: list[ItemT] = []
+        for item in items:
+            key = cast(
+                Hashable,
+                self._source.select_value(
+                    item,
+                    error_prefix=f"{type(self).__name__}(source={self._source!r})",
+                ),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
 
     def resolve_contract(
         self,
@@ -888,12 +912,10 @@ class Distinct(Generic[ItemT]):
     ) -> tuple[tuple[Any, ...], Any]:
         item_type = _iterable_item_annotation(current_output)
         input_type = _sequence_input_annotation(current_output)
-        _selector_annotation(
+        self._source.validate_read(
             item_type,
-            self.src,
-            expand_output_annotation=expand_output_annotation,
             validation_error_type=validation_error_type,
-            operator_name=type(self).__name__,
+            error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (input_type,), _list_annotation(item_type)
@@ -1019,11 +1041,9 @@ class TakeWhile(Generic[ItemT]):
             predicate_input = item_type
         _resolve_callable_contract(
             predicate_input,
-            None,
             self.predicate,
             callable_label="predicate",
-            current_label="current item",
-            expand_output_annotation=expand_output_annotation,
+            source_label="current item",
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
             ignore_explicit_none=False,
@@ -1074,11 +1094,9 @@ class SkipWhile(Generic[ItemT]):
             predicate_input = item_type
         _resolve_callable_contract(
             predicate_input,
-            None,
             self.predicate,
             callable_label="predicate",
-            current_label="current item",
-            expand_output_annotation=expand_output_annotation,
+            source_label="current item",
             validation_error_type=validation_error_type,
             operator_name=type(self).__name__,
             ignore_explicit_none=False,

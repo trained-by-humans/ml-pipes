@@ -49,7 +49,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
                 center=True,
                 allow_scale_up=True,
             ),
-            Store("resize_transform", index=1),
+            Store("resize_transform", source=1),
             Pick(0),
             Normalize(),
             AsType("float16"),

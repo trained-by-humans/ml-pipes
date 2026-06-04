@@ -53,7 +53,7 @@ def yolo8_inference_pipeline(model_path: Path, conf_threshold: float = 0.25) -> 
     return Pipeline(
         [
             Resize((640, 640)),
-            Store("resize_transform", index=1),
+            Store("resize_transform", source=1),
             Pick(0),
             Normalize(),
             Infer(model_path),

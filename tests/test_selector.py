@@ -150,12 +150,12 @@ class SelectorProbe:
             selected = self.select_src.select_value(current, error_prefix=type(self).__name__)
         if self.select_target is None:
             return selected
-        target = self.select_target.select_field(
-            current,
+        target = self.select_target.select_field(current)
+        target.set(
+            selected,
             create_missing_mappings=True,
             error_prefix=type(self).__name__,
         )
-        target.set(selected)
         return current
 
     def resolve_contract(
@@ -357,13 +357,13 @@ def test_selector_runtime_write_cases(
 
     if error_match is not None:
         with pytest.raises((TypeError, IndexError), match=error_match):
-            selector.select_field(current, create_missing_mappings=True).set(item)
+            selector.select_field(current).set(item, create_missing_mappings=True)
         return
 
-    field = selector.select_field(current, create_missing_mappings=True)
+    field = selector.select_field(current)
     assert field.field_path == selector.render_path("x")
     assert field.parent_path == selector.render_path("x", upto=len(selector.steps) - 1)
-    field.set(item)
+    field.set(item, create_missing_mappings=True)
     assert readback_selector is not None
     assert assert_value(Selector.from_input(readback_selector).select_value(current))
 

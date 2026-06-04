@@ -65,19 +65,17 @@ class Store(ContextOp):
     def __init__(
         self,
         name: str,
-        index: int | None = None,
-        select: SelectorInput | None = None,
+        *,
+        source: SelectorInput | None = None,
     ):
-        if index is not None and select is not None:
-            raise ValueError("Store accepts either index or select, not both")
         self.name = name
-        self.index = index
-        self.select = select
-        self._selector = Selector.from_input(select if select is not None else index)
-        self.selector = self._selector.steps
+        self._selector = Selector.from_input(source)
 
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
-        value = self._extract(current)
+        value = self._selector.select_value(
+            current,
+            error_prefix=f"Store({self.name!r}, {self._selector!r})",
+        )
         return current, context.store(self.name, value)
 
     def resolve_contract(
@@ -87,31 +85,12 @@ class Store(ContextOp):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        stored_annotations[self.name] = self._extract_annotation(
+        stored_annotations[self.name] = self._selector.validate_read(
             current_output,
-            expand_output_annotation,
-            validation_error_type,
-        )
-        return (Any,), current_output
-
-    def _extract(self, current: Any) -> Any:
-        return self._selector.select_value(
-            current,
-            error_prefix=f"Store({self.name!r}, {self._selector!r})",
-        )
-
-    def _extract_annotation(
-        self,
-        annotation: Any | None,
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception] | None = None,
-    ) -> Any:
-        del expand_output_annotation
-        return self._selector.validate_read(
-            annotation,
             validation_error_type=validation_error_type,
             error_prefix=f"Store({self.name!r}, {self._selector!r})",
         )
+        return (Any,), current_output
 
 
 @Operator

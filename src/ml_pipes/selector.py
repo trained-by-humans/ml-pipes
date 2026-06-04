@@ -55,12 +55,6 @@ class Selector:
         selector_parts = _normalize_selector_parts(collapsed)
         return cls(selector_parts)
 
-    @classmethod
-    def ensure(cls, selector: Selector | SelectorInput | None) -> Selector:
-        if isinstance(selector, cls):
-            return selector
-        return cls.from_input(selector)
-
     def render_path(self, root_label: str = "x", upto: int | None = None) -> str:
         parts = self.steps if upto is None else self.steps[: max(0, upto)]
         rendered = root_label
@@ -106,31 +100,18 @@ class Selector:
         self,
         value: Any,
         *,
-        create_missing_mappings: bool = False,
-        error_prefix: str | None = None,
         root_label: str = "x",
     ) -> SelectedField:
         if not self.steps:
             raise ValueError("Selector.select_field requires a non-empty selector")
 
-        current = value
-        for step_index, part in enumerate(self.steps[:-1]):
-            current = _runtime_parent_step(
-                current,
-                part,
-                self,
-                step_index,
-                create_missing_mappings=create_missing_mappings,
-                error_prefix=error_prefix,
-                root_label=root_label,
-            )
-
         return SelectedField(
-            parent=current,
+            root=value,
+            parent_selector=Selector(self.steps[:-1]),
             field_selection=self.steps[-1],
             parent_path=self.render_path(root_label, upto=len(self.steps) - 1),
             field_path=self.render_path(root_label),
-            error_prefix=error_prefix,
+            root_label=root_label,
         )
 
     def validate_read(
@@ -195,37 +176,28 @@ class Selector:
 
 @dataclass(frozen=True)
 class SelectedField:
-    parent: object
+    root: object
+    parent_selector: Selector
     field_selection: SelectorPart
     parent_path: str
     field_path: str
-    error_prefix: str | None = None
+    root_label: str = "x"
 
-    def get(self) -> Any:
-        leaf_selector = Selector((self.field_selection,))
-        try:
-            return _runtime_read_step(
-                self.parent,
-                self.field_selection,
-                leaf_selector,
-                0,
-                error_prefix=None,
-                root_label=self.parent_path,
-            )
-        except (SelectorRuntimeError, SelectorIndexError) as exc:
-            raise _wrap_selected_field_error(
-                exc,
-                action="read",
-                parent_path=self.parent_path,
-                field_path=self.field_path,
-                error_prefix=self.error_prefix,
-            ) from exc
-
-    def set(self, value: Any) -> None:
+    def set(
+        self,
+        value: Any,
+        *,
+        create_missing_mappings: bool = False,
+        error_prefix: str | None = None,
+    ) -> None:
+        parent = self._select_parent(
+            create_missing_mappings=create_missing_mappings,
+            error_prefix=error_prefix,
+        )
         leaf_selector = Selector((self.field_selection,))
         try:
             _runtime_write_step(
-                self.parent,
+                parent,
                 self.field_selection,
                 value,
                 leaf_selector,
@@ -239,8 +211,27 @@ class SelectedField:
                 action="write",
                 parent_path=self.parent_path,
                 field_path=self.field_path,
-                error_prefix=self.error_prefix,
+                error_prefix=error_prefix,
             ) from exc
+
+    def _select_parent(
+        self,
+        *,
+        create_missing_mappings: bool,
+        error_prefix: str | None,
+    ) -> Any:
+        current = self.root
+        for step_index, part in enumerate(self.parent_selector.steps):
+            current = _runtime_parent_step(
+                current,
+                part,
+                self.parent_selector,
+                step_index,
+                create_missing_mappings=create_missing_mappings,
+                error_prefix=error_prefix,
+                root_label=self.root_label,
+            )
+        return current
 
 # Parsing
 
@@ -1104,7 +1095,7 @@ def _validate_write_target(
                 root_label=root_label,
             )
         case str() as attribute:
-            return _validate_attribute_step(
+            return _validate_attribute_write_target(
                 annotation,
                 attribute,
                 selector,
@@ -1282,6 +1273,46 @@ def _validate_attribute_step(
     )
 
 
+def _validate_attribute_write_target(
+    annotation: Any,
+    part: str,
+    selector: Selector,
+    step_index: int,
+    *,
+    validation_error_type: type[Exception] | None,
+    error_prefix: str | None,
+    root_label: str,
+) -> Any:
+    attribute_annotation = _validate_attribute_step(
+        annotation,
+        part,
+        selector,
+        step_index,
+        validation_error_type=validation_error_type,
+        error_prefix=error_prefix,
+        root_label=root_label,
+    )
+
+    owner = get_origin(annotation)
+    if not isinstance(owner, type):
+        owner = annotation if isinstance(annotation, type) else None
+    if not isinstance(owner, type):
+        return attribute_annotation
+
+    descriptor = getattr(owner, part, _MISSING_ANNOTATION)
+    if isinstance(descriptor, property) and descriptor.fset is None:
+        current_path = selector.render_path(root_label, upto=step_index)
+        _raise_validation_error(
+            validation_error_type,
+            selector,
+            step_index,
+            f"{_annotation_description(annotation)} at {current_path} has no writable attribute {part!r}",
+            error_prefix=error_prefix,
+            root_label=root_label,
+        )
+    return attribute_annotation
+
+
 def _validate_read_index_step(
     annotation: Any,
     part: int,
@@ -1366,13 +1397,3 @@ def _validate_write_index_target(
         error_prefix=error_prefix,
         root_label=root_label,
     )
-
-# Compatibility
-
-SelectorPath = Selector
-SelectorSpec: TypeAlias = SelectorInput
-SelectorLike: TypeAlias = SelectorInput
-
-
-def _normalize_selector(selector: Selector | SelectorInput | None) -> tuple[SelectorPart, ...]:
-    return Selector.ensure(selector).steps

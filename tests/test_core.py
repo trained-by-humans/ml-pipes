@@ -85,7 +85,7 @@ def test_pipeline_can_store_select_and_recall_values():
     pipeline = Pipeline(
         [
             IntToPair(),
-            Store("saved_text", index=1),
+            Store("saved_text", source=1),
             Pick(0),
             IntToString(),
             Recall("saved_text"),

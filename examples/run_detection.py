@@ -37,7 +37,7 @@ def main() -> int:
             LoadFile(),
             Decode(),
             Resize((640, 640)),
-            Store("resize_transform", index=1),
+            Store("resize_transform", source=1),
             Pick(0),
             Normalize(),
             Infer(model_path),

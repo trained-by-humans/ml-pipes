@@ -60,7 +60,7 @@ def yolo8_tiled_pipeline(
     """
     return Pipeline([
         Tile(slice_wh=slice_wh, overlap_wh=overlap_wh),
-        Store("tile_rects", index=1),
+        Store("tile_rects", source=1),
         Pick(0),
         Scatter(max_concurrency=max_concurrency),
         Inline(yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)),

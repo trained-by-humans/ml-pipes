@@ -187,7 +187,7 @@ def test_select_validation_propagates_array_attribute_type():
 
 
 def test_select_validation_propagates_nested_attribute_type():
-    contract = Pipeline([MakeImage(), Select("spatial_shape", 0), IntToString()]).validate()
+    contract = Pipeline([MakeImage(), Select(("spatial_shape", 0)), IntToString()]).validate()
 
     assert contract is not None
     assert contract.input_type is int
@@ -195,6 +195,13 @@ def test_select_validation_propagates_nested_attribute_type():
 
 def test_select_validation_accepts_dotted_string_selector():
     contract = Pipeline([MakeImage(), Select("spatial_shape.0"), IntToString()]).validate()
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_select_validation_accepts_variadic_selector_parts():
+    contract = Pipeline([MakeImage(), Select("spatial_shape", 0), IntToString()]).validate()
 
     assert contract is not None
     assert contract.input_type is int

@@ -17,7 +17,7 @@ from .batch import BatchGate, LeaderBatch
 from .operator import Operator
 from .region import RegionCloser, RegionOpener
 from .scatter import ScatterGate
-from .selector import Selector, SelectorPart
+from .selector import Selector, SelectorInput
 from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
 from .types import (
     Detections,
@@ -1721,13 +1721,10 @@ class LogDetections(SideEffectOp):
 
 @Operator
 class Select:
-    def __init__(self, *selector: SelectorPart):
-        if not selector:
-            raise ValueError("Select requires at least one selector part")
-        self.selector = selector[0] if len(selector) == 1 else selector
-        self._selector = Selector.from_input(self.selector)
+    def __init__(self, *path: SelectorInput):
+        self._selector = Selector.from_input(path)
         if not self._selector:
-            raise ValueError("Select requires a non-empty selector")
+            raise ValueError("Select requires at least one selector part")
 
     def __call__(self, current: Any) -> Any:
         return self._selector.select_value(
@@ -1957,7 +1954,7 @@ class Scatter(RegionOpener):
         pipeline = Pipeline([
             ...,
             Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
-            Store("tile_rects", index=1),
+            Store("tile_rects", source=1),
             Pick(0),
             Scatter(max_concurrency=4),
             Resize((640, 640)), Normalize(), Infer("model.onnx"), ..., ToDetections(),

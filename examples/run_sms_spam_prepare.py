@@ -261,23 +261,27 @@ def build_sms_spam_prepare_pipeline(
     region_close = EndLazyForEachItem() if lazy else EndForEachItem()
     operators: list[Any] = [
         region_open,
-        WrapMappingInObject(as_="raw", state_factory=PreparedSmsExample),
-        Filter(_has_known_label, src="raw.label"),
-        MapValue(_normalize_label, src="raw.label", as_="label"),
-        MapValue(_label_name, src="label", as_="label_name"),
-        Filter(_has_normalized_sms_text, src="raw.text"),
-        MapValue(_normalize_sms_text, src="raw.text", as_="text"),
-        MapValue(_text_char_count, src="text", as_="char_count"),
-        Filter(_minimum_value_filter(min_chars), src="char_count"),
-        MapValue(_text_token_count, src="text", as_="token_count"),
-        Filter(_minimum_value_filter(min_tokens), src="token_count"),
-        MapValue(_dedupe_key, src="text", as_="dedupe_key"),
-        MapValue(splitter, src="dedupe_key", as_="split"),
+        WrapMappingInObject(target="raw", state_factory=PreparedSmsExample),
+        Filter(_has_known_label, source="raw.label"),
+        MapValue(_normalize_label, source="raw.label", target="label"),
+        MapValue(_label_name, source="label", target="label_name"),
+        Filter(_has_normalized_sms_text, source="raw.text"),
+        MapValue(_normalize_sms_text, source="raw.text", target="text"),
+        MapValue(_text_char_count, source="text", target="char_count"),
+        Filter(_minimum_value_filter(min_chars), source="char_count"),
+        MapValue(_text_token_count, source="text", target="token_count"),
+        Filter(_minimum_value_filter(min_tokens), source="token_count"),
+        MapValue(_dedupe_key, source="text", target="dedupe_key"),
+        MapValue(splitter, source="dedupe_key", target="split"),
         region_close,
     ]
     if dedupe:
-        operators.append(Distinct(src="dedupe_key"))
-    return Pipeline(operators)
+        operators.append(Distinct(source="dedupe_key"))
+
+    pipeline = Pipeline(operators)
+    pipeline.validate()
+    pipeline.describe()
+    return pipeline
 
 
 @pipeline_factory
