@@ -7,9 +7,9 @@ from itertools import dropwhile, islice, takewhile
 from types import UnionType
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
-from .context import Selector, SelectorPart, _normalize_selector, _select_annotation
 from .control import SHORT_CIRCUIT
 from .region import RegionCloser, RegionOpener
+from .selector import Selector, SelectorInput, _normalize_selector
 from .tracing import PendingSpan, InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, capture_value, merge_traces, operator_config
 from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
 
@@ -40,86 +40,39 @@ def _is_runtime_sequence_value(value: object) -> bool:
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray, Mapping))
 
 
-def _select_part(current: object, part: SelectorPart) -> object:
-    if isinstance(part, int):
-        if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
-            try:
-                return current[part]
-            except IndexError:
-                return _MISSING
+def _read_selector_or_missing(value: object, selector: Selector | SelectorInput) -> object:
+    selector_obj = Selector.ensure(selector)
+    selected = selector_obj.select_value_or_missing(value, missing=_MISSING)
+    if selected is _MISSING:
         return _MISSING
-    if isinstance(current, Mapping):
-        return current.get(part, _MISSING)
-    return getattr(current, part, _MISSING)
+    return selected
 
 
-def _read_selector_or_missing(value: object, selector: Selector) -> object:
-    current = value
-    for part in _normalize_selector(selector):
-        current = _select_part(current, part)
-        if current is _MISSING:
-            return _MISSING
-    return current
-
-
-def _read_selector_or_none(value: object, selector: Selector) -> object | None:
+def _read_selector_or_none(value: object, selector: Selector | SelectorInput) -> object | None:
     selected = _read_selector_or_missing(value, selector)
     if selected is _MISSING:
         return None
     return selected
 
 
-def _read_selector(value: object, selector: Selector, operator_name: str) -> object:
-    selected = _read_selector_or_missing(value, selector)
-    if selected is _MISSING:
-        raise TypeError(
-            f"{operator_name} requires selector {_normalize_selector(selector)!r} on {type(value)!r}."
-        )
-    return selected
+def _read_selector(value: object, selector: Selector | SelectorInput, operator_name: str) -> object:
+    selector_obj = Selector.ensure(selector)
+    return selector_obj.select_value(
+        value,
+        error_prefix=f"{operator_name} selector",
+    )
 
 
-def _write_selector(value: object, selector: Selector, item: object, operator_name: str) -> None:
-    parts = _normalize_selector(selector)
-    if not parts:
+def _write_selector(value: object, selector: Selector | SelectorInput, item: object, operator_name: str) -> None:
+    selector_obj = Selector.ensure(selector)
+    if not selector_obj:
         raise ValueError(f"{operator_name} requires a non-empty selector.")
-
-    current = value
-    for part in parts[:-1]:
-        next_value = _select_part(current, part)
-        if next_value is _MISSING:
-            if isinstance(part, str) and isinstance(current, MutableMapping):
-                current[part] = {}
-                next_value = current[part]
-            else:
-                raise TypeError(
-                    f"{operator_name} cannot resolve parent selector {parts!r} on {type(value)!r}."
-                )
-        current = next_value
-
-    last = parts[-1]
-    if isinstance(last, int):
-        if not isinstance(current, list):
-            raise TypeError(
-                f"{operator_name} can only assign index selectors into list parents, got {type(current)!r}."
-            )
-        try:
-            current[last] = item
-        except IndexError as exc:
-            raise IndexError(
-                f"{operator_name} index selector {last} is out of range for parent list."
-            ) from exc
-        return
-
-    if isinstance(current, MutableMapping):
-        current[last] = item
-        return
-
-    try:
-        setattr(current, last, item)
-    except AttributeError as exc:
-        raise TypeError(
-            f"{operator_name} requires writable selector {parts!r} on {type(value)!r}."
-        ) from exc
+    field = selector_obj.select_field(
+        value,
+        create_missing_mappings=True,
+        error_prefix=f"{operator_name} target selector",
+    )
+    field.set(item)
 
 
 def _resolve_unary_callable_contract(function: Callable[..., Any]) -> tuple[Any, Any] | None:
@@ -134,7 +87,7 @@ def _resolve_unary_callable_contract(function: Callable[..., Any]) -> tuple[Any,
 
 def _resolve_callable_contract(
     current_annotation: Any,
-    src: Selector | None,
+    src: Selector | SelectorInput | None,
     function: Callable[..., Any],
     *,
     callable_label: str,
@@ -331,22 +284,35 @@ def _normalize_annotation(annotation: Any) -> Any:
 
 def _selector_annotation(
     annotation: Any,
-    selector: Selector | None,
+    selector: Selector | SelectorInput | None,
     *,
     expand_output_annotation: Any,
     validation_error_type: type[Exception] | None,
     operator_name: str,
 ) -> Any:
-    normalized = _normalize_selector(selector)
-    if not normalized:
+    del expand_output_annotation
+    selector_obj = Selector.ensure(selector)
+    if not selector_obj:
         return annotation
-    return _select_annotation(
+    return selector_obj.validate_read(
         annotation,
-        normalized,
-        expand_output_annotation,
-        validation_error_type,
-        operator_name,
-        f"src={normalized!r}",
+        validation_error_type=validation_error_type,
+        error_prefix=f"{operator_name}(src={selector_obj.steps!r})",
+    )
+
+
+def _selector_target_annotation(
+    annotation: Any,
+    selector: Selector | SelectorInput,
+    *,
+    validation_error_type: type[Exception] | None,
+    operator_name: str,
+) -> Any:
+    selector_obj = Selector.ensure(selector)
+    return selector_obj.validate_write(
+        annotation,
+        validation_error_type=validation_error_type,
+        error_prefix=f"{operator_name}(target={selector_obj.steps!r})",
     )
 
 
@@ -617,7 +583,7 @@ class LazyForEachItem(RegionOpener):
 class WrapMappingInObject(Generic[StateT]):
     """Create a new object and store the current mapping at the target selector."""
 
-    def __init__(self, as_: Selector, state_factory: Callable[[], StateT]):
+    def __init__(self, as_: SelectorInput, state_factory: Callable[[], StateT]):
         self.as_ = as_
         self.state_factory = state_factory
 
@@ -637,10 +603,16 @@ class WrapMappingInObject(Generic[StateT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, expand_output_annotation
         factory_output = _resolve_nullary_callable_output(self.state_factory)
         input_type = _mapping_input_annotation(current_output)
         base_output = factory_output if factory_output is not None else object
+        _selector_target_annotation(
+            base_output,
+            self.as_,
+            validation_error_type=validation_error_type,
+            operator_name=type(self).__name__,
+        )
         return (input_type,), base_output
 
 
@@ -718,8 +690,8 @@ class MapValue(Generic[ValueT, MappedT]):
         self,
         fn: Mapper[ValueT, MappedT],
         *,
-        src: Selector,
-        as_: Selector | None = None,
+        src: SelectorInput,
+        as_: SelectorInput | None = None,
     ):
         self.fn = fn
         self.src = src
@@ -750,7 +722,12 @@ class MapValue(Generic[ValueT, MappedT]):
             operator_name=type(self).__name__,
             ignore_explicit_none=False,
         )
-
+        _selector_target_annotation(
+            current_output,
+            self.as_,
+            validation_error_type=validation_error_type,
+            operator_name=type(self).__name__,
+        )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (current_output,), current_output
 
@@ -767,7 +744,7 @@ class Filter(Generic[ValueT]):
         self,
         predicate: Predicate[ValueT],
         *,
-        src: Selector | None = None,
+        src: SelectorInput | None = None,
     ):
         self.predicate = predicate
         self.src = src
@@ -807,7 +784,7 @@ class Filter(Generic[ValueT]):
 class FilterNotNull:
     """Keep the current value only when the selected value exists and is not None."""
 
-    def __init__(self, src: Selector):
+    def __init__(self, src: SelectorInput):
         self.src = src
 
     def __call__(self, current: CurrentT) -> CurrentT:
@@ -887,14 +864,14 @@ class DistinctBy(Generic[ItemT]):
 class Distinct(Generic[ItemT]):
     """Keep only the first item for each distinct selected value."""
 
-    def __init__(self, *, src: Selector):
+    def __init__(self, *, src: SelectorInput):
         self.src = src
         self._inner = DistinctBy(self._selector_key(src))
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
         return self._inner(items)
 
-    def _selector_key(self, src: Selector) -> KeySelector[ItemT]:
+    def _selector_key(self, src: SelectorInput) -> KeySelector[ItemT]:
         operator_name = type(self).__name__
 
         def key(item: ItemT) -> Hashable:

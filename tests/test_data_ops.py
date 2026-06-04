@@ -350,7 +350,7 @@ def test_filter_not_null_validation_rejects_missing_selector() -> None:
 def test_filter_raises_on_missing_selector() -> None:
     carrier = Carrier(payload={})
 
-    with pytest.raises(TypeError, match="selector"):
+    with pytest.raises(TypeError, match="cannot resolve"):
         Filter(lambda text: True, src="payload.msg")(carrier)
 
 

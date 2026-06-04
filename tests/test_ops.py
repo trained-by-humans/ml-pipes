@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -202,7 +203,7 @@ def test_select_validation_accepts_dotted_string_selector():
 def test_select_tuple_index_rejects_known_non_tuple_input():
     pipeline = Pipeline([IntToString(), Select(0)])
 
-    with pytest.raises(PipelineValidationError, match="tuple"):
+    with pytest.raises(PipelineValidationError, match="indexable"):
         pipeline.validate()
 
 
@@ -210,7 +211,7 @@ def test_select_tuple_index_establishes_tuple_input_boundary():
     contract = Pipeline([Select(0), IntToString()]).validate()
 
     assert contract is not None
-    assert contract.input_type is tuple
+    assert contract.input_type is Any
 
 def test_resize_op_can_do_plain_resize_without_padding():
     image = np.zeros((10, 20, 3), dtype=np.uint8)

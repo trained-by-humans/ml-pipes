@@ -100,7 +100,7 @@ def test_store_select_type_flow_passes():
 
 
 def test_store_index_out_of_bounds_raises_on_concrete_input():
-    with pytest.raises(PipelineValidationError, match="Store\\('x', index=5\\) is out of bounds"):
+    with pytest.raises(PipelineValidationError, match=r"Store\('x', \(5,\)\) is out of bounds"):
         Pipeline([IntToPair(), Store("x", index=5)]).validate()
 
 
