@@ -514,6 +514,23 @@ def test_merge_traces_propagates_error_flag():
     assert merged.spans[0].error is True
 
 
+def test_merge_traces_preserves_attributes_without_item_metric_synthesis():
+    from ml_pipes.tracing import StepSpan, InvocationTrace, merge_traces
+
+    trace_a = InvocationTrace(
+        spans=[StepSpan(label="0:op", start_time=0.0, duration_s=0.01, attributes={"kind": "first"})],
+        total_duration_s=0.01,
+    )
+    trace_b = InvocationTrace(
+        spans=[StepSpan(label="0:op", start_time=0.0, duration_s=0.03, attributes={"kind": "second"})],
+        total_duration_s=0.03,
+    )
+
+    merged = merge_traces([trace_a, trace_b])
+
+    assert merged.spans[0].attributes == {"kind": "first"}
+
+
 # ---------------------------------------------------------------------------
 # PrintCollector smoke test
 # ---------------------------------------------------------------------------

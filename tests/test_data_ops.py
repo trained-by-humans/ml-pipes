@@ -628,9 +628,17 @@ def test_take_after_per_item_is_visible_in_parent_trace() -> None:
     result = pipeline.inspect([0, 1, 2, 3])
 
     assert [span.label for span in result.spans] == ["0:PerItem", "3:Take"]
+    assert result.spans[0].attributes == {
+        "seen": 4,
+        "emitted": 4,
+        "dropped": 0,
+    }
     assert result.spans[0].output_value == [0, 10, 20, 30]
     assert result.spans[0].child_trace is not None
     assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
+    assert result.spans[0].child_trace.spans[0].attributes == {
+        "dropped": 0,
+    }
     assert result.spans[1].output_value == [0, 10]
 
 
@@ -716,6 +724,65 @@ def test_lazy_per_item_trace_resolves_when_downstream_take_closes_stream() -> No
     assert result.spans[0].output_value is None
     assert result.spans[0].child_trace is not None
     assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
+    assert result.spans[0].child_trace.spans[0].attributes == {
+        "dropped": 0,
+    }
+
+
+def test_per_item_trace_reports_dropped_counts_per_operator() -> None:
+    pipeline = Pipeline(
+        [
+            PerItem(),
+            _short_circuit_on_two,
+            _multiply_by_ten,
+            CollectItems(),
+        ]
+    )
+
+    result = pipeline.inspect([1, 2, 3])
+
+    assert result.spans[0].attributes == {
+        "seen": 3,
+        "emitted": 2,
+        "dropped": 1,
+    }
+    assert result.spans[0].child_trace is not None
+    assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_short_circuit_on_two", "2:_multiply_by_ten"]
+    assert result.spans[0].child_trace.spans[0].attributes == {
+        "dropped": 1,
+    }
+    assert result.spans[0].child_trace.spans[1].attributes == {
+        "dropped": 0,
+    }
+
+
+def test_lazy_per_item_trace_reports_dropped_counts_per_operator() -> None:
+    pipeline = Pipeline(
+        [
+            LazyPerItem(),
+            _short_circuit_on_two,
+            _multiply_by_ten,
+            StreamItems(),
+            Take(2),
+        ]
+    )
+
+    result = pipeline.inspect([1, 2, 3])
+
+    assert result.spans[0].attributes == {
+        "seen": 3,
+        "emitted": 2,
+        "dropped": 1,
+        "closed_early": True,
+    }
+    assert result.spans[0].child_trace is not None
+    assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_short_circuit_on_two", "2:_multiply_by_ten"]
+    assert result.spans[0].child_trace.spans[0].attributes == {
+        "dropped": 1,
+    }
+    assert result.spans[0].child_trace.spans[1].attributes == {
+        "dropped": 0,
+    }
 
 
 def test_lazy_per_item_validates_as_sequence_for_downstream_collection_ops() -> None:

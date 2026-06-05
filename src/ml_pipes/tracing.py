@@ -361,11 +361,12 @@ def merge_traces(traces: list[InvocationTrace]) -> InvocationTrace:
             duration_s=sum(s.duration_s for s in group) / n,
             error=any(s.error for s in group),
             operator_config=group[0].operator_config,
-            attributes=group[0].attributes,
+            attributes=copy.deepcopy(group[0].attributes),
             input_shape=group[0].input_shape,
             output_shape=group[0].output_shape,
             output_value=group[0].output_value,
             child_trace=merge_traces([s.child_trace for s in group if s.child_trace is not None]) if any(s.child_trace for s in group) else None,
+            operator_type=group[0].operator_type,
         )
         for label, group in seen.items()
     ]

@@ -10,7 +10,7 @@ from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get
 from .control import SHORT_CIRCUIT
 from .region import RegionCloser, RegionOpener
 from .selector import Selector, SelectorInput
-from .tracing import PendingSpan, InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, capture_value, merge_traces, operator_config
+from .tracing import PendingSpan, InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, capture_value, operator_config
 from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
 
 
@@ -304,6 +304,74 @@ class CollectItems(RegionCloser):
         return (Any,), output_type
 
 
+def _mark_trace_dropped(trace: InvocationTrace) -> None:
+    if not trace.spans:
+        return
+    span = trace.spans[-1]
+    span.attributes = dict(span.attributes)
+    span.attributes["dropped"] = int(span.attributes.get("dropped", 0)) + 1
+    if span.child_trace is not None:
+        _mark_trace_dropped(span.child_trace)
+
+
+def _read_dropped(attributes: dict[str, Any]) -> int:
+    value = attributes.get("dropped", 0)
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return 0
+
+
+def _merge_item_span_attributes(group: list[StepSpan]) -> dict[str, Any]:
+    merged = dict(group[0].attributes)
+    merged["dropped"] = sum(_read_dropped(span.attributes) for span in group)
+    return merged
+
+
+def _merge_item_traces(traces: list[InvocationTrace]) -> InvocationTrace:
+    if not traces:
+        return InvocationTrace()
+    n = len(traces)
+    traces_with_batch_size = [trace for trace in traces if trace.batch_size is not None]
+    grouped_spans: dict[str, list[StepSpan]] = {}
+    for trace in traces:
+        for span in trace.spans:
+            grouped_spans.setdefault(span.label, []).append(span)
+    spans = [
+        StepSpan(
+            label=label,
+            start_time=0.0,
+            duration_s=sum(span.duration_s for span in group) / n,
+            error=any(span.error for span in group),
+            operator_config=group[0].operator_config,
+            attributes=_merge_item_span_attributes(group),
+            input_shape=group[0].input_shape,
+            output_shape=group[0].output_shape,
+            output_value=group[0].output_value,
+            child_trace=(
+                _merge_item_traces([span.child_trace for span in group if span.child_trace is not None])
+                if any(span.child_trace is not None for span in group)
+                else None
+            ),
+            operator_type=group[0].operator_type,
+        )
+        for label, group in grouped_spans.items()
+    ]
+    return InvocationTrace(
+        spans=spans,
+        total_duration_s=sum(trace.total_duration_s for trace in traces) / n,
+        batch_size=(
+            sum(trace.batch_size for trace in traces_with_batch_size) / len(traces_with_batch_size)
+            if traces_with_batch_size
+            else None
+        ),
+        workers=traces[0].workers,
+    )
+
+
 class _MeasuredIterable:
     def __init__(
         self,
@@ -355,6 +423,8 @@ class _MeasuredIterable:
 
             if collecting:
                 incoming = cast(InvocationTrace, child_trace)
+                if result is SHORT_CIRCUIT:
+                    _mark_trace_dropped(incoming)
                 if self._item_traces is not None:
                     self._item_traces.append(incoming)
                     self._item_trace_duration_s += incoming.total_duration_s
@@ -413,7 +483,7 @@ class _MeasuredIterable:
         self._disable_tracing()
 
         if span is not None and not span.is_closed:
-            child_trace = merge_traces(item_traces) if item_traces else None
+            child_trace = _merge_item_traces(item_traces) if item_traces else None
             span.duration_s = self._item_trace_duration_s
             span.error = error or close_error is not None
             span.attributes = {
@@ -449,24 +519,39 @@ class PerItem(RegionOpener):
         source = iter(current)
         results: list[Any] = []
         child_traces: list[InvocationTrace] = []
+        seen = 0
+        emitted = 0
+        dropped = 0
         t_region = time.perf_counter()
 
         try:
             for value in source:
+                seen += 1
                 child_trace = InvocationTrace() if collecting else _NoOpTrace()
                 result, child_trace = execute_region(value, child_trace)
-                if result is not SHORT_CIRCUIT:
-                    results.append(result)
                 if collecting:
-                    child_traces.append(child_trace)
+                    incoming = cast(InvocationTrace, child_trace)
+                    if result is SHORT_CIRCUIT:
+                        _mark_trace_dropped(incoming)
+                    child_traces.append(incoming)
+                if result is SHORT_CIRCUIT:
+                    dropped += 1
+                    continue
+                emitted += 1
+                results.append(result)
         except Exception:
-            merged_trace = merge_traces(child_traces) if child_traces else None
+            merged_trace = _merge_item_traces(child_traces) if child_traces else None
             trace.spans.append(
                 StepSpan(
                     label,
                     t_region,
                     time.perf_counter() - t_region,
                     error=True,
+                    attributes={
+                        "seen": seen,
+                        "emitted": emitted,
+                        "dropped": dropped,
+                    },
                     child_trace=merged_trace if collecting else None,
                     operator_type=type(self),
                 )
@@ -475,13 +560,18 @@ class PerItem(RegionOpener):
         finally:
             _close_iterable(source)
 
-        merged_trace = merge_traces(child_traces) if child_traces else None
+        merged_trace = _merge_item_traces(child_traces) if child_traces else None
         trace.spans.append(
             StepSpan(
                 label,
                 t_region,
                 time.perf_counter() - t_region,
                 operator_config=operator_config(self) if (cfg and cfg.capture_config) else {},
+                attributes={
+                    "seen": seen,
+                    "emitted": emitted,
+                    "dropped": dropped,
+                },
                 input_shape=_extract_shape(current) if (cfg and cfg.capture_shapes) else None,
                 output_shape=_extract_shape(results) if (cfg and cfg.capture_shapes) else None,
                 output_value=capture_value(results) if (cfg and cfg._capture_outputs) else None,
