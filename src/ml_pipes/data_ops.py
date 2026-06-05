@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import time
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
-from itertools import dropwhile, islice, takewhile
+from itertools import islice, takewhile
 from types import UnionType
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
@@ -36,6 +36,16 @@ def _close_iterable(iterator: object) -> None:
 
 def _is_runtime_sequence_value(value: object) -> bool:
     return isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray, Mapping))
+
+
+def _require_runtime_sequence_value(
+    value: object,
+    *,
+    operator_name: str,
+) -> Iterable[Any]:
+    if not _is_runtime_sequence_value(value):
+        raise TypeError(f"{operator_name} requires an iterable boundary, got {type(value).__name__}")
+    return cast(Iterable[Any], value)
 
 
 def _resolve_selector(
@@ -181,6 +191,23 @@ def _iterable_annotation(item_type: Any) -> Any:
     if item_type is Any:
         return Iterable[Any]
     return Iterable[item_type]
+
+
+def _resolve_materialized_sequence_contract(
+    current_output: Any,
+    *,
+    operator_name: str,
+    validation_error_type: type[Exception],
+) -> tuple[Any, Any]:
+    if current_output in {Any, object}:
+        return Any, Any
+    if not _is_iterable_annotation(current_output):
+        raise validation_error_type(
+            f"{operator_name} requires an iterable boundary, got {current_output}"
+        )
+    item_type = _iterable_item_annotation(current_output)
+    input_type = _sequence_input_annotation(current_output)
+    return input_type, _list_annotation(item_type)
 
 
 def _resolve_unary_callable_contract(function: Callable[..., Any]) -> tuple[Any, Any] | None:
@@ -922,27 +949,19 @@ class Distinct(Generic[ItemT]):
 
 
 class Take:
-    """Keep the first `count` items from an iterable."""
+    """Materialize the first `count` items from an iterable."""
 
     def __init__(self, count: int | str):
         self.count = int(count)
-        self.remaining = self.count
         if self.count < 0:
             raise ValueError("count must be >= 0.")
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
-        if current is None:
-            return SHORT_CIRCUIT
-        if _is_runtime_sequence_value(current):
-            source = iter(current)
-            try:
-                return list(islice(source, self.count))
-            finally:
-                _close_iterable(source)
-        if self.remaining <= 0:
-            return SHORT_CIRCUIT
-        self.remaining -= 1
-        return current
+    def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
+        source = iter(_require_runtime_sequence_value(current, operator_name=type(self).__name__))
+        try:
+            return list(islice(source, self.count))
+        finally:
+            _close_iterable(source)
 
     def resolve_contract(
         self,
@@ -951,74 +970,27 @@ class Take:
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
-        if current_output in {Any, object}:
-            return (Any,), Any
-        if _is_iterable_annotation(current_output):
-            item_type = _iterable_item_annotation(current_output)
-            input_type = _sequence_input_annotation(current_output)
-            return (input_type,), _list_annotation(item_type)
-        return (current_output,), _without_none(current_output)
-
-
-class Skip:
-    """Skip the first `count` items from an iterable."""
-
-    def __init__(self, count: int | str):
-        self.count = int(count)
-        self.remaining = self.count
-        if self.count < 0:
-            raise ValueError("count must be >= 0.")
-
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
-        if current is None:
-            return SHORT_CIRCUIT
-        if _is_runtime_sequence_value(current):
-            return list(islice(current, self.count, None))
-        if self.remaining > 0:
-            self.remaining -= 1
-            return SHORT_CIRCUIT
-        return current
-
-    def resolve_contract(
-        self,
-        current_output: Any,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
-        if current_output in {Any, object}:
-            return (Any,), Any
-        if _is_iterable_annotation(current_output):
-            item_type = _iterable_item_annotation(current_output)
-            input_type = _sequence_input_annotation(current_output)
-            return (input_type,), _list_annotation(item_type)
-        return (current_output,), _without_none(current_output)
+        del stored_annotations, expand_output_annotation
+        input_type, output_type = _resolve_materialized_sequence_contract(
+            current_output,
+            operator_name=type(self).__name__,
+            validation_error_type=validation_error_type,
+        )
+        return (input_type,), output_type
 
 
 class TakeWhile(Generic[ItemT]):
-    """Keep items while the predicate remains true."""
+    """Materialize items while the predicate remains true."""
 
     def __init__(self, predicate: Predicate[ItemT]):
         self.predicate = predicate
-        self.active = True
 
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
-        if current is None:
-            return SHORT_CIRCUIT
-        if _is_runtime_sequence_value(current):
-            source = iter(current)
-            try:
-                return list(takewhile(self.predicate, source))
-            finally:
-                _close_iterable(source)
-        if not self.active:
-            return SHORT_CIRCUIT
-        if not self.predicate(current):
-            self.active = False
-            return SHORT_CIRCUIT
-        return current
+    def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
+        source = iter(_require_runtime_sequence_value(current, operator_name=type(self).__name__))
+        try:
+            return list(takewhile(self.predicate, source))
+        finally:
+            _close_iterable(source)
 
     def resolve_contract(
         self,
@@ -1027,18 +999,12 @@ class TakeWhile(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        if current_output in {Any, object}:
-            item_type = Any
-            input_type = Any
-            predicate_input = Any
-        elif _is_iterable_annotation(current_output):
-            item_type = _iterable_item_annotation(current_output)
-            input_type = _sequence_input_annotation(current_output)
-            predicate_input = item_type
-        else:
-            item_type = _without_none(current_output)
-            input_type = current_output
-            predicate_input = item_type
+        input_type, output_type = _resolve_materialized_sequence_contract(
+            current_output,
+            operator_name=type(self).__name__,
+            validation_error_type=validation_error_type,
+        )
+        predicate_input = Any if current_output in {Any, object} else _iterable_item_annotation(current_output)
         _resolve_callable_contract(
             predicate_input,
             self.predicate,
@@ -1049,61 +1015,4 @@ class TakeWhile(Generic[ItemT]):
             ignore_explicit_none=False,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        if current_output in {Any, object}:
-            return (Any,), Any
-        if _is_iterable_annotation(current_output):
-            return (input_type,), _list_annotation(item_type)
-        return (input_type,), _without_none(current_output)
-
-
-class SkipWhile(Generic[ItemT]):
-    """Skip items while the predicate remains true, then keep the rest."""
-
-    def __init__(self, predicate: Predicate[ItemT]):
-        self.predicate = predicate
-        self.skipping = True
-
-    def __call__(self, current: ItemT | Iterable[ItemT] | None) -> ItemT | list[ItemT]:
-        if current is None:
-            return SHORT_CIRCUIT
-        if _is_runtime_sequence_value(current):
-            return list(dropwhile(self.predicate, current))
-        if self.skipping and self.predicate(current):
-            return SHORT_CIRCUIT
-        self.skipping = False
-        return current
-
-    def resolve_contract(
-        self,
-        current_output: Any,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[tuple[Any, ...], Any]:
-        if current_output in {Any, object}:
-            item_type = Any
-            input_type = Any
-            predicate_input = Any
-        elif _is_iterable_annotation(current_output):
-            item_type = _iterable_item_annotation(current_output)
-            input_type = _sequence_input_annotation(current_output)
-            predicate_input = item_type
-        else:
-            item_type = _without_none(current_output)
-            input_type = current_output
-            predicate_input = item_type
-        _resolve_callable_contract(
-            predicate_input,
-            self.predicate,
-            callable_label="predicate",
-            source_label="current item",
-            validation_error_type=validation_error_type,
-            operator_name=type(self).__name__,
-            ignore_explicit_none=False,
-        )
-        del stored_annotations, expand_output_annotation, validation_error_type
-        if current_output in {Any, object}:
-            return (Any,), Any
-        if _is_iterable_annotation(current_output):
-            return (input_type,), _list_annotation(item_type)
-        return (input_type,), _without_none(current_output)
+        return (input_type,), output_type

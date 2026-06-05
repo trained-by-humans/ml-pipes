@@ -27,8 +27,6 @@ from .data_ops import (
     MapNotNull,
     MapValue,
     WrapMappingInObject,
-    Skip,
-    SkipWhile,
     Take,
     TakeWhile,
 )
@@ -255,8 +253,6 @@ __all__ = [
     "Scatter",
     "Segmentations",
     "SideEffectOp",
-    "Skip",
-    "SkipWhile",
     "Stitch",
     "Sigmoid",
     "Slice",

@@ -21,8 +21,6 @@ from ml_pipes import (
     Pipeline,
     SHORT_CIRCUIT,
     WrapMappingInObject,
-    Skip,
-    SkipWhile,
     Take,
     TakeWhile,
     PipelineValidationError,
@@ -471,11 +469,10 @@ def test_distinct_by_validation_requires_optional_aware_key_fn_for_optional_item
     )
 
 
-def test_take_and_skip_support_iterables() -> None:
+def test_take_supports_iterables() -> None:
     items = (value for value in range(5))
 
     assert Take(2)(items) == [0, 1]
-    assert Skip(2)(range(5)) == [2, 3, 4]
 
 
 def test_take_closes_iterator_when_it_short_circuits() -> None:
@@ -483,17 +480,6 @@ def test_take_closes_iterator_when_it_short_circuits() -> None:
 
     assert Take(2)(items) == [0, 1]
     assert items.closed is True
-
-
-def test_skip_does_not_explicitly_close_iterator_after_full_consumption() -> None:
-    items = ClosableIterator([0, 1, 2, 3])
-
-    assert Skip(2)(items) == [2, 3]
-    assert items.closed is False
-
-
-def test_skip_then_take_materializes_expected_slice() -> None:
-    assert Take(2)(Skip(1)(range(5))) == [1, 2]
 
 
 def test_take_validation_uses_static_contract() -> None:
@@ -506,29 +492,16 @@ def test_take_validation_uses_static_contract() -> None:
     assert contract.output_type == str
 
 
-def test_skip_validation_uses_materialized_contract() -> None:
-    contract = Pipeline([Skip(2), AcceptIntList()]).validate(
-        pipeline_input_type=tuple[int, ...],
-        strict=True,
-    )
-
-    assert contract.input_type == tuple[int, ...]
-    assert contract.output_type == str
+def test_take_rejects_scalar_boundary_during_validation() -> None:
+    with pytest.raises(PipelineValidationError, match="iterable boundary"):
+        Pipeline([Take(2)]).validate(
+            pipeline_input_type=int,
+            strict=True,
+        )
 
 
-def test_skip_can_chain_into_take_to_materialize_again() -> None:
-    contract = Pipeline([Skip(2), Take(2), AcceptIntList()]).validate(
-        pipeline_input_type=tuple[int, ...],
-        strict=True,
-    )
-
-    assert contract.input_type == tuple[int, ...]
-    assert contract.output_type == str
-
-
-def test_take_while_and_skip_while_support_iterables() -> None:
+def test_take_while_supports_iterables() -> None:
     assert TakeWhile(lambda value: value < 3)(range(5)) == [0, 1, 2]
-    assert SkipWhile(lambda value: value < 3)(range(5)) == [3, 4]
 
 
 def test_take_while_closes_iterator_when_it_short_circuits() -> None:
@@ -538,19 +511,8 @@ def test_take_while_closes_iterator_when_it_short_circuits() -> None:
     assert items.closed is True
 
 
-def test_skip_while_does_not_explicitly_close_iterator_after_full_consumption() -> None:
-    items = ClosableIterator([0, 1, 2, 3])
-
-    assert SkipWhile(lambda value: value < 2)(items) == [2, 3]
-    assert items.closed is False
-
-
-def test_take_while_and_skip_while_validation_check_predicate_input_type() -> None:
+def test_take_while_validation_checks_predicate_input_type() -> None:
     Pipeline([TakeWhile(_is_positive)]).validate(
-        pipeline_input_type=list[int],
-        strict=True,
-    )
-    Pipeline([SkipWhile(_is_positive)]).validate(
         pipeline_input_type=list[int],
         strict=True,
     )
@@ -561,31 +523,26 @@ def test_take_while_and_skip_while_validation_check_predicate_input_type() -> No
             strict=True,
         )
 
-    with pytest.raises(PipelineValidationError, match="predicate expects"):
-        Pipeline([SkipWhile(_has_min_length)]).validate(
-            pipeline_input_type=list[int],
+def test_take_while_rejects_scalar_boundary_during_validation() -> None:
+    with pytest.raises(PipelineValidationError, match="iterable boundary"):
+        Pipeline([TakeWhile(_is_positive)]).validate(
+            pipeline_input_type=int,
             strict=True,
         )
 
 
-def test_skip_inside_for_each_uses_operator_held_state() -> None:
-    first_pipeline = Pipeline(
+def test_take_after_for_each_pipeline_reuse_is_stable() -> None:
+    pipeline = Pipeline(
         [
             ForEachItem(),
-            Skip(1),
+            _multiply_by_ten,
             EndForEachItem(),
-        ]
-    )
-    second_pipeline = Pipeline(
-        [
-            ForEachItem(),
-            Skip(1),
-            EndForEachItem(),
+            Take(2),
         ]
     )
 
-    assert first_pipeline([1, 2, 3]) == [2, 3]
-    assert second_pipeline([1, 2, 3]) == [2, 3]
+    assert pipeline([1, 2, 3]) == [10, 20]
+    assert pipeline([1, 2, 3]) == [10, 20]
 
 
 def test_drop_null_inside_for_each_drops_none_items() -> None:
@@ -600,16 +557,17 @@ def test_drop_null_inside_for_each_drops_none_items() -> None:
     assert pipeline([1, None, 2]) == [1, 2]
 
 
-def test_take_inside_for_each_drops_items_after_limit() -> None:
+def test_take_after_for_each_limits_materialized_output() -> None:
     pipeline = Pipeline(
         [
             ForEachItem(),
-            Take(2),
+            _multiply_by_ten,
             EndForEachItem(),
+            Take(2),
         ]
     )
 
-    assert pipeline([0, 1, 2, 3]) == [0, 1]
+    assert pipeline([0, 1, 2, 3]) == [0, 10]
 
 
 def test_for_each_drops_short_circuited_items() -> None:
@@ -625,13 +583,27 @@ def test_for_each_drops_short_circuited_items() -> None:
     assert pipeline([1, 2, 3]) == [10, 30]
 
 
-def test_for_each_sequence_ops_validate_against_item_types() -> None:
+def test_take_inside_for_each_is_rejected_as_collection_op() -> None:
+    with pytest.raises(PipelineValidationError, match="iterable boundary"):
+        Pipeline(
+            [
+                ForEachItem(),
+                Take(2),
+                EndForEachItem(),
+            ]
+        ).validate(
+            pipeline_input_type=list[int],
+            strict=True,
+        )
+
+
+def test_for_each_then_take_validates_against_collection_output() -> None:
     contract = Pipeline(
         [
             ForEachItem(),
-            Skip(1),
-            Take(2),
+            _multiply_by_ten,
             EndForEachItem(),
+            Take(2),
             AcceptIntList(),
         ]
     ).validate(
@@ -643,25 +615,23 @@ def test_for_each_sequence_ops_validate_against_item_types() -> None:
     assert contract.output_type == str
 
 
-def test_for_each_sequence_ops_are_visible_in_child_trace() -> None:
+def test_take_after_for_each_is_visible_in_parent_trace() -> None:
     pipeline = Pipeline(
         [
             ForEachItem(),
-            Skip(1),
-            Take(2),
+            _multiply_by_ten,
             EndForEachItem(),
+            Take(2),
         ]
     )
 
     result = pipeline.inspect([0, 1, 2, 3])
 
-    assert [span.label for span in result.spans] == ["0:ForEachItem"]
-    assert result.spans[0].output_value == [1, 2]
+    assert [span.label for span in result.spans] == ["0:ForEachItem", "3:Take"]
+    assert result.spans[0].output_value == [0, 10, 20, 30]
     assert result.spans[0].child_trace is not None
-    assert [span.label for span in result.spans[0].child_trace.spans] == [
-        "1:Skip",
-        "2:Take",
-    ]
+    assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
+    assert result.spans[1].output_value == [0, 10]
 
 
 def test_lazy_for_each_only_processes_consumed_items() -> None:
