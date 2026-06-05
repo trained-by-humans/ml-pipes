@@ -88,12 +88,192 @@ class PreparedSmsExample:
     token_count: int = 0
 
 
+@dataclass(frozen=True)
+class SmsSpamLineageReport:
+    kept_records: list[dict[str, Any]]
+    dropped_records: list[dict[str, Any]]
+    duplicate_records: list[dict[str, Any]]
+
+
 class _LastTraceCollector(TraceCollector):
     def __init__(self) -> None:
         self.trace: InvocationTrace | None = None
 
     def on_trace(self, trace: InvocationTrace) -> None:
         self.trace = trace
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sha256_file(path: Path | str) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_lineage_row(row: dict[str, str], source_index: int) -> dict[str, Any]:
+    return {
+        "source_id": row["id"],
+        "source_index": source_index,
+        "source_label": row["label"],
+        "source_text": row["text"],
+        "source_text_sha256": _sha256_text(row["text"]),
+    }
+
+
+def _analyze_sms_spam_lineage(
+    rows: list[dict[str, str]],
+    *,
+    min_chars: int,
+    min_tokens: int,
+    validation_ratio: float,
+    test_ratio: float,
+) -> SmsSpamLineageReport:
+    splitter = _make_splitter(validation_ratio, test_ratio)
+    kept_by_dedupe_key: dict[str, dict[str, Any]] = {}
+    kept_records: list[dict[str, Any]] = []
+    dropped_records: list[dict[str, Any]] = []
+    duplicate_records: list[dict[str, Any]] = []
+
+    for source_index, row in enumerate(rows):
+        base = _source_lineage_row(row, source_index)
+
+        if not _has_known_label(row["label"]):
+            dropped_records.append(
+                {
+                    **base,
+                    "stage": "label",
+                    "reason": "unknown_label",
+                }
+            )
+            continue
+
+        label = _normalize_label(row["label"])
+        label_name = _label_name(label)
+        normalized_text = _normalize_sms_text_or_none(row["text"])
+        if normalized_text is None:
+            dropped_records.append(
+                {
+                    **base,
+                    "label": label,
+                    "label_name": label_name,
+                    "stage": "normalize",
+                    "reason": "empty_after_normalization",
+                }
+            )
+            continue
+
+        char_count = _text_char_count(normalized_text)
+        if char_count < min_chars:
+            dropped_records.append(
+                {
+                    **base,
+                    "label": label,
+                    "label_name": label_name,
+                    "normalized_text": normalized_text,
+                    "char_count": char_count,
+                    "min_chars": min_chars,
+                    "stage": "min_chars",
+                    "reason": "char_count_below_minimum",
+                }
+            )
+            continue
+
+        token_count = _text_token_count(normalized_text)
+        if token_count < min_tokens:
+            dropped_records.append(
+                {
+                    **base,
+                    "label": label,
+                    "label_name": label_name,
+                    "normalized_text": normalized_text,
+                    "char_count": char_count,
+                    "token_count": token_count,
+                    "min_tokens": min_tokens,
+                    "stage": "min_tokens",
+                    "reason": "token_count_below_minimum",
+                }
+            )
+            continue
+
+        dedupe_key = _dedupe_key(normalized_text)
+        split = splitter(dedupe_key)
+        lineage_row = {
+            **base,
+            "label": label,
+            "label_name": label_name,
+            "normalized_text": normalized_text,
+            "dedupe_key": dedupe_key,
+            "char_count": char_count,
+            "token_count": token_count,
+            "split": split,
+        }
+        kept = kept_by_dedupe_key.get(dedupe_key)
+        if kept is None:
+            kept_by_dedupe_key[dedupe_key] = lineage_row
+            kept_records.append(lineage_row)
+            continue
+
+        duplicate_records.append(
+            {
+                **lineage_row,
+                "stage": "dedupe",
+                "reason": "duplicate_normalized_text",
+                "kept_source_id": kept["source_id"],
+                "kept_source_index": kept["source_index"],
+                "kept_split": kept["split"],
+            }
+        )
+
+    return SmsSpamLineageReport(
+        kept_records=kept_records,
+        dropped_records=dropped_records,
+        duplicate_records=duplicate_records,
+    )
+
+
+def _validate_lineage_against_records(
+    lineage_report: SmsSpamLineageReport,
+    records: list[PreparedSmsExample],
+) -> None:
+    actual = [
+        {
+            "source_id": record.raw["id"],
+            "label": record.label,
+            "label_name": record.label_name,
+            "normalized_text": record.text,
+            "dedupe_key": record.dedupe_key,
+            "char_count": record.char_count,
+            "token_count": record.token_count,
+            "split": record.split,
+        }
+        for record in records
+    ]
+    expected = [
+        {
+            "source_id": row["source_id"],
+            "label": row["label"],
+            "label_name": row["label_name"],
+            "normalized_text": row["normalized_text"],
+            "dedupe_key": row["dedupe_key"],
+            "char_count": row["char_count"],
+            "token_count": row["token_count"],
+            "split": row["split"],
+        }
+        for row in lineage_report.kept_records
+    ]
+    if expected != actual:
+        raise RuntimeError("SMS spam lineage analysis does not match prepared pipeline output.")
+
+
+def _write_jsonl(path: Path | str, rows: Iterable[dict[str, Any]]) -> None:
+    with Path(path).open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _read_prepare_counts(trace: InvocationTrace) -> tuple[int, int, int]:
@@ -377,6 +557,18 @@ def _label_counts(records: list[PreparedSmsExample]) -> dict[str, int]:
     return {"ham": counts.get("ham", 0), "spam": counts.get("spam", 0)}
 
 
+def _output_locations(records: list[PreparedSmsExample]) -> dict[str, dict[str, Any]]:
+    locations: dict[str, dict[str, Any]] = {}
+    for split_name, split_items in _split_records(records).items():
+        output_file = f"{split_name}.jsonl"
+        for output_index, record in enumerate(split_items):
+            locations[record.raw["id"]] = {
+                "output_file": output_file,
+                "output_index": output_index,
+            }
+    return locations
+
+
 def write_prepared_sms_dataset(
     records: list[PreparedSmsExample],
     *,
@@ -423,6 +615,82 @@ def write_prepared_sms_dataset(
     return summary
 
 
+def _write_sms_spam_lineage_artifacts(
+    *,
+    records: list[PreparedSmsExample],
+    lineage_report: SmsSpamLineageReport,
+    dataset_path: Path,
+    output_dir: Path | str,
+    pipeline_description: str,
+    run_args: dict[str, Any],
+) -> None:
+    output_path = Path(output_dir)
+    output_locations = _output_locations(records)
+
+    kept_lineage = [
+        {
+            **row,
+            **output_locations[row["source_id"]],
+        }
+        for row in lineage_report.kept_records
+    ]
+    duplicate_lineage = [
+        {
+            **row,
+            **{
+                "kept_output_file": output_locations[row["kept_source_id"]]["output_file"],
+                "kept_output_index": output_locations[row["kept_source_id"]]["output_index"],
+            },
+        }
+        for row in lineage_report.duplicate_records
+    ]
+    dropped_lineage = list(lineage_report.dropped_records)
+
+    kept_lineage_path = output_path / "kept_lineage.jsonl"
+    dropped_lineage_path = output_path / "dropped_lineage.jsonl"
+    duplicate_lineage_path = output_path / "duplicate_lineage.jsonl"
+    _write_jsonl(kept_lineage_path, kept_lineage)
+    _write_jsonl(dropped_lineage_path, dropped_lineage)
+    _write_jsonl(duplicate_lineage_path, duplicate_lineage)
+
+    artifact_paths = {
+        "train.jsonl": output_path / "train.jsonl",
+        "validation.jsonl": output_path / "validation.jsonl",
+        "test.jsonl": output_path / "test.jsonl",
+        "summary.json": output_path / "summary.json",
+        "kept_lineage.jsonl": kept_lineage_path,
+        "dropped_lineage.jsonl": dropped_lineage_path,
+        "duplicate_lineage.jsonl": duplicate_lineage_path,
+    }
+    manifest = {
+        "version": 1,
+        "pipeline": {
+            "description": pipeline_description,
+        },
+        "run": {
+            "args": run_args,
+        },
+        "input": {
+            "path": str(dataset_path),
+            "sha256": _sha256_file(dataset_path),
+            "bytes": dataset_path.stat().st_size,
+        },
+        "output": {
+            "path": str(output_path),
+            "artifacts": {
+                name: {
+                    "path": str(path),
+                    "sha256": _sha256_file(path),
+                    "bytes": path.stat().st_size,
+                }
+                for name, path in artifact_paths.items()
+            },
+        },
+    }
+    manifest_path = output_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def prepare_sms_spam_dataset(
     *,
     assets_dir: Path | str = DEFAULT_SMS_SPAM_DIR,
@@ -446,12 +714,21 @@ def prepare_sms_spam_dataset(
         dedupe=True,
         lazy=lazy,
     )
+    pipeline_description = repr(pipeline)
     pipeline.set_tracing(trace_collector)
     deduped = _materialize_records(pipeline(raw_rows))
 
     if trace_collector.trace is None:
         raise RuntimeError("SMS spam prepare pipeline did not emit a trace.")
     raw_count, before_dedupe_count, _ = _read_prepare_counts(trace_collector.trace)
+    lineage_report = _analyze_sms_spam_lineage(
+        raw_rows,
+        min_chars=min_chars,
+        min_tokens=min_tokens,
+        validation_ratio=validation_ratio,
+        test_ratio=test_ratio,
+    )
+    _validate_lineage_against_records(lineage_report, deduped)
 
     summary = write_prepared_sms_dataset(
         deduped,
@@ -464,6 +741,23 @@ def prepare_sms_spam_dataset(
         validation_ratio=validation_ratio,
         test_ratio=test_ratio,
         lazy=lazy,
+    )
+    _write_sms_spam_lineage_artifacts(
+        records=deduped,
+        lineage_report=lineage_report,
+        dataset_path=dataset_path,
+        output_dir=output_dir,
+        pipeline_description=pipeline_description,
+        run_args={
+            "assets_dir": str(assets_dir),
+            "output_dir": str(output_dir),
+            "force_download": force_download,
+            "min_chars": min_chars,
+            "min_tokens": min_tokens,
+            "validation_ratio": validation_ratio,
+            "test_ratio": test_ratio,
+            "lazy": lazy,
+        },
     )
     return dataset_path, deduped, summary
 
