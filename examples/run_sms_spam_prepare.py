@@ -536,6 +536,15 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     output_dir = args.output_dir or (args.assets_dir / "sms_spam_prepared")
+    pipeline = build_sms_spam_prepare_pipeline(
+        min_chars=args.min_chars,
+        min_tokens=args.min_tokens,
+        validation_ratio=args.validation_ratio,
+        test_ratio=args.test_ratio,
+        dedupe=True,
+        lazy=args.lazy,
+    )
+    pipeline.describe()
 
     dataset_path, _, summary = prepare_sms_spam_dataset(
         assets_dir=args.assets_dir / "sms_spam_collection",
@@ -550,15 +559,7 @@ def main() -> int:
 
     if args.inspect_html is not None and args.inspect_samples > 0:
         raw_rows = read_sms_spam_rows(dataset_path)[: args.inspect_samples]
-        inspection_pipeline = build_sms_spam_prepare_pipeline(
-            min_chars=args.min_chars,
-            min_tokens=args.min_tokens,
-            validation_ratio=args.validation_ratio,
-            test_ratio=args.test_ratio,
-            dedupe=True,
-            lazy=args.lazy,
-        )
-        inspection = inspection_pipeline.inspect(raw_rows)
+        inspection = pipeline.inspect(raw_rows)
         saved = PipelineInspector().save_to_html(
             inspection,
             args.inspect_html,

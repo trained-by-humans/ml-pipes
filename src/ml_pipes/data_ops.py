@@ -8,6 +8,7 @@ from types import UnionType
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from .control import SHORT_CIRCUIT
+from .operator import Operator
 from .region import RegionCloser, RegionOpener
 from .selector import Selector, SelectorInput
 from .tracing import PendingSpan, InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, capture_value, operator_config
@@ -290,6 +291,7 @@ def _require_assignment_compatible(
     )
 
 
+@Operator
 class CollectItems(RegionCloser):
     """Region boundary that materializes per-item outputs as a list."""
 
@@ -498,6 +500,7 @@ class _MeasuredIterable:
                 span.child_trace = child_trace
 
 
+@Operator
 class PerItem(RegionOpener):
     """Run the enclosed operators once per source item.
 
@@ -592,6 +595,7 @@ class PerItem(RegionOpener):
         return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
 
 
+@Operator
 class StreamItems(RegionCloser):
     """Region boundary that exposes per-item outputs as a lazy iterable."""
 
@@ -607,6 +611,7 @@ class StreamItems(RegionCloser):
         return (Any,), output_type
 
 
+@Operator
 class LazyPerItem(RegionOpener):
     """Run the enclosed operators once per source item and stream results lazily."""
 
@@ -644,6 +649,7 @@ class LazyPerItem(RegionOpener):
         return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
 
 
+@Operator
 class WrapMappingInObject(Generic[StateT]):
     """Create a new object and store the current mapping at the target selector."""
 
@@ -703,6 +709,7 @@ class WrapMappingInObject(Generic[StateT]):
         return (input_type,), base_output
 
 
+@Operator
 class Map(Generic[ValueT, MappedT]):
     """Apply a function to the current value."""
 
@@ -739,6 +746,7 @@ class Map(Generic[ValueT, MappedT]):
         return (fn_input_type,), fn_output_type
 
 
+@Operator
 class MapNotNull(Generic[ValueT, MappedT]):
     """Apply a function and short-circuit when the mapped result is None."""
 
@@ -768,6 +776,7 @@ class MapNotNull(Generic[ValueT, MappedT]):
         return input_types, _without_none(mapped_output)
 
 
+@Operator
 class MapValue(Generic[ValueT, MappedT]):
     """Apply a function to a source value and store the result on the current object."""
 
@@ -850,6 +859,7 @@ class MapValue(Generic[ValueT, MappedT]):
         return (current_output,), current_output
 
 
+@Operator
 class Filter(Generic[ValueT]):
     """Keep the current value when a predicate matches the current or source value.
 
@@ -911,6 +921,7 @@ class Filter(Generic[ValueT]):
         return (current_output,), current_output
 
 
+@Operator
 class FilterNotNull:
     """Keep the current value only when the source value exists and is not None."""
 
@@ -944,6 +955,7 @@ class FilterNotNull:
         return (current_output,), _without_none(current_output)
 
 
+@Operator
 class DropNull:
     """Short-circuit when the current value is `None`."""
 
@@ -953,6 +965,7 @@ class DropNull:
         return current
 
 
+@Operator
 class DistinctBy(Generic[ItemT]):
     """Keep only the first item for each computed key."""
 
@@ -992,6 +1005,7 @@ class DistinctBy(Generic[ItemT]):
         return (input_type,), _list_annotation(item_type)
 
 
+@Operator
 class Distinct(Generic[ItemT]):
     """Keep only the first item for each distinct source value."""
 
@@ -1038,6 +1052,7 @@ class Distinct(Generic[ItemT]):
         return (input_type,), _list_annotation(item_type)
 
 
+@Operator
 class Take:
     """Materialize the first `count` items from an iterable."""
 
@@ -1069,6 +1084,7 @@ class Take:
         return (input_type,), output_type
 
 
+@Operator
 class TakeWhile(Generic[ItemT]):
     """Materialize items while the predicate remains true."""
 
