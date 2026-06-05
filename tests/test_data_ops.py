@@ -6,20 +6,20 @@ from typing import Any
 import pytest
 
 from ml_pipes import (
+    CollectItems,
     Distinct,
     DistinctBy,
     DropNull,
-    EndForEachItem,
-    EndLazyForEachItem,
     FilterNotNull,
     Filter,
-    ForEachItem,
-    LazyForEachItem,
+    LazyPerItem,
     Map,
     MapNotNull,
     MapValue,
     Pipeline,
+    PerItem,
     SHORT_CIRCUIT,
+    StreamItems,
     WrapMappingInObject,
     Take,
     TakeWhile,
@@ -531,12 +531,12 @@ def test_take_while_rejects_scalar_boundary_during_validation() -> None:
         )
 
 
-def test_take_after_for_each_pipeline_reuse_is_stable() -> None:
+def test_take_after_per_item_pipeline_reuse_is_stable() -> None:
     pipeline = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             _multiply_by_ten,
-            EndForEachItem(),
+            CollectItems(),
             Take(2),
         ]
     )
@@ -545,24 +545,24 @@ def test_take_after_for_each_pipeline_reuse_is_stable() -> None:
     assert pipeline([1, 2, 3]) == [10, 20]
 
 
-def test_drop_null_inside_for_each_drops_none_items() -> None:
+def test_drop_null_inside_per_item_drops_none_items() -> None:
     pipeline = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             DropNull(),
-            EndForEachItem(),
+            CollectItems(),
         ]
     )
 
     assert pipeline([1, None, 2]) == [1, 2]
 
 
-def test_take_after_for_each_limits_materialized_output() -> None:
+def test_take_after_per_item_limits_materialized_output() -> None:
     pipeline = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             _multiply_by_ten,
-            EndForEachItem(),
+            CollectItems(),
             Take(2),
         ]
     )
@@ -570,26 +570,26 @@ def test_take_after_for_each_limits_materialized_output() -> None:
     assert pipeline([0, 1, 2, 3]) == [0, 10]
 
 
-def test_for_each_drops_short_circuited_items() -> None:
+def test_per_item_drops_short_circuited_items() -> None:
     pipeline = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             _short_circuit_on_two,
             _multiply_by_ten,
-            EndForEachItem(),
+            CollectItems(),
         ]
     )
 
     assert pipeline([1, 2, 3]) == [10, 30]
 
 
-def test_take_inside_for_each_is_rejected_as_collection_op() -> None:
+def test_take_inside_per_item_is_rejected_as_collection_op() -> None:
     with pytest.raises(PipelineValidationError, match="iterable boundary"):
         Pipeline(
             [
-                ForEachItem(),
+                PerItem(),
                 Take(2),
-                EndForEachItem(),
+                CollectItems(),
             ]
         ).validate(
             pipeline_input_type=list[int],
@@ -597,12 +597,12 @@ def test_take_inside_for_each_is_rejected_as_collection_op() -> None:
         )
 
 
-def test_for_each_then_take_validates_against_collection_output() -> None:
+def test_per_item_then_take_validates_against_collection_output() -> None:
     contract = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             _multiply_by_ten,
-            EndForEachItem(),
+            CollectItems(),
             Take(2),
             AcceptIntList(),
         ]
@@ -615,26 +615,26 @@ def test_for_each_then_take_validates_against_collection_output() -> None:
     assert contract.output_type == str
 
 
-def test_take_after_for_each_is_visible_in_parent_trace() -> None:
+def test_take_after_per_item_is_visible_in_parent_trace() -> None:
     pipeline = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             _multiply_by_ten,
-            EndForEachItem(),
+            CollectItems(),
             Take(2),
         ]
     )
 
     result = pipeline.inspect([0, 1, 2, 3])
 
-    assert [span.label for span in result.spans] == ["0:ForEachItem", "3:Take"]
+    assert [span.label for span in result.spans] == ["0:PerItem", "3:Take"]
     assert result.spans[0].output_value == [0, 10, 20, 30]
     assert result.spans[0].child_trace is not None
     assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
     assert result.spans[1].output_value == [0, 10]
 
 
-def test_lazy_for_each_only_processes_consumed_items() -> None:
+def test_lazy_per_item_only_processes_consumed_items() -> None:
     seen: list[int] = []
 
     def mark(value: int) -> int:
@@ -643,9 +643,9 @@ def test_lazy_for_each_only_processes_consumed_items() -> None:
 
     pipeline = Pipeline(
         [
-            LazyForEachItem(),
+            LazyPerItem(),
             mark,
-            EndLazyForEachItem(),
+            StreamItems(),
             Take(2),
         ]
     )
@@ -654,12 +654,12 @@ def test_lazy_for_each_only_processes_consumed_items() -> None:
     assert seen == [1, 2]
 
 
-def test_lazy_for_each_returns_measured_iterable_when_it_is_terminal() -> None:
+def test_lazy_per_item_returns_measured_iterable_when_it_is_terminal() -> None:
     pipeline = Pipeline(
         [
-            LazyForEachItem(),
+            LazyPerItem(),
             _multiply_by_ten,
-            EndLazyForEachItem(),
+            StreamItems(),
         ]
     )
 
@@ -679,34 +679,34 @@ def test_inspect_does_not_materialize_terminal_lazy_stream() -> None:
 
     pipeline = Pipeline(
         [
-            LazyForEachItem(),
+            LazyPerItem(),
             mark,
-            EndLazyForEachItem(),
+            StreamItems(),
         ]
     )
 
     result = pipeline.inspect([1, 2, 3])
 
     assert seen == []
-    assert [span.label for span in result.spans] == ["0:LazyForEachItem"]
+    assert [span.label for span in result.spans] == ["0:LazyPerItem"]
     assert result.spans[0].duration_s == 0.0
     assert result.spans[0].attributes == {}
     assert result.spans[0].child_trace is None
 
 
-def test_lazy_for_each_trace_resolves_when_downstream_take_closes_stream() -> None:
+def test_lazy_per_item_trace_resolves_when_downstream_take_closes_stream() -> None:
     pipeline = Pipeline(
         [
-            LazyForEachItem(),
+            LazyPerItem(),
             _multiply_by_ten,
-            EndLazyForEachItem(),
+            StreamItems(),
             Take(2),
         ]
     )
 
     result = pipeline.inspect([1, 2, 3, 4])
 
-    assert [span.label for span in result.spans] == ["0:LazyForEachItem", "3:Take"]
+    assert [span.label for span in result.spans] == ["0:LazyPerItem", "3:Take"]
     assert result.spans[0].attributes == {
         "seen": 2,
         "emitted": 2,
@@ -718,12 +718,12 @@ def test_lazy_for_each_trace_resolves_when_downstream_take_closes_stream() -> No
     assert [span.label for span in result.spans[0].child_trace.spans] == ["1:_multiply_by_ten"]
 
 
-def test_lazy_for_each_validates_as_sequence_for_downstream_collection_ops() -> None:
+def test_lazy_per_item_validates_as_sequence_for_downstream_collection_ops() -> None:
     contract = Pipeline(
         [
-            LazyForEachItem(),
+            LazyPerItem(),
             Map(_text_length),
-            EndLazyForEachItem(),
+            StreamItems(),
             Take(2),
             AcceptIntList(),
         ]
@@ -736,15 +736,15 @@ def test_lazy_for_each_validates_as_sequence_for_downstream_collection_ops() -> 
     assert contract.output_type == str
 
 
-def test_for_each_item_pipeline_composes_primitives_for_dataset_processing() -> None:
+def test_per_item_pipeline_composes_primitives_for_dataset_processing() -> None:
     pipeline = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             WrapMappingInObject(target="payload", state_factory=Carrier),
             MapValue(str.strip, source="payload.msg", target="cleaned"),
             FilterNotNull(source="cleaned"),
             Filter(lambda text: len(text) >= 5, source="cleaned"),
-            EndForEachItem(),
+            CollectItems(),
             Distinct(source="cleaned"),
             Take(1),
         ]
@@ -791,12 +791,12 @@ def test_wrap_mapping_in_object_validation_resolves_factory_output() -> None:
 def test_region_and_sequence_ops_preserve_item_type_for_validation() -> None:
     contract = Pipeline(
         [
-            ForEachItem(),
+            PerItem(),
             WrapMappingInObject(target="payload", state_factory=Carrier),
             MapValue(str.strip, source="payload.msg", target="cleaned"),
             FilterNotNull(source="cleaned"),
             Filter(_has_min_length_or_none, source="cleaned"),
-            EndForEachItem(),
+            CollectItems(),
             Distinct(source="cleaned"),
             Take(1),
             AcceptCarrierList(),

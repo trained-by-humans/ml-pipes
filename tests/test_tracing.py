@@ -8,14 +8,14 @@ import pytest
 
 from ml_pipes import (
     Batch,
-    EndLazyForEachItem,
     InspectionSerializer,
     InvocationTrace,
-    LazyForEachItem,
+    LazyPerItem,
     Pipeline,
     PrintCollector,
     SHORT_CIRCUIT,
     StepSpan,
+    StreamItems,
     TraceCollector,
     TracingConfig,
     UnBatch,
@@ -89,7 +89,7 @@ def test_collector_called_once_per_invocation():
 
 
 def test_lazy_top_level_trace_delivered_immediately_as_unmaterialized() -> None:
-    p, cap = _make_pipeline([LazyForEachItem(), _double, EndLazyForEachItem()])
+    p, cap = _make_pipeline([LazyPerItem(), _double, StreamItems()])
 
     result = p([1, 2, 3])
 
@@ -110,7 +110,7 @@ def test_freeze_trace_closes_pending_spans_and_returns_detached_step_spans() -> 
         attributes={"seen": 1},
     )
     parent_pending = PendingSpan(
-        label="0:LazyForEachItem",
+        label="0:LazyPerItem",
         start_time=0.0,
         duration_s=0.02,
         attributes={"seen": 1, "emitted": 1},
@@ -140,7 +140,7 @@ def test_freeze_trace_closes_pending_spans_and_returns_detached_step_spans() -> 
 
 def test_lazy_top_level_close_only_closes_source_once() -> None:
     source = _ClosableSource([1, 2, 3])
-    p, cap = _make_pipeline([LazyForEachItem(), _double, EndLazyForEachItem()])
+    p, cap = _make_pipeline([LazyPerItem(), _double, StreamItems()])
 
     result = p(source)
     assert len(cap.traces) == 1
@@ -157,7 +157,7 @@ def test_lazy_top_level_close_only_closes_source_once() -> None:
 
 def test_lazy_top_level_close_failure_does_not_rewrite_delivered_trace() -> None:
     source = _ClosableSource([1, 2, 3], fail_on_close=True)
-    p, cap = _make_pipeline([LazyForEachItem(), _double, EndLazyForEachItem()])
+    p, cap = _make_pipeline([LazyPerItem(), _double, StreamItems()])
 
     result = p(source)
     assert len(cap.traces) == 1

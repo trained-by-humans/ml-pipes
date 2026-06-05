@@ -290,8 +290,8 @@ def _require_assignment_compatible(
     )
 
 
-class EndForEachItem(RegionCloser):
-    """Region boundary for the end of per-item processing."""
+class CollectItems(RegionCloser):
+    """Region boundary that materializes per-item outputs as a list."""
 
     def resolve_contract(
         self,
@@ -428,14 +428,14 @@ class _MeasuredIterable:
                 span.child_trace = child_trace
 
 
-class ForEachItem(RegionOpener):
+class PerItem(RegionOpener):
     """Run the enclosed operators once per source item.
 
     Items that short-circuit inside the region are treated as dropped and are
     omitted from the resulting collection.
     """
 
-    closing_type = EndForEachItem
+    closing_type = CollectItems
 
     def run_region(
         self,
@@ -502,8 +502,8 @@ class ForEachItem(RegionOpener):
         return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
 
 
-class EndLazyForEachItem(RegionCloser):
-    """Region boundary for lazy per-item processing."""
+class StreamItems(RegionCloser):
+    """Region boundary that exposes per-item outputs as a lazy iterable."""
 
     def resolve_contract(
         self,
@@ -517,10 +517,10 @@ class EndLazyForEachItem(RegionCloser):
         return (Any,), output_type
 
 
-class LazyForEachItem(RegionOpener):
+class LazyPerItem(RegionOpener):
     """Run the enclosed operators once per source item and stream results lazily."""
 
-    closing_type = EndLazyForEachItem
+    closing_type = StreamItems
 
     def run_region(
         self,
