@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ml_pipes import Gather, ImagePayload, Pipeline, PipelineValidationError, Recall, Resize, Scatter, Store
+from ml_pipes import DropNull, Gather, ImagePayload, Pipeline, PipelineValidationError, Recall, Resize, Scatter, Store
 from ml_pipes.scatter import ScatterGate, _ScatterEntry
 
 
@@ -111,6 +111,12 @@ def test_pipeline_scatter_gather_single_worker():
 def test_pipeline_scatter_gather_empty_list():
     pipeline = Pipeline([Scatter(max_concurrency=2), _Double(), Gather()])
     assert pipeline([]) == []
+
+
+def test_pipeline_scatter_gather_omits_short_circuited_items():
+    pipeline = Pipeline([Scatter(max_concurrency=1), DropNull(), Gather()])
+
+    assert pipeline([1, None, 2]) == [1, 2]
 
 
 def test_pipeline_scatter_gather_worker_exception_propagates():

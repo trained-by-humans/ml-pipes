@@ -14,6 +14,7 @@ from typing import TextIO
 import numpy as np
 
 from .batch import BatchGate, LeaderBatch
+from .control import SHORT_CIRCUIT
 from .operator import Operator
 from .region import RegionCloser, RegionOpener
 from .scatter import ScatterGate
@@ -2001,7 +2002,7 @@ class Scatter(RegionOpener):
         child_traces = [e.child_trace for e in entries if e.child_trace is not None]
         child_trace = merge_traces(child_traces) if child_traces else None
         trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, child_trace=child_trace if collecting else None, operator_type=type(self)))
-        return [e.result for e in entries]
+        return [e.result for e in entries if e.result is not SHORT_CIRCUIT]
 
     def resolve_contract(
         self,
