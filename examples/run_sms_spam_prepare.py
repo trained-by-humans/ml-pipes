@@ -39,16 +39,18 @@ if __name__ == "__main__" and __package__ is None:
 
 from examples.common import ASSETS_DIR, add_assets_dir_arg
 from ml_pipes import (
+    CollectItems,
     Distinct,
-    EndForEachItem,
-    EndLazyForEachItem,
     Filter,
-    ForEachItem,
     InputFn,
-    LazyForEachItem,
+    InvocationTrace,
+    LazyPerItem,
     MapValue,
     Pipeline,
     PipelineInspector,
+    PerItem,
+    StreamItems,
+    TraceCollector,
     WrapMappingInObject,
     data_factory,
     pipeline_factory,
@@ -84,6 +86,26 @@ class PreparedSmsExample:
     split: str = ""
     char_count: int = 0
     token_count: int = 0
+
+
+class _LastTraceCollector(TraceCollector):
+    def __init__(self) -> None:
+        self.trace: InvocationTrace | None = None
+
+    def on_trace(self, trace: InvocationTrace) -> None:
+        self.trace = trace
+
+
+def _read_prepare_counts(trace: InvocationTrace) -> tuple[int, int, int]:
+    for span in trace.spans:
+        if span.operator_type in {PerItem, LazyPerItem}:
+            seen = span.attributes.get("seen")
+            emitted = span.attributes.get("emitted")
+            dropped = span.attributes.get("dropped")
+            if isinstance(seen, int) and isinstance(emitted, int) and isinstance(dropped, int):
+                return seen, emitted, dropped
+            break
+    raise RuntimeError("SMS spam prepare trace is missing PerItem/LazyPerItem counts.")
 
 
 def _download_with_fallback(urls: tuple[str, ...], destination: Path) -> None:
@@ -257,8 +279,8 @@ def build_sms_spam_prepare_pipeline(
         raise ValueError(f"min_tokens must be >= 0, got {min_tokens}")
 
     splitter = _make_splitter(validation_ratio, test_ratio)
-    region_open = LazyForEachItem() if lazy else ForEachItem()
-    region_close = EndLazyForEachItem() if lazy else EndForEachItem()
+    region_open = LazyPerItem() if lazy else PerItem()
+    region_close = StreamItems() if lazy else CollectItems()
     operators: list[Any] = [
         region_open,
         WrapMappingInObject(target="raw", state_factory=PreparedSmsExample),
@@ -280,7 +302,6 @@ def build_sms_spam_prepare_pipeline(
 
     pipeline = Pipeline(operators)
     pipeline.validate()
-    pipeline.describe()
     return pipeline
 
 
@@ -412,21 +433,12 @@ def prepare_sms_spam_dataset(
     validation_ratio: float = 0.1,
     test_ratio: float = 0.1,
     lazy: bool = False,
-) -> tuple[Path, list[PreparedSmsExample], list[PreparedSmsExample], dict[str, Any]]:
+) -> tuple[Path, list[PreparedSmsExample], dict[str, Any]]:
     dataset_path = ensure_sms_spam_collection(assets_dir, force_download=force_download)
     raw_rows = read_sms_spam_rows(dataset_path)
 
-    before_dedupe_pipeline = build_sms_spam_prepare_pipeline(
-        min_chars=min_chars,
-        min_tokens=min_tokens,
-        validation_ratio=validation_ratio,
-        test_ratio=test_ratio,
-        dedupe=False,
-        lazy=lazy,
-    )
-    before_dedupe = _materialize_records(before_dedupe_pipeline(raw_rows))
-
-    deduped_pipeline = build_sms_spam_prepare_pipeline(
+    trace_collector = _LastTraceCollector()
+    pipeline = build_sms_spam_prepare_pipeline(
         min_chars=min_chars,
         min_tokens=min_tokens,
         validation_ratio=validation_ratio,
@@ -434,12 +446,17 @@ def prepare_sms_spam_dataset(
         dedupe=True,
         lazy=lazy,
     )
-    deduped = _materialize_records(deduped_pipeline(raw_rows))
+    pipeline.set_tracing(trace_collector)
+    deduped = _materialize_records(pipeline(raw_rows))
+
+    if trace_collector.trace is None:
+        raise RuntimeError("SMS spam prepare pipeline did not emit a trace.")
+    raw_count, before_dedupe_count, _ = _read_prepare_counts(trace_collector.trace)
 
     summary = write_prepared_sms_dataset(
         deduped,
-        raw_count=len(raw_rows),
-        before_dedupe_count=len(before_dedupe),
+        raw_count=raw_count,
+        before_dedupe_count=before_dedupe_count,
         dataset_path=dataset_path,
         output_dir=output_dir,
         min_chars=min_chars,
@@ -448,7 +465,7 @@ def prepare_sms_spam_dataset(
         test_ratio=test_ratio,
         lazy=lazy,
     )
-    return dataset_path, before_dedupe, deduped, summary
+    return dataset_path, deduped, summary
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -520,7 +537,7 @@ def main() -> int:
     args = _build_parser().parse_args()
     output_dir = args.output_dir or (args.assets_dir / "sms_spam_prepared")
 
-    dataset_path, before_dedupe, deduped, summary = prepare_sms_spam_dataset(
+    dataset_path, _, summary = prepare_sms_spam_dataset(
         assets_dir=args.assets_dir / "sms_spam_collection",
         output_dir=output_dir,
         force_download=args.force_download,
@@ -562,8 +579,8 @@ def main() -> int:
     )
     print(f"Split counts: {summary['split_counts']}")
     print(f"Label counts: {summary['label_counts']['all']}")
-    print(f"Prepared rows materialized: {len(deduped)}")
-    print(f"Rows surviving before dedupe: {len(before_dedupe)}")
+    print(f"Prepared rows materialized: {summary['prepared_records']}")
+    print(f"Rows surviving before dedupe: {summary['prepared_records_before_dedupe']}")
     return 0
 
 

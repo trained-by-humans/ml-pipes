@@ -148,11 +148,18 @@ def test_prepare_sms_spam_dataset_lazy_matches_eager(tmp_path: Path) -> None:
         lazy=True,
     )
 
-    eager_dataset_path, eager_before_dedupe, eager_deduped, eager_summary = eager
-    lazy_dataset_path, lazy_before_dedupe, lazy_deduped, lazy_summary = lazy
+    eager_dataset_path, eager_deduped, eager_summary = eager
+    lazy_dataset_path, lazy_deduped, lazy_summary = lazy
 
     assert eager_dataset_path == lazy_dataset_path == dataset_path
-    assert lazy_before_dedupe == eager_before_dedupe
     assert lazy_deduped == eager_deduped
+    assert eager_summary["raw_records"] == 4
+    assert eager_summary["prepared_records_before_dedupe"] == 3
+    assert eager_summary["prepared_records"] == 2
+    assert eager_summary["duplicates_removed"] == 1
+    assert lazy_summary["raw_records"] == 4
+    assert lazy_summary["prepared_records_before_dedupe"] == 3
+    assert lazy_summary["prepared_records"] == 2
+    assert lazy_summary["duplicates_removed"] == 1
     assert eager_summary["execution_mode"] == "eager"
     assert lazy_summary["execution_mode"] == "lazy"
