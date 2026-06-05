@@ -105,6 +105,34 @@ def test_pipeline_inspector_formats_mapping_as_group_blocks():
     assert started_at.rows == [("started_at", "2.5")]
 
 
+def test_pipeline_inspector_build_views_handles_cyclic_mappings():
+    payload: dict[str, object] = {"label": "spam"}
+    payload["self"] = payload
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=payload,
+            )
+        ]
+    )
+
+    views = PipelineInspector().build_views(result)
+
+    assert len(views) == 1
+    assert len(views[0].blocks) == 1
+    block = views[0].blocks[0]
+    assert isinstance(block, GroupBlock)
+    assert block.title == "dict"
+    assert len(block.children) == 2
+    assert isinstance(block.children[0], TextBlock)
+    assert block.children[0].rows == [("label", "spam")]
+    assert isinstance(block.children[1], TextBlock)
+    assert block.children[1].rows == [("self", "<recursive dict>")]
+
+
 def test_html_renderer_renders_group_block_boundaries():
     html = HtmlRenderer(orientation="vertical").render(
         [

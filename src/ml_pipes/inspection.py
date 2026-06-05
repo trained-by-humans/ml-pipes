@@ -556,11 +556,16 @@ class PipelineInspector:
             and block.rows[0][0] == ""
         )
 
-    def _named_block(self, name: str, value: Any) -> OutputBlock:
-        if isinstance(value, Mapping):
-            return self._mapping_to_group(f"{name}: {type(value).__name__}", value)
+    def _recursive_reference_block(self, value: Any) -> TextBlock:
+        return TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])
 
-        blocks = self._output_to_blocks(value)
+    def _named_block(
+        self,
+        name: str,
+        value: Any,
+        active_ids: set[int],
+    ) -> OutputBlock:
+        blocks = self._output_to_blocks(value, active_ids)
         if len(blocks) == 1:
             block = blocks[0]
             if isinstance(block, GroupBlock):
@@ -577,29 +582,47 @@ class PipelineInspector:
             children=blocks,
         )
 
-    def _mapping_to_group(self, title: str, value: Mapping[Any, Any]) -> GroupBlock:
+    def _mapping_to_group(
+        self,
+        title: str,
+        value: Mapping[Any, Any],
+        active_ids: set[int],
+    ) -> GroupBlock:
         items = list(value.items())
-        children = [self._named_block(str(key), item) for key, item in items[:12]]
+        children = [self._named_block(str(key), item, active_ids) for key, item in items[:12]]
         if len(items) > 12:
             children.append(TextBlock("…", [("", f"+{len(items) - 12} more")]))
         return GroupBlock(title=title, children=children)
 
-    def _dataclass_to_group(self, value: Any, title: str | None = None) -> GroupBlock:
+    def _dataclass_to_group(
+        self,
+        value: Any,
+        title: str | None = None,
+        *,
+        active_ids: set[int],
+    ) -> GroupBlock:
         return GroupBlock(
             title=title or type(value).__name__,
             children=[
-                self._named_block(field.name, getattr(value, field.name))
+                self._named_block(field.name, getattr(value, field.name), active_ids)
                 for field in dataclasses.fields(value)
             ],
         )
 
-    def _output_to_blocks(self, value: Any) -> list[OutputBlock]:
+    def _output_to_blocks(
+        self,
+        value: Any,
+        active_ids: set[int] | None = None,
+    ) -> list[OutputBlock]:
+        if active_ids is None:
+            active_ids = set()
+
         if isinstance(value, tuple):
             if _is_primitive_tuple(value):
                 return [TextBlock(type(value).__name__, [("", str(value))])]
             blocks: list[OutputBlock] = []
             for item in value:
-                blocks.extend(self._output_to_blocks(item))
+                blocks.extend(self._output_to_blocks(item, active_ids))
             return blocks
 
         if isinstance(value, list) and value:
@@ -620,7 +643,7 @@ class PipelineInspector:
                 return [TextBlock(f"list  ×{len(value)}", rows)]
             if isinstance(value[0], Mapping) or (dataclasses.is_dataclass(value[0]) and not isinstance(value[0], type)):
                 rows = [
-                    (f"[{i}]", _block_summary(self._output_to_blocks(item)))
+                    (f"[{i}]", _block_summary(self._output_to_blocks(item, active_ids)))
                     for i, item in enumerate(value[:_LIST_MAX])
                 ]
                 if len(value) > _LIST_MAX:
@@ -634,10 +657,24 @@ class PipelineInspector:
             return formatter(value)
 
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
-            return [self._dataclass_to_group(value)]
+            value_id = id(value)
+            if value_id in active_ids:
+                return [self._recursive_reference_block(value)]
+            active_ids.add(value_id)
+            try:
+                return [self._dataclass_to_group(value, active_ids=active_ids)]
+            finally:
+                active_ids.remove(value_id)
 
         if isinstance(value, Mapping):
-            return [self._mapping_to_group(type(value).__name__, value)]
+            value_id = id(value)
+            if value_id in active_ids:
+                return [self._recursive_reference_block(value)]
+            active_ids.add(value_id)
+            try:
+                return [self._mapping_to_group(type(value).__name__, value, active_ids)]
+            finally:
+                active_ids.remove(value_id)
 
         name = type(value).__name__
         text = value if isinstance(value, str) else repr(value)
