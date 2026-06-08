@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -119,6 +120,10 @@ def _is_positive_or_none(value: int | None) -> bool:
 
 def _hash_text(text: str) -> int:
     return len(text)
+
+
+def _lower_text(text: str) -> str:
+    return text.lower()
 
 
 def _hash_optional_text(text: str | None) -> int:
@@ -475,6 +480,10 @@ def test_take_supports_iterables() -> None:
     assert Take(2)(items) == [0, 1]
 
 
+def test_take_supports_value_shaped_iterables() -> None:
+    assert Take(2)("hello") == ["h", "e"]
+
+
 def test_take_closes_iterator_when_it_short_circuits() -> None:
     items = ClosableIterator([0, 1, 2, 3])
 
@@ -492,6 +501,16 @@ def test_take_validation_uses_static_contract() -> None:
     assert contract.output_type == str
 
 
+def test_take_validation_accepts_string_iterable_boundary() -> None:
+    contract = Pipeline([Take(2)]).validate(
+        pipeline_input_type=str,
+        strict=True,
+    )
+
+    assert contract.input_type == str
+    assert contract.output_type == list[str]
+
+
 def test_take_rejects_scalar_boundary_during_validation() -> None:
     with pytest.raises(PipelineValidationError, match="iterable boundary"):
         Pipeline([Take(2)]).validate(
@@ -502,6 +521,10 @@ def test_take_rejects_scalar_boundary_during_validation() -> None:
 
 def test_take_while_supports_iterables() -> None:
     assert TakeWhile(lambda value: value < 3)(range(5)) == [0, 1, 2]
+
+
+def test_take_while_supports_value_shaped_iterables() -> None:
+    assert TakeWhile(lambda value: value != "!")("hello!") == ["h", "e", "l", "l", "o"]
 
 
 def test_take_while_closes_iterator_when_it_short_circuits() -> None:
@@ -527,6 +550,103 @@ def test_take_while_rejects_scalar_boundary_during_validation() -> None:
     with pytest.raises(PipelineValidationError, match="iterable boundary"):
         Pipeline([TakeWhile(_is_positive)]).validate(
             pipeline_input_type=int,
+            strict=True,
+        )
+
+
+def test_distinct_by_supports_value_shaped_iterables() -> None:
+    assert DistinctBy(_lower_text)("AaBbA") == ["A", "B"]
+
+
+def test_distinct_by_validation_accepts_string_iterable_boundary() -> None:
+    contract = Pipeline([DistinctBy(_lower_text)]).validate(
+        pipeline_input_type=str,
+        strict=True,
+    )
+
+    assert contract.input_type == str
+    assert contract.output_type == list[str]
+
+
+@pytest.mark.parametrize("annotation", [set[int], frozenset[int], Iterator[int]])
+def test_per_item_validation_accepts_generic_item_iterable_annotations(annotation: Any) -> None:
+    contract = Pipeline(
+        [
+            PerItem(),
+            _multiply_by_ten,
+            CollectItems(),
+            AcceptIntList(),
+        ]
+    ).validate(
+        pipeline_input_type=annotation,
+        strict=True,
+    )
+
+    assert contract.input_type == annotation
+    assert contract.output_type == str
+
+
+@pytest.mark.parametrize(
+    ("opener", "closer"),
+    [
+        (PerItem, CollectItems),
+        (LazyPerItem, StreamItems),
+    ],
+)
+@pytest.mark.parametrize(
+    "current",
+    [
+        {"id": "sms-00000", "label": "ham", "text": "hello"},
+        "hello",
+        b"hello",
+    ],
+)
+def test_per_item_regions_reject_single_mapping_and_string_like_boundaries_at_runtime(
+    opener: type[PerItem] | type[LazyPerItem],
+    closer: type[CollectItems] | type[StreamItems],
+    current: object,
+) -> None:
+    pipeline = Pipeline(
+        [
+            opener(),
+            DropNull(),
+            closer(),
+        ]
+    )
+
+    with pytest.raises(TypeError, match=rf"{opener.__name__} requires an item iterable boundary"):
+        pipeline(current)
+
+
+@pytest.mark.parametrize(
+    ("opener", "closer"),
+    [
+        (PerItem, CollectItems),
+        (LazyPerItem, StreamItems),
+    ],
+)
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        dict[str, object],
+        str,
+        bytes,
+    ],
+)
+def test_per_item_regions_reject_single_mapping_and_string_like_boundaries_during_validation(
+    opener: type[PerItem] | type[LazyPerItem],
+    closer: type[CollectItems] | type[StreamItems],
+    annotation: Any,
+) -> None:
+    with pytest.raises(PipelineValidationError, match=rf"{opener.__name__} requires an item iterable boundary"):
+        Pipeline(
+            [
+                opener(),
+                DropNull(),
+                closer(),
+            ]
+        ).validate(
+            pipeline_input_type=annotation,
             strict=True,
         )
 

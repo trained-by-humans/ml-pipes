@@ -35,17 +35,20 @@ def _close_iterable(iterator: object) -> None:
         close()
 
 
-def _is_runtime_sequence_value(value: object) -> bool:
-    return isinstance(value, Iterable) and not isinstance(value, (str, bytes, bytearray, Mapping))
+# "Item iterable" means a boundary that yields logical items; values like
+# mappings and string/bytes-like objects stay value-shaped even though Python
+# can iterate over them.
+def _is_value_shaped_iterable(value: Iterable[Any]) -> bool:
+    return isinstance(value, (str, bytes, bytearray, Mapping))
 
 
-def _require_runtime_sequence_value(
+def _require_item_iterable(
     value: object,
     *,
     operator_name: str,
 ) -> Iterable[Any]:
-    if not _is_runtime_sequence_value(value):
-        raise TypeError(f"{operator_name} requires an iterable boundary, got {type(value).__name__}")
+    if not isinstance(value, Iterable) or _is_value_shaped_iterable(cast(Iterable[Any], value)):
+        raise TypeError(f"{operator_name} requires an item iterable boundary, got {type(value).__name__}")
     return cast(Iterable[Any], value)
 
 
@@ -60,10 +63,6 @@ def _resolve_selector(
     if required and not selector:
         raise ValueError(f"{operator_name} requires a non-empty {name} selector")
     return selector
-
-
-def _normalize_annotation(annotation: Any) -> Any:
-    return _NONE_TYPE if annotation is None else annotation
 
 
 def _is_union_annotation(annotation: Any) -> bool:
@@ -117,26 +116,30 @@ def _is_mapping_annotation(annotation: Any) -> bool:
     return False
 
 
-def _mapping_input_annotation(annotation: Any) -> Any:
-    if _is_mapping_annotation(annotation):
-        return annotation
-    return AnyMapping | None
+def _iterable_alias(item_type: Any) -> Any:
+    return cast(Any, Iterable)[item_type]
 
 
-def _iterable_item_annotation(annotation: Any) -> Any:
+def _list_alias(item_type: Any) -> Any:
+    return cast(Any, list)[item_type]
+
+
+def _resolve_iterable_item_annotation(annotation: Any) -> Any:
     annotation = _without_none(annotation)
     if annotation in {Any, object}:
         return Any
     if _is_union_annotation(annotation):
-        item_types = tuple(_iterable_item_annotation(option) for option in get_args(annotation))
+        item_types = tuple(_resolve_iterable_item_annotation(option) for option in get_args(annotation))
         if not item_types or any(item_type is Any for item_type in item_types):
             return Any
         return _combine_annotations(*item_types)
 
+    if annotation is str:
+        return str
+    if annotation in {bytes, bytearray}:
+        return int
+
     origin = get_origin(annotation)
-    if origin in {list, Sequence, Iterable}:
-        args = get_args(annotation)
-        return args[0] if args else Any
     if origin is tuple:
         args = get_args(annotation)
         if not args:
@@ -144,9 +147,20 @@ def _iterable_item_annotation(annotation: Any) -> Any:
         if len(args) == 2 and args[1] is Ellipsis:
             return args[0]
         return _combine_annotations(*args)
+    if origin is not None:
+        args = get_args(annotation)
+        try:
+            if issubclass(origin, Mapping):
+                return args[0] if args else Any
+            if issubclass(origin, Iterable):
+                return args[0] if args else Any
+        except TypeError:
+            return Any
     if isinstance(annotation, type):
         try:
-            if issubclass(annotation, Iterable) and not issubclass(annotation, (str, bytes, bytearray, Mapping)):
+            if issubclass(annotation, Mapping):
+                return Any
+            if issubclass(annotation, Iterable):
                 return Any
         except TypeError:
             return Any
@@ -161,40 +175,57 @@ def _is_iterable_annotation(annotation: Any) -> bool:
         options = get_args(annotation)
         return bool(options) and all(_is_iterable_annotation(option) for option in options)
 
-    origin = get_origin(annotation)
-    if origin in {list, Sequence, Iterable, tuple}:
+    if annotation in {str, bytes, bytearray}:
         return True
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        try:
+            return issubclass(origin, Iterable)
+        except TypeError:
+            return False
     if isinstance(annotation, type):
         try:
-            return issubclass(annotation, Iterable) and not issubclass(annotation, (str, bytes, bytearray, Mapping))
+            return issubclass(annotation, Iterable)
         except TypeError:
             return False
     return False
 
 
-def _sequence_input_annotation(annotation: Any) -> Any:
+def _is_value_shaped_iterable_annotation(annotation: Any) -> bool:
+    annotation = _without_none(annotation)
+    if annotation in {Any, object}:
+        return False
+    if _is_union_annotation(annotation):
+        options = get_args(annotation)
+        return any(_is_value_shaped_iterable_annotation(option) for option in options)
+
+    if annotation in {str, bytes, bytearray}:
+        return True
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        try:
+            return issubclass(origin, Mapping)
+        except TypeError:
+            return False
+    if isinstance(annotation, type):
+        try:
+            return issubclass(annotation, (str, bytes, bytearray, Mapping))
+        except TypeError:
+            return False
+    return False
+
+
+def _resolve_iterable_input_annotation(annotation: Any) -> Any:
     if _is_iterable_annotation(annotation):
         return annotation
 
-    item_type = _iterable_item_annotation(annotation)
-    if item_type is Any:
-        return Iterable[Any]
-    return Iterable[item_type]
+    item_type = _resolve_iterable_item_annotation(annotation)
+    return _iterable_alias(item_type)
 
 
-def _list_annotation(item_type: Any) -> Any:
-    if item_type is Any:
-        return list[Any]
-    return list[item_type]
-
-
-def _iterable_annotation(item_type: Any) -> Any:
-    if item_type is Any:
-        return Iterable[Any]
-    return Iterable[item_type]
-
-
-def _resolve_materialized_sequence_contract(
+def _resolve_iterable_boundary_contract(
     current_output: Any,
     *,
     operator_name: str,
@@ -206,19 +237,26 @@ def _resolve_materialized_sequence_contract(
         raise validation_error_type(
             f"{operator_name} requires an iterable boundary, got {current_output}"
         )
-    item_type = _iterable_item_annotation(current_output)
-    input_type = _sequence_input_annotation(current_output)
-    return input_type, _list_annotation(item_type)
+    item_type = _resolve_iterable_item_annotation(current_output)
+    input_type = _resolve_iterable_input_annotation(current_output)
+    return input_type, item_type
 
 
-def _resolve_unary_callable_contract(function: Callable[..., Any]) -> tuple[Any, Any] | None:
-    try:
-        input_types, output_type = resolve_operator_contract(function)
-    except (PipelineValidationError, StaticContractUnavailableError):
-        return None
-    if len(input_types) != 1:
-        return None
-    return input_types[0], output_type
+def _resolve_per_item_boundary_contract(
+    current_output: Any,
+    *,
+    operator_name: str,
+    validation_error_type: type[Exception],
+) -> tuple[Any, Any]:
+    if current_output in {Any, object}:
+        return Any, Any
+    if not _is_iterable_annotation(current_output) or _is_value_shaped_iterable_annotation(current_output):
+        raise validation_error_type(
+            f"{operator_name} requires an item iterable boundary, got {current_output}"
+        )
+    item_type = _resolve_iterable_item_annotation(current_output)
+    input_type = _resolve_iterable_input_annotation(current_output)
+    return input_type, item_type
 
 
 def _resolve_callable_contract(
@@ -231,7 +269,12 @@ def _resolve_callable_contract(
     operator_name: str,
     ignore_explicit_none: bool = True,
 ) -> tuple[Any, Any] | None:
-    contract = _resolve_unary_callable_contract(function)
+    try:
+        input_types, output_type = resolve_operator_contract(function)
+    except (PipelineValidationError, StaticContractUnavailableError):
+        contract = None
+    else:
+        contract = (input_types[0], output_type) if len(input_types) == 1 else None
     if source_annotation in {None, Any}:
         return contract
     if contract is None:
@@ -302,7 +345,7 @@ class CollectItems(RegionCloser):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        output_type = _list_annotation(_normalize_annotation(current_output))
+        output_type = _list_alias(_NONE_TYPE if current_output is None else current_output)
         return (Any,), output_type
 
 
@@ -502,7 +545,7 @@ class _MeasuredIterable:
 
 @Operator
 class PerItem(RegionOpener):
-    """Run the enclosed operators once per source item.
+    """Run the enclosed operators once per item from the current item iterable boundary.
 
     Items that short-circuit inside the region are treated as dropped and are
     omitted from the resulting collection.
@@ -519,7 +562,7 @@ class PerItem(RegionOpener):
         cfg: Any,
     ) -> list[Any]:
         collecting = isinstance(trace, InvocationTrace)
-        source = iter(current)
+        source = iter(_require_item_iterable(current, operator_name=type(self).__name__))
         results: list[Any] = []
         child_traces: list[InvocationTrace] = []
         seen = 0
@@ -591,13 +634,18 @@ class PerItem(RegionOpener):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
-        return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
+        del stored_annotations, expand_output_annotation
+        input_type, output_type = _resolve_per_item_boundary_contract(
+            current_output,
+            operator_name=type(self).__name__,
+            validation_error_type=validation_error_type,
+        )
+        return (input_type,), output_type
 
 
 @Operator
 class StreamItems(RegionCloser):
-    """Region boundary that exposes per-item outputs as a lazy iterable."""
+    """Region boundary that exposes per-item outputs as a lazy item iterable."""
 
     def resolve_contract(
         self,
@@ -607,13 +655,13 @@ class StreamItems(RegionCloser):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation, validation_error_type
-        output_type = _iterable_annotation(_normalize_annotation(current_output))
+        output_type = _iterable_alias(_NONE_TYPE if current_output is None else current_output)
         return (Any,), output_type
 
 
 @Operator
 class LazyPerItem(RegionOpener):
-    """Run the enclosed operators once per source item and stream results lazily."""
+    """Run the enclosed operators once per item from the current item iterable boundary."""
 
     closing_type = StreamItems
 
@@ -625,6 +673,7 @@ class LazyPerItem(RegionOpener):
         trace: InvocationTrace | _NoOpTrace,
         cfg: Any,
     ) -> _MeasuredIterable:
+        current = _require_item_iterable(current, operator_name=type(self).__name__)
         span = None
         if isinstance(trace, InvocationTrace):
             span = PendingSpan(
@@ -645,8 +694,13 @@ class LazyPerItem(RegionOpener):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
-        return (_sequence_input_annotation(current_output),), _iterable_item_annotation(current_output)
+        del stored_annotations, expand_output_annotation
+        input_type, output_type = _resolve_per_item_boundary_contract(
+            current_output,
+            operator_name=type(self).__name__,
+            validation_error_type=validation_error_type,
+        )
+        return (input_type,), output_type
 
 
 @Operator
@@ -690,7 +744,7 @@ class WrapMappingInObject(Generic[StateT]):
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
         factory_output = _resolve_nullary_callable_output(self.state_factory)
-        input_type = _mapping_input_annotation(current_output)
+        input_type = current_output if _is_mapping_annotation(current_output) else AnyMapping | None
         base_output = factory_output if factory_output is not None else object
         target_annotation = self._target.validate_write(
             base_output,
@@ -973,15 +1027,19 @@ class DistinctBy(Generic[ItemT]):
         self.fn = fn
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
+        source = iter(items)
         seen: set[Hashable] = set()
         deduped: list[ItemT] = []
-        for item in items:
-            current_key = self.fn(item)
-            if current_key in seen:
-                continue
-            seen.add(current_key)
-            deduped.append(item)
-        return deduped
+        try:
+            for item in source:
+                current_key = self.fn(item)
+                if current_key in seen:
+                    continue
+                seen.add(current_key)
+                deduped.append(item)
+            return deduped
+        finally:
+            _close_iterable(source)
 
     def resolve_contract(
         self,
@@ -990,8 +1048,11 @@ class DistinctBy(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        item_type = _iterable_item_annotation(current_output)
-        input_type = _sequence_input_annotation(current_output)
+        input_type, item_type = _resolve_iterable_boundary_contract(
+            current_output,
+            operator_name=type(self).__name__,
+            validation_error_type=validation_error_type,
+        )
         _resolve_callable_contract(
             item_type,
             self.fn,
@@ -1002,7 +1063,7 @@ class DistinctBy(Generic[ItemT]):
             ignore_explicit_none=False,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (input_type,), _list_annotation(item_type)
+        return (input_type,), _list_alias(item_type)
 
 
 @Operator
@@ -1018,21 +1079,25 @@ class Distinct(Generic[ItemT]):
         )
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
+        source = iter(items)
         seen: set[Hashable] = set()
         deduped: list[ItemT] = []
-        for item in items:
-            key = cast(
-                Hashable,
-                self._source.select_value(
-                    item,
-                    error_prefix=f"{type(self).__name__}(source={self._source!r})",
-                ),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(item)
-        return deduped
+        try:
+            for item in source:
+                key = cast(
+                    Hashable,
+                    self._source.select_value(
+                        item,
+                        error_prefix=f"{type(self).__name__}(source={self._source!r})",
+                    ),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(item)
+            return deduped
+        finally:
+            _close_iterable(source)
 
     def resolve_contract(
         self,
@@ -1041,20 +1106,23 @@ class Distinct(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        item_type = _iterable_item_annotation(current_output)
-        input_type = _sequence_input_annotation(current_output)
+        input_type, item_type = _resolve_iterable_boundary_contract(
+            current_output,
+            operator_name=type(self).__name__,
+            validation_error_type=validation_error_type,
+        )
         self._source.validate_read(
             item_type,
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (input_type,), _list_annotation(item_type)
+        return (input_type,), _list_alias(item_type)
 
 
 @Operator
 class Take:
-    """Materialize the first `count` items from an iterable."""
+    """Materialize the first `count` items from an iterable boundary."""
 
     def __init__(self, count: int | str):
         self.count = int(count)
@@ -1062,7 +1130,7 @@ class Take:
             raise ValueError("count must be >= 0.")
 
     def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
-        source = iter(_require_runtime_sequence_value(current, operator_name=type(self).__name__))
+        source = iter(current)
         try:
             return list(islice(source, self.count))
         finally:
@@ -1076,23 +1144,24 @@ class Take:
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        input_type, output_type = _resolve_materialized_sequence_contract(
+        input_type, item_type = _resolve_iterable_boundary_contract(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
+        output_type = _list_alias(item_type)
         return (input_type,), output_type
 
 
 @Operator
 class TakeWhile(Generic[ItemT]):
-    """Materialize items while the predicate remains true."""
+    """Materialize items from an iterable boundary while the predicate remains true."""
 
     def __init__(self, predicate: Predicate[ItemT]):
         self.predicate = predicate
 
     def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
-        source = iter(_require_runtime_sequence_value(current, operator_name=type(self).__name__))
+        source = iter(current)
         try:
             return list(takewhile(self.predicate, source))
         finally:
@@ -1105,12 +1174,13 @@ class TakeWhile(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        input_type, output_type = _resolve_materialized_sequence_contract(
+        input_type, item_type = _resolve_iterable_boundary_contract(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
-        predicate_input = Any if current_output in {Any, object} else _iterable_item_annotation(current_output)
+        output_type = _list_alias(item_type)
+        predicate_input = Any if current_output in {Any, object} else _resolve_iterable_item_annotation(current_output)
         _resolve_callable_contract(
             predicate_input,
             self.predicate,
