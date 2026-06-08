@@ -12,8 +12,9 @@ from ml_pipes.benchmark import (
     BenchmarkResult,
 )
 from ml_pipes.factory import (
-    Factory,
+    DataFactory,
     InputFn,
+    PipelineFactory,
 )
 
 
@@ -59,8 +60,8 @@ def _load_ref(ref: str) -> tuple[Any, Any]:
 
 def _resolve_pipeline_factory(module: Any, explicit_fn: Any, ref: str):
     try:
-        factory = Factory.discover_pipeline(module, explicit_fn)
-    except ValueError as exc:
+        factory = PipelineFactory.discover(module, explicit_fn)
+    except (TypeError, ValueError) as exc:
         raise CLIError(str(exc)) from exc
     if factory is None:
         mod_name = ref.split(":")[0]
@@ -77,8 +78,8 @@ def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
     if data_ref is not None:
         data_module, explicit_fn = _load_ref(data_ref)
         try:
-            data_fn = Factory.discover_data(data_module, explicit_fn)
-        except ValueError as exc:
+            data_fn = DataFactory.discover(data_module, explicit_fn)
+        except (TypeError, ValueError) as exc:
             raise CLIError(str(exc)) from exc
         if data_fn is None:
             raise CLIError(
@@ -88,8 +89,8 @@ def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
         return data_fn
 
     try:
-        data_fn = Factory.discover_data(pipeline_module)
-    except ValueError as exc:
+        data_fn = DataFactory.discover(pipeline_module)
+    except (TypeError, ValueError) as exc:
         raise CLIError(str(exc)) from exc
     if data_fn is None:
         return None

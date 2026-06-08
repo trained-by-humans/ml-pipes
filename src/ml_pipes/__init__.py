@@ -38,7 +38,7 @@ from .data_ops import (
     TakeWhile,
 )
 from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
-from .factory import Factory, data_factory, pipeline_factory, InputFn
+from .factory import DataFactory, Factory, PipelineFactory, data_factory, pipeline_factory, InputFn
 from .inspection import (
     GroupBlock,
     HtmlRenderer,
@@ -145,6 +145,8 @@ __all__ = [
     "data_factory",
     "pipeline_factory",
     "Factory",
+    "PipelineFactory",
+    "DataFactory",
     "InputFn",
     "SHORT_CIRCUIT",
     "ArgMax",

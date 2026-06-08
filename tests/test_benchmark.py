@@ -18,8 +18,9 @@ from ml_pipes.benchmark import (
     MeasurementConfig,
 )
 from ml_pipes.factory import (
-    Factory,
+    DataFactory,
     InputFn,
+    PipelineFactory,
 )
 from ml_pipes.tracing import InvocationTrace, StepSpan, TracingConfig
 from ml_pipes.collectors import PrintCollector
@@ -714,7 +715,7 @@ def test_builder_factory_constructor_preserves_plain_dict_factory():
         return _make_pipeline()
 
     b = BenchmarkBuilder.factory(make_pipeline)
-    assert isinstance(b._source, Factory)
+    assert isinstance(b._source, PipelineFactory)
     assert b._source is not make_pipeline
     assert isinstance(b._source.from_config({}), Pipeline)
 
@@ -729,7 +730,7 @@ def test_builder_data_factory_assignment_preserves_plain_dict_factory():
         return _builder_input_fn
 
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(make_data)
-    assert isinstance(b._data_factory_fn, Factory)
+    assert isinstance(b._data_factory_fn, DataFactory)
     assert b._data_factory_fn is not make_data
     assert b._data_factory_fn.from_config({}) is _builder_input_fn
 

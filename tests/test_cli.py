@@ -6,7 +6,9 @@ import types
 import pytest
 
 from ml_pipes.factory import (
+    DataFactory,
     Factory,
+    PipelineFactory,
     data_factory,
     pipeline_factory,
 )
@@ -31,10 +33,10 @@ def test_pipeline_factory_returns_discoverable_factory():
     def my_fn(model_path): pass
     wrapped = pipeline_factory(my_fn)
     module = _fake_module("_test_pipeline_factory", wrapped=wrapped)
-    assert isinstance(wrapped, Factory)
+    assert isinstance(wrapped, PipelineFactory)
     assert wrapped is not my_fn
     assert wrapped.__name__ == "my_fn"
-    assert Factory.discover_pipeline(module) is wrapped
+    assert PipelineFactory.discover(module) is wrapped
     assert wrapped.from_config({"model_path": "x"}) is None
 
 
@@ -42,10 +44,10 @@ def test_data_factory_returns_discoverable_factory():
     def my_fn(): pass
     wrapped = data_factory(my_fn)
     module = _fake_module("_test_data_factory", wrapped=wrapped)
-    assert isinstance(wrapped, Factory)
+    assert isinstance(wrapped, DataFactory)
     assert wrapped is not my_fn
     assert wrapped.__name__ == "my_fn"
-    assert Factory.discover_data(module) is wrapped
+    assert DataFactory.discover(module) is wrapped
     assert wrapped.from_config({}) is None
 
 
@@ -86,8 +88,17 @@ def test_factory_from_callable_rejects_existing_factory():
     def decorated(x=1):
         return x
 
-    with pytest.raises(TypeError, match="ensure_factory"):
+    with pytest.raises(TypeError, match="Factory.ensure_factory"):
         Factory.from_callable(decorated)
+
+
+def test_pipeline_factory_from_callable_rejects_other_factory_subclass():
+    @data_factory
+    def decorated(x=1):
+        return x
+
+    with pytest.raises(TypeError, match="PipelineFactory.ensure_factory"):
+        PipelineFactory.from_callable(decorated)
 
 
 def test_factory_from_config_callable_rejects_existing_factory():
@@ -95,8 +106,17 @@ def test_factory_from_config_callable_rejects_existing_factory():
         return config["x"]
 
     wrapped = Factory.from_config_callable(plain)
-    with pytest.raises(TypeError, match="ensure_factory"):
+    with pytest.raises(TypeError, match="Factory.ensure_factory"):
         Factory.from_config_callable(wrapped)
+
+
+def test_data_factory_from_config_callable_rejects_other_factory_subclass():
+    @pipeline_factory
+    def decorated(x=1):
+        return x
+
+    with pytest.raises(TypeError, match="DataFactory.ensure_factory"):
+        DataFactory.from_config_callable(decorated)
 
 
 def test_factory_ensure_factory_wraps_config_callable():
@@ -116,11 +136,29 @@ def test_factory_ensure_factory_is_idempotent():
     assert Factory.ensure_factory(decorated) is decorated
 
 
+def test_pipeline_factory_ensure_factory_promotes_base_factory():
+    def plain(config):
+        return config["x"]
+
+    wrapped = Factory.from_config_callable(plain)
+    promoted = PipelineFactory.ensure_factory(wrapped)
+    assert isinstance(promoted, PipelineFactory)
+    assert promoted.from_config({"x": 10}) == 10
+
+
 def test_decorators_exported_from_init():
-    from ml_pipes import Factory as factory_type, pipeline_factory as pf, data_factory as df
+    from ml_pipes import (
+        DataFactory as data_factory_type,
+        Factory as factory_type,
+        PipelineFactory as pipeline_factory_type,
+        pipeline_factory as pf,
+        data_factory as df,
+    )
     assert callable(pf)
     assert callable(df)
     assert callable(factory_type)
+    assert callable(pipeline_factory_type)
+    assert callable(data_factory_type)
     assert callable(factory_type.from_callable)
     assert callable(factory_type.from_config_callable)
     assert callable(factory_type.ensure_factory)
@@ -215,7 +253,7 @@ def test_discover_pipeline_factory_single_found():
     @pipeline_factory
     def my_pf(x): pass
     m = _fake_module("_test", my_pf=my_pf, other=lambda: None)
-    result = Factory.discover_pipeline(m)
+    result = PipelineFactory.discover(m)
     assert result is my_pf
 
 
@@ -226,13 +264,27 @@ def test_discover_pipeline_factory_multiple_raises():
     def pf2(x): pass
     m = _fake_module("_test2", pf1=pf1, pf2=pf2)
     with pytest.raises(ValueError, match="multiple @pipeline_factory"):
-        Factory.discover_pipeline(m)
+        PipelineFactory.discover(m)
 
 
 def test_discover_pipeline_factory_none_when_absent():
     m = _fake_module("_test3", other=lambda: None)
-    result = Factory.discover_pipeline(m)
+    result = PipelineFactory.discover(m)
     assert result is None
+
+
+def test_discover_pipeline_and_data_factory_use_distinct_classes():
+    @pipeline_factory
+    def my_pipeline(x=1):
+        return x
+
+    @data_factory
+    def my_data(x=1):
+        return x
+
+    m = _fake_module("_test_kinds", my_pipeline=my_pipeline, my_data=my_data)
+    assert PipelineFactory.discover(m) is my_pipeline
+    assert DataFactory.discover(m) is my_data
 
 
 def test_discover_pipeline_factory_explicit_wraps_config_callable():
@@ -240,8 +292,8 @@ def test_discover_pipeline_factory_explicit_wraps_config_callable():
         return (config["x"], config["y"])
 
     m = _fake_module("_test4")
-    result = Factory.discover_pipeline(m, explicit)
-    assert isinstance(result, Factory)
+    result = PipelineFactory.discover(m, explicit)
+    assert isinstance(result, PipelineFactory)
     assert result is not explicit
     assert result.from_config({"x": 1, "y": 2}) == (1, 2)
 
@@ -250,7 +302,7 @@ def test_resolve_pipeline_factory_explicit_undecorated_wraps_for_dict_call():
     def plain(config): return (config["x"], config["y"])
     m = _fake_module("_test5")
     result = _resolve_pipeline_factory(m, plain, "_test5:plain")
-    assert isinstance(result, Factory)
+    assert isinstance(result, PipelineFactory)
     assert result({"x": 10, "y": 20}) == (10, 20)
 
 
@@ -258,7 +310,7 @@ def test_discover_pipeline_factory_explicit_already_decorated_not_double_wrapped
     @pipeline_factory
     def decorated(x=1): pass
     m = _fake_module("_test6")
-    result = Factory.discover_pipeline(m, decorated)
+    result = PipelineFactory.discover(m, decorated)
     assert result is decorated
 
 
