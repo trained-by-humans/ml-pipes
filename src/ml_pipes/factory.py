@@ -34,7 +34,7 @@ class Factory(Generic[FactoryOutputT]):
         cls: type[FactoryClassT],
         fn: Callable[..., FactoryOutputT],
     ) -> FactoryClassT:
-        """Build a ``Factory`` from a keyword-style callable."""
+        """Build a ``Factory`` from a plain callable and derive its config adapter."""
         if isinstance(fn, Factory):
             raise TypeError(
                 f"{cls.__name__}.from_callable() expects a plain callable; use {cls.__name__}.ensure_factory()."
@@ -42,42 +42,25 @@ class Factory(Generic[FactoryOutputT]):
         return cls(fn, from_config=_wrap_as_factory(fn), signature_target=fn)
 
     @classmethod
-    def from_config_callable(
-        cls: type[FactoryClassT],
-        fn: Callable[[dict], FactoryOutputT],
-    ) -> FactoryClassT:
-        """Build a ``Factory`` from a config-dict callable."""
-        if isinstance(fn, Factory):
-            raise TypeError(
-                f"{cls.__name__}.from_config_callable() expects a config callable; "
-                f"use {cls.__name__}.ensure_factory()."
-            )
-        return cls(fn, from_config=fn, signature_target=None)
-
-    @classmethod
     def ensure_factory(
         cls: type[FactoryClassT],
-        fn: Callable[[dict], FactoryOutputT] | Factory[Any],
+        fn: Callable[..., FactoryOutputT] | Factory[Any],
     ) -> FactoryClassT:
-        """Normalize a config-dict callable or existing compatible factory."""
+        """Normalize a plain callable or existing compatible factory."""
         if isinstance(fn, cls):
             return fn
         if isinstance(fn, Factory):
             if type(fn) is Factory:
-                return cls(fn._fn, from_config=fn._from_config, signature_target=fn.signature_target)
+                return cls(fn._fn, from_config=fn._from_config, signature_target=fn._signature_target)
             raise TypeError(
-                f"{cls.__name__}.ensure_factory() expects a config callable or {cls.__name__}, "
+                f"{cls.__name__}.ensure_factory() expects a callable or {cls.__name__}, "
                 f"got {type(fn).__name__}."
             )
-        return cls.from_config_callable(fn)
-
-    @property
-    def signature_target(self) -> Callable | None:
-        return self._signature_target
+        return cls.from_callable(fn)
 
     def validate_config(self, config: dict, *, name: str = "factory") -> None:
         """Validate a config dict against the wrapped keyword signature."""
-        target = self.signature_target
+        target = self._signature_target
         if target is None:
             return
 
@@ -116,11 +99,7 @@ class Factory(Generic[FactoryOutputT]):
     ) -> FactoryClassT | None:
         if explicit_fn is not None:
             return cls.ensure_factory(explicit_fn)
-
-        found = _discover_marked_factory(module, cls)
-        if found is None:
-            return None
-        return found
+        return _discover_marked_factory(module, cls)
 
 
 class PipelineFactory(Factory[Pipeline]):
@@ -164,11 +143,14 @@ def data_factory(fn: Callable[..., InputFn]) -> DataFactory:
     return DataFactory.from_callable(fn)
 
 
-def _wrap_as_factory(fn: Callable) -> Callable:
-    """Wrap a plain callable so it accepts (config: dict) and calls fn(**config)."""
+def _wrap_as_factory(
+    fn: Callable[..., FactoryOutputT],
+) -> Callable[[dict], FactoryOutputT]:
+    """Wrap a callable with a ``from_config(config)`` adapter."""
     @functools.wraps(fn)
-    def wrapper(config: dict) -> Any:
+    def wrapper(config: dict) -> FactoryOutputT:
         return fn(**config)
+
     return wrapper
 
 
@@ -176,7 +158,7 @@ def _discover_marked_factory(
     module: Any,
     factory_type: type[FactoryClassT],
 ) -> FactoryClassT | None:
-    kind = _factory_kind_name(factory_type)
+    kind = factory_type.__name__.removesuffix("Factory").lower()
     found = [
         (name, fn)
         for name, fn in vars(module).items()
@@ -191,7 +173,3 @@ def _discover_marked_factory(
         )
 
     return found[0][1] if found else None
-
-
-def _factory_kind_name(factory_type: type[Factory[Any]]) -> str:
-    return factory_type.__name__.removesuffix("Factory").lower()

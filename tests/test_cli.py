@@ -83,6 +83,16 @@ def test_factory_from_callable_wraps_plain_callable_for_config_dict_call():
     assert wrapped.from_config({"x": 10, "y": 20}) == (10, 20)
 
 
+def test_factory_from_callable_passes_dict_values_as_keyword_args():
+    def plain(labels: dict):
+        return labels["x"]
+
+    wrapped = Factory.from_callable(plain)
+    assert isinstance(wrapped, Factory)
+    assert wrapped(labels={"x": 10}) == 10
+    assert wrapped.from_config({"labels": {"x": 10}}) == 10
+
+
 def test_factory_from_callable_rejects_existing_factory():
     @pipeline_factory
     def decorated(x=1):
@@ -101,31 +111,22 @@ def test_pipeline_factory_from_callable_rejects_other_factory_subclass():
         PipelineFactory.from_callable(decorated)
 
 
-def test_factory_from_config_callable_rejects_existing_factory():
-    def plain(config):
-        return config["x"]
-
-    wrapped = Factory.from_config_callable(plain)
-    with pytest.raises(TypeError, match="Factory.ensure_factory"):
-        Factory.from_config_callable(wrapped)
-
-
-def test_data_factory_from_config_callable_rejects_other_factory_subclass():
+def test_data_factory_from_callable_rejects_other_factory_subclass():
     @pipeline_factory
     def decorated(x=1):
         return x
 
     with pytest.raises(TypeError, match="DataFactory.ensure_factory"):
-        DataFactory.from_config_callable(decorated)
+        DataFactory.from_callable(decorated)
 
 
-def test_factory_ensure_factory_wraps_config_callable():
-    def plain(config):
-        return config["x"]
+def test_factory_ensure_factory_wraps_plain_callable():
+    def plain(value=1):
+        return value
 
     wrapped = Factory.ensure_factory(plain)
     assert isinstance(wrapped, Factory)
-    assert wrapped.from_config({"x": 10}) == 10
+    assert wrapped.from_config({"value": 10}) == 10
 
 
 def test_factory_ensure_factory_is_idempotent():
@@ -137,13 +138,13 @@ def test_factory_ensure_factory_is_idempotent():
 
 
 def test_pipeline_factory_ensure_factory_promotes_base_factory():
-    def plain(config):
-        return config["x"]
+    def plain(value=1):
+        return value
 
-    wrapped = Factory.from_config_callable(plain)
+    wrapped = Factory.from_callable(plain)
     promoted = PipelineFactory.ensure_factory(wrapped)
     assert isinstance(promoted, PipelineFactory)
-    assert promoted.from_config({"x": 10}) == 10
+    assert promoted.from_config({"value": 10}) == 10
 
 
 def test_decorators_exported_from_init():
@@ -160,7 +161,6 @@ def test_decorators_exported_from_init():
     assert callable(pipeline_factory_type)
     assert callable(data_factory_type)
     assert callable(factory_type.from_callable)
-    assert callable(factory_type.from_config_callable)
     assert callable(factory_type.ensure_factory)
 
 
@@ -287,23 +287,36 @@ def test_discover_pipeline_and_data_factory_use_distinct_classes():
     assert DataFactory.discover(m) is my_data
 
 
-def test_discover_pipeline_factory_explicit_wraps_config_callable():
-    def explicit(config):
-        return (config["x"], config["y"])
+def test_discover_pipeline_factory_explicit_wraps_dict_valued_callable():
+    def explicit(labels: dict):
+        return labels["x"]
 
     m = _fake_module("_test4")
     result = PipelineFactory.discover(m, explicit)
     assert isinstance(result, PipelineFactory)
     assert result is not explicit
-    assert result.from_config({"x": 1, "y": 2}) == (1, 2)
+    assert result.from_config({"labels": {"x": 1}}) == 1
 
 
-def test_resolve_pipeline_factory_explicit_undecorated_wraps_for_dict_call():
-    def plain(config): return (config["x"], config["y"])
+def test_discover_pipeline_factory_explicit_wraps_keyword_callable():
+    def explicit(x=1, y=2):
+        return (x, y)
+
+    m = _fake_module("_test4_kwargs")
+    result = PipelineFactory.discover(m, explicit)
+    assert isinstance(result, PipelineFactory)
+    assert result is not explicit
+    assert result(x=3, y=4) == (3, 4)
+    assert result.from_config({"x": 3, "y": 4}) == (3, 4)
+
+
+def test_resolve_pipeline_factory_explicit_undecorated_wraps_keyword_callable():
+    def plain(x=1, y=2): return (x, y)
     m = _fake_module("_test5")
     result = _resolve_pipeline_factory(m, plain, "_test5:plain")
     assert isinstance(result, PipelineFactory)
-    assert result({"x": 10, "y": 20}) == (10, 20)
+    assert result(x=10, y=20) == (10, 20)
+    assert result.from_config({"x": 10, "y": 20}) == (10, 20)
 
 
 def test_discover_pipeline_factory_explicit_already_decorated_not_double_wrapped():

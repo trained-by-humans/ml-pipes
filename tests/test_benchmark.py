@@ -291,7 +291,7 @@ def test_benchmark_per_operator_spans_present():
 # BenchmarkSweep
 # ---------------------------------------------------------------------------
 
-def _make_pipeline_from_config(config: dict) -> Pipeline:
+def _make_pipeline_from_config(**kwargs) -> Pipeline:
     return _make_pipeline()
 
 
@@ -300,7 +300,7 @@ def test_matrix_run_produces_correct_count():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=configs,
-        data_factory=lambda cfg: lambda: _static_input(cfg["idx"]),
+        data_factory=lambda idx: lambda: _static_input(idx),
         data_configs=[{"idx": 0}, {"idx": 1}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
@@ -311,7 +311,7 @@ def test_matrix_result_labels_contain_input_and_config():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"mode": "fast"}],
-        data_factory=lambda cfg: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         data_configs=[{"name": "my_input"}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
@@ -324,7 +324,7 @@ def test_matrix_result_labels_data_key_in_label():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{}],
-        data_factory=lambda cfg: lambda: _static_input(cfg["idx"]),
+        data_factory=lambda idx: lambda: _static_input(idx),
         data_configs=[{"idx": 0}, {"idx": 1}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
@@ -336,7 +336,7 @@ def test_matrix_default_config():
     matrix = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
     )
     assert matrix.measurement is not None
     assert matrix.measurement.runs == 100
@@ -346,7 +346,7 @@ def test_matrix_to_table_renders():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"a": 1}, {"a": 2}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     table = BenchmarkResult.to_comparison_table(results)
@@ -358,7 +358,7 @@ def test_sweep_to_table_expand_regions_false():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"a": 1}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     table = BenchmarkResult.to_comparison_table(results, expand_regions=False)
@@ -403,7 +403,7 @@ def test_matrix_metadata_records_config_and_data_config():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"batch": 4}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     meta = results[0].metadata
@@ -415,7 +415,7 @@ def test_sweep_label_prefix_single_result():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
         label_prefix="baseline",
     ).run()
@@ -426,7 +426,7 @@ def test_sweep_label_prefix_multi_result():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"a": 1}, {"a": 2}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
         label_prefix="exp",
     ).run()
@@ -438,7 +438,7 @@ def test_sweep_extra_metadata_merged_into_all_results():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"a": 1}, {"a": 2}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
         extra_metadata={"env": "ci", "git_sha": "abc"},
     ).run()
@@ -452,7 +452,7 @@ def test_sweep_extra_metadata_does_not_overwrite_pipeline_config():
     results = BenchmarkSweep(
         factory=_make_pipeline_from_config,
         configs=[{"batch": 4}],
-        data_factory=lambda _: lambda: _static_input(0),
+        data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
         extra_metadata={"note": "hi"},
     ).run()
@@ -464,7 +464,7 @@ def test_sweep_extra_metadata_does_not_overwrite_pipeline_config():
 # BenchmarkBuilder — axis expansion (was BenchmarkMatrix)
 # ---------------------------------------------------------------------------
 
-_FIXED_DATA = lambda _: lambda: _static_input(0)
+_FIXED_DATA = lambda **_: lambda: _static_input(0)
 
 
 def test_matrix_pipeline_configs_cartesian_product():
@@ -486,7 +486,7 @@ def test_matrix_run_produces_correct_count():
         BenchmarkBuilder.factory(_make_pipeline_from_config)
         .pipeline_config_axis("workers", 1, 2)
         .pipeline_config_axis("mode", "fast", "slow")
-        .data_factory(lambda cfg: lambda: _static_input(cfg["idx"]))
+        .data_factory(lambda idx: lambda: _static_input(idx))
         .data_config_axis("idx", 0, 1)
         .runs(3).warmup(1)
         .run()
@@ -711,13 +711,23 @@ def test_builder_factory_constructor():
 
 
 def test_builder_factory_constructor_preserves_plain_dict_factory():
-    def make_pipeline(config: dict) -> Pipeline:
+    def make_pipeline(labels: dict[str, int]) -> Pipeline:
         return _make_pipeline()
 
     b = BenchmarkBuilder.factory(make_pipeline)
     assert isinstance(b._source, PipelineFactory)
     assert b._source is not make_pipeline
-    assert isinstance(b._source.from_config({}), Pipeline)
+    assert isinstance(b._source.from_config({"labels": {"spam": 1}}), Pipeline)
+
+
+def test_builder_factory_constructor_preserves_plain_keyword_factory():
+    def make_pipeline(value: int = 1) -> Pipeline:
+        return _make_pipeline()
+
+    b = BenchmarkBuilder.factory(make_pipeline)
+    assert isinstance(b._source, PipelineFactory)
+    assert b._source is not make_pipeline
+    assert isinstance(b._source.from_config({"value": 2}), Pipeline)
 
 
 def test_builder_data_factory_assignment_coerces_decorated_factory():
@@ -726,13 +736,48 @@ def test_builder_data_factory_assignment_coerces_decorated_factory():
 
 
 def test_builder_data_factory_assignment_preserves_plain_dict_factory():
-    def make_data(config: dict):
+    def make_data(labels: dict[str, int]):
         return _builder_input_fn
 
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(make_data)
     assert isinstance(b._data_factory_fn, DataFactory)
     assert b._data_factory_fn is not make_data
-    assert b._data_factory_fn.from_config({}) is _builder_input_fn
+    assert b._data_factory_fn.from_config({"labels": {"spam": 1}}) is _builder_input_fn
+
+
+def test_builder_resolved_concrete_pipeline_rejects_config_keys():
+    factory = BenchmarkBuilder.pipeline(_make_pipeline())._resolve_factory()
+    with pytest.raises(TypeError, match="unknown config key"):
+        factory.validate_config({"workers": 4})
+
+
+def test_builder_resolved_concrete_input_rejects_config_keys():
+    factory = BenchmarkBuilder.pipeline(_make_pipeline()).data_input(_builder_input_fn)._resolve_data_factory()
+    with pytest.raises(TypeError, match="unknown config key"):
+        factory.validate_config({"value": 1})
+
+
+def test_builder_data_inputs_resolve_by_label():
+    def other_input_fn():
+        return ("other", 2, None, None)
+
+    builder = BenchmarkBuilder.pipeline(_make_pipeline()).data_inputs(
+        [_builder_input_fn, other_input_fn],
+        ["first", "second"],
+    )
+    factory = builder._resolve_data_factory()
+    assert factory.from_config({"_label": "first"}) is _builder_input_fn
+    assert factory.from_config({"_label": "second"}) is other_input_fn
+
+
+def test_builder_data_inputs_reject_extra_config_keys():
+    builder = BenchmarkBuilder.pipeline(_make_pipeline()).data_inputs(
+        [_builder_input_fn],
+        ["first"],
+    )
+    factory = builder._resolve_data_factory()
+    with pytest.raises(TypeError, match="unknown config key"):
+        factory.validate_config({"_label": "first", "value": 1})
 
 
 # --- Single run: concrete pipeline + concrete input ---
@@ -1309,7 +1354,7 @@ def test_pipeline_factory_bad_config_raises_with_context():
     sweep = BenchmarkSweep(
         factory=_strict_pipeline_factory,
         configs=[{"unknown_param": 1}],
-        data_factory=lambda _: _static_input,
+        data_factory=lambda **_: _static_input,
     )
     with pytest.raises(TypeError, match="pipeline factory got unknown config key.*unknown_param"):
         sweep.run()
@@ -1319,7 +1364,7 @@ def test_pipeline_factory_missing_required_raises_with_context():
     sweep = BenchmarkSweep(
         factory=_strict_pipeline_factory,
         configs=[{}],
-        data_factory=lambda _: _static_input,
+        data_factory=lambda **_: _static_input,
     )
     with pytest.raises(TypeError, match="pipeline factory is missing required config key.*workers"):
         sweep.run()
@@ -1327,7 +1372,7 @@ def test_pipeline_factory_missing_required_raises_with_context():
 
 def test_data_factory_bad_config_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda _: _make_pipeline(),
+        factory=lambda **_: _make_pipeline(),
         configs=[{}],
         data_factory=_strict_data_factory,
         data_configs=[{"unknown_param": 1}],
@@ -1338,7 +1383,7 @@ def test_data_factory_bad_config_raises_with_context():
 
 def test_data_factory_missing_required_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda _: _make_pipeline(),
+        factory=lambda **_: _make_pipeline(),
         configs=[{}],
         data_factory=_strict_data_factory,
         data_configs=[{}],
@@ -1349,9 +1394,9 @@ def test_data_factory_missing_required_raises_with_context():
 
 def test_pipeline_factory_returns_none_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda _: None,
+        factory=lambda **_: None,
         configs=[{"workers": 1}],
-        data_factory=lambda _: _static_input,
+        data_factory=lambda **_: _static_input,
     )
     with pytest.raises(TypeError, match="pipeline factory must return a Pipeline"):
         sweep.run()
@@ -1359,9 +1404,9 @@ def test_pipeline_factory_returns_none_raises_with_context():
 
 def test_data_factory_returns_none_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda _: _make_pipeline(),
+        factory=lambda **_: _make_pipeline(),
         configs=[{}],
-        data_factory=lambda _: None,
+        data_factory=lambda **_: None,
     )
     with pytest.raises(TypeError, match="data factory must return a callable InputFn"):
         sweep.run()

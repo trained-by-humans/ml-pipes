@@ -18,8 +18,8 @@ from .factory import (
 )
 from .tracing import InvocationTrace
 
-PipelineFactoryLike: TypeAlias = PipelineFactory | Callable[[dict], Pipeline]
-DataFactoryLike: TypeAlias = DataFactory | Callable[[dict], InputFn]
+PipelineFactoryLike: TypeAlias = PipelineFactory | Callable[..., Pipeline]
+DataFactoryLike: TypeAlias = DataFactory | Callable[..., InputFn]
 ConfigFilter: TypeAlias = Callable[[dict], bool]
 
 
@@ -487,8 +487,8 @@ class Benchmark:
 class BenchmarkSweep:
     """Cross-product every pipeline config with every data config and collect all results.
 
-    Expects either ``PipelineFactory`` / ``DataFactory`` objects or
-    ``factory(config_dict)`` / ``data_factory(config_dict)`` callables.
+    Expects either ``PipelineFactory`` / ``DataFactory`` objects or plain
+    callables that accept config keys as keyword arguments.
 
     Calls ``data_factory(data_config)`` fresh for each cell::
 
@@ -505,7 +505,7 @@ class BenchmarkSweep:
         sweep = BenchmarkSweep(
             factory=make_pipeline,
             configs=[{"workers": 1}, {"workers": 4}],
-            data_factory=lambda _: my_input_fn,
+            data_factory=lambda **_: my_input_fn,
         )
     """
 
@@ -665,7 +665,10 @@ class BenchmarkBuilder:
     def data_inputs(self, fns: list[InputFn], labels: list[str]) -> BenchmarkBuilder:
         """Use multiple InputFns as a sweep — each gets a label."""
         _fn_map = dict(zip(labels, fns))
-        self._data_factory_fn = lambda cfg, _m=_fn_map: _m[cfg["_label"]]
+        def _select_input(_label: str) -> InputFn:
+            return _fn_map[_label]
+
+        self._data_factory_fn = _select_input
         self._data_config_set = [{"_label": lab} for lab in labels]
         return self
 
@@ -850,7 +853,7 @@ class BenchmarkBuilder:
     def _resolve_factory(self) -> PipelineFactory:
         if isinstance(self._source, Pipeline):
             _pipeline = self._source
-            return PipelineFactory.from_config_callable(lambda _, pipeline=_pipeline: pipeline)
+            return PipelineFactory.from_callable(lambda: _pipeline)
         return PipelineFactory.ensure_factory(self._source)
 
     def _resolve_pipeline_configs(self) -> list[dict]:
@@ -870,14 +873,14 @@ class BenchmarkBuilder:
     def _resolve_data_factory(self) -> DataFactory:
         if self._data_input_fn is not None:
             _fn = self._data_input_fn
-            return DataFactory.from_config_callable(lambda _, fn=_fn: fn)
+            return DataFactory.from_callable(lambda: _fn)
         if self._data_factory_fn is not None:
             return DataFactory.ensure_factory(self._data_factory_fn)
         raise ValueError("no data_input() or data_factory() provided")
 
     def _resolve_data_configs(self) -> list[dict]:
         if self._data_input_fn is not None:
-            return [{"_label": "input"}]
+            return [{}]
         if self._data_axes:
             keys = list(self._data_axes.keys())
             configs = [
