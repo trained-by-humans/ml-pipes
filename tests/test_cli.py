@@ -8,6 +8,7 @@ import pytest
 from ml_pipes.factory import (
     _DATA_FACTORY_ATTR,
     _PIPELINE_FACTORY_ATTR,
+    coerce_factory,
     data_factory,
     discover_factory,
     pipeline_factory,
@@ -20,6 +21,7 @@ from ml_pipes.__main__ import (
     _parse_config_axis,
     _parse_config_value,
     _parse_config_list,
+    _resolve_pipeline_factory,
     cmd_benchmark,
 )
 
@@ -32,12 +34,14 @@ def test_pipeline_factory_sets_attribute():
     def my_fn(model_path): pass
     wrapped = pipeline_factory(my_fn)
     assert getattr(wrapped, _PIPELINE_FACTORY_ATTR) is True
+    assert wrapped is my_fn
 
 
 def test_data_factory_sets_attribute():
     def my_fn(): pass
     wrapped = data_factory(my_fn)
     assert getattr(wrapped, _DATA_FACTORY_ATTR) is True
+    assert wrapped is my_fn
 
 
 def test_pipeline_factory_preserves_name():
@@ -46,10 +50,36 @@ def test_pipeline_factory_preserves_name():
     assert my_named_fn.__name__ == "my_named_fn"
 
 
-def test_pipeline_factory_preserves_wrapped():
-    def original(x): pass
-    wrapped = pipeline_factory(original)
-    assert wrapped.__wrapped__ is original
+def test_pipeline_factory_preserves_direct_call():
+    @pipeline_factory
+    def original(x):
+        return x + 1
+
+    assert original(2) == 3
+
+
+def test_data_factory_preserves_direct_call():
+    @data_factory
+    def original(x):
+        return x + 1
+
+    assert original(2) == 3
+
+
+def test_coerce_factory_wraps_plain_callable_for_config_dict_call():
+    def plain(x=1, y=2):
+        return (x, y)
+
+    wrapped = coerce_factory(plain)
+    assert wrapped({"x": 10, "y": 20}) == (10, 20)
+
+
+def test_coerce_factory_is_idempotent():
+    def plain(x=1):
+        return x
+
+    wrapped = coerce_factory(plain)
+    assert coerce_factory(wrapped) is wrapped
 
 
 def test_decorators_exported_from_init():
@@ -171,14 +201,13 @@ def test_discover_factory_explicit_bypasses_scan():
     def explicit(config): pass
     m = _fake_module("_test4")
     result = discover_factory(m, explicit, _PIPELINE_FACTORY_ATTR, "pipeline")
-    # Undecorated explicit refs are wrapped — __wrapped__ points to the original
-    assert result.__wrapped__ is explicit
+    assert result is explicit
 
 
-def test_discover_factory_explicit_undecorated_wraps_for_dict_call():
+def test_resolve_pipeline_factory_explicit_undecorated_wraps_for_dict_call():
     def plain(x=1, y=2): return (x, y)
     m = _fake_module("_test5")
-    result = discover_factory(m, plain, _PIPELINE_FACTORY_ATTR, "pipeline")
+    result = _resolve_pipeline_factory(m, plain, "_test5:plain")
     assert result({"x": 10, "y": 20}) == (10, 20)
 
 

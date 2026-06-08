@@ -14,6 +14,7 @@ from ml_pipes.benchmark import (
 from ml_pipes.factory import (
     _DATA_FACTORY_ATTR,
     _PIPELINE_FACTORY_ATTR,
+    coerce_factory,
     InputFn,
     discover_factory,
     validate_factory_config,
@@ -72,7 +73,7 @@ def _resolve_pipeline_factory(module: Any, explicit_fn: Any, ref: str):
             f"Decorate exactly one function with @pipeline_factory, "
             f"or use 'module:fn_name' syntax."
         )
-    return fn
+    return coerce_factory(fn)
 
 
 def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
@@ -88,12 +89,15 @@ def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
                 f"no @data_factory found in {data_ref!r}. "
                 f"Decorate a function with @data_factory or use 'module:fn_name' syntax."
             )
-        return data_fn
+        return coerce_factory(data_fn)
 
     try:
-        return discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
+        data_fn = discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
     except ValueError as exc:
         raise CLIError(str(exc)) from exc
+    if data_fn is None:
+        return None
+    return coerce_factory(data_fn)
 
 
 # ---------------------------------------------------------------------------
