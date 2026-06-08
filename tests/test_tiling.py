@@ -190,7 +190,7 @@ def test_tile_scatter_gather_stitch_pipeline():
 
     pipeline = Pipeline([
         Tile(slice_wh=(320, 320), overlap_wh=(0, 0)),
-        Store("tile_rects", index=1),
+        Store("tile_rects", source=1),
         Pick(0),
         Scatter(max_concurrency=2),
         _PassDets(),

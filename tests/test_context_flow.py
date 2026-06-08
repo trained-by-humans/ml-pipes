@@ -77,7 +77,7 @@ def test_outer_key_survives_batch_region():
 def test_store_pick_recall_type_flow_passes():
     Pipeline([
         IntToPair(),
-        Store("saved_text", index=1),
+        Store("saved_text", source=1),
         Pick(0),
         IntToString(),
         Recall("saved_text"),
@@ -87,7 +87,7 @@ def test_store_pick_recall_type_flow_passes():
 
 def test_store_select_stores_image_payload_property():
     image = ImagePayload(array=np.zeros((10, 20, 3), dtype=np.uint8))
-    pipeline = Pipeline([Store("image_shape", select="spatial_shape"), Recall("image_shape")])
+    pipeline = Pipeline([Store("image_shape", source="spatial_shape"), Recall("image_shape")])
 
     result = pipeline(image)
 
@@ -96,21 +96,21 @@ def test_store_select_stores_image_payload_property():
 
 
 def test_store_select_type_flow_passes():
-    Pipeline([Store("image_shape", select="spatial_shape"), Recall("image_shape")]).validate()
+    Pipeline([Store("image_shape", source="spatial_shape"), Recall("image_shape")]).validate()
 
 
 def test_store_index_out_of_bounds_raises_on_concrete_input():
-    with pytest.raises(PipelineValidationError, match="Store\\('x', index=5\\) is out of bounds"):
-        Pipeline([IntToPair(), Store("x", index=5)]).validate()
+    with pytest.raises(PipelineValidationError, match=r"Store\('x', \(5,\)\) is out of bounds"):
+        Pipeline([IntToPair(), Store("x", source=5)]).validate()
 
 
 def test_store_index_out_of_bounds_silent_on_vague_input():
-    Pipeline([Store("x", index=5)]).validate()
+    Pipeline([Store("x", source=5)]).validate()
 
 
-def test_store_rejects_index_and_select_together():
-    with pytest.raises(ValueError, match="either index or select"):
-        Store("x", index=0, select="shape")
+def test_store_rejects_removed_index_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        Store("x", index=0)
 
 
 # ---------------------------------------------------------------------------

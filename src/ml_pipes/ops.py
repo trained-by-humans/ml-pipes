@@ -14,10 +14,11 @@ from typing import TextIO
 import numpy as np
 
 from .batch import BatchGate, LeaderBatch
-from .context import Selector, SelectorPart, _attribute_annotation, _normalize_selector
+from .control import SHORT_CIRCUIT
 from .operator import Operator
 from .region import RegionCloser, RegionOpener
 from .scatter import ScatterGate
+from .selector import Selector, SelectorInput
 from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
 from .types import (
     Detections,
@@ -1721,40 +1722,16 @@ class LogDetections(SideEffectOp):
 
 @Operator
 class Select:
-    def __init__(self, *selector: SelectorPart):
-        if not selector:
-            raise ValueError("Select requires at least one selector part")
-        self.selector = selector[0] if len(selector) == 1 else selector
-        self._selector = self._normalize_selector_parts(selector)
+    def __init__(self, *path: SelectorInput):
+        self._selector = Selector.from_input(path)
         if not self._selector:
-            raise ValueError("Select requires a non-empty selector")
-        self._selector_label = self._format_selector_label(self.selector, self._selector)
+            raise ValueError("Select requires at least one selector part")
 
-    @staticmethod
-    def _normalize_selector_parts(
-        selector: tuple[SelectorPart | tuple[SelectorPart, ...], ...],
-    ) -> tuple[str | int, ...]:
-        normalized: list[str | int] = []
-        for part in selector:
-            normalized.extend(_normalize_selector(part))
-        return tuple(normalized)
-
-    @staticmethod
-    def _format_selector_label(selector: Selector, normalized: tuple[str | int, ...]) -> str:
-        if isinstance(selector, int):
-            return f"index={selector}"
-        return f"select={normalized!r}"
-
-    def __call__(self, current: object) -> Any:
-        selected = current
-        for part in self._selector:
-            if isinstance(part, int):
-                if not isinstance(selected, tuple):
-                    raise TypeError(f"Select({self._selector_label}) can only index tuple outputs")
-                selected = selected[part]
-                continue
-            selected = getattr(selected, part)
-        return selected
+    def __call__(self, current: Any) -> Any:
+        return self._selector.select_value(
+            current,
+            error_prefix=f"Select({self._selector!r})",
+        )
 
     def resolve_contract(
         self,
@@ -1765,31 +1742,13 @@ class Select:
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations
         if current_output is Any:
-            if isinstance(self._selector[0], int):
-                return (tuple,), Any
             return (Any,), Any
 
-        selected = current_output
-        for part in self._selector:
-            if selected is Any or selected is None:
-                return (current_output,), Any
-            if isinstance(part, int):
-                origin = get_origin(selected)
-                if origin is tuple:
-                    parts = get_args(selected)
-                elif isinstance(selected, tuple):
-                    parts = selected
-                else:
-                    raise validation_error_type(
-                        f"Select({self._selector_label}) requires a tuple boundary, got {selected}"
-                    )
-                if not (-len(parts) <= part < len(parts)):
-                    raise validation_error_type(
-                        f"Select({self._selector_label}) is out of bounds for {selected} (length {len(parts)})"
-                    )
-                selected = parts[part]
-                continue
-            selected = _attribute_annotation(selected, part)
+        selected = self._selector.validate_read(
+            current_output,
+            validation_error_type=validation_error_type,
+            error_prefix=f"Select({self._selector!r})",
+        )
         return (current_output,), selected
 
 
@@ -1996,7 +1955,7 @@ class Scatter(RegionOpener):
         pipeline = Pipeline([
             ...,
             Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
-            Store("tile_rects", index=1),
+            Store("tile_rects", source=1),
             Pick(0),
             Scatter(max_concurrency=4),
             Resize((640, 640)), Normalize(), Infer("model.onnx"), ..., ToDetections(),
@@ -2025,25 +1984,49 @@ class Scatter(RegionOpener):
         n_items = len(items)
 
         def run_region(entry: Any) -> None:
-            child_trace = InvocationTrace(batch_size=n_items, workers=gate.max_concurrency) if collecting else _NoOpTrace()
+            child_trace = (
+                InvocationTrace(batch_size=n_items, workers=gate.max_concurrency)
+                if collecting
+                else _NoOpTrace()
+            )
             try:
-                result, child_trace = execute_region(entry.value, child_trace)  # cfg flows via closure in execute_region
+                result, child_trace = execute_region(
+                    entry.value,
+                    child_trace,
+                )  # cfg flows via closure in execute_region
                 entry.deposit(result, child_trace if collecting else None)
             except BaseException as exc:
                 entry.deposit_exception(exc, child_trace if collecting else None)
 
         gate.scatter(items, run_region)
         t_gather = time.perf_counter()
-        try:
-            entries = gate.gather()
-        except BaseException:
-            trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, error=True, operator_type=type(self)))
-            raise
-
+        entries, first_exc = gate.gather()
         child_traces = [e.child_trace for e in entries if e.child_trace is not None]
         child_trace = merge_traces(child_traces) if child_traces else None
-        trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, child_trace=child_trace if collecting else None, operator_type=type(self)))
-        return [e.result for e in entries]
+
+        if first_exc is not None:
+            trace.spans.append(
+                StepSpan(
+                    label,
+                    t_gather,
+                    time.perf_counter() - t_gather,
+                    error=True,
+                    child_trace=child_trace if collecting else None,
+                    operator_type=type(self),
+                )
+            )
+            raise first_exc
+
+        trace.spans.append(
+            StepSpan(
+                label,
+                t_gather,
+                time.perf_counter() - t_gather,
+                child_trace=child_trace if collecting else None,
+                operator_type=type(self),
+            )
+        )
+        return [e.result for e in entries if e.result is not SHORT_CIRCUIT]
 
     def resolve_contract(
         self,

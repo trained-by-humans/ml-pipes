@@ -11,9 +11,10 @@ Components
 1. StepView / OutputBlock (intermediate representation)
        StepView is the display representation of one pipeline step — a label,
        operator config, and a list of OutputBlocks. An OutputBlock represents
-       the step's output value visually: ImageBlock (numpy RGB array) and
-       TextBlock (key/value rows) are the built-in kinds, but custom types can
-       be defined and handled by a custom Renderer. Renderers consume
+       the step's output value visually: ImageBlock (numpy RGB array),
+       TextBlock (key/value rows), and GroupBlock (nested structured output)
+       are the built-in kinds, but custom types can be defined and handled by
+       a custom Renderer. Renderers consume
        list[StepView] and know nothing about spans or formatters.
 
 2. SpanFormatter
@@ -47,6 +48,7 @@ import os
 import pickle
 import tempfile
 import webbrowser
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -56,8 +58,9 @@ import numpy as np
 
 _IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
 _TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)
+_HTML_ORIENTATIONS = ("horizontal", "vertical")
 
-from .tracing import InvocationTrace, StepSpan, TraceCollector, _fmt_batch_size
+from .tracing import InvocationTrace, StepSpan, _fmt_batch_size
 from .tiling import TileRect
 from .types import (
     Detections,
@@ -94,7 +97,14 @@ class TextBlock:
     dim: bool = False
 
 
-OutputBlock = ImageBlock | TextBlock
+@dataclass
+class GroupBlock:
+    title: str
+    children: list["OutputBlock"]
+    dim: bool = False
+
+
+OutputBlock = ImageBlock | TextBlock | GroupBlock
 
 
 @dataclass
@@ -241,7 +251,7 @@ def _block_summary(blocks: list[OutputBlock]) -> str:
     for b in blocks:
         if isinstance(b, ImageBlock):
             parts.append(b.title)
-        else:
+        elif isinstance(b, TextBlock):
             summary = b.title
             rows = b.rows[:3] if b.title == "dict" else b.rows[:1]
             if rows:
@@ -249,7 +259,18 @@ def _block_summary(blocks: list[OutputBlock]) -> str:
                     (f"{k} {v}".rstrip() if k else f"{v}")
                     for k, v in rows
                 ]
-                summary += "  " + "  |  ".join(row_summaries)
+                if summary:
+                    summary += "  " + "  |  ".join(row_summaries)
+                else:
+                    summary = "  |  ".join(row_summaries)
+            parts.append(summary)
+        else:
+            summary = b.title
+            child_summaries = [_block_summary([child]) for child in b.children[:2]]
+            if child_summaries:
+                summary += "  " + "  |  ".join(child_summaries)
+            if len(b.children) > 2:
+                summary += f"  |  +{len(b.children) - 2} more"
             parts.append(summary)
     return "  |  ".join(parts)
 
@@ -267,12 +288,23 @@ def _apply_image_carry(
 
     Returns the blocks and the image to carry forward to the next step.
     """
-    image_to_carry = next((b.array for b in raw_blocks if isinstance(b, ImageBlock)), None)
+    image_to_carry = _find_image_in_blocks(raw_blocks)
     if image_to_carry is not None:
         return raw_blocks, image_to_carry
     if last_image is not None:
         return [ImageBlock(title="↑ previous", array=last_image, dim=True)] + raw_blocks, last_image
     return raw_blocks, None
+
+
+def _find_image_in_blocks(blocks: list[OutputBlock]) -> np.ndarray | None:
+    for block in blocks:
+        if isinstance(block, ImageBlock):
+            return block.array
+        if isinstance(block, GroupBlock):
+            nested = _find_image_in_blocks(block.children)
+            if nested is not None:
+                return nested
+    return None
 
 
 def _flatten_step_views(views: list[StepView], depth: int = 0) -> list[tuple[StepView, int]]:
@@ -307,6 +339,16 @@ def _build_span_metadata(span: StepSpan) -> dict[str, Any]:
     metadata = dict(span.operator_config)
     metadata.update({f"attributes.{key}": value for key, value in span.attributes.items()})
     return metadata
+
+
+def _normalize_html_orientation(orientation: str) -> str:
+    normalized = orientation.strip().lower()
+    if normalized not in _HTML_ORIENTATIONS:
+        raise ValueError(
+            f"Invalid HTML orientation: {orientation!r}. "
+            f"Expected one of {list(_HTML_ORIENTATIONS)}."
+        )
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -413,12 +455,6 @@ def _register_builtin_formatters() -> None:
             rows.append((name, f"{shape}@{device}" if device is not None else shape))
         return [TextBlock(type(value).__name__, rows)]
 
-    def _format_dict(value: dict[Any, Any]) -> list[OutputBlock]:
-        rows = [(str(key), str(item)) for key, item in list(value.items())[:6]]
-        if len(value) > 6:
-            rows.append(("…", f"+{len(value) - 6} more"))
-        return [TextBlock("dict", rows)]
-
     def _format_bytes(value: bytes) -> list[OutputBlock]:
         return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
 
@@ -432,7 +468,6 @@ def _register_builtin_formatters() -> None:
     _OUTPUT_FORMATTERS[TensorRegistry]  = _format_tensor_registry
     if TorchTensorRegistry is not None:
         _OUTPUT_FORMATTERS[TorchTensorRegistry] = _format_tensor_registry
-    _OUTPUT_FORMATTERS[dict]            = _format_dict
     _OUTPUT_FORMATTERS[TileRect]        = _format_tile_rect
     _OUTPUT_FORMATTERS[bytes]           = _format_bytes
 
@@ -451,7 +486,7 @@ def _register_builtin_formatters() -> None:
         val = span.output_value
         raw_blocks = _format_tiles_with_overlay(val[0], val[1]) if val is not None else []
         blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
-        return StepView(span.label, _build_span_metadata(span), blocks), image_to_carry
+        return StepView(span.label, span.operator_config, blocks), image_to_carry
 
     _SPAN_FORMATTERS[RegionOpener] = _region_span_formatter
     _SPAN_FORMATTERS[Tile]         = _tile_span_formatter
@@ -513,13 +548,81 @@ class PipelineInspector:
             None,
         )
 
-    def _output_to_blocks(self, value: Any) -> list[OutputBlock]:
+    def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
+        return (
+            isinstance(block, TextBlock)
+            and block.title == type(value).__name__
+            and len(block.rows) == 1
+            and block.rows[0][0] == ""
+        )
+
+    def _recursive_reference_block(self, value: Any) -> TextBlock:
+        return TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])
+
+    def _named_block(
+        self,
+        name: str,
+        value: Any,
+        active_ids: set[int],
+    ) -> OutputBlock:
+        blocks = self._output_to_blocks(value, active_ids)
+        if len(blocks) == 1:
+            block = blocks[0]
+            if isinstance(block, GroupBlock):
+                return GroupBlock(
+                    title=f"{name}: {block.title}",
+                    children=block.children,
+                    dim=block.dim,
+                )
+            if self._is_scalar_field_block(block, value):
+                return TextBlock("", [(name, block.rows[0][1])], dim=block.dim)
+
+        return GroupBlock(
+            title=f"{name}: {type(value).__name__}",
+            children=blocks,
+        )
+
+    def _mapping_to_group(
+        self,
+        title: str,
+        value: Mapping[Any, Any],
+        active_ids: set[int],
+    ) -> GroupBlock:
+        items = list(value.items())
+        children = [self._named_block(str(key), item, active_ids) for key, item in items[:12]]
+        if len(items) > 12:
+            children.append(TextBlock("…", [("", f"+{len(items) - 12} more")]))
+        return GroupBlock(title=title, children=children)
+
+    def _dataclass_to_group(
+        self,
+        value: Any,
+        title: str | None = None,
+        *,
+        active_ids: set[int],
+    ) -> GroupBlock:
+        return GroupBlock(
+            title=title or type(value).__name__,
+            children=[
+                self._named_block(field.name, getattr(value, field.name), active_ids)
+                for field in dataclasses.fields(value)
+            ],
+        )
+
+    def _output_to_blocks(
+        self,
+        value: Any,
+        active_ids: set[int] | None = None,
+    ) -> list[OutputBlock]:
+        if active_ids is None:
+            active_ids = set()
+
         if isinstance(value, tuple):
             if _is_primitive_tuple(value):
                 return [TextBlock(type(value).__name__, [("", str(value))])]
             blocks: list[OutputBlock] = []
             for item in value:
-                blocks.extend(self._output_to_blocks(item))
+                blocks.extend(self._output_to_blocks(item, active_ids))
             return blocks
 
         if isinstance(value, list) and value:
@@ -538,6 +641,14 @@ class PipelineInspector:
                 if len(value) > _LIST_MAX:
                     rows.append(("…", f"+{len(value) - _LIST_MAX} more"))
                 return [TextBlock(f"list  ×{len(value)}", rows)]
+            if isinstance(value[0], Mapping) or (dataclasses.is_dataclass(value[0]) and not isinstance(value[0], type)):
+                rows = [
+                    (f"[{i}]", _block_summary(self._output_to_blocks(item, active_ids)))
+                    for i, item in enumerate(value[:_LIST_MAX])
+                ]
+                if len(value) > _LIST_MAX:
+                    rows.append(("…", f"+{len(value) - _LIST_MAX} more"))
+                return [TextBlock(f"list  ×{len(value)}", rows)]
             item_type = type(value[0]).__name__
             return [TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
 
@@ -545,11 +656,28 @@ class PipelineInspector:
         if formatter is not None:
             return formatter(value)
 
-        name = type(value).__name__
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
-            return [TextBlock(name, [(f.name, str(getattr(value, f.name))) for f in dataclasses.fields(value)])]
+            value_id = id(value)
+            if value_id in active_ids:
+                return [self._recursive_reference_block(value)]
+            active_ids.add(value_id)
+            try:
+                return [self._dataclass_to_group(value, active_ids=active_ids)]
+            finally:
+                active_ids.remove(value_id)
 
-        text = repr(value)
+        if isinstance(value, Mapping):
+            value_id = id(value)
+            if value_id in active_ids:
+                return [self._recursive_reference_block(value)]
+            active_ids.add(value_id)
+            try:
+                return [self._mapping_to_group(type(value).__name__, value, active_ids)]
+            finally:
+                active_ids.remove(value_id)
+
+        name = type(value).__name__
+        text = value if isinstance(value, str) else repr(value)
         return [TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
 
     def _span_to_view(
@@ -600,13 +728,18 @@ class PipelineInspector:
         """Pass the view tree to *renderer* and return its output."""
         return renderer.render(self.build_views(result))
 
-    def to_html(self, result: InspectionResult) -> str:
+    def to_html(self, result: InspectionResult, orientation: str = "horizontal") -> str:
         """Return a self-contained HTML string."""
-        return HtmlRenderer().render(self.build_views(result))
+        return HtmlRenderer(orientation=orientation).render(self.build_views(result))
 
-    def save_to_html(self, result: InspectionResult, path: str | Path) -> Path:
+    def save_to_html(
+        self,
+        result: InspectionResult,
+        path: str | Path,
+        orientation: str = "horizontal",
+    ) -> Path:
         """Write an HTML report to *path* and return it."""
-        return HtmlRenderer().save(self.build_views(result), path)
+        return HtmlRenderer(orientation=orientation).save(self.build_views(result), path)
 
     def to_plot(
         self,
@@ -634,7 +767,12 @@ class PipelineInspector:
         fig.savefig(out, dpi=dpi, bbox_inches="tight")
         return out
 
-    def show(self, result: InspectionResult, cols: int = 6) -> None:
+    def show(
+        self,
+        result: InspectionResult,
+        cols: int = 6,
+        orientation: str = "horizontal",
+    ) -> None:
         """Display the result.
 
         In Jupyter: renders the HTML card strip inline.
@@ -642,13 +780,13 @@ class PipelineInspector:
         """
         if _IN_JUPYTER:
             from IPython.display import HTML, display
-            display(HTML(self.to_html(result)))
+            display(HTML(self.to_html(result, orientation=orientation)))
         else:
             import matplotlib.pyplot as plt
             self.to_plot(result, cols=cols)
             plt.show()
 
-    def show_in_browser(self, result: InspectionResult) -> None:
+    def show_in_browser(self, result: InspectionResult, orientation: str = "horizontal") -> None:
         """Open the HTML report in the default web browser via a temporary file."""
         fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
         os.close(fd)
@@ -656,7 +794,7 @@ class PipelineInspector:
         out.write_text(
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             "<title>Pipeline inspection</title></head><body>"
-            f"{self.to_html(result)}</body></html>",
+            f"{self.to_html(result, orientation=orientation)}</body></html>",
             encoding="utf-8",
         )
         webbrowser.open(out.as_uri())
@@ -679,12 +817,19 @@ _CSS = """
 <style>
 .insp-container {
   display: flex;
-  flex-direction: row;
-  overflow-x: auto;
   gap: 10px;
   padding: 10px 4px 14px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+.insp-container--horizontal {
+  flex-direction: row;
+  overflow-x: auto;
   align-items: flex-start;
+}
+.insp-container--vertical {
+  flex-direction: column;
+  overflow-y: auto;
+  align-items: stretch;
 }
 .insp-card {
   min-width: 200px;
@@ -694,6 +839,11 @@ _CSS = """
   background: #fff;
   flex-shrink: 0;
   box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.insp-container--vertical .insp-card {
+  min-width: 0;
+  width: calc(100% - 8px);
+  max-width: 1100px;
 }
 .insp-card-head {
   background: #f0f0f0;
@@ -712,9 +862,40 @@ _CSS = """
   background: #fff; user-select: none; flex-shrink: 0;
 }
 .insp-cfg-icon:hover { color: #333; border-color: #888; }
-.insp-card-body { padding: 7px 8px; border-radius: 0 0 6px 6px; }
+.insp-card-body { padding: 7px 8px; border-radius: 0 0 6px 6px; overflow-x: auto; }
 .insp-card-error .insp-card-head { background: #fff0f0; border-color: #f5a0a0; }
 .insp-card-error .insp-card-name { color: #c00; }
+.insp-container--vertical .insp-card-name { white-space: normal; }
+.insp-group {
+  margin-bottom: 8px;
+}
+.insp-group--dim { opacity: 0.6; }
+.insp-group-body {
+  margin-left: 12px;
+}
+.insp-group-empty {
+  font-size: 11px;
+  color: #aaa;
+  font-style: italic;
+}
+.insp-inline-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 1px;
+  align-items: start;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.insp-inline-grid--dim { opacity: 0.6; }
+.insp-inline-key {
+  color: #555;
+  white-space: nowrap;
+}
+.insp-inline-val {
+  min-width: 0;
+  word-break: break-all;
+}
 #insp-cfg-popup {
   display: none; position: fixed; z-index: 9999;
   background: #1e1e1e; color: #d4d4d4; border-radius: 5px;
@@ -755,7 +936,7 @@ _CSS = """
 
 
 class HtmlRenderer:
-    """Renders a list of StepViews as an HTML card strip.
+    """Renders a list of StepViews as HTML cards.
 
     Example::
 
@@ -764,10 +945,16 @@ class HtmlRenderer:
         HtmlRenderer().save(views, "report.html")
     """
 
+    def __init__(self, orientation: str = "horizontal") -> None:
+        self.orientation = _normalize_html_orientation(orientation)
+
     def render(self, views: list[StepView]) -> str:
         """Return a self-contained HTML string."""
         cards = [self._render_card(v) for v, _ in _flatten_step_views(views)]
-        return f'{_CSS}<div class="insp-container">{"".join(cards)}</div>'
+        return (
+            f'{_CSS}<div class="insp-container insp-container--{self.orientation}">'
+            f'{"".join(cards)}</div>'
+        )
 
     def save(self, views: list[StepView], path: str | Path) -> Path:
         """Write the HTML report to *path* and return it."""
@@ -803,12 +990,59 @@ class HtmlRenderer:
             return "<em style='font-size:11px;color:#aaa;'>no value captured</em>"
         return "".join(self._render_block(b) for b in view.blocks)
 
-    def _render_block(self, block: OutputBlock) -> str:
-        dim = block.dim
-        title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
-        title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
+    @staticmethod
+    def _is_inline_row_block(block: OutputBlock) -> bool:
+        return isinstance(block, TextBlock) and not block.title
 
+    @staticmethod
+    def _leaf_row(block: TextBlock) -> tuple[str, str] | None:
+        if len(block.rows) != 1:
+            return None
+        key, value = block.rows[0]
+        if block.title and not key:
+            return block.title, value
+        if not block.title and key:
+            return key, value
+        return None
+
+    def _render_inline_rows(self, blocks: list[TextBlock]) -> str:
+        if not blocks:
+            return ""
+        dim = all(block.dim for block in blocks)
+        rows = "".join(
+            f'<div class="insp-inline-key">{_html.escape(key)}</div>'
+            f'<div class="insp-inline-val">{_html.escape(value)}</div>'
+            for block in blocks
+            for key, value in block.rows
+        )
+        dim_class = " insp-inline-grid--dim" if dim else ""
+        return f'<div class="insp-inline-grid{dim_class}">{rows}</div>'
+
+    def _render_group_children(self, children: list[OutputBlock]) -> str:
+        parts: list[str] = []
+        inline_rows: list[TextBlock] = []
+
+        def flush_inline_rows() -> None:
+            nonlocal inline_rows
+            if inline_rows:
+                parts.append(self._render_inline_rows(inline_rows))
+                inline_rows = []
+
+        for child in children:
+            if self._is_inline_row_block(child):
+                inline_rows.append(child)
+                continue
+            flush_inline_rows()
+            parts.append(self._render_block(child))
+
+        flush_inline_rows()
+        return "".join(parts)
+
+    def _render_block(self, block: OutputBlock) -> str:
         if isinstance(block, ImageBlock):
+            dim = block.dim
+            title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
+            title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
             _, buf = cv2.imencode(".png", cv2.cvtColor(block.array, cv2.COLOR_RGB2BGR))
             uri = "data:image/png;base64," + base64.b64encode(buf).decode()
             opacity = "0.2" if dim else "1"
@@ -835,6 +1069,33 @@ class HtmlRenderer:
                 img_html = f'<img src="{uri}" style="{_IMG_STYLE}opacity:{opacity};">'
             return f'<div style="margin-bottom:8px;">{title_html}{img_html}</div>'
 
+        if isinstance(block, GroupBlock):
+            dim_class = " insp-group--dim" if block.dim else ""
+            dim = block.dim
+            title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
+            title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
+            children = (
+                self._render_group_children(block.children)
+                if block.children else
+                '<div class="insp-group-empty">empty</div>'
+            )
+            return (
+                f'<div class="insp-group{dim_class}">'
+                f'{title_html}'
+                f'<div class="insp-group-body">{children}</div>'
+                f'</div>'
+            )
+
+        dim = block.dim
+        leaf_row = self._leaf_row(block)
+        if leaf_row is not None:
+            return self._render_inline_rows([TextBlock("", [leaf_row], dim=dim)])
+
+        title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
+        title_html = (
+            f'<div style="{title_style}">{_html.escape(block.title)}</div>'
+            if block.title else ""
+        )
         inner = "".join(
             f'<tr><td style="{_TD_K}">{_html.escape(k)}</td>'
             f'<td style="{_TD_V}">{_html.escape(v)}</td></tr>'
@@ -873,6 +1134,27 @@ class PlotRenderer:
         self.cols = cols
         self.cell_w = cell_w
         self.cell_h = cell_h
+
+    def _block_to_lines(self, block: OutputBlock, indent: int = 0) -> list[str]:
+        prefix = "  " * indent
+        if isinstance(block, ImageBlock):
+            return [prefix + block.title]
+
+        if isinstance(block, GroupBlock):
+            lines = [prefix + block.title]
+            if not block.children:
+                lines.append(prefix + "  empty")
+                return lines
+            for child in block.children:
+                lines.extend(self._block_to_lines(child, indent + 1))
+            return lines
+
+        lines = [prefix + block.title] if block.title else []
+        lines.extend(
+            prefix + "  " + (f"{key}: {value}" if key else value)
+            for key, value in block.rows
+        )
+        return lines
 
     def render(self, views: list[StepView]) -> "matplotlib.figure.Figure":
         import matplotlib
@@ -915,9 +1197,7 @@ class PlotRenderer:
             if isinstance(block, ImageBlock):
                 ax.imshow(block.array, alpha=0.2 if block.dim else 1.0)
             else:
-                text = block.title + "\n" + "\n".join(
-                    f"  {k}  {v}" if k else f"  {v}" for k, v in block.rows
-                )
+                text = "\n".join(self._block_to_lines(block))
                 ax.text(
                     0.04, 0.97, text,
                     transform=ax.transAxes,
@@ -1040,15 +1320,3 @@ class InspectionResult:
     def load(path: str | Path) -> InspectionResult:
         """Load a serialized result from a file."""
         return InspectionSerializer().load(path)
-
-
-# ---------------------------------------------------------------------------
-# Internal — used by Pipeline.inspect
-# ---------------------------------------------------------------------------
-
-class _CaptureCollector(TraceCollector):
-    def __init__(self) -> None:
-        self.trace: InvocationTrace | None = None
-
-    def on_trace(self, trace: InvocationTrace) -> None:
-        self.trace = trace

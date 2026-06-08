@@ -43,13 +43,13 @@ class Tile:
     """Slice an ImagePayload into overlapping tiles.
 
     Returns ``(list[ImagePayload], list[TileRect])`` so the caller can
-    ``Store("tile_rects", index=1)`` and scatter the tile list.
+    ``Store("tile_rects", source=1)`` and scatter the tile list.
 
     Example::
 
         Pipeline([
             Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
-            Store("tile_rects", index=1),
+            Store("tile_rects", source=1),
             Pick(0),
             Scatter(max_concurrency=4),
             ...,

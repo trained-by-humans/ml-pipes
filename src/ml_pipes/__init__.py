@@ -9,12 +9,38 @@ from .benchmark import (
     InvocationStatDiff,
     MeasurementConfig,
 )
-from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
+from .collectors import (
+    AggregateCollector,
+    CaptureCollector,
+    ConcurrentCollector,
+    PrintCollector,
+    SerialCollector,
+    ThroughputCollector,
+)
 from .context import Context, Recall, Store
+from .control import SHORT_CIRCUIT
 from .core import Pipeline, PipelineDescription, Embed, embed, Inline, inline, Operator, OperatorLike
+from .data_ops import (
+    CollectItems,
+    Distinct,
+    DistinctBy,
+    DropNull,
+    FilterNotNull,
+    Filter,
+    LazyPerItem,
+    Map,
+    MapNotNull,
+    MapValue,
+    PerItem,
+    StreamItems,
+    WrapMappingInObject,
+    Take,
+    TakeWhile,
+)
 from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
 from .factory import data_factory, pipeline_factory, InputFn
 from .inspection import (
+    GroupBlock,
     HtmlRenderer,
     ImageBlock,
     InspectionResult,
@@ -26,6 +52,7 @@ from .inspection import (
     StepView,
     TextBlock,
 )
+from .operator import OperatorArgument, OperatorDescription
 from .ops import (
     AsType,
     ArgMax,
@@ -104,7 +131,6 @@ from .types import (
     TensorRegistry,
 )
 from .validation import PipelineValidationError, TypeContract
-from .operator import OperatorArgument, OperatorDescription
 
 __all__ = [
     "Benchmark",
@@ -119,8 +145,10 @@ __all__ = [
     "data_factory",
     "pipeline_factory",
     "InputFn",
+    "SHORT_CIRCUIT",
     "ArgMax",
     "AggregateCollector",
+    "CaptureCollector",
     "ConcurrentCollector",
     "InvocationTrace",
     "PrintCollector",
@@ -141,9 +169,13 @@ __all__ = [
     "ToDensityPrediction",
     "DensityToHeatmap",
     "BlendImages",
+    "CollectItems",
+    "Distinct",
+    "DistinctBy",
     "Decode",
     "Detections",
     "Distribute",
+    "DropNull",
     "DrawBoxes",
     "DrawMasks",
     "ApplyTensorMask",
@@ -173,7 +205,10 @@ __all__ = [
     "Gather",
     "GatherRows",
     "GatherScores",
+    "Filter",
+    "FilterNotNull",
     "HtmlRenderer",
+    "GroupBlock",
     "ImagePayload",
     "InspectionResult",
     "InspectionSerializer",
@@ -190,6 +225,11 @@ __all__ = [
     "Infer",
     "LoadFile",
     "LogDetections",
+    "LazyPerItem",
+    "PerItem",
+    "Map",
+    "MapNotNull",
+    "MapValue",
     "MapToObjects",
     "NMM",
     "Operator",
@@ -211,6 +251,7 @@ __all__ = [
     "Recall",
     "RegionCloser",
     "RegionOpener",
+    "WrapMappingInObject",
     "Resize",
     "ResizeTransform",
     "RuntimeOutputs",
@@ -225,6 +266,9 @@ __all__ = [
     "Softmax",
     "Squeeze",
     "Store",
+    "StreamItems",
+    "Take",
+    "TakeWhile",
     "TensorPayload",
     "TensorRegistry",
     "Tile",

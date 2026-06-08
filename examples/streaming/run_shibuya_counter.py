@@ -57,7 +57,7 @@ _MAX_HUMAN_AREA = 1_000  # px² — filters out cars and other large objects
 def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
     return Pipeline([
         Resize((640, 640)),
-        Store("resize_transform", index=1),
+        Store("resize_transform", source=1),
         Pick(0),
         Normalize(),
         Infer(model_path),
@@ -84,7 +84,7 @@ def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers:
 
     pipeline = Pipeline([
         Tile(slice_wh=(240, 240), overlap_wh=(80, 80)),
-        Store("tile_rects", index=1),
+        Store("tile_rects", source=1),
         Pick(0),
         Scatter(max_concurrency=6),
         Inline(_infer_pipeline(model_path, conf_threshold)),

@@ -88,7 +88,7 @@ def build_mask2former_preprocess_pipeline() -> Pipeline:
             LoadFile(),
             Decode(),
             Store("source_image"),
-            Store("image_shape", select="spatial_shape"),
+            Store("image_shape", source="spatial_shape"),
             ConvertColorSpace("RGB"),
             Select("array"),
         ]

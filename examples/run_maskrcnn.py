@@ -48,7 +48,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
             Resize((800, 800)),
-            Store("resize_transform", index=1),
+            Store("resize_transform", source=1),
             Pick(0),
             Normalize(
                 scale=1.0,

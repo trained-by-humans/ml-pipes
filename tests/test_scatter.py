@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from ml_pipes import Gather, ImagePayload, Pipeline, PipelineValidationError, Recall, Resize, Scatter, Store
+from ml_pipes import DropNull, Gather, ImagePayload, Pipeline, PipelineValidationError, Recall, Resize, Scatter, Store
 from ml_pipes.scatter import ScatterGate, _ScatterEntry
 
 
@@ -17,13 +17,15 @@ from ml_pipes.scatter import ScatterGate, _ScatterEntry
 
 def test_scatter_gate_single_item():
     gate = ScatterGate(max_concurrency=1)
-    results: list[Any] = []
 
     def run(entry: _ScatterEntry) -> None:
         entry.deposit(entry.value * 2)
 
     gate.scatter([7], run)
-    assert [e.result for e in gate.gather()] == [14]
+    entries, first_exc = gate.gather()
+
+    assert first_exc is None
+    assert [e.result for e in entries] == [14]
 
 
 def test_scatter_gate_multiple_items_in_order():
@@ -35,10 +37,13 @@ def test_scatter_gate_multiple_items_in_order():
         entry.deposit(entry.value * 10)
 
     gate.scatter([1, 2, 3, 4], run)
-    assert [e.result for e in gate.gather()] == [10, 20, 30, 40]
+    entries, first_exc = gate.gather()
+
+    assert first_exc is None
+    assert [e.result for e in entries] == [10, 20, 30, 40]
 
 
-def test_scatter_gate_exception_propagates():
+def test_scatter_gate_returns_first_exception():
     gate = ScatterGate(max_concurrency=2)
     sentinel = ValueError("worker boom")
 
@@ -50,12 +55,13 @@ def test_scatter_gate_exception_propagates():
             entry.deposit(entry.value)
 
     gate.scatter([1, 2], run)
-    with pytest.raises(ValueError, match="worker boom"):
-        gate.gather()
+    _, first_exc = gate.gather()
+
+    assert first_exc is sentinel
 
 
-def test_scatter_gate_all_workers_finish_before_reraise():
-    """gather() should wait for ALL workers before re-raising."""
+def test_scatter_gate_waits_for_all_workers_before_returning_exception():
+    """gather() should wait for ALL workers before returning the first exception."""
     gate = ScatterGate(max_concurrency=3)
     finished = []
     lock = threading.Lock()
@@ -70,9 +76,9 @@ def test_scatter_gate_all_workers_finish_before_reraise():
             entry.deposit(entry.value)
 
     gate.scatter([0, 1, 2], run)
-    with pytest.raises(RuntimeError):
-        gate.gather()
-    # All three workers deposited before gather returned.
+    _, first_exc = gate.gather()
+
+    assert isinstance(first_exc, RuntimeError)
     assert sorted(finished) == [0, 1, 2]
 
 
@@ -113,6 +119,12 @@ def test_pipeline_scatter_gather_empty_list():
     assert pipeline([]) == []
 
 
+def test_pipeline_scatter_gather_omits_short_circuited_items():
+    pipeline = Pipeline([Scatter(max_concurrency=1), DropNull(), Gather()])
+
+    assert pipeline([1, None, 2]) == [1, 2]
+
+
 def test_pipeline_scatter_gather_worker_exception_propagates():
     class _Boom:
         def __call__(self, value: int) -> int:
@@ -123,6 +135,21 @@ def test_pipeline_scatter_gather_worker_exception_propagates():
     pipeline = Pipeline([Scatter(max_concurrency=4), _Boom(), Gather()])
     with pytest.raises(ValueError, match="bad item"):
         pipeline([1, 2, 3, 4])
+
+
+def test_scatter_inspect_preserves_failing_child_trace():
+    class _Boom:
+        def __call__(self, value: int) -> int:
+            if value == 3:
+                raise ValueError("bad item")
+            return value
+
+    result = Pipeline([Scatter(max_concurrency=2), _Boom(), Gather()]).inspect([1, 2, 3, 4])
+
+    assert [span.label for span in result.spans] == ["0:Scatter"]
+    assert result.spans[0].error
+    assert result.spans[0].child_trace is not None
+    assert any(span.label == "1:_Boom" and span.error for span in result.spans[0].child_trace.spans)
 
 
 def test_pipeline_scatter_gather_type_contract():

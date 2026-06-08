@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from .serial_collector import SerialCollector
+from .capture_collector import CaptureCollector
 from ..tracing import InvocationTrace
 
 
-class PrintCollector(SerialCollector):
+class PrintCollector(CaptureCollector):
     """Prints each trace to stdout. Useful for development and debugging.
 
     The last received trace is kept in ``last_trace`` and can be reprinted
@@ -13,10 +13,9 @@ class PrintCollector(SerialCollector):
 
     def __init__(self) -> None:
         super().__init__()
-        self.last_trace: InvocationTrace | None = None
 
     def _collect(self, trace: InvocationTrace) -> None:
-        self.last_trace = trace
+        super()._collect(trace)
         self.print_trace(trace)
 
     def print_trace(self, trace: InvocationTrace | None = None) -> None:

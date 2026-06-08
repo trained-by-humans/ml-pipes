@@ -44,7 +44,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline:
     return Pipeline(
         [
             Resize(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
-            Store("resize_transform", index=1),
+            Store("resize_transform", source=1),
             Pick(0),
             Normalize(),
             Infer(model_path, dtype="float32"),
