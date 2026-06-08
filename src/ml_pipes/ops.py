@@ -1984,24 +1984,48 @@ class Scatter(RegionOpener):
         n_items = len(items)
 
         def run_region(entry: Any) -> None:
-            child_trace = InvocationTrace(batch_size=n_items, workers=gate.max_concurrency) if collecting else _NoOpTrace()
+            child_trace = (
+                InvocationTrace(batch_size=n_items, workers=gate.max_concurrency)
+                if collecting
+                else _NoOpTrace()
+            )
             try:
-                result, child_trace = execute_region(entry.value, child_trace)  # cfg flows via closure in execute_region
+                result, child_trace = execute_region(
+                    entry.value,
+                    child_trace,
+                )  # cfg flows via closure in execute_region
                 entry.deposit(result, child_trace if collecting else None)
             except BaseException as exc:
                 entry.deposit_exception(exc, child_trace if collecting else None)
 
         gate.scatter(items, run_region)
         t_gather = time.perf_counter()
-        try:
-            entries = gate.gather()
-        except BaseException:
-            trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, error=True, operator_type=type(self)))
-            raise
-
+        entries, first_exc = gate.gather()
         child_traces = [e.child_trace for e in entries if e.child_trace is not None]
         child_trace = merge_traces(child_traces) if child_traces else None
-        trace.spans.append(StepSpan(label, t_gather, time.perf_counter() - t_gather, child_trace=child_trace if collecting else None, operator_type=type(self)))
+
+        if first_exc is not None:
+            trace.spans.append(
+                StepSpan(
+                    label,
+                    t_gather,
+                    time.perf_counter() - t_gather,
+                    error=True,
+                    child_trace=child_trace if collecting else None,
+                    operator_type=type(self),
+                )
+            )
+            raise first_exc
+
+        trace.spans.append(
+            StepSpan(
+                label,
+                t_gather,
+                time.perf_counter() - t_gather,
+                child_trace=child_trace if collecting else None,
+                operator_type=type(self),
+            )
+        )
         return [e.result for e in entries if e.result is not SHORT_CIRCUIT]
 
     def resolve_contract(

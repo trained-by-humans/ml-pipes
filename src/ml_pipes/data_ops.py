@@ -569,6 +569,7 @@ class PerItem(RegionOpener):
         emitted = 0
         dropped = 0
         t_region = time.perf_counter()
+        child_trace: InvocationTrace | _NoOpTrace | None = None
 
         try:
             for value in source:
@@ -582,10 +583,14 @@ class PerItem(RegionOpener):
                     child_traces.append(incoming)
                 if result is SHORT_CIRCUIT:
                     dropped += 1
+                    child_trace = None
                     continue
                 emitted += 1
                 results.append(result)
+                child_trace = None
         except Exception:
+            if collecting and child_trace is not None:
+                child_traces.append(cast(InvocationTrace, child_trace))
             merged_trace = _merge_item_traces(child_traces) if child_traces else None
             trace.spans.append(
                 StepSpan(

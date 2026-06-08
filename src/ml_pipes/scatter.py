@@ -37,12 +37,13 @@ class ScatterGate:
     deposited, then collects results in submission order.
 
     Exception handling: if any worker raises, its exception is captured in its
-    entry.  gather() re-raises the first exception seen after all workers finish
-    (others are allowed to complete — no cancellation).
+    entry.  gather() still waits for all workers, then returns both the entries
+    and the first exception seen (others are allowed to complete — no
+    cancellation).
 
     Scatter path:  scatter(items) → submits one task per item to the executor.
     Gather path:   gather()       → blocks until all entries are set, then returns
-                                    list[_ScatterEntry] in submission order (or raises).
+                                    (list[_ScatterEntry], first_exc) in submission order.
     """
 
     def __init__(self, max_concurrency: int) -> None:
@@ -56,7 +57,7 @@ class ScatterGate:
         for entry in entries:
             self._executor.submit(run_region, entry)
 
-    def gather(self) -> list[_ScatterEntry]:
+    def gather(self) -> tuple[list[_ScatterEntry], BaseException | None]:
         entries: list[_ScatterEntry] = self._local.entries
         del self._local.entries
 
@@ -66,7 +67,4 @@ class ScatterGate:
             if entry.exception is not None and first_exc is None:
                 first_exc = entry.exception
 
-        if first_exc is not None:
-            raise first_exc
-
-        return entries
+        return entries, first_exc

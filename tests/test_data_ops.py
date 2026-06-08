@@ -140,6 +140,12 @@ def _multiply_by_ten(value: int) -> int:
     return value * 10
 
 
+def _raise_on_two(value: int) -> int:
+    if value == 2:
+        raise ValueError("bad item")
+    return value
+
+
 def test_map_transforms_current_value() -> None:
     assert Map(lambda value: value * 2)(3) == 6
 
@@ -874,6 +880,29 @@ def test_per_item_trace_reports_dropped_counts_per_operator() -> None:
     assert result.spans[0].child_trace.spans[1].attributes == {
         "dropped": 0,
     }
+
+
+def test_per_item_inspect_preserves_failing_child_trace() -> None:
+    pipeline = Pipeline(
+        [
+            PerItem(),
+            _raise_on_two,
+            _multiply_by_ten,
+            CollectItems(),
+        ]
+    )
+
+    result = pipeline.inspect([1, 2, 3])
+
+    assert [span.label for span in result.spans] == ["0:PerItem"]
+    assert result.spans[0].error
+    assert result.spans[0].attributes == {
+        "seen": 2,
+        "emitted": 1,
+        "dropped": 0,
+    }
+    assert result.spans[0].child_trace is not None
+    assert any(span.label == "1:_raise_on_two" and span.error for span in result.spans[0].child_trace.spans)
 
 
 def test_lazy_per_item_trace_reports_dropped_counts_per_operator() -> None:
