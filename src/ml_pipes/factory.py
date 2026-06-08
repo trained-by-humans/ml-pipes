@@ -7,7 +7,7 @@ from typing import Any, Callable, Generic, TypeVar
 from .core import Pipeline
 
 FactoryOutputT = TypeVar("FactoryOutputT")
-FactoryClassT = TypeVar("FactoryClassT", bound="Factory[Any]")
+FactoryT = TypeVar("FactoryT", bound="Factory[Any]")
 
 # InputFn returns (id, value, tag, metadata).
 # tag and metadata are reserved for future bucketing/annotation features and ignored for now.
@@ -22,45 +22,48 @@ class Factory(Generic[FactoryOutputT]):
         fn: Callable[..., FactoryOutputT],
         *,
         from_config: Callable[[dict], FactoryOutputT],
-        signature_target: Callable | None = None,
+        signature_source: Callable | None = None,
     ) -> None:
         self._fn = fn
         self._from_config = from_config
-        self._signature_target = signature_target
+        self._signature_source = signature_source
         functools.update_wrapper(self, fn)
 
     @classmethod
     def from_callable(
-        cls: type[FactoryClassT],
+        cls: type[FactoryT],
         fn: Callable[..., FactoryOutputT],
-    ) -> FactoryClassT:
+    ) -> FactoryT:
         """Build a ``Factory`` from a plain callable and derive its config adapter."""
         if isinstance(fn, Factory):
             raise TypeError(
                 f"{cls.__name__}.from_callable() expects a plain callable; use {cls.__name__}.ensure_factory()."
             )
-        return cls(fn, from_config=_wrap_as_factory(fn), signature_target=fn)
+        return cls(fn, from_config=_wrap_as_factory(fn), signature_source=fn)
 
     @classmethod
     def ensure_factory(
-        cls: type[FactoryClassT],
+        cls: type[FactoryT],
         fn: Callable[..., FactoryOutputT] | Factory[Any],
-    ) -> FactoryClassT:
+    ) -> FactoryT:
         """Normalize a plain callable or existing compatible factory."""
         if isinstance(fn, cls):
             return fn
         if isinstance(fn, Factory):
             if type(fn) is Factory:
-                return cls(fn._fn, from_config=fn._from_config, signature_target=fn._signature_target)
+                return cls(fn._fn, from_config=fn._from_config, signature_source=fn._signature_source)
             raise TypeError(
                 f"{cls.__name__}.ensure_factory() expects a callable or {cls.__name__}, "
                 f"got {type(fn).__name__}."
             )
         return cls.from_callable(fn)
 
+    def from_config(self, config: dict) -> FactoryOutputT:
+        return self._from_config(config)
+
     def validate_config(self, config: dict, *, name: str = "factory") -> None:
         """Validate a config dict against the wrapped keyword signature."""
-        target = self._signature_target
+        target = self._signature_source
         if target is None:
             return
 
@@ -85,21 +88,18 @@ class Factory(Generic[FactoryOutputT]):
                 f"{name} is missing required config key(s) {missing!r} for config {config!r}"
             )
 
-    def from_config(self, config: dict) -> FactoryOutputT:
-        return self._from_config(config)
-
     def __call__(self, *args, **kwargs) -> FactoryOutputT:
         return self._fn(*args, **kwargs)
 
     @classmethod
-    def _discover(
-        cls: type[FactoryClassT],
+    def _discover_factory(
+        cls: type[FactoryT],
         module: Any,
         explicit_fn: Any,
-    ) -> FactoryClassT | None:
+    ) -> FactoryT | None:
         if explicit_fn is not None:
             return cls.ensure_factory(explicit_fn)
-        return _discover_marked_factory(module, cls)
+        return _discover_factory_in_module(module, cls)
 
 
 class PipelineFactory(Factory[Pipeline]):
@@ -108,7 +108,7 @@ class PipelineFactory(Factory[Pipeline]):
     @classmethod
     def discover(cls, module: Any, explicit_fn: Any = None) -> PipelineFactory | None:
         """Discover the module's pipeline factory, normalized to ``PipelineFactory``."""
-        return cls._discover(module, explicit_fn)
+        return cls._discover_factory(module, explicit_fn)
 
 
 class DataFactory(Factory[InputFn]):
@@ -117,11 +117,11 @@ class DataFactory(Factory[InputFn]):
     @classmethod
     def discover(cls, module: Any, explicit_fn: Any = None) -> DataFactory | None:
         """Discover the module's data factory, normalized to ``DataFactory``."""
-        return cls._discover(module, explicit_fn)
+        return cls._discover_factory(module, explicit_fn)
 
 
 def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:
-    """Mark a function as a pipeline factory for CLI discovery.
+    """Wrap a function as a discoverable pipeline factory.
 
     The decorated value is a ``PipelineFactory``. It preserves the original
     Python call semantics while also exposing ``from_config(config)`` for CLI
@@ -132,7 +132,7 @@ def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:
 
 
 def data_factory(fn: Callable[..., InputFn]) -> DataFactory:
-    """Mark a function as a data factory for CLI discovery.
+    """Wrap a function as a discoverable data factory.
 
     The decorated value is a ``DataFactory``. It preserves the original
     Python call semantics while also exposing ``from_config(config)`` for CLI
@@ -154,10 +154,10 @@ def _wrap_as_factory(
     return wrapper
 
 
-def _discover_marked_factory(
+def _discover_factory_in_module(
     module: Any,
-    factory_type: type[FactoryClassT],
-) -> FactoryClassT | None:
+    factory_type: type[FactoryT],
+) -> FactoryT | None:
     kind = factory_type.__name__.removesuffix("Factory").lower()
     found = [
         (name, fn)

@@ -291,14 +291,14 @@ def test_benchmark_per_operator_spans_present():
 # BenchmarkSweep
 # ---------------------------------------------------------------------------
 
-def _make_pipeline_from_config(**kwargs) -> Pipeline:
+def _make_sweep_pipeline(**_) -> Pipeline:
     return _make_pipeline()
 
 
-def test_matrix_run_produces_correct_count():
+def test_sweep_run_produces_correct_count():
     configs = [{"workers": 1}, {"workers": 2}]
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=configs,
         data_factory=lambda idx: lambda: _static_input(idx),
         data_configs=[{"idx": 0}, {"idx": 1}],
@@ -307,9 +307,9 @@ def test_matrix_run_produces_correct_count():
     assert len(results) == 4  # 2 configs × 2 data configs
 
 
-def test_matrix_result_labels_contain_input_and_config():
+def test_sweep_result_labels_contain_input_and_config():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{"mode": "fast"}],
         data_factory=lambda **_: lambda: _static_input(0),
         data_configs=[{"name": "my_input"}],
@@ -320,9 +320,9 @@ def test_matrix_result_labels_contain_input_and_config():
     assert "fast" in results[0].label
 
 
-def test_matrix_result_labels_data_key_in_label():
+def test_sweep_result_labels_include_data_config():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{}],
         data_factory=lambda idx: lambda: _static_input(idx),
         data_configs=[{"idx": 0}, {"idx": 1}],
@@ -332,19 +332,19 @@ def test_matrix_result_labels_data_key_in_label():
     assert "idx:1" in results[1].label
 
 
-def test_matrix_default_config():
-    matrix = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+def test_sweep_default_measurement():
+    sweep = BenchmarkSweep(
+        factory=_make_sweep_pipeline,
         configs=[{}],
         data_factory=lambda **_: lambda: _static_input(0),
     )
-    assert matrix.measurement is not None
-    assert matrix.measurement.runs == 100
+    assert sweep.measurement is not None
+    assert sweep.measurement.runs == 100
 
 
-def test_matrix_to_table_renders():
+def test_sweep_to_table_renders():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{"a": 1}, {"a": 2}],
         data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
@@ -356,7 +356,7 @@ def test_matrix_to_table_renders():
 
 def test_sweep_to_table_expand_regions_false():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{"a": 1}],
         data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
@@ -365,7 +365,7 @@ def test_sweep_to_table_expand_regions_false():
     assert "total" in table
 
 
-def test_matrix_to_table_empty():
+def test_sweep_to_table_empty():
     assert BenchmarkResult.to_comparison_table([]) == "(no results)"
 
 
@@ -399,9 +399,9 @@ def _make_result_with_percentiles(label: str, percentiles: tuple[float, ...]) ->
     return collector.report(label=label)
 
 
-def test_matrix_metadata_records_config_and_data_config():
+def test_sweep_metadata_records_config_and_data_config():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{"batch": 4}],
         data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
@@ -413,7 +413,7 @@ def test_matrix_metadata_records_config_and_data_config():
 
 def test_sweep_label_prefix_single_result():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{}],
         data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
@@ -424,7 +424,7 @@ def test_sweep_label_prefix_single_result():
 
 def test_sweep_label_prefix_multi_result():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{"a": 1}, {"a": 2}],
         data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
@@ -436,7 +436,7 @@ def test_sweep_label_prefix_multi_result():
 
 def test_sweep_extra_metadata_merged_into_all_results():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{"a": 1}, {"a": 2}],
         data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
@@ -450,7 +450,7 @@ def test_sweep_extra_metadata_merged_into_all_results():
 
 def test_sweep_extra_metadata_does_not_overwrite_pipeline_config():
     results = BenchmarkSweep(
-        factory=_make_pipeline_from_config,
+        factory=_make_sweep_pipeline,
         configs=[{"batch": 4}],
         data_factory=lambda **_: lambda: _static_input(0),
         measurement=MeasurementConfig(runs=3, warmup=1),
@@ -461,19 +461,20 @@ def test_sweep_extra_metadata_does_not_overwrite_pipeline_config():
 
 
 # ---------------------------------------------------------------------------
-# BenchmarkBuilder — axis expansion (was BenchmarkMatrix)
+# BenchmarkBuilder — sweep expansion
 # ---------------------------------------------------------------------------
 
-_FIXED_DATA = lambda **_: lambda: _static_input(0)
+def _fixed_input_factory(**_):
+    return lambda: _static_input(0)
 
 
-def test_matrix_pipeline_configs_cartesian_product():
+def test_builder_pipeline_configs_expand_cartesian_product():
     pipeline_configs = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("a", 1, 2)
         .pipeline_config_axis("b", "x", "y")
         .pipeline_config_axis("c", True)
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         ._resolve_pipeline_configs()
     )
     assert len(pipeline_configs) == 4  # 2 × 2 × 1
@@ -481,9 +482,9 @@ def test_matrix_pipeline_configs_cartesian_product():
     assert {"a": 2, "b": "y", "c": True} in pipeline_configs
 
 
-def test_matrix_run_produces_correct_count():
+def test_builder_sweep_run_produces_correct_count():
     results = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("workers", 1, 2)
         .pipeline_config_axis("mode", "fast", "slow")
         .data_factory(lambda idx: lambda: _static_input(idx))
@@ -494,47 +495,47 @@ def test_matrix_run_produces_correct_count():
     assert len(results) == 8  # (2×2 pipeline) × 2 data configs
 
 
-def test_matrix_single_axis():
+def test_builder_single_axis_sweep():
     results = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("conf", 0.1, 0.5, 0.9)
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .runs(3).warmup(1)
         .run()
     )
     assert len(results) == 3
 
 
-def test_matrix_default_measurement():
+def test_builder_sweep_default_measurement():
     builder = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("a", 1)
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
     )
     m = builder._build_measurement()
     assert m.runs == 100
 
 
-def test_matrix_filter_removes_invalid_combos():
+def test_builder_sweep_filter_removes_invalid_combos():
     pipeline_configs = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("workers", 1, 2, 4)
         .pipeline_config_axis("batch_size", 1, 2, 4)
         .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         ._resolve_pipeline_configs()
     )
     assert all(c["workers"] >= c["batch_size"] for c in pipeline_configs)
     assert len(pipeline_configs) == 6  # (1,1),(2,1),(2,2),(4,1),(4,2),(4,4)
 
 
-def test_matrix_to_plan_shows_all_combos():
+def test_builder_plan_shows_all_combos():
     plan = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("workers", 1, 2)
         .pipeline_config_axis("batch_size", 1, 2)
         .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .plan()
     )
     assert "○" in plan
@@ -544,12 +545,12 @@ def test_matrix_to_plan_shows_all_combos():
     assert "1 filtered" in plan
 
 
-def test_matrix_to_plan_no_filter():
+def test_builder_plan_without_filter_marks_all_active():
     plan = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("a", 1, 2)
         .pipeline_config_axis("b", 1, 2)
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .plan()
     )
     assert "4 active, 0 filtered" in plan
@@ -558,11 +559,11 @@ def test_matrix_to_plan_no_filter():
 
 def test_plan_includes_grid_for_2axes():
     plan = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("workers", 1, 2)
         .pipeline_config_axis("batch_size", 1, 2)
         .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .plan()
     )
     assert "row=workers" in plan
@@ -571,12 +572,12 @@ def test_plan_includes_grid_for_2axes():
 
 def test_plan_includes_grid_for_3axes():
     plan = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("workers", 1, 2)
         .pipeline_config_axis("batch_size", 1, 2)
         .pipeline_config_axis("serialize", True, False)
         .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .plan()
     )
     assert "grp=serialize" in plan
@@ -584,9 +585,9 @@ def test_plan_includes_grid_for_3axes():
 
 def test_plan_single_axis_omits_grid():
     plan = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("a", 1, 2)
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .plan()
     )
     assert "grid:" not in plan
@@ -595,11 +596,11 @@ def test_plan_single_axis_omits_grid():
 
 def test_grid_2axes():
     grid = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("workers", 1, 2)
         .pipeline_config_axis("batch_size", 1, 2)
         .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .grid()
     )
     assert "○" in grid
@@ -610,12 +611,12 @@ def test_grid_2axes():
 
 def test_grid_3axes():
     grid = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("workers", 1, 2)
         .pipeline_config_axis("batch_size", 1, 2)
         .pipeline_config_axis("serialize", True, False)
         .pipeline_config_filter(lambda c: c["workers"] >= c["batch_size"])
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .grid()
     )
     assert "grp=serialize" in grid
@@ -624,29 +625,29 @@ def test_grid_3axes():
 def test_grid_wrong_axes_raises():
     with pytest.raises(ValueError):
         (
-            BenchmarkBuilder.factory(_make_pipeline_from_config)
+            BenchmarkBuilder.factory(_make_sweep_pipeline)
             .pipeline_config_axis("a", 1)
-            .data_factory(_FIXED_DATA)
+            .data_factory(_fixed_input_factory)
             .grid()
         )
 
 
-def test_matrix_filter_none_keeps_all():
+def test_builder_sweep_filter_none_keeps_all():
     pipeline_configs = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("a", 1, 2)
         .pipeline_config_axis("b", 1, 2)
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         ._resolve_pipeline_configs()
     )
     assert len(pipeline_configs) == 4
 
 
-def test_matrix_to_comparison_table_renders():
+def test_builder_sweep_to_comparison_table_renders():
     results = (
-        BenchmarkBuilder.factory(_make_pipeline_from_config)
+        BenchmarkBuilder.factory(_make_sweep_pipeline)
         .pipeline_config_axis("a", 1, 2)
-        .data_factory(_FIXED_DATA)
+        .data_factory(_fixed_input_factory)
         .runs(3).warmup(1)
         .run()
     )
@@ -681,7 +682,7 @@ def test_slug_colon_replaced():
 from ml_pipes.factory import pipeline_factory as _pipeline_factory, data_factory as _data_factory
 
 @_pipeline_factory
-def _make_builder_pipeline(**kwargs) -> Pipeline:
+def _builder_pipeline_factory(**_) -> Pipeline:
     return Pipeline([_AddOne(), _Double()])
 
 
@@ -690,7 +691,7 @@ def _builder_input_fn():
 
 
 @_data_factory
-def _make_builder_data_factory(value: int = 1):
+def _builder_data_factory(value: int = 1):
     """Data factory: accepts a config dict, returns an InputFn."""
     def input_fn():
         return (str(value), 1, None, None)   # always pass int 1 to the pipeline
@@ -702,12 +703,12 @@ def _make_builder_data_factory(value: int = 1):
 def test_builder_pipeline_constructor():
     p = _make_pipeline()
     b = BenchmarkBuilder.pipeline(p)
-    assert b._source is p
+    assert b._pipeline_source is p
 
 
 def test_builder_factory_constructor():
-    b = BenchmarkBuilder.factory(_make_builder_pipeline)
-    assert b._source is _make_builder_pipeline
+    b = BenchmarkBuilder.factory(_builder_pipeline_factory)
+    assert b._pipeline_source is _builder_pipeline_factory
 
 
 def test_builder_factory_constructor_preserves_plain_dict_factory():
@@ -715,9 +716,9 @@ def test_builder_factory_constructor_preserves_plain_dict_factory():
         return _make_pipeline()
 
     b = BenchmarkBuilder.factory(make_pipeline)
-    assert isinstance(b._source, PipelineFactory)
-    assert b._source is not make_pipeline
-    assert isinstance(b._source.from_config({"labels": {"spam": 1}}), Pipeline)
+    assert isinstance(b._pipeline_source, PipelineFactory)
+    assert b._pipeline_source is not make_pipeline
+    assert isinstance(b._pipeline_source.from_config({"labels": {"spam": 1}}), Pipeline)
 
 
 def test_builder_factory_constructor_preserves_plain_keyword_factory():
@@ -725,14 +726,14 @@ def test_builder_factory_constructor_preserves_plain_keyword_factory():
         return _make_pipeline()
 
     b = BenchmarkBuilder.factory(make_pipeline)
-    assert isinstance(b._source, PipelineFactory)
-    assert b._source is not make_pipeline
-    assert isinstance(b._source.from_config({"value": 2}), Pipeline)
+    assert isinstance(b._pipeline_source, PipelineFactory)
+    assert b._pipeline_source is not make_pipeline
+    assert isinstance(b._pipeline_source.from_config({"value": 2}), Pipeline)
 
 
 def test_builder_data_factory_assignment_coerces_decorated_factory():
-    b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(_make_builder_data_factory)
-    assert b._data_factory_fn is _make_builder_data_factory
+    b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(_builder_data_factory)
+    assert b._data_factory is _builder_data_factory
 
 
 def test_builder_data_factory_assignment_preserves_plain_dict_factory():
@@ -740,13 +741,13 @@ def test_builder_data_factory_assignment_preserves_plain_dict_factory():
         return _builder_input_fn
 
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(make_data)
-    assert isinstance(b._data_factory_fn, DataFactory)
-    assert b._data_factory_fn is not make_data
-    assert b._data_factory_fn.from_config({"labels": {"spam": 1}}) is _builder_input_fn
+    assert isinstance(b._data_factory, DataFactory)
+    assert b._data_factory is not make_data
+    assert b._data_factory.from_config({"labels": {"spam": 1}}) is _builder_input_fn
 
 
 def test_builder_resolved_concrete_pipeline_rejects_config_keys():
-    factory = BenchmarkBuilder.pipeline(_make_pipeline())._resolve_factory()
+    factory = BenchmarkBuilder.pipeline(_make_pipeline())._resolve_pipeline_factory()
     with pytest.raises(TypeError, match="unknown config key"):
         factory.validate_config({"workers": 4})
 
@@ -780,6 +781,22 @@ def test_builder_data_inputs_reject_extra_config_keys():
         factory.validate_config({"_label": "first", "value": 1})
 
 
+def test_builder_data_inputs_require_matching_lengths():
+    with pytest.raises(ValueError, match="same number of input functions and labels"):
+        BenchmarkBuilder.pipeline(_make_pipeline()).data_inputs(
+            [_builder_input_fn],
+            ["first", "second"],
+        )
+
+
+def test_builder_data_inputs_require_unique_labels():
+    with pytest.raises(ValueError, match="unique labels"):
+        BenchmarkBuilder.pipeline(_make_pipeline()).data_inputs(
+            [_builder_input_fn, _builder_input_fn],
+            ["first", "first"],
+        )
+
+
 # --- Single run: concrete pipeline + concrete input ---
 
 def test_builder_single_run_returns_one_result():
@@ -806,8 +823,8 @@ def test_builder_single_run_label_applied():
 
 def test_builder_label_applied_with_factory_single_result():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
-        .data_factory(_make_builder_data_factory)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
+        .data_factory(_builder_data_factory)
         .label("factory-run")
         .runs(3).warmup(1)
         .run()
@@ -819,7 +836,7 @@ def test_builder_label_applied_with_factory_single_result():
 def test_builder_label_prefix_on_sweep():
     # with multiple results, label_prefix is prepended to each auto-generated label
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_set([{"x": 1}, {"x": 2}])
         .data_input(_builder_input_fn)
         .label("exp")
@@ -832,7 +849,7 @@ def test_builder_label_prefix_on_sweep():
 
 def test_builder_metadata_applied_to_all_results():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_set([{"x": 1}, {"x": 2}])
         .data_input(_builder_input_fn)
         .metadata({"env": "test", "git_sha": "abc123"})
@@ -848,7 +865,7 @@ def test_builder_metadata_applied_to_all_results():
 def test_builder_metadata_does_not_overwrite_pipeline_config():
     # metadata merges on top; pipeline_config key in auto-metadata is preserved
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(x=1)
         .data_input(_builder_input_fn)
         .metadata({"note": "hi"})
@@ -861,9 +878,9 @@ def test_builder_metadata_does_not_overwrite_pipeline_config():
 
 def test_builder_label_and_metadata_apply_with_data_factory_sweep():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_set([{"x": 1}, {"x": 2}])
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(value=7)
         .label("factory-exp")
         .metadata({"env": "test"})
@@ -882,7 +899,7 @@ def test_builder_label_and_metadata_apply_with_data_factory_sweep():
 
 def test_builder_pipeline_configs_sweep():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_set([{}, {}])
         .data_input(_builder_input_fn)
         .runs(2).warmup(1)
@@ -892,7 +909,7 @@ def test_builder_pipeline_configs_sweep():
 
 
 def test_builder_pipeline_config_builds_dict():
-    b = BenchmarkBuilder.factory(_make_builder_pipeline)
+    b = BenchmarkBuilder.factory(_builder_pipeline_factory)
     b.pipeline_config(workers=4)
     assert b._pipeline_config_dict == {"workers": 4}
 
@@ -902,7 +919,7 @@ def test_builder_pipeline_config_builds_dict():
 def test_builder_data_factory_sweep():
     results = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config_set([{"value": 1}, {"value": 2}])
         .runs(2).warmup(1)
         .run()
@@ -911,7 +928,7 @@ def test_builder_data_factory_sweep():
 
 
 def test_builder_data_config_builds_dict():
-    b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(_make_builder_data_factory)
+    b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(_builder_data_factory)
     b.data_config(value=99)
     assert b._data_config_dict == {"value": 99}
 
@@ -920,9 +937,9 @@ def test_builder_data_config_builds_dict():
 
 def test_builder_pipeline_configs_cross_data_configs():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_set([{}, {}])
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config_set([{"value": 1}, {"value": 2}])
         .runs(2).warmup(1)
         .run()
@@ -930,11 +947,11 @@ def test_builder_pipeline_configs_cross_data_configs():
     assert len(results) == 4  # 2 pipeline configs × 2 data configs
 
 
-# --- Matrix: pipeline axis ---
+# --- Sweep axes: pipeline ---
 
-def test_builder_pipeline_config_axis_uses_matrix():
+def test_builder_pipeline_config_axis_expands_sweep():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_axis("x", 1, 2, 3)
         .data_input(_builder_input_fn)
         .runs(2).warmup(1)
@@ -943,12 +960,12 @@ def test_builder_pipeline_config_axis_uses_matrix():
     assert len(results) == 3
 
 
-# --- Matrix: data axis ---
+# --- Sweep axes: data ---
 
-def test_builder_data_config_axis_uses_matrix():
+def test_builder_data_config_axis_expands_sweep():
     results = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config_axis("value", 10, 20)
         .runs(2).warmup(1)
         .run()
@@ -956,13 +973,13 @@ def test_builder_data_config_axis_uses_matrix():
     assert len(results) == 2
 
 
-# --- Matrix: both axes (pipeline × data) ---
+# --- Sweep axes: pipeline × data ---
 
 def test_builder_both_axes_cross_product():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_axis("x", 1, 2)
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config_axis("value", 10, 20)
         .runs(2).warmup(1)
         .run()
@@ -974,7 +991,7 @@ def test_builder_both_axes_cross_product():
 
 def test_builder_plan_without_axes_lists_configs():
     plan = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(x=1)
         .data_input(_builder_input_fn)
         .plan()
@@ -985,7 +1002,7 @@ def test_builder_plan_without_axes_lists_configs():
 
 def test_builder_plan_returns_string():
     b = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_axis("x", 1, 2, 3)
         .data_input(_builder_input_fn)
     )
@@ -996,7 +1013,7 @@ def test_builder_plan_returns_string():
 
 def test_builder_pipeline_config_filter_drops_configs():
     results = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config_axis("x", 1, 2, 3, 4)
         .pipeline_config_filter(lambda c: c["x"] % 2 == 0)
         .data_input(_builder_input_fn)
@@ -1009,7 +1026,7 @@ def test_builder_pipeline_config_filter_drops_configs():
 def test_builder_data_config_filter_drops_configs():
     results = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config_axis("value", 1, 2, 3, 4)
         .data_config_filter(lambda c: c["value"] % 2 == 0)
         .runs(2).warmup(1)
@@ -1053,7 +1070,7 @@ def test_builder_concrete_pipeline_with_pipeline_config_axis_raises():
 def test_builder_pipeline_configs_and_axis_raises():
     with pytest.raises(ValueError, match="mutually exclusive"):
         (
-            BenchmarkBuilder.factory(_make_builder_pipeline)
+            BenchmarkBuilder.factory(_builder_pipeline_factory)
             .pipeline_config_set([{}])
             .pipeline_config_axis("x", 1)
             .data_input(_builder_input_fn)
@@ -1065,7 +1082,7 @@ def test_builder_data_configs_and_axis_raises():
     with pytest.raises(ValueError, match="mutually exclusive"):
         (
             BenchmarkBuilder.pipeline(_make_pipeline())
-            .data_factory(_make_builder_data_factory)
+            .data_factory(_builder_data_factory)
             .data_config_set([{}])
             .data_config_axis("value", 1)
             .run()
@@ -1077,7 +1094,7 @@ def test_builder_data_input_and_data_factory_raises():
         (
             BenchmarkBuilder.pipeline(_make_pipeline())
             .data_input(_builder_input_fn)
-            .data_factory(_make_builder_data_factory)
+            .data_factory(_builder_data_factory)
             .run()
         )
 
@@ -1130,7 +1147,7 @@ def test_builder_measurement_custom():
 
 def test_pipeline_config_and_pipeline_config_merge_into_single_config():
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(model_path="/model.onnx")
         .pipeline_config(conf_threshold=0.5, slice_wh=(320, 320))
         ._resolve_pipeline_configs()
@@ -1140,7 +1157,7 @@ def test_pipeline_config_and_pipeline_config_merge_into_single_config():
 
 def test_pipeline_config_merges_into_config_set():
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(model_path="/model.onnx")
         .pipeline_config_set([{"slice_wh": (320, 320)}, {"slice_wh": (480, 480)}])
         ._resolve_pipeline_configs()
@@ -1153,7 +1170,7 @@ def test_pipeline_config_merges_into_config_set():
 
 def test_pipeline_config_multi_merges_into_config_set():
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(model_path="/model.onnx", conf_threshold=0.25)
         .pipeline_config_set([{"slice_wh": (320, 320)}, {"slice_wh": (480, 480)}])
         ._resolve_pipeline_configs()
@@ -1166,7 +1183,7 @@ def test_pipeline_config_multi_merges_into_config_set():
 
 def test_pipeline_config_merges_into_axis_expansion():
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(model_path="/model.onnx")
         .pipeline_config_axis("slice_wh", (320, 320), (480, 480))
         ._resolve_pipeline_configs()
@@ -1179,7 +1196,7 @@ def test_pipeline_config_merges_into_axis_expansion():
 
 def test_pipeline_config_multi_merges_into_axis_expansion():
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(model_path="/model.onnx", conf_threshold=0.25)
         .pipeline_config_axis("slice_wh", (320, 320), (480, 480))
         ._resolve_pipeline_configs()
@@ -1193,7 +1210,7 @@ def test_pipeline_config_multi_merges_into_axis_expansion():
 def test_pipeline_config_set_key_overrides_base():
     # per-config entry wins over base when the same key appears in both
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(conf_threshold=0.25)
         .pipeline_config_set([{"conf_threshold": 0.5}, {}])
         ._resolve_pipeline_configs()
@@ -1205,7 +1222,7 @@ def test_pipeline_config_set_key_overrides_base():
 def test_pipeline_axis_value_overrides_base():
     # axis value wins over base when the same key appears in both
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(conf_threshold=0.25)
         .pipeline_config_axis("conf_threshold", 0.1, 0.9)
         ._resolve_pipeline_configs()
@@ -1215,7 +1232,7 @@ def test_pipeline_axis_value_overrides_base():
 
 def test_pipeline_config_multi_present_in_each_axis_config():
     configs = (
-        BenchmarkBuilder.factory(_make_builder_pipeline)
+        BenchmarkBuilder.factory(_builder_pipeline_factory)
         .pipeline_config(model_path="/model.onnx", output_path="/out")
         .pipeline_config_axis("slice_wh", (240, 240), (320, 320), (480, 480))
         ._resolve_pipeline_configs()
@@ -1233,7 +1250,7 @@ def test_pipeline_config_multi_present_in_each_axis_config():
 def test_data_config_and_data_config_merge_into_single_config():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(dataset="coco")
         .data_config(split="val")
         ._resolve_data_configs()
@@ -1244,7 +1261,7 @@ def test_data_config_and_data_config_merge_into_single_config():
 def test_data_config_merges_into_data_config_set():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(dataset="coco")
         .data_config_set([{"image_path": "a.jpg"}, {"image_path": "b.jpg"}])
         ._resolve_data_configs()
@@ -1258,7 +1275,7 @@ def test_data_config_merges_into_data_config_set():
 def test_data_config_multi_merges_into_data_config_set():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(dataset="coco", split="val")
         .data_config_set([{"image_path": "a.jpg"}, {"image_path": "b.jpg"}])
         ._resolve_data_configs()
@@ -1272,7 +1289,7 @@ def test_data_config_multi_merges_into_data_config_set():
 def test_data_config_merges_into_data_axis():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(dataset="coco")
         .data_config_axis("value", 1, 2)
         ._resolve_data_configs()
@@ -1284,7 +1301,7 @@ def test_data_config_merges_into_data_axis():
 def test_data_config_multi_merges_into_data_axis():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(dataset="coco", split="val")
         .data_config_axis("value", 1, 2)
         ._resolve_data_configs()
@@ -1297,7 +1314,7 @@ def test_data_config_multi_merges_into_data_axis():
 def test_data_config_set_key_overrides_base():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(split="val")
         .data_config_set([{"split": "test"}, {}])
         ._resolve_data_configs()
@@ -1309,7 +1326,7 @@ def test_data_config_set_key_overrides_base():
 def test_data_axis_value_overrides_base():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(value=99)
         .data_config_axis("value", 1, 2)
         ._resolve_data_configs()
@@ -1320,7 +1337,7 @@ def test_data_axis_value_overrides_base():
 def test_data_config_multi_present_in_each_axis_config():
     configs = (
         BenchmarkBuilder.pipeline(_make_pipeline())
-        .data_factory(_make_builder_data_factory)
+        .data_factory(_builder_data_factory)
         .data_config(dataset="coco", split="val")
         .data_config_axis("value", 1, 2, 3)
         ._resolve_data_configs()
