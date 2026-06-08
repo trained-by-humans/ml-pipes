@@ -6,9 +6,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
+from .collectors import CaptureCollector
 from .context import Context, ContextOp
 from .control import SHORT_CIRCUIT
-from .inspection import InspectionResult, _CaptureCollector
+from .inspection import InspectionResult
 from .operator import Operator, OperatorDescription
 from .region import RegionCloser, RegionOpener
 from .tracing import (
@@ -118,13 +119,15 @@ class Pipeline:
 
     def inspect(self, value: Any) -> InspectionResult:
         """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
-        collector = _CaptureCollector()
+        collector = CaptureCollector()
         cfg = TracingConfig(collector, capture_shapes=True, _capture_outputs=True, capture_config=True)
         try:
             self._call_with_tracing(value, cfg)
         except Exception:
             pass
-        return InspectionResult(collector.trace.spans)
+        if collector.last_trace is None:
+            return InspectionResult([])
+        return InspectionResult(collector.last_trace.spans)
 
     def __repr__(self) -> str:
         return self._describe().render()

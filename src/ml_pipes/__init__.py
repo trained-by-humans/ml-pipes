@@ -9,7 +9,14 @@ from .benchmark import (
     InvocationStatDiff,
     MeasurementConfig,
 )
-from .collectors import AggregateCollector, ConcurrentCollector, PrintCollector, SerialCollector, ThroughputCollector
+from .collectors import (
+    AggregateCollector,
+    CaptureCollector,
+    ConcurrentCollector,
+    PrintCollector,
+    SerialCollector,
+    ThroughputCollector,
+)
 from .context import Context, Recall, Store
 from .control import SHORT_CIRCUIT
 from .core import Pipeline, PipelineDescription, Embed, embed, Inline, inline, Operator, OperatorLike
@@ -141,6 +148,7 @@ __all__ = [
     "SHORT_CIRCUIT",
     "ArgMax",
     "AggregateCollector",
+    "CaptureCollector",
     "ConcurrentCollector",
     "InvocationTrace",
     "PrintCollector",

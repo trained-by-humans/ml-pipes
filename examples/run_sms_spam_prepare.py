@@ -39,18 +39,17 @@ if __name__ == "__main__" and __package__ is None:
 
 from examples.common import ASSETS_DIR, add_assets_dir_arg
 from ml_pipes import (
+    CaptureCollector,
     CollectItems,
     Distinct,
     Filter,
     InputFn,
-    InvocationTrace,
     LazyPerItem,
     MapValue,
     Pipeline,
     PipelineInspector,
     PerItem,
     StreamItems,
-    TraceCollector,
     WrapMappingInObject,
     data_factory,
     pipeline_factory,
@@ -93,14 +92,6 @@ class SmsSpamLineageReport:
     kept_records: list[dict[str, Any]]
     dropped_records: list[dict[str, Any]]
     duplicate_records: list[dict[str, Any]]
-
-
-class _LastTraceCollector(TraceCollector):
-    def __init__(self) -> None:
-        self.trace: InvocationTrace | None = None
-
-    def on_trace(self, trace: InvocationTrace) -> None:
-        self.trace = trace
 
 
 def _sha256_text(text: str) -> str:
@@ -705,7 +696,7 @@ def prepare_sms_spam_dataset(
     dataset_path = ensure_sms_spam_collection(assets_dir, force_download=force_download)
     raw_rows = read_sms_spam_rows(dataset_path)
 
-    trace_collector = _LastTraceCollector()
+    trace_collector = CaptureCollector()
     pipeline = build_sms_spam_prepare_pipeline(
         min_chars=min_chars,
         min_tokens=min_tokens,
@@ -718,9 +709,9 @@ def prepare_sms_spam_dataset(
     pipeline.set_tracing(trace_collector)
     deduped = _materialize_records(pipeline(raw_rows))
 
-    if trace_collector.trace is None:
+    if trace_collector.last_trace is None:
         raise RuntimeError("SMS spam prepare pipeline did not emit a trace.")
-    raw_count, before_dedupe_count, _ = _read_prepare_counts(trace_collector.trace)
+    raw_count, before_dedupe_count, _ = _read_prepare_counts(trace_collector.last_trace)
     lineage_report = _analyze_sms_spam_lineage(
         raw_rows,
         min_chars=min_chars,

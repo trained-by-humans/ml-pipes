@@ -60,7 +60,7 @@ _IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins_
 _TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)
 _HTML_ORIENTATIONS = ("horizontal", "vertical")
 
-from .tracing import InvocationTrace, StepSpan, TraceCollector, _fmt_batch_size
+from .tracing import InvocationTrace, StepSpan, _fmt_batch_size
 from .tiling import TileRect
 from .types import (
     Detections,
@@ -1320,15 +1320,3 @@ class InspectionResult:
     def load(path: str | Path) -> InspectionResult:
         """Load a serialized result from a file."""
         return InspectionSerializer().load(path)
-
-
-# ---------------------------------------------------------------------------
-# Internal — used by Pipeline.inspect
-# ---------------------------------------------------------------------------
-
-class _CaptureCollector(TraceCollector):
-    def __init__(self) -> None:
-        self.trace: InvocationTrace | None = None
-
-    def on_trace(self, trace: InvocationTrace) -> None:
-        self.trace = trace
