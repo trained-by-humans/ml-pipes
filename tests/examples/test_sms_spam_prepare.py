@@ -10,10 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from examples.run_sms_spam_prepare import (
     SMS_SPAM_MEMBER_NAME,
-    build_sms_spam_prepare_pipeline,
-    build_sms_spam_collection_input,
     prepare_sms_spam_dataset,
     read_sms_spam_rows,
+    sms_spam_collection_input,
+    sms_spam_prepare_pipeline,
     write_prepared_sms_dataset,
 )
 
@@ -42,7 +42,7 @@ def test_sms_spam_collection_input_uses_cached_dataset(tmp_path: Path) -> None:
         ],
     )
 
-    input_fn = build_sms_spam_collection_input(assets_dir=tmp_path)
+    input_fn = sms_spam_collection_input(assets_dir=tmp_path)
     input_id, rows, tag, metadata = input_fn()
 
     assert input_id == "sms-spam-collection"
@@ -56,7 +56,7 @@ def test_sms_spam_collection_input_uses_cached_dataset(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("lazy", [False, True])
 def test_sms_spam_prepare_pipeline_validates(lazy: bool) -> None:
-    pipeline = build_sms_spam_prepare_pipeline(lazy=lazy)
+    pipeline = sms_spam_prepare_pipeline(lazy=lazy)
 
     contract = pipeline.validate()
 
@@ -77,12 +77,11 @@ def test_sms_spam_prepare_pipeline_normalizes_filters_and_dedupes(tmp_path: Path
     )
     rows = read_sms_spam_rows(dataset_path)
 
-    pipeline = build_sms_spam_prepare_pipeline(
+    pipeline = sms_spam_prepare_pipeline(
         min_chars=5,
         min_tokens=2,
         validation_ratio=0.2,
         test_ratio=0.2,
-        dedupe=True,
         lazy=lazy,
     )
     prepared = pipeline(rows)

@@ -435,13 +435,12 @@ def _make_splitter(validation_ratio: float, test_ratio: float):
     return assign_split
 
 
-def build_sms_spam_prepare_pipeline(
-    *,
+@pipeline_factory
+def sms_spam_prepare_pipeline(
     min_chars: int = 5,
     min_tokens: int = 2,
     validation_ratio: float = 0.1,
     test_ratio: float = 0.1,
-    dedupe: bool = True,
     lazy: bool = False,
 ) -> Pipeline:
     if min_chars < 0:
@@ -467,45 +466,12 @@ def build_sms_spam_prepare_pipeline(
         MapValue(_dedupe_key, source="text", target="dedupe_key"),
         MapValue(splitter, source="dedupe_key", target="split"),
         region_close,
+        Distinct(source="dedupe_key"),
     ]
-    if dedupe:
-        operators.append(Distinct(source="dedupe_key"))
 
     pipeline = Pipeline(operators)
     pipeline.validate()
     return pipeline
-
-
-@pipeline_factory
-def sms_spam_prepare_pipeline(
-    min_chars: int = 5,
-    min_tokens: int = 2,
-    validation_ratio: float = 0.1,
-    test_ratio: float = 0.1,
-    lazy: bool = False,
-) -> Pipeline:
-    return build_sms_spam_prepare_pipeline(
-        min_chars=min_chars,
-        min_tokens=min_tokens,
-        validation_ratio=validation_ratio,
-        test_ratio=test_ratio,
-        dedupe=True,
-        lazy=lazy,
-    )
-
-
-def build_sms_spam_collection_input(
-    assets_dir: str | Path = DEFAULT_SMS_SPAM_DIR,
-    *,
-    force_download: bool = False,
-) -> InputFn:
-    dataset_path = ensure_sms_spam_collection(assets_dir, force_download=force_download)
-    rows = read_sms_spam_rows(dataset_path)
-
-    def fn() -> tuple[str, Any, str | None, dict | None]:
-        return ("sms-spam-collection", rows, None, {"dataset_path": str(dataset_path)})
-
-    return fn
 
 
 @data_factory
@@ -513,7 +479,13 @@ def sms_spam_collection_input(
     assets_dir: str | Path = DEFAULT_SMS_SPAM_DIR,
     force_download: int = 0,
 ) -> InputFn:
-    return build_sms_spam_collection_input(assets_dir, force_download=bool(force_download))
+    dataset_path = ensure_sms_spam_collection(assets_dir, force_download=bool(force_download))
+    rows = read_sms_spam_rows(dataset_path)
+
+    def fn() -> tuple[str, Any, str | None, dict | None]:
+        return ("sms-spam-collection", rows, None, {"dataset_path": str(dataset_path)})
+
+    return fn
 
 
 def _serialize_record(record: PreparedSmsExample) -> dict[str, Any]:
@@ -693,16 +665,19 @@ def prepare_sms_spam_dataset(
     test_ratio: float = 0.1,
     lazy: bool = False,
 ) -> tuple[Path, list[PreparedSmsExample], dict[str, Any]]:
-    dataset_path = ensure_sms_spam_collection(assets_dir, force_download=force_download)
-    raw_rows = read_sms_spam_rows(dataset_path)
+    input_fn = sms_spam_collection_input(
+        assets_dir=assets_dir,
+        force_download=int(force_download),
+    )
+    _, raw_rows, _, input_metadata = input_fn()
+    dataset_path = Path(input_metadata["dataset_path"])
 
     trace_collector = CaptureCollector()
-    pipeline = build_sms_spam_prepare_pipeline(
+    pipeline = sms_spam_prepare_pipeline(
         min_chars=min_chars,
         min_tokens=min_tokens,
         validation_ratio=validation_ratio,
         test_ratio=test_ratio,
-        dedupe=True,
         lazy=lazy,
     )
     pipeline_description = repr(pipeline)
@@ -821,16 +796,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     output_dir = args.output_dir or (args.assets_dir / "sms_spam_prepared")
-    pipeline = build_sms_spam_prepare_pipeline(
-        min_chars=args.min_chars,
-        min_tokens=args.min_tokens,
-        validation_ratio=args.validation_ratio,
-        test_ratio=args.test_ratio,
-        dedupe=True,
-        lazy=args.lazy,
-    )
-    pipeline.describe()
-
     dataset_path, _, summary = prepare_sms_spam_dataset(
         assets_dir=args.assets_dir / "sms_spam_collection",
         output_dir=output_dir,
