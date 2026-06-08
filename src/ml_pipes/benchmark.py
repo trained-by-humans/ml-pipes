@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import itertools
 import json
 import re
@@ -14,7 +13,6 @@ from .collectors.concurrent_collector import ConcurrentCollector
 from .core import Pipeline
 from .factory import (
     Factory,
-    _signature_target,
     InputFn,
 )
 from .tracing import InvocationTrace
@@ -484,42 +482,6 @@ class Benchmark:
         return collector.report(label=self._label, metadata=self._metadata)
 
 
-def _validate_factory_config(kind: str, factory: Callable, config: dict) -> None:
-    """Pre-validate config against the factory signature before calling it.
-
-    Runs for ``Factory`` objects that expose a natural keyword signature.
-    Raises TypeError with a precise message rather than parsing the exception
-    after the fact.
-    """
-    fn = _signature_target(factory)
-    if fn is None:
-        return
-    params = inspect.signature(fn).parameters
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
-    if not has_var_keyword:
-        unexpected = [k for k in config if k not in params]
-        if unexpected:
-            raise TypeError(
-                f"{kind} factory got unknown config key(s) {unexpected!r} for config {config!r}"
-            )
-    missing = [
-        name for name, p in params.items()
-        if p.default is inspect.Parameter.empty
-        and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-        and name not in config
-    ]
-    if missing:
-        raise TypeError(
-            f"{kind} factory is missing required config key(s) {missing!r} for config {config!r}"
-        )
-
-
-def _call_factory(factory: PipelineFactory | DataFactory, config: dict):
-    if isinstance(factory, Factory):
-        return factory.from_config(config)
-    return factory(config)
-
-
 @dataclass
 class BenchmarkSweep:
     """Cross-product every pipeline config with every data config and collect all results.
@@ -559,14 +521,16 @@ class BenchmarkSweep:
             self.measurement = MeasurementConfig()
         if self.data_configs is None:
             self.data_configs = [{}]
+        self.factory = Factory.ensure_factory(self.factory)
+        self.data_factory = Factory.ensure_factory(self.data_factory)
 
     def run(self) -> list[BenchmarkResult]:
         is_single = len(self.configs) == 1 and len(self.data_configs) == 1  # type: ignore[arg-type]
         results: list[BenchmarkResult] = []
         for data_config in self.data_configs:  # type: ignore[union-attr]
-            _validate_factory_config("data", self.data_factory, data_config)
+            self.data_factory.validate_config(data_config, name="data factory")
             try:
-                input_fn = _call_factory(self.data_factory, data_config)
+                input_fn = self.data_factory.from_config(data_config)
             except TypeError as exc:
                 raise TypeError(
                     f"data factory rejected config {data_config!r}: {exc}"
@@ -592,9 +556,9 @@ class BenchmarkSweep:
                 metadata: dict = {"pipeline_config": pipeline_config, "data_config": data_config}
                 if self.extra_metadata:
                     metadata.update(self.extra_metadata)
-                _validate_factory_config("pipeline", self.factory, pipeline_config)
+                self.factory.validate_config(pipeline_config, name="pipeline factory")
                 try:
-                    pipeline = _call_factory(self.factory, pipeline_config)
+                    pipeline = self.factory.from_config(pipeline_config)
                 except TypeError as exc:
                     raise TypeError(
                         f"pipeline factory rejected config {pipeline_config!r}: {exc}"
@@ -629,7 +593,7 @@ class BenchmarkBuilder:
     """
 
     def __init__(self, source: Pipeline | PipelineFactory) -> None:
-        self._source = source if isinstance(source, (Pipeline, Factory)) else Factory.from_config_callable(source)
+        self._source = source if isinstance(source, Pipeline) else Factory.ensure_factory(source)
 
         self._data_input_fn: InputFn | None = None
         self._data_factory_fn: DataFactory | None = None
@@ -706,7 +670,7 @@ class BenchmarkBuilder:
 
     def data_factory(self, factory: DataFactory) -> BenchmarkBuilder:
         """Use a data factory callable (enables data config sweep)."""
-        self._data_factory_fn = factory if isinstance(factory, Factory) else Factory.from_config_callable(factory)
+        self._data_factory_fn = Factory.ensure_factory(factory)
         return self
 
     def data_config(self, **kwargs) -> BenchmarkBuilder:
@@ -885,8 +849,8 @@ class BenchmarkBuilder:
     def _resolve_factory(self) -> PipelineFactory:
         if isinstance(self._source, Pipeline):
             _pipeline = self._source
-            return lambda _: _pipeline
-        return self._source
+            return Factory.from_config_callable(lambda _, pipeline=_pipeline: pipeline)
+        return Factory.ensure_factory(self._source)
 
     def _resolve_pipeline_configs(self) -> list[dict]:
         if self._pipeline_axes:
@@ -905,9 +869,9 @@ class BenchmarkBuilder:
     def _resolve_data_factory(self) -> DataFactory:
         if self._data_input_fn is not None:
             _fn = self._data_input_fn
-            return lambda _, fn=_fn: fn
+            return Factory.from_config_callable(lambda _, fn=_fn: fn)
         if self._data_factory_fn is not None:
-            return self._data_factory_fn
+            return Factory.ensure_factory(self._data_factory_fn)
         raise ValueError("no data_input() or data_factory() provided")
 
     def _resolve_data_configs(self) -> list[dict]:

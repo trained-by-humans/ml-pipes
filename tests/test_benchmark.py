@@ -18,8 +18,6 @@ from ml_pipes.benchmark import (
     MeasurementConfig,
 )
 from ml_pipes.factory import (
-    _DATA_FACTORY_ATTR,
-    _PIPELINE_FACTORY_ATTR,
     Factory,
     InputFn,
 )
@@ -718,7 +716,7 @@ def test_builder_factory_constructor_preserves_plain_dict_factory():
     b = BenchmarkBuilder.factory(make_pipeline)
     assert isinstance(b._source, Factory)
     assert b._source is not make_pipeline
-    assert b._source.__wrapped__ is make_pipeline
+    assert isinstance(b._source.from_config({}), Pipeline)
 
 
 def test_builder_data_factory_assignment_coerces_decorated_factory():
@@ -733,7 +731,7 @@ def test_builder_data_factory_assignment_preserves_plain_dict_factory():
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(make_data)
     assert isinstance(b._data_factory_fn, Factory)
     assert b._data_factory_fn is not make_data
-    assert b._data_factory_fn.__wrapped__ is make_data
+    assert b._data_factory_fn.from_config({}) is _builder_input_fn
 
 
 # --- Single run: concrete pipeline + concrete input ---

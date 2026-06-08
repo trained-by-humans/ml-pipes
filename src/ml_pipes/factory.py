@@ -4,6 +4,8 @@ import functools
 import inspect
 from typing import Any, Callable, Generic, TypeVar
 
+from .core import Pipeline
+
 _PIPELINE_FACTORY_ATTR = "_ml_pipes_pipeline_factory"
 _DATA_FACTORY_ATTR = "_ml_pipes_data_factory"
 FactoryOutputT = TypeVar("FactoryOutputT")
@@ -34,46 +36,107 @@ class Factory(Generic[FactoryOutputT]):
     @classmethod
     def from_callable(
         cls,
-        fn: Callable[..., FactoryOutputT] | Factory[FactoryOutputT],
+        fn: Callable[..., FactoryOutputT],
         *,
         attr: str | None = None,
     ) -> Factory[FactoryOutputT]:
-        """Adapt ``fn(**config)`` into the ``Factory`` interface.
-
-        Idempotent for existing ``Factory`` instances.
-        """
+        """Build a ``Factory`` from a keyword-style callable."""
         if isinstance(fn, cls):
-            if attr is not None:
-                setattr(fn, attr, True)
-            return fn
+            raise TypeError("Factory.from_callable() expects a plain callable; use Factory.ensure_factory().")
         return cls(fn, from_config=_wrap_as_factory(fn), attr=attr, signature_target=fn)
 
     @classmethod
     def from_config_callable(
         cls,
-        fn: Callable[[dict], FactoryOutputT] | Factory[FactoryOutputT],
+        fn: Callable[[dict], FactoryOutputT],
         *,
         attr: str | None = None,
     ) -> Factory[FactoryOutputT]:
-        """Adapt ``fn(config_dict)`` into the ``Factory`` interface.
-
-        Idempotent for existing ``Factory`` instances.
-        """
+        """Build a ``Factory`` from a config-dict callable."""
         if isinstance(fn, cls):
-            if attr is not None:
-                setattr(fn, attr, True)
-            return fn
+            raise TypeError(
+                "Factory.from_config_callable() expects a config callable; use Factory.ensure_factory()."
+            )
         return cls(fn, from_config=fn, attr=attr, signature_target=None)
+
+    @classmethod
+    def ensure_factory(
+        cls,
+        fn: Callable[[dict], FactoryOutputT] | Factory[FactoryOutputT],
+    ) -> Factory[FactoryOutputT]:
+        """Normalize a config-dict callable or existing ``Factory`` to ``Factory``."""
+        if isinstance(fn, cls):
+            return fn
+        return cls.from_config_callable(fn)
 
     @property
     def signature_target(self) -> Callable | None:
         return self._signature_target
+
+    def validate_config(self, config: dict, *, name: str = "factory") -> None:
+        """Validate a config dict against the wrapped keyword signature."""
+        target = self.signature_target
+        if target is None:
+            return
+
+        params = inspect.signature(target).parameters
+        has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if not has_var_keyword:
+            unexpected = [k for k in config if k not in params]
+            if unexpected:
+                raise TypeError(
+                    f"{name} got unknown config key(s) {unexpected!r} for config {config!r}"
+                )
+
+        missing = [
+            param_name
+            for param_name, param in params.items()
+            if param.default is inspect.Parameter.empty
+            and param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+            and param_name not in config
+        ]
+        if missing:
+            raise TypeError(
+                f"{name} is missing required config key(s) {missing!r} for config {config!r}"
+            )
 
     def from_config(self, config: dict) -> FactoryOutputT:
         return self._from_config(config)
 
     def __call__(self, *args, **kwargs) -> FactoryOutputT:
         return self._fn(*args, **kwargs)
+
+    @staticmethod
+    def discover_pipeline(module: Any, explicit_fn: Any = None) -> Factory[Pipeline] | None:
+        """Discover the module's pipeline factory, normalized to ``Factory``."""
+        return Factory._discover(module, explicit_fn, attr=_PIPELINE_FACTORY_ATTR, kind="pipeline")
+
+    @staticmethod
+    def discover_data(module: Any, explicit_fn: Any = None) -> Factory[InputFn] | None:
+        """Discover the module's data factory, normalized to ``Factory``."""
+        return Factory._discover(module, explicit_fn, attr=_DATA_FACTORY_ATTR, kind="data")
+
+    @staticmethod
+    def _discover(
+        module: Any,
+        explicit_fn: Any,
+        *,
+        attr: str,
+        kind: str,
+    ) -> Factory[Any] | None:
+        if explicit_fn is not None:
+            if isinstance(explicit_fn, Factory):
+                return explicit_fn
+            if getattr(explicit_fn, attr, False):
+                return Factory.from_callable(explicit_fn, attr=attr)
+            return Factory.from_config_callable(explicit_fn)
+
+        found = _discover_marked_factory(module, attr, kind)
+        if found is None:
+            return None
+        if isinstance(found, Factory):
+            return found
+        return Factory.from_callable(found, attr=attr)
 
 
 def pipeline_factory(fn: Callable) -> Callable:
@@ -107,21 +170,7 @@ def _wrap_as_factory(fn: Callable) -> Callable:
     return wrapper
 
 
-def _signature_target(factory: Callable) -> Callable | None:
-    if isinstance(factory, Factory):
-        return factory.signature_target
-    return getattr(factory, "__wrapped__", None)
-
-
-def discover_factory(module: Any, explicit_fn: Any, attr: str, kind: str) -> Any:
-    """Scan module for a function marked with attr, or return explicit_fn if given.
-
-    Returns None when nothing is found.
-    Raises ValueError when more than one decorated function is present.
-    """
-    if explicit_fn is not None:
-        return explicit_fn
-
+def _discover_marked_factory(module: Any, attr: str, kind: str) -> Any:
     found = [
         (name, fn)
         for name, fn in vars(module).items()
@@ -136,14 +185,3 @@ def discover_factory(module: Any, explicit_fn: Any, attr: str, kind: str) -> Any
         )
 
     return found[0][1] if found else None
-
-
-def validate_factory_config(factory: Callable, config: dict) -> None:
-    """Raise TypeError if config is missing required parameters for factory.
-
-    Inspects the original function behind an adapted factory wrapper.
-    """
-    target = _signature_target(factory)
-    if target is None:
-        return
-    inspect.signature(target).bind(**config)

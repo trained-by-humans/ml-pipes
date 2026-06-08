@@ -6,11 +6,8 @@ import types
 import pytest
 
 from ml_pipes.factory import (
-    _DATA_FACTORY_ATTR,
-    _PIPELINE_FACTORY_ATTR,
     Factory,
     data_factory,
-    discover_factory,
     pipeline_factory,
 )
 from ml_pipes.__main__ import (
@@ -30,23 +27,25 @@ from ml_pipes.__main__ import (
 # Decorator markers
 # ---------------------------------------------------------------------------
 
-def test_pipeline_factory_sets_attribute():
+def test_pipeline_factory_returns_discoverable_factory():
     def my_fn(model_path): pass
     wrapped = pipeline_factory(my_fn)
+    module = _fake_module("_test_pipeline_factory", wrapped=wrapped)
     assert isinstance(wrapped, Factory)
-    assert getattr(wrapped, _PIPELINE_FACTORY_ATTR) is True
     assert wrapped is not my_fn
-    assert wrapped.__wrapped__ is my_fn
+    assert wrapped.__name__ == "my_fn"
+    assert Factory.discover_pipeline(module) is wrapped
     assert wrapped.from_config({"model_path": "x"}) is None
 
 
-def test_data_factory_sets_attribute():
+def test_data_factory_returns_discoverable_factory():
     def my_fn(): pass
     wrapped = data_factory(my_fn)
+    module = _fake_module("_test_data_factory", wrapped=wrapped)
     assert isinstance(wrapped, Factory)
-    assert getattr(wrapped, _DATA_FACTORY_ATTR) is True
     assert wrapped is not my_fn
-    assert wrapped.__wrapped__ is my_fn
+    assert wrapped.__name__ == "my_fn"
+    assert Factory.discover_data(module) is wrapped
     assert wrapped.from_config({}) is None
 
 
@@ -82,28 +81,39 @@ def test_factory_from_callable_wraps_plain_callable_for_config_dict_call():
     assert wrapped.from_config({"x": 10, "y": 20}) == (10, 20)
 
 
-def test_factory_from_callable_is_idempotent():
-    def plain(x=1):
-        return x
-
-    wrapped = Factory.from_callable(plain)
-    assert Factory.from_callable(wrapped) is wrapped
-
-
-def test_factory_from_callable_returns_decorated_factory_entry():
+def test_factory_from_callable_rejects_existing_factory():
     @pipeline_factory
     def decorated(x=1):
         return x
 
-    assert Factory.from_callable(decorated) is decorated
+    with pytest.raises(TypeError, match="ensure_factory"):
+        Factory.from_callable(decorated)
 
 
-def test_factory_from_config_callable_is_idempotent():
+def test_factory_from_config_callable_rejects_existing_factory():
     def plain(config):
         return config["x"]
 
     wrapped = Factory.from_config_callable(plain)
-    assert Factory.from_config_callable(wrapped) is wrapped
+    with pytest.raises(TypeError, match="ensure_factory"):
+        Factory.from_config_callable(wrapped)
+
+
+def test_factory_ensure_factory_wraps_config_callable():
+    def plain(config):
+        return config["x"]
+
+    wrapped = Factory.ensure_factory(plain)
+    assert isinstance(wrapped, Factory)
+    assert wrapped.from_config({"x": 10}) == 10
+
+
+def test_factory_ensure_factory_is_idempotent():
+    @pipeline_factory
+    def decorated(x=1):
+        return x
+
+    assert Factory.ensure_factory(decorated) is decorated
 
 
 def test_decorators_exported_from_init():
@@ -113,6 +123,7 @@ def test_decorators_exported_from_init():
     assert callable(factory_type)
     assert callable(factory_type.from_callable)
     assert callable(factory_type.from_config_callable)
+    assert callable(factory_type.ensure_factory)
 
 
 # ---------------------------------------------------------------------------
@@ -200,35 +211,39 @@ def _fake_module(name: str, **attrs) -> types.ModuleType:
     return m
 
 
-def test_discover_factory_single_found():
+def test_discover_pipeline_factory_single_found():
     @pipeline_factory
     def my_pf(x): pass
     m = _fake_module("_test", my_pf=my_pf, other=lambda: None)
-    result = discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
+    result = Factory.discover_pipeline(m)
     assert result is my_pf
 
 
-def test_discover_factory_multiple_raises():
+def test_discover_pipeline_factory_multiple_raises():
     @pipeline_factory
     def pf1(x): pass
     @pipeline_factory
     def pf2(x): pass
     m = _fake_module("_test2", pf1=pf1, pf2=pf2)
     with pytest.raises(ValueError, match="multiple @pipeline_factory"):
-        discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
+        Factory.discover_pipeline(m)
 
 
-def test_discover_factory_none_when_absent():
+def test_discover_pipeline_factory_none_when_absent():
     m = _fake_module("_test3", other=lambda: None)
-    result = discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
+    result = Factory.discover_pipeline(m)
     assert result is None
 
 
-def test_discover_factory_explicit_bypasses_scan():
-    def explicit(config): pass
+def test_discover_pipeline_factory_explicit_wraps_config_callable():
+    def explicit(config):
+        return (config["x"], config["y"])
+
     m = _fake_module("_test4")
-    result = discover_factory(m, explicit, _PIPELINE_FACTORY_ATTR, "pipeline")
-    assert result is explicit
+    result = Factory.discover_pipeline(m, explicit)
+    assert isinstance(result, Factory)
+    assert result is not explicit
+    assert result.from_config({"x": 1, "y": 2}) == (1, 2)
 
 
 def test_resolve_pipeline_factory_explicit_undecorated_wraps_for_dict_call():
@@ -239,11 +254,11 @@ def test_resolve_pipeline_factory_explicit_undecorated_wraps_for_dict_call():
     assert result({"x": 10, "y": 20}) == (10, 20)
 
 
-def test_discover_factory_explicit_already_decorated_not_double_wrapped():
+def test_discover_pipeline_factory_explicit_already_decorated_not_double_wrapped():
     @pipeline_factory
     def decorated(x=1): pass
     m = _fake_module("_test6")
-    result = discover_factory(m, decorated, _PIPELINE_FACTORY_ATTR, "pipeline")
+    result = Factory.discover_pipeline(m, decorated)
     assert result is decorated
 
 
