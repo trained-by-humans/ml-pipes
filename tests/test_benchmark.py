@@ -17,7 +17,12 @@ from ml_pipes.benchmark import (
     InvocationStatDiff,
     MeasurementConfig,
 )
-from ml_pipes.factory import InputFn, coerce_factory
+from ml_pipes.factory import (
+    _DATA_FACTORY_ATTR,
+    _PIPELINE_FACTORY_ATTR,
+    Factory,
+    InputFn,
+)
 from ml_pipes.tracing import InvocationTrace, StepSpan, TracingConfig
 from ml_pipes.collectors import PrintCollector
 
@@ -703,8 +708,7 @@ def test_builder_pipeline_constructor():
 
 def test_builder_factory_constructor():
     b = BenchmarkBuilder.factory(_make_builder_pipeline)
-    assert b._source is not _make_builder_pipeline
-    assert b._source.__wrapped__ is _make_builder_pipeline
+    assert b._source is _make_builder_pipeline
 
 
 def test_builder_factory_constructor_preserves_plain_dict_factory():
@@ -712,13 +716,14 @@ def test_builder_factory_constructor_preserves_plain_dict_factory():
         return _make_pipeline()
 
     b = BenchmarkBuilder.factory(make_pipeline)
-    assert b._source is make_pipeline
+    assert isinstance(b._source, Factory)
+    assert b._source is not make_pipeline
+    assert b._source.__wrapped__ is make_pipeline
 
 
 def test_builder_data_factory_assignment_coerces_decorated_factory():
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(_make_builder_data_factory)
-    assert b._data_factory_fn is not _make_builder_data_factory
-    assert b._data_factory_fn.__wrapped__ is _make_builder_data_factory
+    assert b._data_factory_fn is _make_builder_data_factory
 
 
 def test_builder_data_factory_assignment_preserves_plain_dict_factory():
@@ -726,7 +731,9 @@ def test_builder_data_factory_assignment_preserves_plain_dict_factory():
         return _builder_input_fn
 
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(make_data)
-    assert b._data_factory_fn is make_data
+    assert isinstance(b._data_factory_fn, Factory)
+    assert b._data_factory_fn is not make_data
+    assert b._data_factory_fn.__wrapped__ is make_data
 
 
 # --- Single run: concrete pipeline + concrete input ---
@@ -1301,7 +1308,7 @@ def _strict_data_factory(value: int) -> InputFn:
 
 def test_pipeline_factory_bad_config_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=coerce_factory(_strict_pipeline_factory),
+        factory=_strict_pipeline_factory,
         configs=[{"unknown_param": 1}],
         data_factory=lambda _: _static_input,
     )
@@ -1311,7 +1318,7 @@ def test_pipeline_factory_bad_config_raises_with_context():
 
 def test_pipeline_factory_missing_required_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=coerce_factory(_strict_pipeline_factory),
+        factory=_strict_pipeline_factory,
         configs=[{}],
         data_factory=lambda _: _static_input,
     )
@@ -1323,7 +1330,7 @@ def test_data_factory_bad_config_raises_with_context():
     sweep = BenchmarkSweep(
         factory=lambda _: _make_pipeline(),
         configs=[{}],
-        data_factory=coerce_factory(_strict_data_factory),
+        data_factory=_strict_data_factory,
         data_configs=[{"unknown_param": 1}],
     )
     with pytest.raises(TypeError, match="data factory got unknown config key.*unknown_param"):
@@ -1334,7 +1341,7 @@ def test_data_factory_missing_required_raises_with_context():
     sweep = BenchmarkSweep(
         factory=lambda _: _make_pipeline(),
         configs=[{}],
-        data_factory=coerce_factory(_strict_data_factory),
+        data_factory=_strict_data_factory,
         data_configs=[{}],
     )
     with pytest.raises(TypeError, match="data factory is missing required config key.*value"):

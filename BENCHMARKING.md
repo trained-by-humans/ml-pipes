@@ -220,7 +220,7 @@ BenchmarkBuilder.factory(my_pipeline)
 
 If you already have a keyword-style constructor and want the same config-dict
 entrypoint without decorating it, adapt it explicitly with
-`ml_pipes.factory.coerce_factory(...)`.
+`Factory.from_callable(...)`.
 
 With `@pipeline_factory`, the function uses a natural keyword signature and
 dict unpacking is handled automatically. Parameters without defaults are
@@ -234,8 +234,9 @@ def my_pipeline(model_path: Path, conf_threshold: float = 0.25) -> Pipeline:
 BenchmarkBuilder.factory(my_pipeline)
 ```
 
-The decorator only marks the function for discovery and config adaptation; you
-can still call `my_pipeline(...)` directly in normal Python code.
+The decorator returns a `Factory` object. It still behaves like the original
+callable for normal Python calls, and it also exposes `from_config(...)` for
+discovery and config-driven execution.
 
 Unknown config keys, missing required parameters, and wrong return types all
 produce descriptive errors that name the offending key and config:
@@ -314,7 +315,7 @@ BenchmarkBuilder.factory(my_pipeline).data_factory(my_data)
 ```
 
 The same explicit adaptation option exists for data factories via
-`ml_pipes.factory.coerce_factory(...)`.
+`Factory.from_callable(...)`.
 
 With `@data_factory`, the function uses a natural keyword signature:
 
@@ -328,8 +329,9 @@ def my_data(image_path: Path) -> InputFn:
 BenchmarkBuilder.factory(my_pipeline).data_factory(my_data)
 ```
 
-As with `@pipeline_factory`, the decorator does not replace normal Python call
-semantics; direct calls still use the original function signature.
+As with `@pipeline_factory`, the decorator returns a `Factory` object that
+preserves normal Python call semantics while exposing `from_config(...)` for
+config-driven use.
 
 The same error feedback applies as for the pipeline factory.
 

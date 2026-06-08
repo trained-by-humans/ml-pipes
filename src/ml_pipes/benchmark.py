@@ -13,16 +13,14 @@ import numpy as np
 from .collectors.concurrent_collector import ConcurrentCollector
 from .core import Pipeline
 from .factory import (
-    _DATA_FACTORY_ATTR,
-    _PIPELINE_FACTORY_ATTR,
-    coerce_factory,
+    Factory,
     _signature_target,
     InputFn,
 )
 from .tracing import InvocationTrace
 
-PipelineFactory: TypeAlias = Callable[[dict], Pipeline]
-DataFactory: TypeAlias = Callable[[dict], InputFn]
+PipelineFactory: TypeAlias = Factory[Pipeline] | Callable[[dict], Pipeline]
+DataFactory: TypeAlias = Factory[InputFn] | Callable[[dict], InputFn]
 ConfigFilter: TypeAlias = Callable[[dict], bool]
 
 
@@ -489,9 +487,9 @@ class Benchmark:
 def _validate_factory_config(kind: str, factory: Callable, config: dict) -> None:
     """Pre-validate config against the factory signature before calling it.
 
-    Runs for adapted factory wrappers such as ``coerce_factory(...)``. Raises
-    TypeError with a precise message rather than parsing the exception after
-    the fact.
+    Runs for ``Factory`` objects that expose a natural keyword signature.
+    Raises TypeError with a precise message rather than parsing the exception
+    after the fact.
     """
     fn = _signature_target(factory)
     if fn is None:
@@ -516,13 +514,18 @@ def _validate_factory_config(kind: str, factory: Callable, config: dict) -> None
         )
 
 
+def _call_factory(factory: PipelineFactory | DataFactory, config: dict):
+    if isinstance(factory, Factory):
+        return factory.from_config(config)
+    return factory(config)
+
+
 @dataclass
 class BenchmarkSweep:
     """Cross-product every pipeline config with every data config and collect all results.
 
-    Expects ``factory(config_dict)`` and ``data_factory(config_dict)`` callables.
-    To use a natural keyword-signature function, adapt it first with
-    ``coerce_factory(...)`` or pass it through ``BenchmarkBuilder``.
+    Expects either ``Factory`` objects or ``factory(config_dict)`` /
+    ``data_factory(config_dict)`` callables.
 
     Calls ``data_factory(data_config)`` fresh for each cell::
 
@@ -563,7 +566,7 @@ class BenchmarkSweep:
         for data_config in self.data_configs:  # type: ignore[union-attr]
             _validate_factory_config("data", self.data_factory, data_config)
             try:
-                input_fn = self.data_factory(data_config)
+                input_fn = _call_factory(self.data_factory, data_config)
             except TypeError as exc:
                 raise TypeError(
                     f"data factory rejected config {data_config!r}: {exc}"
@@ -591,7 +594,7 @@ class BenchmarkSweep:
                     metadata.update(self.extra_metadata)
                 _validate_factory_config("pipeline", self.factory, pipeline_config)
                 try:
-                    pipeline = self.factory(pipeline_config)
+                    pipeline = _call_factory(self.factory, pipeline_config)
                 except TypeError as exc:
                     raise TypeError(
                         f"pipeline factory rejected config {pipeline_config!r}: {exc}"
@@ -626,11 +629,7 @@ class BenchmarkBuilder:
     """
 
     def __init__(self, source: Pipeline | PipelineFactory) -> None:
-        self._source = (
-            coerce_factory(source)
-            if callable(source) and getattr(source, _PIPELINE_FACTORY_ATTR, False)
-            else source
-        )
+        self._source = source if isinstance(source, (Pipeline, Factory)) else Factory.from_config_callable(source)
 
         self._data_input_fn: InputFn | None = None
         self._data_factory_fn: DataFactory | None = None
@@ -707,11 +706,7 @@ class BenchmarkBuilder:
 
     def data_factory(self, factory: DataFactory) -> BenchmarkBuilder:
         """Use a data factory callable (enables data config sweep)."""
-        self._data_factory_fn = (
-            coerce_factory(factory)
-            if getattr(factory, _DATA_FACTORY_ATTR, False)
-            else factory
-        )
+        self._data_factory_fn = factory if isinstance(factory, Factory) else Factory.from_config_callable(factory)
         return self
 
     def data_config(self, **kwargs) -> BenchmarkBuilder:

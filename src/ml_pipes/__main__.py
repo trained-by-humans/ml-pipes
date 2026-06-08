@@ -14,7 +14,7 @@ from ml_pipes.benchmark import (
 from ml_pipes.factory import (
     _DATA_FACTORY_ATTR,
     _PIPELINE_FACTORY_ATTR,
-    coerce_factory,
+    Factory,
     InputFn,
     discover_factory,
     validate_factory_config,
@@ -73,7 +73,9 @@ def _resolve_pipeline_factory(module: Any, explicit_fn: Any, ref: str):
             f"Decorate exactly one function with @pipeline_factory, "
             f"or use 'module:fn_name' syntax."
         )
-    return coerce_factory(fn)
+    if isinstance(fn, Factory):
+        return fn
+    return Factory.from_config_callable(fn)
 
 
 def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
@@ -89,7 +91,9 @@ def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
                 f"no @data_factory found in {data_ref!r}. "
                 f"Decorate a function with @data_factory or use 'module:fn_name' syntax."
             )
-        return coerce_factory(data_fn)
+        if isinstance(data_fn, Factory):
+            return data_fn
+        return Factory.from_config_callable(data_fn)
 
     try:
         data_fn = discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
@@ -97,7 +101,9 @@ def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
         raise CLIError(str(exc)) from exc
     if data_fn is None:
         return None
-    return coerce_factory(data_fn)
+    if isinstance(data_fn, Factory):
+        return data_fn
+    return Factory.from_config_callable(data_fn)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +119,7 @@ def _resolve_inputs(
     data_fn = _resolve_data_factory(data_ref, pipeline_module)
 
     if data_fn is not None:
-        input_fn = data_fn(data_config)
+        input_fn = data_fn.from_config(data_config)
         return [input_fn], [getattr(data_fn, "__wrapped__", data_fn).__name__]
 
     if not input_paths:
@@ -243,7 +249,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         validate_factory_config(factory, pipeline_config)
     except TypeError as exc:
         raise CLIError(f"missing required argument for config {pipeline_config}: {exc}") from exc
-    pipeline = factory(pipeline_config)
+    pipeline = factory.from_config(pipeline_config)
     for input_fn in input_fns:
         _, value, _, _ = input_fn()
         pipeline(value)

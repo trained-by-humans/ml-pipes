@@ -2,39 +2,101 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable
+from typing import Any, Callable, Generic, TypeVar
 
 _PIPELINE_FACTORY_ATTR = "_ml_pipes_pipeline_factory"
 _DATA_FACTORY_ATTR = "_ml_pipes_data_factory"
-_FACTORY_ADAPTER_ATTR = "_ml_pipes_factory_adapter"
+FactoryOutputT = TypeVar("FactoryOutputT")
 
 # InputFn returns (id, value, tag, metadata).
 # tag and metadata are reserved for future bucketing/annotation features and ignored for now.
 InputFn = Callable[[], tuple[str, Any, str | None, dict | None]]
 
 
+class Factory(Generic[FactoryOutputT]):
+    """Callable wrapper with a public config-driven factory entrypoint."""
+
+    def __init__(
+        self,
+        fn: Callable[..., FactoryOutputT],
+        *,
+        from_config: Callable[[dict], FactoryOutputT],
+        attr: str | None = None,
+        signature_target: Callable | None = None,
+    ) -> None:
+        self._fn = fn
+        self._from_config = from_config
+        self._signature_target = signature_target
+        functools.update_wrapper(self, fn)
+        if attr is not None:
+            setattr(self, attr, True)
+
+    @classmethod
+    def from_callable(
+        cls,
+        fn: Callable[..., FactoryOutputT] | Factory[FactoryOutputT],
+        *,
+        attr: str | None = None,
+    ) -> Factory[FactoryOutputT]:
+        """Adapt ``fn(**config)`` into the ``Factory`` interface.
+
+        Idempotent for existing ``Factory`` instances.
+        """
+        if isinstance(fn, cls):
+            if attr is not None:
+                setattr(fn, attr, True)
+            return fn
+        return cls(fn, from_config=_wrap_as_factory(fn), attr=attr, signature_target=fn)
+
+    @classmethod
+    def from_config_callable(
+        cls,
+        fn: Callable[[dict], FactoryOutputT] | Factory[FactoryOutputT],
+        *,
+        attr: str | None = None,
+    ) -> Factory[FactoryOutputT]:
+        """Adapt ``fn(config_dict)`` into the ``Factory`` interface.
+
+        Idempotent for existing ``Factory`` instances.
+        """
+        if isinstance(fn, cls):
+            if attr is not None:
+                setattr(fn, attr, True)
+            return fn
+        return cls(fn, from_config=fn, attr=attr, signature_target=None)
+
+    @property
+    def signature_target(self) -> Callable | None:
+        return self._signature_target
+
+    def from_config(self, config: dict) -> FactoryOutputT:
+        return self._from_config(config)
+
+    def __call__(self, *args, **kwargs) -> FactoryOutputT:
+        return self._fn(*args, **kwargs)
+
+
 def pipeline_factory(fn: Callable) -> Callable:
     """Mark a function as a pipeline factory for CLI discovery.
 
-    The decorated function keeps its original Python call semantics. CLI and
-    benchmark helpers adapt it to ``factory(config_dict)`` and unpack to
-    ``fn(**config)``. Any parameter without a default must be supplied through
-    ``--arg``, ``--config``, or ``--axis``.
+    The decorated value is a ``Factory`` object. It preserves the original
+    Python call semantics while also exposing ``from_config(config)`` for CLI
+    and benchmark helpers. Any parameter without a default must be supplied
+    through ``--arg``, ``--config``, or ``--axis``.
     """
-    setattr(fn, _PIPELINE_FACTORY_ATTR, True)
-    return fn
+    return Factory.from_callable(fn, attr=_PIPELINE_FACTORY_ATTR)
 
 
 def data_factory(fn: Callable) -> Callable:
     """Mark a function as a data factory for CLI discovery.
 
-    The decorated function keeps its original Python call semantics. CLI and
-    benchmark helpers adapt it to config-dict invocation. It must return an
-    ``InputFn`` — a zero-argument callable yielding ``(id: str, value: Any,
-    tag: str | None, metadata: dict | None)``.
+    The decorated value is a ``Factory`` object. It preserves the original
+    Python call semantics while also exposing ``from_config(config)`` for CLI
+    and benchmark helpers. It must return an ``InputFn`` — a zero-argument
+    callable yielding ``(id: str, value: Any, tag: str | None,
+    metadata: dict | None)``.
     """
-    setattr(fn, _DATA_FACTORY_ATTR, True)
-    return fn
+    return Factory.from_callable(fn, attr=_DATA_FACTORY_ATTR)
 
 
 def _wrap_as_factory(fn: Callable) -> Callable:
@@ -42,21 +104,12 @@ def _wrap_as_factory(fn: Callable) -> Callable:
     @functools.wraps(fn)
     def wrapper(config: dict) -> Any:
         return fn(**config)
-    setattr(wrapper, _FACTORY_ADAPTER_ATTR, True)
     return wrapper
 
 
-def coerce_factory(fn: Callable) -> Callable:
-    """Adapt any callable to ``factory(config_dict)`` form via ``fn(**config)``.
-
-    Idempotent: passing an already adapted factory returns it unchanged.
-    """
-    if getattr(fn, _FACTORY_ADAPTER_ATTR, False):
-        return fn
-    return _wrap_as_factory(fn)
-
-
 def _signature_target(factory: Callable) -> Callable | None:
+    if isinstance(factory, Factory):
+        return factory.signature_target
     return getattr(factory, "__wrapped__", None)
 
 

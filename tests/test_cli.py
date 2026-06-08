@@ -8,7 +8,7 @@ import pytest
 from ml_pipes.factory import (
     _DATA_FACTORY_ATTR,
     _PIPELINE_FACTORY_ATTR,
-    coerce_factory,
+    Factory,
     data_factory,
     discover_factory,
     pipeline_factory,
@@ -33,15 +33,21 @@ from ml_pipes.__main__ import (
 def test_pipeline_factory_sets_attribute():
     def my_fn(model_path): pass
     wrapped = pipeline_factory(my_fn)
+    assert isinstance(wrapped, Factory)
     assert getattr(wrapped, _PIPELINE_FACTORY_ATTR) is True
-    assert wrapped is my_fn
+    assert wrapped is not my_fn
+    assert wrapped.__wrapped__ is my_fn
+    assert wrapped.from_config({"model_path": "x"}) is None
 
 
 def test_data_factory_sets_attribute():
     def my_fn(): pass
     wrapped = data_factory(my_fn)
+    assert isinstance(wrapped, Factory)
     assert getattr(wrapped, _DATA_FACTORY_ATTR) is True
-    assert wrapped is my_fn
+    assert wrapped is not my_fn
+    assert wrapped.__wrapped__ is my_fn
+    assert wrapped.from_config({}) is None
 
 
 def test_pipeline_factory_preserves_name():
@@ -66,26 +72,47 @@ def test_data_factory_preserves_direct_call():
     assert original(2) == 3
 
 
-def test_coerce_factory_wraps_plain_callable_for_config_dict_call():
+def test_factory_from_callable_wraps_plain_callable_for_config_dict_call():
     def plain(x=1, y=2):
         return (x, y)
 
-    wrapped = coerce_factory(plain)
-    assert wrapped({"x": 10, "y": 20}) == (10, 20)
+    wrapped = Factory.from_callable(plain)
+    assert isinstance(wrapped, Factory)
+    assert wrapped(x=10, y=20) == (10, 20)
+    assert wrapped.from_config({"x": 10, "y": 20}) == (10, 20)
 
 
-def test_coerce_factory_is_idempotent():
+def test_factory_from_callable_is_idempotent():
     def plain(x=1):
         return x
 
-    wrapped = coerce_factory(plain)
-    assert coerce_factory(wrapped) is wrapped
+    wrapped = Factory.from_callable(plain)
+    assert Factory.from_callable(wrapped) is wrapped
+
+
+def test_factory_from_callable_returns_decorated_factory_entry():
+    @pipeline_factory
+    def decorated(x=1):
+        return x
+
+    assert Factory.from_callable(decorated) is decorated
+
+
+def test_factory_from_config_callable_is_idempotent():
+    def plain(config):
+        return config["x"]
+
+    wrapped = Factory.from_config_callable(plain)
+    assert Factory.from_config_callable(wrapped) is wrapped
 
 
 def test_decorators_exported_from_init():
-    from ml_pipes import pipeline_factory as pf, data_factory as df
+    from ml_pipes import Factory as factory_type, pipeline_factory as pf, data_factory as df
     assert callable(pf)
     assert callable(df)
+    assert callable(factory_type)
+    assert callable(factory_type.from_callable)
+    assert callable(factory_type.from_config_callable)
 
 
 # ---------------------------------------------------------------------------
@@ -205,9 +232,10 @@ def test_discover_factory_explicit_bypasses_scan():
 
 
 def test_resolve_pipeline_factory_explicit_undecorated_wraps_for_dict_call():
-    def plain(x=1, y=2): return (x, y)
+    def plain(config): return (config["x"], config["y"])
     m = _fake_module("_test5")
     result = _resolve_pipeline_factory(m, plain, "_test5:plain")
+    assert isinstance(result, Factory)
     assert result({"x": 10, "y": 20}) == (10, 20)
 
 
