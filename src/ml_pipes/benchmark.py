@@ -538,18 +538,7 @@ class BenchmarkSweep:
         is_single = len(self.configs) == 1 and len(data_configs) == 1
         results: list[BenchmarkResult] = []
         for data_config in data_configs:
-            self.data_factory.validate_config(data_config, name="data factory")
-            try:
-                input_fn = self.data_factory.from_config(data_config)
-            except TypeError as exc:
-                raise TypeError(
-                    f"data factory rejected config {data_config!r}: {exc}"
-                ) from exc
-            if not callable(input_fn):
-                raise TypeError(
-                    f"data factory must return a callable InputFn, got {type(input_fn).__name__!r} "
-                    f"for config {data_config!r}"
-                )
+            input_fn = self.data_factory.from_config(data_config)
             data_label = _format_config_label(data_config, default="input")
             for pipeline_config in self.configs:
                 pipeline_label = _format_config_label(pipeline_config, default="")
@@ -561,18 +550,7 @@ class BenchmarkSweep:
                 metadata: dict = {"pipeline_config": pipeline_config, "data_config": data_config}
                 if self.extra_metadata:
                     metadata.update(self.extra_metadata)
-                self.factory.validate_config(pipeline_config, name="pipeline factory")
-                try:
-                    pipeline = self.factory.from_config(pipeline_config)
-                except TypeError as exc:
-                    raise TypeError(
-                        f"pipeline factory rejected config {pipeline_config!r}: {exc}"
-                    ) from exc
-                if not isinstance(pipeline, Pipeline):
-                    raise TypeError(
-                        f"pipeline factory must return a Pipeline, got {type(pipeline).__name__!r} "
-                        f"for config {pipeline_config!r}"
-                    )
+                pipeline = self.factory.from_config(pipeline_config)
                 result = Benchmark(
                     pipeline=pipeline,
                     input_fn=input_fn,

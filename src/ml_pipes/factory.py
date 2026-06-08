@@ -17,6 +17,8 @@ InputFn = Callable[[], tuple[str, Any, str | None, dict | None]]
 class Factory(Generic[FactoryOutputT]):
     """Callable wrapper with a public config-driven factory entrypoint."""
 
+    _factory_name = "factory"
+
     def __init__(
         self,
         fn: Callable[..., FactoryOutputT],
@@ -59,7 +61,8 @@ class Factory(Generic[FactoryOutputT]):
         return cls.from_callable(fn)
 
     def from_config(self, config: dict) -> FactoryOutputT:
-        return self._from_config(config)
+        self.validate_config(config, name=self._factory_name)
+        return self._validate_output(self._from_config(config), config=config)
 
     def validate_config(self, config: dict, *, name: str = "factory") -> None:
         """Validate a config dict against the wrapped keyword signature."""
@@ -89,7 +92,15 @@ class Factory(Generic[FactoryOutputT]):
             )
 
     def __call__(self, *args, **kwargs) -> FactoryOutputT:
-        return self._fn(*args, **kwargs)
+        return self._validate_output(self._fn(*args, **kwargs))
+
+    def _validate_output(
+        self,
+        output: FactoryOutputT,
+        *,
+        config: dict | None = None,
+    ) -> FactoryOutputT:
+        return output
 
     @classmethod
     def _discover_factory(
@@ -105,19 +116,52 @@ class Factory(Generic[FactoryOutputT]):
 class PipelineFactory(Factory[Pipeline]):
     """Factory subtype for pipeline-producing callables."""
 
+    _factory_name = "pipeline factory"
+
     @classmethod
     def discover(cls, module: Any, explicit_fn: Any = None) -> PipelineFactory | None:
         """Discover the module's pipeline factory, normalized to ``PipelineFactory``."""
         return cls._discover_factory(module, explicit_fn)
 
+    def _validate_output(
+        self,
+        output: Any,
+        *,
+        config: dict | None = None,
+    ) -> Pipeline:
+        if isinstance(output, Pipeline):
+            return output
+
+        config_suffix = f" for config {config!r}" if config is not None else ""
+        raise TypeError(
+            f"{self._factory_name} must return a Pipeline, got {type(output).__name__!r}{config_suffix}"
+        )
+
 
 class DataFactory(Factory[InputFn]):
     """Factory subtype for input-producing callables."""
+
+    _factory_name = "data factory"
 
     @classmethod
     def discover(cls, module: Any, explicit_fn: Any = None) -> DataFactory | None:
         """Discover the module's data factory, normalized to ``DataFactory``."""
         return cls._discover_factory(module, explicit_fn)
+
+    def _validate_output(
+        self,
+        output: Any,
+        *,
+        config: dict | None = None,
+    ) -> InputFn:
+        if callable(output):
+            return output
+
+        config_suffix = f" for config {config!r}" if config is not None else ""
+        raise TypeError(
+            f"{self._factory_name} must return a callable InputFn, "
+            f"got {type(output).__name__!r}{config_suffix}"
+        )
 
 
 def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:

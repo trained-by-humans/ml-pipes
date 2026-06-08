@@ -4,6 +4,7 @@ import types
 
 import pytest
 
+from ml_pipes import Pipeline
 from ml_pipes.factory import (
     DataFactory,
     Factory,
@@ -25,7 +26,8 @@ def _fake_module(name: str, **attrs) -> types.ModuleType:
 # ---------------------------------------------------------------------------
 
 def test_pipeline_factory_returns_discoverable_factory():
-    def my_fn(model_path): pass
+    def my_fn(model_path):
+        return Pipeline([])
 
     wrapped = pipeline_factory(my_fn)
     module = _fake_module("_test_pipeline_factory", wrapped=wrapped)
@@ -33,11 +35,12 @@ def test_pipeline_factory_returns_discoverable_factory():
     assert wrapped is not my_fn
     assert wrapped.__name__ == "my_fn"
     assert PipelineFactory.discover(module) is wrapped
-    assert wrapped.from_config({"model_path": "x"}) is None
+    assert isinstance(wrapped.from_config({"model_path": "x"}), Pipeline)
 
 
 def test_data_factory_returns_discoverable_factory():
-    def my_fn(): pass
+    def my_fn():
+        return lambda: ("id", "value", None, None)
 
     wrapped = data_factory(my_fn)
     module = _fake_module("_test_data_factory", wrapped=wrapped)
@@ -45,7 +48,7 @@ def test_data_factory_returns_discoverable_factory():
     assert wrapped is not my_fn
     assert wrapped.__name__ == "my_fn"
     assert DataFactory.discover(module) is wrapped
-    assert wrapped.from_config({}) is None
+    assert callable(wrapped.from_config({}))
 
 
 def test_pipeline_factory_preserves_name():
@@ -56,19 +59,27 @@ def test_pipeline_factory_preserves_name():
 
 
 def test_pipeline_factory_preserves_direct_call():
+    seen = {}
+
     @pipeline_factory
     def original(x):
-        return x + 1
+        seen["x"] = x
+        return Pipeline([])
 
-    assert original(2) == 3
+    assert isinstance(original(2), Pipeline)
+    assert seen["x"] == 2
 
 
 def test_data_factory_preserves_direct_call():
+    seen = {}
+
     @data_factory
     def original(x):
-        return x + 1
+        seen["x"] = x
+        return lambda: ("id", x + 1, None, None)
 
-    assert original(2) == 3
+    assert callable(original(2))
+    assert seen["x"] == 2
 
 
 def test_factory_from_callable_wraps_plain_callable_for_config_dict_call():
@@ -130,19 +141,55 @@ def test_factory_ensure_factory_wraps_plain_callable():
 def test_factory_ensure_factory_is_idempotent():
     @pipeline_factory
     def decorated(x=1):
-        return x
+        return Pipeline([])
 
     assert Factory.ensure_factory(decorated) is decorated
 
 
 def test_pipeline_factory_ensure_factory_promotes_base_factory():
     def plain(value=1):
-        return value
+        return Pipeline([])
 
     wrapped = Factory.from_callable(plain)
     promoted = PipelineFactory.ensure_factory(wrapped)
     assert isinstance(promoted, PipelineFactory)
-    assert promoted.from_config({"value": 10}) == 10
+    assert isinstance(promoted.from_config({"value": 10}), Pipeline)
+
+
+def test_pipeline_factory_from_config_validates_config():
+    @pipeline_factory
+    def build_pipeline(workers: int) -> Pipeline:
+        return Pipeline([])
+
+    with pytest.raises(TypeError, match="pipeline factory is missing required config key.*workers"):
+        build_pipeline.from_config({})
+
+
+def test_data_factory_from_config_validates_config():
+    @data_factory
+    def build_data(value: int):
+        return lambda: ("id", value, None, None)
+
+    with pytest.raises(TypeError, match="data factory is missing required config key.*value"):
+        build_data.from_config({})
+
+
+def test_pipeline_factory_validates_return_type_on_direct_call():
+    @pipeline_factory
+    def bad_pipeline():
+        return 1
+
+    with pytest.raises(TypeError, match="pipeline factory must return a Pipeline"):
+        bad_pipeline()
+
+
+def test_data_factory_validates_return_type_on_direct_call():
+    @data_factory
+    def bad_data():
+        return None
+
+    with pytest.raises(TypeError, match="data factory must return a callable InputFn"):
+        bad_data()
 
 
 def test_decorators_exported_from_init():
@@ -169,7 +216,8 @@ def test_decorators_exported_from_init():
 
 def test_discover_pipeline_factory_single_found():
     @pipeline_factory
-    def my_pf(x): pass
+    def my_pf(x):
+        return Pipeline([])
 
     module = _fake_module("_test", my_pf=my_pf, other=lambda: None)
     result = PipelineFactory.discover(module)
@@ -197,11 +245,11 @@ def test_discover_pipeline_factory_none_when_absent():
 def test_discover_pipeline_and_data_factory_use_distinct_classes():
     @pipeline_factory
     def my_pipeline(x=1):
-        return x
+        return Pipeline([])
 
     @data_factory
     def my_data(x=1):
-        return x
+        return lambda: ("id", x, None, None)
 
     module = _fake_module("_test_kinds", my_pipeline=my_pipeline, my_data=my_data)
     assert PipelineFactory.discover(module) is my_pipeline
@@ -209,26 +257,35 @@ def test_discover_pipeline_and_data_factory_use_distinct_classes():
 
 
 def test_discover_pipeline_factory_explicit_wraps_dict_valued_callable():
+    seen = {}
+
     def explicit(labels: dict):
-        return labels["x"]
+        seen["labels"] = labels
+        return Pipeline([])
 
     module = _fake_module("_test4")
     result = PipelineFactory.discover(module, explicit)
     assert isinstance(result, PipelineFactory)
     assert result is not explicit
-    assert result.from_config({"labels": {"x": 1}}) == 1
+    assert isinstance(result.from_config({"labels": {"x": 1}}), Pipeline)
+    assert seen["labels"] == {"x": 1}
 
 
 def test_discover_pipeline_factory_explicit_wraps_keyword_callable():
+    seen = {}
+
     def explicit(x=1, y=2):
-        return (x, y)
+        seen["args"] = (x, y)
+        return Pipeline([])
 
     module = _fake_module("_test4_kwargs")
     result = PipelineFactory.discover(module, explicit)
     assert isinstance(result, PipelineFactory)
     assert result is not explicit
-    assert result(x=3, y=4) == (3, 4)
-    assert result.from_config({"x": 3, "y": 4}) == (3, 4)
+    assert isinstance(result(x=3, y=4), Pipeline)
+    assert seen["args"] == (3, 4)
+    assert isinstance(result.from_config({"x": 3, "y": 4}), Pipeline)
+    assert seen["args"] == (3, 4)
 
 
 def test_discover_pipeline_factory_explicit_already_decorated_not_double_wrapped():

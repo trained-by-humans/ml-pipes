@@ -110,7 +110,10 @@ def _resolve_inputs(
     data_fn = _resolve_data_factory(data_ref, pipeline_module)
 
     if data_fn is not None:
-        input_fn = data_fn.from_config(data_config)
+        try:
+            input_fn = data_fn.from_config(data_config)
+        except TypeError as exc:
+            raise CLIError(str(exc)) from exc
         return [input_fn], [data_fn.__name__]
 
     if not input_paths:
@@ -237,10 +240,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         data_config=data_config,
     )
     try:
-        factory.validate_config(pipeline_config, name="pipeline factory")
+        pipeline = factory.from_config(pipeline_config)
     except TypeError as exc:
-        raise CLIError(f"missing required argument for config {pipeline_config}: {exc}") from exc
-    pipeline = factory.from_config(pipeline_config)
+        raise CLIError(str(exc)) from exc
     for input_fn in input_fns:
         _, value, _, _ = input_fn()
         pipeline(value)
@@ -294,7 +296,10 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         builder.warmup(args.warmup)
     builder.percentiles(*args.percentiles)
 
-    results = builder.run()
+    try:
+        results = builder.run()
+    except TypeError as exc:
+        raise CLIError(str(exc)) from exc
     print(BenchmarkResult.to_comparison_table(results, expand_regions=expand_regions))
 
     if args.save:

@@ -5,6 +5,7 @@ import types
 
 import pytest
 
+from ml_pipes import Pipeline
 from ml_pipes.factory import (
     PipelineFactory,
     data_factory,
@@ -109,12 +110,19 @@ def _fake_module(name: str, **attrs) -> types.ModuleType:
 # ---------------------------------------------------------------------------
 
 def test_resolve_pipeline_factory_explicit_undecorated_wraps_keyword_callable():
-    def plain(x=1, y=2): return (x, y)
+    seen = {}
+
+    def plain(x=1, y=2):
+        seen["args"] = (x, y)
+        return Pipeline([])
+
     m = _fake_module("_test5")
     result = _resolve_pipeline_factory(m, plain, "_test5:plain")
     assert isinstance(result, PipelineFactory)
-    assert result(x=10, y=20) == (10, 20)
-    assert result.from_config({"x": 10, "y": 20}) == (10, 20)
+    assert isinstance(result(x=10, y=20), Pipeline)
+    assert seen["args"] == (10, 20)
+    assert isinstance(result.from_config({"x": 10, "y": 20}), Pipeline)
+    assert seen["args"] == (10, 20)
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +229,7 @@ def test_cmd_benchmark_missing_required_arg_raises(tmp_path):
             "--input", str(f),
             "--runs", "2", "--warmup", "1",
         ])
-        with pytest.raises(TypeError):
+        with pytest.raises(CLIError, match="pipeline factory is missing required config key"):
             cmd_benchmark(args)
     finally:
         del sys.modules["_test_bench_missing"]
