@@ -18,8 +18,8 @@ from .factory import (
 )
 from .tracing import InvocationTrace
 
-PipelineFactoryLike: TypeAlias = PipelineFactory | Callable[..., Pipeline]
-DataFactoryLike: TypeAlias = DataFactory | Callable[..., InputFn]
+PipelineFactoryLike: TypeAlias = Callable[..., Pipeline]
+DataFactoryLike: TypeAlias = Callable[..., InputFn]
 ConfigFilter: TypeAlias = Callable[[dict], bool]
 
 
@@ -495,10 +495,10 @@ class Benchmark:
 class BenchmarkSweep:
     """Cross-product every pipeline config with every data config and collect all results.
 
-    Expects either ``PipelineFactory`` / ``DataFactory`` objects or plain
-    callables invoked as ``fn(**config)``.
+    Pass the values returned by ``@pipeline_factory`` and ``@data_factory``.
+    That is the normal way to use ``BenchmarkSweep``.
 
-    Calls ``data_factory(data_config)`` fresh for each cell::
+    ``data_factory`` is called fresh for each data config::
 
         sweep = BenchmarkSweep(
             factory=make_pipeline,
@@ -508,18 +508,13 @@ class BenchmarkSweep:
             measurement=MeasurementConfig(runs=30),
         )
 
-    To benchmark against a single fixed input with no config, wrap it::
-
-        sweep = BenchmarkSweep(
-            factory=make_pipeline,
-            configs=[{"workers": 1}, {"workers": 4}],
-            data_factory=lambda **_: my_input_fn,
-        )
+    If you need to adapt a plain callable explicitly, wrap it with
+    ``PipelineFactory.from_callable(...)`` or ``DataFactory.from_callable(...)``.
     """
 
-    factory: PipelineFactoryLike
+    factory: PipelineFactory
     configs: list[dict]
-    data_factory: DataFactoryLike
+    data_factory: DataFactory
     data_configs: list[dict] | None = None
     measurement: MeasurementConfig = None  # type: ignore[assignment]
     label_prefix: str | None = None
@@ -530,8 +525,16 @@ class BenchmarkSweep:
             self.measurement = MeasurementConfig()
         if self.data_configs is None:
             self.data_configs = [{}]
-        self.factory = PipelineFactory.ensure_factory(self.factory)
-        self.data_factory = DataFactory.ensure_factory(self.data_factory)
+        if not isinstance(self.factory, PipelineFactory):
+            raise TypeError(
+                "BenchmarkSweep.factory expects a PipelineFactory. "
+                "Pass @pipeline_factory output or PipelineFactory.from_callable(...)."
+            )
+        if not isinstance(self.data_factory, DataFactory):
+            raise TypeError(
+                "BenchmarkSweep.data_factory expects a DataFactory. "
+                "Pass @data_factory output or DataFactory.from_callable(...)."
+            )
 
     def run(self) -> list[BenchmarkResult]:
         data_configs = self.data_configs if self.data_configs is not None else [{}]

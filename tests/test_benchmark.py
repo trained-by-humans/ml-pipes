@@ -298,9 +298,9 @@ def _make_sweep_pipeline(**_) -> Pipeline:
 def test_sweep_run_produces_correct_count():
     configs = [{"workers": 1}, {"workers": 2}]
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=configs,
-        data_factory=lambda idx: lambda: _static_input(idx),
+        data_factory=DataFactory.from_callable(lambda idx: lambda: _static_input(idx)),
         data_configs=[{"idx": 0}, {"idx": 1}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
@@ -309,9 +309,9 @@ def test_sweep_run_produces_correct_count():
 
 def test_sweep_result_labels_contain_input_and_config():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{"mode": "fast"}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         data_configs=[{"name": "my_input"}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
@@ -322,9 +322,9 @@ def test_sweep_result_labels_contain_input_and_config():
 
 def test_sweep_result_labels_include_data_config():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{}],
-        data_factory=lambda idx: lambda: _static_input(idx),
+        data_factory=DataFactory.from_callable(lambda idx: lambda: _static_input(idx)),
         data_configs=[{"idx": 0}, {"idx": 1}],
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
@@ -334,19 +334,37 @@ def test_sweep_result_labels_include_data_config():
 
 def test_sweep_default_measurement():
     sweep = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
     )
     assert sweep.measurement is not None
     assert sweep.measurement.runs == 100
 
 
+def test_sweep_requires_pipeline_factory():
+    with pytest.raises(TypeError, match="BenchmarkSweep.factory expects a PipelineFactory"):
+        BenchmarkSweep(
+            factory=_make_sweep_pipeline,
+            configs=[{}],
+            data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
+        )
+
+
+def test_sweep_requires_data_factory():
+    with pytest.raises(TypeError, match="BenchmarkSweep.data_factory expects a DataFactory"):
+        BenchmarkSweep(
+            factory=PipelineFactory.from_callable(_make_sweep_pipeline),
+            configs=[{}],
+            data_factory=lambda **_: lambda: _static_input(0),
+        )
+
+
 def test_sweep_to_table_renders():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{"a": 1}, {"a": 2}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     table = BenchmarkResult.to_comparison_table(results)
@@ -356,9 +374,9 @@ def test_sweep_to_table_renders():
 
 def test_sweep_to_table_expand_regions_false():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{"a": 1}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     table = BenchmarkResult.to_comparison_table(results, expand_regions=False)
@@ -401,9 +419,9 @@ def _make_result_with_percentiles(label: str, percentiles: tuple[float, ...]) ->
 
 def test_sweep_metadata_records_config_and_data_config():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{"batch": 4}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         measurement=MeasurementConfig(runs=3, warmup=1),
     ).run()
     meta = results[0].metadata
@@ -413,9 +431,9 @@ def test_sweep_metadata_records_config_and_data_config():
 
 def test_sweep_label_prefix_single_result():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         measurement=MeasurementConfig(runs=3, warmup=1),
         label_prefix="baseline",
     ).run()
@@ -424,9 +442,9 @@ def test_sweep_label_prefix_single_result():
 
 def test_sweep_label_prefix_multi_result():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{"a": 1}, {"a": 2}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         measurement=MeasurementConfig(runs=3, warmup=1),
         label_prefix="exp",
     ).run()
@@ -436,9 +454,9 @@ def test_sweep_label_prefix_multi_result():
 
 def test_sweep_extra_metadata_merged_into_all_results():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{"a": 1}, {"a": 2}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         measurement=MeasurementConfig(runs=3, warmup=1),
         extra_metadata={"env": "ci", "git_sha": "abc"},
     ).run()
@@ -450,9 +468,9 @@ def test_sweep_extra_metadata_merged_into_all_results():
 
 def test_sweep_extra_metadata_does_not_overwrite_pipeline_config():
     results = BenchmarkSweep(
-        factory=_make_sweep_pipeline,
+        factory=PipelineFactory.from_callable(_make_sweep_pipeline),
         configs=[{"batch": 4}],
-        data_factory=lambda **_: lambda: _static_input(0),
+        data_factory=DataFactory.from_callable(lambda **_: lambda: _static_input(0)),
         measurement=MeasurementConfig(runs=3, warmup=1),
         extra_metadata={"note": "hi"},
     ).run()
@@ -1371,7 +1389,7 @@ def test_pipeline_factory_bad_config_raises_with_context():
     sweep = BenchmarkSweep(
         factory=_strict_pipeline_factory,
         configs=[{"unknown_param": 1}],
-        data_factory=lambda **_: _static_input,
+        data_factory=DataFactory.from_callable(lambda **_: _static_input),
     )
     with pytest.raises(TypeError, match="pipeline factory got unknown config key.*unknown_param"):
         sweep.run()
@@ -1381,7 +1399,7 @@ def test_pipeline_factory_missing_required_raises_with_context():
     sweep = BenchmarkSweep(
         factory=_strict_pipeline_factory,
         configs=[{}],
-        data_factory=lambda **_: _static_input,
+        data_factory=DataFactory.from_callable(lambda **_: _static_input),
     )
     with pytest.raises(TypeError, match="pipeline factory is missing required config key.*workers"):
         sweep.run()
@@ -1389,7 +1407,7 @@ def test_pipeline_factory_missing_required_raises_with_context():
 
 def test_data_factory_bad_config_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda **_: _make_pipeline(),
+        factory=PipelineFactory.from_callable(lambda **_: _make_pipeline()),
         configs=[{}],
         data_factory=_strict_data_factory,
         data_configs=[{"unknown_param": 1}],
@@ -1400,7 +1418,7 @@ def test_data_factory_bad_config_raises_with_context():
 
 def test_data_factory_missing_required_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda **_: _make_pipeline(),
+        factory=PipelineFactory.from_callable(lambda **_: _make_pipeline()),
         configs=[{}],
         data_factory=_strict_data_factory,
         data_configs=[{}],
@@ -1411,9 +1429,9 @@ def test_data_factory_missing_required_raises_with_context():
 
 def test_pipeline_factory_returns_none_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda **_: None,
+        factory=PipelineFactory.from_callable(lambda **_: None),
         configs=[{"workers": 1}],
-        data_factory=lambda **_: _static_input,
+        data_factory=DataFactory.from_callable(lambda **_: _static_input),
     )
     with pytest.raises(TypeError, match="pipeline factory must return a Pipeline"):
         sweep.run()
@@ -1421,9 +1439,9 @@ def test_pipeline_factory_returns_none_raises_with_context():
 
 def test_data_factory_returns_none_raises_with_context():
     sweep = BenchmarkSweep(
-        factory=lambda **_: _make_pipeline(),
+        factory=PipelineFactory.from_callable(lambda **_: _make_pipeline()),
         configs=[{}],
-        data_factory=lambda **_: None,
+        data_factory=DataFactory.from_callable(lambda **_: None),
     )
     with pytest.raises(TypeError, match="data factory must return a callable InputFn"):
         sweep.run()
