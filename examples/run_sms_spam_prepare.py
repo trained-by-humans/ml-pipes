@@ -478,9 +478,15 @@ def sms_spam_prepare_pipeline(
 def sms_spam_collection_input(
     assets_dir: str | Path = DEFAULT_SMS_SPAM_DIR,
     force_download: int = 0,
+    sample_count: int = 0,
 ) -> InputFn:
+    if sample_count < 0:
+        raise ValueError(f"sample_count must be >= 0, got {sample_count}")
+
     dataset_path = ensure_sms_spam_collection(assets_dir, force_download=bool(force_download))
     rows = read_sms_spam_rows(dataset_path)
+    if sample_count > 0:
+        rows = rows[:sample_count]
 
     def fn() -> tuple[str, Any, str | None, dict | None]:
         return ("sms-spam-collection", rows, None, {"dataset_path": str(dataset_path)})
@@ -654,80 +660,6 @@ def _write_sms_spam_lineage_artifacts(
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def prepare_sms_spam_dataset(
-    *,
-    assets_dir: Path | str = DEFAULT_SMS_SPAM_DIR,
-    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
-    force_download: bool = False,
-    min_chars: int = 5,
-    min_tokens: int = 2,
-    validation_ratio: float = 0.1,
-    test_ratio: float = 0.1,
-    lazy: bool = False,
-) -> tuple[Path, list[PreparedSmsExample], dict[str, Any]]:
-    input_fn = sms_spam_collection_input(
-        assets_dir=assets_dir,
-        force_download=int(force_download),
-    )
-    _, raw_rows, _, input_metadata = input_fn()
-    dataset_path = Path(input_metadata["dataset_path"])
-
-    trace_collector = CaptureCollector()
-    pipeline = sms_spam_prepare_pipeline(
-        min_chars=min_chars,
-        min_tokens=min_tokens,
-        validation_ratio=validation_ratio,
-        test_ratio=test_ratio,
-        lazy=lazy,
-    )
-    pipeline_description = repr(pipeline)
-    pipeline.set_tracing(trace_collector)
-    deduped = _materialize_records(pipeline(raw_rows))
-
-    if trace_collector.last_trace is None:
-        raise RuntimeError("SMS spam prepare pipeline did not emit a trace.")
-    raw_count, before_dedupe_count, _ = _read_prepare_counts(trace_collector.last_trace)
-    lineage_report = _analyze_sms_spam_lineage(
-        raw_rows,
-        min_chars=min_chars,
-        min_tokens=min_tokens,
-        validation_ratio=validation_ratio,
-        test_ratio=test_ratio,
-    )
-    _validate_lineage_against_records(lineage_report, deduped)
-
-    summary = write_prepared_sms_dataset(
-        deduped,
-        raw_count=raw_count,
-        before_dedupe_count=before_dedupe_count,
-        dataset_path=dataset_path,
-        output_dir=output_dir,
-        min_chars=min_chars,
-        min_tokens=min_tokens,
-        validation_ratio=validation_ratio,
-        test_ratio=test_ratio,
-        lazy=lazy,
-    )
-    _write_sms_spam_lineage_artifacts(
-        records=deduped,
-        lineage_report=lineage_report,
-        dataset_path=dataset_path,
-        output_dir=output_dir,
-        pipeline_description=pipeline_description,
-        run_args={
-            "assets_dir": str(assets_dir),
-            "output_dir": str(output_dir),
-            "force_download": force_download,
-            "min_chars": min_chars,
-            "min_tokens": min_tokens,
-            "validation_ratio": validation_ratio,
-            "test_ratio": test_ratio,
-            "lazy": lazy,
-        },
-    )
-    return dataset_path, deduped, summary
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_assets_dir_arg(parser)
@@ -777,7 +709,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--inspect-samples",
         type=int,
         default=24,
-        help="How many raw rows to include in the optional inspection report.",
+        help="How many raw rows to load when --inspect-html is used. "
+             "The same subset is used for the inspection report and the prepared output.",
     )
     parser.add_argument(
         "--lazy",
@@ -795,20 +728,25 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    assets_dir = args.assets_dir / "sms_spam_collection"
     output_dir = args.output_dir or (args.assets_dir / "sms_spam_prepared")
-    dataset_path, _, summary = prepare_sms_spam_dataset(
-        assets_dir=args.assets_dir / "sms_spam_collection",
-        output_dir=output_dir,
-        force_download=args.force_download,
+    sample_count = args.inspect_samples if args.inspect_html is not None and args.inspect_samples > 0 else 0
+    pipeline = sms_spam_prepare_pipeline(
         min_chars=args.min_chars,
         min_tokens=args.min_tokens,
         validation_ratio=args.validation_ratio,
         test_ratio=args.test_ratio,
         lazy=args.lazy,
     )
+    input_fn = sms_spam_collection_input(
+        assets_dir=assets_dir,
+        force_download=int(args.force_download),
+        sample_count=sample_count,
+    )
+    _, raw_rows, _, input_metadata = input_fn()
+    dataset_path = Path(input_metadata["dataset_path"])
 
-    if args.inspect_html is not None and args.inspect_samples > 0:
-        raw_rows = read_sms_spam_rows(dataset_path)[: args.inspect_samples]
+    if args.inspect_html is not None and sample_count > 0:
         inspection = pipeline.inspect(raw_rows)
         saved = PipelineInspector().save_to_html(
             inspection,
@@ -816,6 +754,55 @@ def main() -> int:
             orientation=args.inspect_orientation,
         )
         print(f"Inspection report saved to: {saved}")
+
+    pipeline_description = repr(pipeline)
+    trace_collector = CaptureCollector()
+    pipeline.set_tracing(trace_collector)
+    deduped = _materialize_records(pipeline(raw_rows))
+
+    if trace_collector.last_trace is None:
+        raise RuntimeError("SMS spam prepare pipeline did not emit a trace.")
+
+    raw_count, before_dedupe_count, _ = _read_prepare_counts(trace_collector.last_trace)
+
+    lineage_report = _analyze_sms_spam_lineage(
+        raw_rows,
+        min_chars=args.min_chars,
+        min_tokens=args.min_tokens,
+        validation_ratio=args.validation_ratio,
+        test_ratio=args.test_ratio,
+    )
+    _validate_lineage_against_records(lineage_report, deduped)
+
+    summary = write_prepared_sms_dataset(
+        deduped,
+        raw_count=raw_count,
+        before_dedupe_count=before_dedupe_count,
+        dataset_path=dataset_path,
+        output_dir=output_dir,
+        min_chars=args.min_chars,
+        min_tokens=args.min_tokens,
+        validation_ratio=args.validation_ratio,
+        test_ratio=args.test_ratio,
+        lazy=args.lazy,
+    )
+    _write_sms_spam_lineage_artifacts(
+        records=deduped,
+        lineage_report=lineage_report,
+        dataset_path=dataset_path,
+        output_dir=output_dir,
+        pipeline_description=pipeline_description,
+        run_args={
+            "assets_dir": str(assets_dir),
+            "output_dir": str(output_dir),
+            "force_download": args.force_download,
+            "min_chars": args.min_chars,
+            "min_tokens": args.min_tokens,
+            "validation_ratio": args.validation_ratio,
+            "test_ratio": args.test_ratio,
+            "lazy": args.lazy,
+        },
+    )
 
     print(f"Dataset cached at: {dataset_path}")
     print(f"Prepared output written to: {output_dir}")
