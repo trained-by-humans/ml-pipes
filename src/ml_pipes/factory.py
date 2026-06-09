@@ -15,7 +15,7 @@ InputFn = Callable[[], tuple[str, Any, str | None, dict | None]]
 
 
 class Factory(Generic[FactoryOutputT]):
-    """Callable wrapper with a public config-driven factory entrypoint."""
+    """Callable wrapper with a config-driven entrypoint."""
 
     _factory_name = "factory"
 
@@ -36,7 +36,7 @@ class Factory(Generic[FactoryOutputT]):
         cls: type[FactoryT],
         fn: Callable[..., FactoryOutputT],
     ) -> FactoryT:
-        """Build a ``Factory`` from a plain callable and derive its config adapter."""
+        """Build a ``Factory`` from a callable invoked as ``fn(**config)``."""
         if isinstance(fn, Factory):
             raise TypeError(
                 f"{cls.__name__}.from_callable() expects a plain callable; use {cls.__name__}.ensure_factory()."
@@ -165,24 +165,23 @@ class DataFactory(Factory[InputFn]):
 
 
 def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:
-    """Wrap a function as a discoverable pipeline factory.
+    """Wrap a declared reusable function as a discoverable pipeline factory.
 
-    The decorated value is a ``PipelineFactory``. It preserves the original
-    Python call semantics while also exposing ``from_config(config)`` for CLI
-    and benchmark helpers. Any parameter without a default must be supplied
-    through ``--arg``, ``--config``, or ``--axis``.
+    The decorated value stays directly callable and also exposes
+    ``from_config(config)`` for CLI and benchmark helpers. Any parameter
+    without a default must be supplied through ``--arg``, ``--config``,
+    or ``--axis``.
     """
     return PipelineFactory.from_callable(fn)
 
 
 def data_factory(fn: Callable[..., InputFn]) -> DataFactory:
-    """Wrap a function as a discoverable data factory.
+    """Wrap a declared reusable function as a discoverable data factory.
 
-    The decorated value is a ``DataFactory``. It preserves the original
-    Python call semantics while also exposing ``from_config(config)`` for CLI
-    and benchmark helpers. It must return an ``InputFn`` — a zero-argument
-    callable yielding ``(id: str, value: Any, tag: str | None,
-    metadata: dict | None)``.
+    The decorated value stays directly callable and also exposes
+    ``from_config(config)`` for CLI and benchmark helpers. It must return an
+    ``InputFn`` — a zero-argument callable yielding ``(id: str, value: Any,
+    tag: str | None, metadata: dict | None)``.
     """
     return DataFactory.from_callable(fn)
 
@@ -190,7 +189,7 @@ def data_factory(fn: Callable[..., InputFn]) -> DataFactory:
 def _wrap_as_factory(
     fn: Callable[..., FactoryOutputT],
 ) -> Callable[[dict], FactoryOutputT]:
-    """Wrap a callable with a ``from_config(config)`` adapter."""
+    """Adapt a callable to the ``from_config(config)`` entrypoint."""
     @functools.wraps(fn)
     def wrapper(config: dict) -> FactoryOutputT:
         return fn(**config)

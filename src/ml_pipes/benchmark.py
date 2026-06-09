@@ -496,7 +496,7 @@ class BenchmarkSweep:
     """Cross-product every pipeline config with every data config and collect all results.
 
     Expects either ``PipelineFactory`` / ``DataFactory`` objects or plain
-    callables that accept config keys as keyword arguments.
+    callables invoked as ``fn(**config)``.
 
     Calls ``data_factory(data_config)`` fresh for each cell::
 
@@ -571,6 +571,9 @@ class BenchmarkBuilder:
         BenchmarkBuilder.pipeline(p)   # concrete Pipeline (no config sweep)
         BenchmarkBuilder.factory(f)    # factory callable (config sweep)
 
+    Factories can be decorated reusable functions or plain callables invoked
+    as ``fn(**config)``.
+
     Chain measurement, pipeline config, and data config methods, then call
     ``.run()`` which returns ``list[BenchmarkResult]``.
     """
@@ -610,7 +613,7 @@ class BenchmarkBuilder:
 
     @classmethod
     def factory(cls, f: PipelineFactoryLike) -> BenchmarkBuilder:
-        """Start from a pipeline factory callable."""
+        """Start from a pipeline factory or callable."""
         return cls(f)
 
     # ------------------------------------------------------------------
@@ -663,7 +666,7 @@ class BenchmarkBuilder:
         return self
 
     def data_factory(self, factory: DataFactoryLike) -> BenchmarkBuilder:
-        """Use a data factory callable (enables data config sweep)."""
+        """Use a data factory or callable (enables data config sweep)."""
         self._data_factory = DataFactory.ensure_factory(factory)
         return self
 

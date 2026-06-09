@@ -208,23 +208,8 @@ to construct each pipeline variant.
 
 #### Pipeline factory
 
-Without `@pipeline_factory`, the factory must accept a single config dict
-explicitly:
-
-```python
-def my_pipeline(config: dict) -> Pipeline:
-    return Pipeline([Infer(config["model_path"]), NMS(conf_threshold=config["conf_threshold"]), ...])
-
-BenchmarkBuilder.factory(my_pipeline)
-```
-
-If you already have a keyword-style constructor and want the same config-dict
-entrypoint without decorating it, adapt it explicitly with
-`Factory.from_callable(...)`.
-
-With `@pipeline_factory`, the function uses a natural keyword signature and
-dict unpacking is handled automatically. Parameters without defaults are
-required config keys; parameters with defaults are optional:
+Use `@pipeline_factory` for reusable declared factories. Parameters without
+defaults are required config keys; parameters with defaults are optional:
 
 ```python
 @pipeline_factory
@@ -234,9 +219,23 @@ def my_pipeline(model_path: Path, conf_threshold: float = 0.25) -> Pipeline:
 BenchmarkBuilder.factory(my_pipeline)
 ```
 
-The decorator returns a `Factory` object. It still behaves like the original
-callable for normal Python calls, and it also exposes `from_config(...)` for
-discovery and config-driven execution.
+For ad hoc cases, pass a plain callable directly to
+`BenchmarkBuilder.factory(...)`. It should accept config as keyword arguments:
+
+```python
+factory = lambda model_path, conf_threshold=0.25: (
+    decode() + yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
+)
+
+results = (
+    BenchmarkBuilder.factory(factory)
+    .pipeline_config(model_path=model_path)
+    .run()
+)
+```
+
+The decorator returns a factory object that stays directly callable while also
+exposing `from_config(...)` for discovery and config-driven execution.
 
 Unknown config keys, missing required parameters, and wrong return types all
 produce descriptive errors that name the offending key and config:
@@ -301,23 +300,7 @@ inputs.
 
 #### Data factory
 
-Without `@data_factory`, the factory must accept a single config dict
-explicitly:
-
-```python
-def my_data(config: dict) -> InputFn:
-    path = config["image_path"]
-    def fn():
-        return (path.name, path, None, None)
-    return fn
-
-BenchmarkBuilder.factory(my_pipeline).data_factory(my_data)
-```
-
-The same explicit adaptation option exists for data factories via
-`Factory.from_callable(...)`.
-
-With `@data_factory`, the function uses a natural keyword signature:
+Use `@data_factory` for reusable declared data factories:
 
 ```python
 @data_factory
@@ -329,9 +312,20 @@ def my_data(image_path: Path) -> InputFn:
 BenchmarkBuilder.factory(my_pipeline).data_factory(my_data)
 ```
 
-As with `@pipeline_factory`, the decorator returns a `Factory` object that
-preserves normal Python call semantics while exposing `from_config(...)` for
-config-driven use.
+For ad hoc cases, pass a plain callable directly to `.data_factory(...)`. It
+should accept config as keyword arguments:
+
+```python
+results = (
+    BenchmarkBuilder.factory(my_pipeline)
+    .data_factory(lambda image_path: lambda: (image_path.name, image_path, None, None))
+    .data_config(image_path=Path("coco_val.jpg"))
+    .run()
+)
+```
+
+As with `@pipeline_factory`, the decorator returns a factory object that stays
+directly callable while exposing `from_config(...)` for config-driven use.
 
 The same error feedback applies as for the pipeline factory.
 
