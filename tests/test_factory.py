@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import types
 
 import pytest
@@ -19,6 +20,14 @@ def _fake_module(name: str, **attrs) -> types.ModuleType:
     for key, value in attrs.items():
         setattr(module, key, value)
     return module
+
+
+def _passthrough_wrapper(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +136,28 @@ def test_data_factory_from_callable_rejects_other_factory_subclass():
 
     with pytest.raises(TypeError, match="DataFactory.ensure_factory"):
         DataFactory.from_callable(decorated)
+
+
+def test_pipeline_factory_from_callable_rejects_wrapped_decorated_factory():
+    @pipeline_factory
+    def decorated(x=1):
+        return Pipeline([])
+
+    wrapped = _passthrough_wrapper(decorated)
+
+    with pytest.raises(TypeError, match=r"@pipeline_factory must be the outermost decorator"):
+        PipelineFactory.from_callable(wrapped)
+
+
+def test_data_factory_from_callable_rejects_wrapped_decorated_factory():
+    @data_factory
+    def decorated(x=1):
+        return lambda: ("id", x, None, None)
+
+    wrapped = _passthrough_wrapper(decorated)
+
+    with pytest.raises(TypeError, match=r"@data_factory must be the outermost decorator"):
+        DataFactory.from_callable(wrapped)
 
 
 def test_factory_ensure_factory_wraps_plain_callable():
@@ -295,3 +326,27 @@ def test_discover_pipeline_factory_explicit_already_decorated_not_double_wrapped
     module = _fake_module("_test6")
     result = PipelineFactory.discover(module, decorated)
     assert result is decorated
+
+
+def test_discover_pipeline_factory_wrapped_factory_raises():
+    @pipeline_factory
+    def decorated(x=1):
+        return Pipeline([])
+
+    wrapped = _passthrough_wrapper(decorated)
+    module = _fake_module("_wrapped_pipeline_factory", wrapped=wrapped)
+
+    with pytest.raises(TypeError, match=r"wraps @pipeline_factory"):
+        PipelineFactory.discover(module)
+
+
+def test_discover_data_factory_wrapped_factory_raises():
+    @data_factory
+    def decorated(x=1):
+        return lambda: ("id", x, None, None)
+
+    wrapped = _passthrough_wrapper(decorated)
+    module = _fake_module("_wrapped_data_factory", wrapped=wrapped)
+
+    with pytest.raises(TypeError, match=r"wraps @data_factory"):
+        DataFactory.discover(module)

@@ -219,6 +219,9 @@ def my_pipeline(model_path: Path, conf_threshold: float = 0.25) -> Pipeline:
 BenchmarkBuilder.factory(my_pipeline)
 ```
 
+Place `@pipeline_factory` on the top decorator line. The exported symbol must
+itself be the `PipelineFactory`; wrapping it afterward is unsupported.
+
 For ad hoc cases, pass a plain callable directly to
 `BenchmarkBuilder.factory(...)`. It should accept config as keyword arguments:
 
@@ -311,6 +314,9 @@ def my_data(image_path: Path) -> InputFn:
 
 BenchmarkBuilder.factory(my_pipeline).data_factory(my_data)
 ```
+
+Place `@data_factory` on the top decorator line. The exported symbol must
+itself be the `DataFactory`; wrapping it afterward is unsupported.
 
 For ad hoc cases, pass a plain callable directly to `.data_factory(...)`. It
 should accept config as keyword arguments:
@@ -431,8 +437,10 @@ you can pass one or more file paths directly via `--input` as a quick
 alternative for simple file-based inputs.
 
 The CLI discovers the `@pipeline_factory` and `@data_factory` functions
-automatically by scanning the module. If a module contains more than one of
-either, pass the fully qualified name: `module:factory_fn`.
+automatically by scanning the module. Keep those decorators on the top
+decorator line so the exported symbol is the factory itself. If a module
+contains more than one of either, pass the fully qualified name:
+`module:factory_fn`.
 
 ```bash
 # single run, input passed directly

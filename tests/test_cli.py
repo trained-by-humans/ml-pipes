@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import sys
 import types
 
@@ -22,6 +23,14 @@ from ml_pipes.__main__ import (
     _resolve_pipeline_factory,
     cmd_benchmark,
 )
+
+
+def _passthrough_wrapper(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +242,20 @@ def test_cmd_benchmark_missing_required_arg_raises(tmp_path):
             cmd_benchmark(args)
     finally:
         del sys.modules["_test_bench_missing"]
+
+
+def test_resolve_pipeline_factory_wrapped_decorated_export_raises():
+    @pipeline_factory
+    def make_pipeline():
+        return Pipeline([_Identity()])
+
+    wrapped = _passthrough_wrapper(make_pipeline)
+
+    mod = types.ModuleType("_test_wrapped_factory")
+    mod.wrapped = wrapped
+
+    with pytest.raises(CLIError, match=r"@pipeline_factory must be the outermost decorator"):
+        _resolve_pipeline_factory(mod, None, "_test_wrapped_factory")
 
 
 # ---------------------------------------------------------------------------

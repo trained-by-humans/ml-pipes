@@ -33,6 +33,13 @@ class Factory(Generic[FactoryOutputT]):
             raise TypeError(
                 f"{cls.__name__}.from_callable() expects a plain callable; use {cls.__name__}.ensure_factory()."
             )
+        annotated = _find_annotated_factory(source)
+        if annotated is not None:
+            decorator = _factory_decorator_name(type(annotated))
+            raise TypeError(
+                f"{cls.__name__}.from_callable() cannot wrap a callable that already wraps {decorator}. "
+                f"{decorator} must be the outermost decorator."
+            )
         return cls(source)
 
     @classmethod
@@ -156,6 +163,10 @@ class DataFactory(Factory[InputFn]):
 def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:
     """Wrap a declared reusable function as a discoverable pipeline factory.
 
+    Place ``@pipeline_factory`` on the top decorator line. If another
+    decorator wraps the resulting factory object, discovery and factory
+    normalization raise an error instead of adapting it.
+
     The decorated value stays directly callable and also exposes
     ``from_config(config)`` for CLI and benchmark helpers. Any parameter
     without a default must be supplied through ``--arg``, ``--config``,
@@ -166,6 +177,10 @@ def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:
 
 def data_factory(fn: Callable[..., InputFn]) -> DataFactory:
     """Wrap a declared reusable function as a discoverable data factory.
+
+    Place ``@data_factory`` on the top decorator line. If another decorator
+    wraps the resulting factory object, discovery and factory normalization
+    raise an error instead of adapting it.
 
     The decorated value stays directly callable and also exposes
     ``from_config(config)`` for CLI and benchmark helpers. It must return an
@@ -180,11 +195,19 @@ def _discover_factory_in_module(
     factory_type: type[FactoryT],
 ) -> FactoryT | None:
     kind = factory_type.__name__.removesuffix("Factory").lower()
-    found = [
-        (name, fn)
-        for name, fn in vars(module).items()
-        if isinstance(fn, factory_type)
-    ]
+    found: list[tuple[str, FactoryT]] = []
+    for name, source in vars(module).items():
+        if isinstance(source, factory_type):
+            found.append((name, source))
+            continue
+
+        annotated = _find_annotated_factory(source)
+        if annotated is not None and isinstance(annotated, factory_type):
+            decorator = _factory_decorator_name(factory_type)
+            raise TypeError(
+                f"{module.__name__!r}.{name} wraps {decorator}. "
+                f"{decorator} must be the outermost decorator."
+            )
 
     if len(found) > 1:
         names = ", ".join(name for name, _ in found)
@@ -194,3 +217,19 @@ def _discover_factory_in_module(
         )
 
     return found[0][1] if found else None
+
+
+def _find_annotated_factory(source: Any) -> Factory[Any] | None:
+    current = source
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, Factory):
+            return current
+        current = getattr(current, "__wrapped__", None)
+    return None
+
+
+def _factory_decorator_name(factory_type: type[Factory[Any]]) -> str:
+    kind = factory_type.__name__.removesuffix("Factory").lower()
+    return f"@{kind}_factory"
