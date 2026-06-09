@@ -19,58 +19,50 @@ class Factory(Generic[FactoryOutputT]):
 
     _factory_name = "factory"
 
-    def __init__(
-        self,
-        fn: Callable[..., FactoryOutputT],
-        *,
-        from_config: Callable[[dict], FactoryOutputT],
-        signature_source: Callable | None = None,
-    ) -> None:
-        self._fn = fn
-        self._from_config = from_config
-        self._signature_source = signature_source
-        functools.update_wrapper(self, fn)
+    def __init__(self, source: Callable[..., FactoryOutputT]) -> None:
+        self._source = source
+        functools.update_wrapper(self, source)
 
     @classmethod
     def from_callable(
         cls: type[FactoryT],
-        fn: Callable[..., FactoryOutputT],
+        source: Callable[..., FactoryOutputT],
     ) -> FactoryT:
-        """Build a ``Factory`` from a callable invoked as ``fn(**config)``."""
-        if isinstance(fn, Factory):
+        """Build a ``Factory`` from a callable invoked as ``source(**config)``."""
+        if isinstance(source, Factory):
             raise TypeError(
                 f"{cls.__name__}.from_callable() expects a plain callable; use {cls.__name__}.ensure_factory()."
             )
-        return cls(fn, from_config=_wrap_as_factory(fn), signature_source=fn)
+        return cls(source)
 
     @classmethod
     def ensure_factory(
         cls: type[FactoryT],
-        fn: Callable[..., FactoryOutputT] | Factory[Any],
+        source: Callable[..., FactoryOutputT] | Factory[FactoryOutputT],
     ) -> FactoryT:
         """Normalize a plain callable or existing compatible factory."""
-        if isinstance(fn, cls):
-            return fn
-        if isinstance(fn, Factory):
-            if type(fn) is Factory:
-                return cls(fn._fn, from_config=fn._from_config, signature_source=fn._signature_source)
+        if isinstance(source, cls):
+            return source
+        if isinstance(source, Factory):
+            if type(source) is Factory:
+                return cls(source._source)
             raise TypeError(
                 f"{cls.__name__}.ensure_factory() expects a callable or {cls.__name__}, "
-                f"got {type(fn).__name__}."
+                f"got {type(source).__name__}."
             )
-        return cls.from_callable(fn)
+        return cls.from_callable(source)
+
+    def __call__(self, *args, **kwargs) -> FactoryOutputT:
+        return self._validate_output(self._source(*args, **kwargs))
 
     def from_config(self, config: dict) -> FactoryOutputT:
         self.validate_config(config, name=self._factory_name)
-        return self._validate_output(self._from_config(config), config=config)
+        output = self._source(**config)
+        return self._validate_output(output, config=config)
 
     def validate_config(self, config: dict, *, name: str = "factory") -> None:
         """Validate a config dict against the wrapped keyword signature."""
-        target = self._signature_source
-        if target is None:
-            return
-
-        params = inspect.signature(target).parameters
+        params = inspect.signature(self._source).parameters
         has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
         if not has_var_keyword:
             unexpected = [k for k in config if k not in params]
@@ -90,9 +82,6 @@ class Factory(Generic[FactoryOutputT]):
             raise TypeError(
                 f"{name} is missing required config key(s) {missing!r} for config {config!r}"
             )
-
-    def __call__(self, *args, **kwargs) -> FactoryOutputT:
-        return self._validate_output(self._fn(*args, **kwargs))
 
     def _validate_output(
         self,
@@ -184,17 +173,6 @@ def data_factory(fn: Callable[..., InputFn]) -> DataFactory:
     tag: str | None, metadata: dict | None)``.
     """
     return DataFactory.from_callable(fn)
-
-
-def _wrap_as_factory(
-    fn: Callable[..., FactoryOutputT],
-) -> Callable[[dict], FactoryOutputT]:
-    """Adapt a callable to the ``from_config(config)`` entrypoint."""
-    @functools.wraps(fn)
-    def wrapper(config: dict) -> FactoryOutputT:
-        return fn(**config)
-
-    return wrapper
 
 
 def _discover_factory_in_module(
