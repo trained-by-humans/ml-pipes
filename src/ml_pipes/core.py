@@ -4,7 +4,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Generic, Iterable, TypeVar
 
 from .collectors import CaptureCollector
 from .context import Context, ContextOp
@@ -26,6 +26,11 @@ from .tracing import (
 from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
 
 _log = logging.getLogger(__name__)
+
+PipelineInputT = TypeVar("PipelineInputT")
+PipelineOutputT = TypeVar("PipelineOutputT")
+NextPipelineOutputT = TypeVar("NextPipelineOutputT")
+PipelineT = TypeVar("PipelineT", bound="Pipeline[Any, Any]")
 
 # An operator is anything the pipeline can execute as a step.
 OperatorLike = Callable[..., Any] | ContextOp | RegionOpener | RegionCloser | "Inline"
@@ -67,7 +72,7 @@ class PipelineDescription:
     __str__ = __repr__
 
 
-class Pipeline:
+class Pipeline(Generic[PipelineInputT, PipelineOutputT]):
     def __init__(
         self,
         operators: Iterable[OperatorLike],
@@ -93,14 +98,17 @@ class Pipeline:
             if collector is not None else None
         )
 
-    def extend(self, operators: Iterable[OperatorLike]) -> Pipeline:
+    def extend(self: PipelineT, operators: Iterable[OperatorLike]) -> PipelineT:
         """Append *operators* to this pipeline in place and return self."""
         self.operators.extend(self._flatten(list(operators)))
         if self._auto_validate:
             self.validate()
         return self
 
-    def __rshift__(self, other: Pipeline) -> Pipeline:
+    def __rshift__(
+        self,
+        other: "Pipeline[PipelineOutputT, NextPipelineOutputT]",
+    ) -> "Pipeline[PipelineInputT, NextPipelineOutputT]":
         """Join two pipelines as isolated blocks: a >> b.
 
         If self is already a flat join chain (all Embed operators), extend it
@@ -110,14 +118,17 @@ class Pipeline:
             return Pipeline([*self.operators, Embed(other)])
         return Pipeline([Embed(self), Embed(other)])
 
-    def __add__(self, other: Pipeline) -> Pipeline:
+    def __add__(
+        self,
+        other: "Pipeline[PipelineOutputT, NextPipelineOutputT]",
+    ) -> "Pipeline[PipelineInputT, NextPipelineOutputT]":
         """Combine two pipelines into one flat pipeline with shared context: a + b."""
         return Pipeline([*self.operators, *other.operators])
 
-    def __call__(self, value: Any) -> Any:
+    def __call__(self, value: PipelineInputT) -> PipelineOutputT:
         return self._call_with_tracing(value, self._tracing_config)
 
-    def inspect(self, value: Any) -> InspectionResult:
+    def inspect(self, value: PipelineInputT) -> InspectionResult:
         """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
         collector = CaptureCollector()
         cfg = TracingConfig(collector, capture_shapes=True, _capture_outputs=True, capture_config=True)
@@ -330,7 +341,7 @@ class Pipeline:
             return operator
         return getattr(operator, "__call__")
 
-class Inline:
+class Inline(Generic[PipelineInputT, PipelineOutputT]):
     """
     Marker that expands a pipeline's operators into the parent at construction time.
 
@@ -346,17 +357,17 @@ class Inline:
         # full.operators == [Decode(), Resize(), Normalize(), Infer(...)]
     """
 
-    def __init__(self, pipeline: Pipeline) -> None:
+    def __init__(self, pipeline: Pipeline[PipelineInputT, PipelineOutputT]) -> None:
         self.pipeline = pipeline
 
 
-def inline(pipeline: Pipeline) -> Inline:
+def inline(pipeline: Pipeline[PipelineInputT, PipelineOutputT]) -> Inline[PipelineInputT, PipelineOutputT]:
     """Inline *pipeline* as a flattening marker inside a pipeline definition (a + b equivalent)."""
     return Inline(pipeline)
 
 
 @Operator
-class Embed:
+class Embed(Generic[PipelineInputT, PipelineOutputT]):
     """
     Embed a pipeline as a single isolated step inside an outer pipeline.
 
@@ -376,10 +387,10 @@ class Embed:
         ])
     """
 
-    def __init__(self, pipeline: Pipeline) -> None:
+    def __init__(self, pipeline: Pipeline[PipelineInputT, PipelineOutputT]) -> None:
         self.pipeline = pipeline
 
-    def __call__(self, value: Any) -> Any:
+    def __call__(self, value: PipelineInputT) -> PipelineOutputT:
         return self.pipeline(value)
 
     def resolve_contract(
@@ -411,6 +422,6 @@ class Embed:
         return (type_contract.input_type,), type_contract.output_type
 
 
-def embed(pipeline: Pipeline) -> Embed:
+def embed(pipeline: Pipeline[PipelineInputT, PipelineOutputT]) -> Embed[PipelineInputT, PipelineOutputT]:
     """Embed *pipeline* as an isolated step inside another pipeline."""
     return Embed(pipeline)

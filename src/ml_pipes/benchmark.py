@@ -5,7 +5,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Callable, TypeAlias
+from typing import Any, Callable, TypeAlias
 
 import numpy as np
 
@@ -18,7 +18,7 @@ from .factory import (
 )
 from .tracing import InvocationTrace
 
-PipelineFactoryLike: TypeAlias = Callable[..., Pipeline]
+PipelineFactoryLike: TypeAlias = Callable[..., Pipeline[Any, Any]]
 DataFactoryLike: TypeAlias = Callable[..., InputFn]
 ConfigFilter: TypeAlias = Callable[[dict], bool]
 
@@ -463,7 +463,7 @@ class Benchmark:
 
     def __init__(
         self,
-        pipeline: Pipeline,
+        pipeline: Pipeline[Any, Any],
         input_fn: InputFn,
         measurement: MeasurementConfig = MeasurementConfig(),
         label: str = "",
@@ -512,7 +512,7 @@ class BenchmarkSweep:
     ``PipelineFactory.from_callable(...)`` or ``DataFactory.from_callable(...)``.
     """
 
-    factory: PipelineFactory
+    factory: PipelineFactory[Any, Any]
     configs: list[dict]
     data_factory: DataFactory
     data_configs: list[dict] | None = None
@@ -581,7 +581,7 @@ class BenchmarkBuilder:
     ``.run()`` which returns ``list[BenchmarkResult]``.
     """
 
-    def __init__(self, source: Pipeline | PipelineFactoryLike) -> None:
+    def __init__(self, source: Pipeline[Any, Any] | PipelineFactoryLike) -> None:
         self._pipeline_source = (
             source if isinstance(source, Pipeline) else PipelineFactory.ensure_factory(source)
         )
@@ -610,7 +610,7 @@ class BenchmarkBuilder:
     # ------------------------------------------------------------------
 
     @classmethod
-    def pipeline(cls, p: Pipeline) -> BenchmarkBuilder:
+    def pipeline(cls, p: Pipeline[Any, Any]) -> BenchmarkBuilder:
         """Start from a concrete Pipeline (no config sweep)."""
         return cls(p)
 
@@ -846,7 +846,7 @@ class BenchmarkBuilder:
         lines += ["", "○ = active  × = filtered"]
         return "\n".join(lines)
 
-    def _resolve_pipeline_factory(self) -> PipelineFactory:
+    def _resolve_pipeline_factory(self) -> PipelineFactory[Any, Any]:
         if isinstance(self._pipeline_source, Pipeline):
             _pipeline = self._pipeline_source
             return PipelineFactory.from_callable(lambda: _pipeline)

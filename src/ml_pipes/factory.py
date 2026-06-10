@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar, cast
 
 from .core import Pipeline
 
 FactoryOutputT = TypeVar("FactoryOutputT")
 FactoryT = TypeVar("FactoryT", bound="Factory[Any]")
+PipelineInputT = TypeVar("PipelineInputT")
+PipelineOutputT = TypeVar("PipelineOutputT")
 
 # InputFn returns (id, value, tag, metadata).
 # tag and metadata are reserved for future bucketing/annotation features and ignored for now.
@@ -110,19 +112,36 @@ class Factory(Generic[FactoryOutputT]):
         return _discover_factory_in_module(module, cls)
 
 
-class PipelineFactory(Factory[Pipeline]):
+class PipelineFactory(Factory[Pipeline[PipelineInputT, PipelineOutputT]], Generic[PipelineInputT, PipelineOutputT]):
     """Factory subtype for pipeline-producing callables."""
 
     _factory_name = "pipeline factory"
+
+    @classmethod
+    def from_callable(
+        cls,
+        source: Callable[..., Pipeline[PipelineInputT, PipelineOutputT]],
+    ) -> "PipelineFactory[PipelineInputT, PipelineOutputT]":
+        return cast("PipelineFactory[PipelineInputT, PipelineOutputT]", super().from_callable(source))
+
+    @classmethod
+    def ensure_factory(
+        cls,
+        source: (
+            Callable[..., Pipeline[PipelineInputT, PipelineOutputT]]
+            | Factory[Pipeline[PipelineInputT, PipelineOutputT]]
+        ),
+    ) -> "PipelineFactory[PipelineInputT, PipelineOutputT]":
+        return cast("PipelineFactory[PipelineInputT, PipelineOutputT]", super().ensure_factory(source))
 
     def _validate_output(
         self,
         output: Any,
         *,
         config: dict | None = None,
-    ) -> Pipeline:
+    ) -> Pipeline[PipelineInputT, PipelineOutputT]:
         if isinstance(output, Pipeline):
-            return output
+            return cast(Pipeline[PipelineInputT, PipelineOutputT], output)
 
         config_suffix = f" for config {config!r}" if config is not None else ""
         raise TypeError(
@@ -151,7 +170,9 @@ class DataFactory(Factory[InputFn]):
         )
 
 
-def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:
+def pipeline_factory(
+    fn: Callable[..., Pipeline[PipelineInputT, PipelineOutputT]],
+) -> PipelineFactory[PipelineInputT, PipelineOutputT]:
     """Wrap a declared reusable function as a discoverable pipeline factory.
 
     Place ``@pipeline_factory`` on the top decorator line. If another
