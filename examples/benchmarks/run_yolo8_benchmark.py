@@ -1,21 +1,16 @@
 """
-Benchmark example: per-operator latency profiling and pipeline comparison for YOLOv8.
+Lowest-level benchmarking example for YOLOv8.
 
-Demonstrates three benchmark patterns:
+This script uses `Benchmark` directly rather than `BenchmarkBuilder` or the
+CLI. It is the best reference when you want to inspect a single measured run
+and compare the resulting `BenchmarkResult` objects with `diff()`.
 
-  1. Single pipeline run — warmup + N measured runs → per-operator breakdown table.
-  2. Config comparison — same pipeline structure, different NMS confidence thresholds →
-     BenchmarkDiff table showing Δmean and Δp95 per operator.
-  3. Structural comparison — inference-only pipeline vs full pipeline with visualisation →
-     BenchmarkDiff highlighting operators that appear in only one variant.
+Run from the repo root:
+    python examples/benchmarks/run_yolo8_benchmark.py --model n --runs 30
+    python examples/benchmarks/run_yolo8_benchmark.py --model s --save results/
 
-Results are saved as JSON so they can be reloaded and compared later, or forwarded
-to MLflow / W&B via result.to_dict().
-
-Usage:
-    python run_yolo8_benchmark.py
-    python run_yolo8_benchmark.py --runs 50 --warmup 5
-    python run_yolo8_benchmark.py --model s --save results/
+See `BENCHMARKING.md` for shared measurement options, result formats, and the
+higher-level sweep / CLI APIs.
 """
 from __future__ import annotations
 

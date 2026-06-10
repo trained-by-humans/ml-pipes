@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import itertools
 import json
 import re
@@ -12,11 +11,15 @@ import numpy as np
 
 from .collectors.concurrent_collector import ConcurrentCollector
 from .core import Pipeline
-from .factory import InputFn
+from .factory import (
+    DataFactory,
+    InputFn,
+    PipelineFactory,
+)
 from .tracing import InvocationTrace
 
-PipelineFactory: TypeAlias = Callable[[dict], Pipeline]
-DataFactory: TypeAlias = Callable[[dict], InputFn]
+PipelineFactoryLike: TypeAlias = Callable[..., Pipeline]
+DataFactoryLike: TypeAlias = Callable[..., InputFn]
 ConfigFilter: TypeAlias = Callable[[dict], bool]
 
 
@@ -60,6 +63,14 @@ def _compute_stat(label: str, samples_s: list[float], percentiles: tuple[float, 
         max_ms=float(np.max(arr)),
         percentiles={p: float(np.percentile(arr, p * 100)) for p in percentiles},
     )
+
+
+def _format_config_label(config: dict, *, default: str) -> str:
+    if "_label" in config and len(config) == 1:
+        return str(config["_label"])
+
+    visible = {k: v for k, v in config.items() if not k.startswith("_")}
+    return "|".join(f"{k}:{v}" for k, v in visible.items()) or default
 
 
 @dataclass
@@ -480,40 +491,14 @@ class Benchmark:
         return collector.report(label=self._label, metadata=self._metadata)
 
 
-def _validate_factory_config(kind: str, factory: Callable, config: dict) -> None:
-    """Pre-validate config against the factory signature before calling it.
-
-    Only runs when __wrapped__ is present (i.e. @pipeline_factory / @data_factory was used).
-    Raises TypeError with a precise message rather than parsing the exception after the fact.
-    """
-    fn = getattr(factory, "__wrapped__", None)
-    if fn is None:
-        return
-    params = inspect.signature(fn).parameters
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
-    if not has_var_keyword:
-        unexpected = [k for k in config if k not in params]
-        if unexpected:
-            raise TypeError(
-                f"{kind} factory got unknown config key(s) {unexpected!r} for config {config!r}"
-            )
-    missing = [
-        name for name, p in params.items()
-        if p.default is inspect.Parameter.empty
-        and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-        and name not in config
-    ]
-    if missing:
-        raise TypeError(
-            f"{kind} factory is missing required config key(s) {missing!r} for config {config!r}"
-        )
-
-
 @dataclass
 class BenchmarkSweep:
     """Cross-product every pipeline config with every data config and collect all results.
 
-    Calls ``data_factory(data_config)`` fresh for each cell::
+    Pass the values returned by ``@pipeline_factory`` and ``@data_factory``.
+    That is the normal way to use ``BenchmarkSweep``.
+
+    ``data_factory`` is called fresh for each data config::
 
         sweep = BenchmarkSweep(
             factory=make_pipeline,
@@ -523,13 +508,8 @@ class BenchmarkSweep:
             measurement=MeasurementConfig(runs=30),
         )
 
-    To benchmark against a single fixed input with no config, wrap it::
-
-        sweep = BenchmarkSweep(
-            factory=make_pipeline,
-            configs=[{"workers": 1}, {"workers": 4}],
-            data_factory=lambda _: my_input_fn,
-        )
+    If you need to adapt a plain callable explicitly, wrap it with
+    ``PipelineFactory.from_callable(...)`` or ``DataFactory.from_callable(...)``.
     """
 
     factory: PipelineFactory
@@ -545,32 +525,27 @@ class BenchmarkSweep:
             self.measurement = MeasurementConfig()
         if self.data_configs is None:
             self.data_configs = [{}]
+        if not isinstance(self.factory, PipelineFactory):
+            raise TypeError(
+                "BenchmarkSweep.factory expects a PipelineFactory. "
+                "Pass @pipeline_factory output or PipelineFactory.from_callable(...)."
+            )
+        if not isinstance(self.data_factory, DataFactory):
+            raise TypeError(
+                "BenchmarkSweep.data_factory expects a DataFactory. "
+                "Pass @data_factory output or DataFactory.from_callable(...)."
+            )
 
     def run(self) -> list[BenchmarkResult]:
-        is_single = len(self.configs) == 1 and len(self.data_configs) == 1  # type: ignore[arg-type]
+        data_configs = self.data_configs if self.data_configs is not None else [{}]
+        is_single = len(self.configs) == 1 and len(data_configs) == 1
         results: list[BenchmarkResult] = []
-        for data_config in self.data_configs:  # type: ignore[union-attr]
-            _validate_factory_config("data", self.data_factory, data_config)
-            try:
-                input_fn = self.data_factory(data_config)
-            except TypeError as exc:
-                raise TypeError(
-                    f"data factory rejected config {data_config!r}: {exc}"
-                ) from exc
-            if not callable(input_fn):
-                raise TypeError(
-                    f"data factory must return a callable InputFn, got {type(input_fn).__name__!r} "
-                    f"for config {data_config!r}"
-                )
-            if "_label" in data_config and len(data_config) == 1:
-                data_label = data_config["_label"]
-            else:
-                visible = {k: v for k, v in data_config.items() if not k.startswith("_")}
-                data_label = "|".join(f"{k}:{v}" for k, v in visible.items()) or "input"
+        for data_config in data_configs:
+            input_fn = self.data_factory.build(data_config)
+            data_label = _format_config_label(data_config, default="input")
             for pipeline_config in self.configs:
-                visible = {k: v for k, v in pipeline_config.items() if not k.startswith("_")}
-                config_str = "|".join(f"{k}:{v}" for k, v in visible.items())
-                auto_label = f"{data_label}|{config_str}" if config_str else data_label
+                pipeline_label = _format_config_label(pipeline_config, default="")
+                auto_label = "|".join(part for part in (data_label, pipeline_label) if part)
                 if self.label_prefix:
                     label = self.label_prefix if is_single else f"{self.label_prefix}|{auto_label}"
                 else:
@@ -578,18 +553,7 @@ class BenchmarkSweep:
                 metadata: dict = {"pipeline_config": pipeline_config, "data_config": data_config}
                 if self.extra_metadata:
                     metadata.update(self.extra_metadata)
-                _validate_factory_config("pipeline", self.factory, pipeline_config)
-                try:
-                    pipeline = self.factory(pipeline_config)
-                except TypeError as exc:
-                    raise TypeError(
-                        f"pipeline factory rejected config {pipeline_config!r}: {exc}"
-                    ) from exc
-                if not isinstance(pipeline, Pipeline):
-                    raise TypeError(
-                        f"pipeline factory must return a Pipeline, got {type(pipeline).__name__!r} "
-                        f"for config {pipeline_config!r}"
-                    )
+                pipeline = self.factory.build(pipeline_config)
                 result = Benchmark(
                     pipeline=pipeline,
                     input_fn=input_fn,
@@ -608,33 +572,38 @@ class BenchmarkBuilder:
     Entry points::
 
         BenchmarkBuilder.pipeline(p)   # concrete Pipeline (no config sweep)
-        BenchmarkBuilder.factory(f)    # factory callable (config sweep / matrix)
+        BenchmarkBuilder.factory(f)    # factory callable (config sweep)
+
+    Factories can be decorated reusable functions or plain callables invoked
+    as ``fn(**config)``.
 
     Chain measurement, pipeline config, and data config methods, then call
     ``.run()`` which returns ``list[BenchmarkResult]``.
     """
 
-    def __init__(self, source: Pipeline | PipelineFactory) -> None:
-        self._source = source
+    def __init__(self, source: Pipeline | PipelineFactoryLike) -> None:
+        self._pipeline_source = (
+            source if isinstance(source, Pipeline) else PipelineFactory.ensure_factory(source)
+        )
 
-        self._data_input_fn: InputFn | None = None
-        self._data_factory_fn: DataFactory | None = None
+        self._input_fn: InputFn | None = None
+        self._data_factory: DataFactory | None = None
 
         self._pipeline_config_dict: dict = {}
         self._pipeline_config_set: list[dict] | None = None
         self._pipeline_axes: dict[str, list] = {}
-        self._pipeline_config_filter_fn: Callable | None = None
+        self._pipeline_config_filter: Callable | None = None
 
         self._data_config_dict: dict = {}
         self._data_config_set: list[dict] | None = None
         self._data_axes: dict[str, list] = {}
-        self._data_config_filter_fn: Callable | None = None
+        self._data_config_filter: Callable | None = None
 
         self._runs: int | None = None
         self._warmup: int | None = None
         self._percentiles: list[float] | None = None
-        self._label_str: str | None = None
-        self._metadata_dict: dict | None = None
+        self._label: str | None = None
+        self._metadata: dict | None = None
 
     # ------------------------------------------------------------------
     # Named constructors
@@ -646,8 +615,8 @@ class BenchmarkBuilder:
         return cls(p)
 
     @classmethod
-    def factory(cls, f: PipelineFactory) -> BenchmarkBuilder:
-        """Start from a pipeline factory callable."""
+    def factory(cls, f: PipelineFactoryLike) -> BenchmarkBuilder:
+        """Start from a pipeline factory or callable."""
         return cls(f)
 
     # ------------------------------------------------------------------
@@ -671,7 +640,7 @@ class BenchmarkBuilder:
 
     def pipeline_config_filter(self, pred: ConfigFilter) -> BenchmarkBuilder:
         """Drop pipeline configs where pred returns False."""
-        self._pipeline_config_filter_fn = pred
+        self._pipeline_config_filter = pred
         return self
 
     # ------------------------------------------------------------------
@@ -680,19 +649,28 @@ class BenchmarkBuilder:
 
     def data_input(self, fn: InputFn) -> BenchmarkBuilder:
         """Use a concrete InputFn (no data config sweep)."""
-        self._data_input_fn = fn
+        self._input_fn = fn
         return self
 
     def data_inputs(self, fns: list[InputFn], labels: list[str]) -> BenchmarkBuilder:
         """Use multiple InputFns as a sweep — each gets a label."""
+        if len(fns) != len(labels):
+            raise ValueError("data_inputs() requires the same number of input functions and labels")
+        if len(set(labels)) != len(labels):
+            raise ValueError("data_inputs() requires unique labels")
+
         _fn_map = dict(zip(labels, fns))
-        self._data_factory_fn = lambda cfg, _m=_fn_map: _m[cfg["_label"]]
+
+        def _select_input(_label: str) -> InputFn:
+            return _fn_map[_label]
+
+        self._data_factory = DataFactory.from_callable(_select_input)
         self._data_config_set = [{"_label": lab} for lab in labels]
         return self
 
-    def data_factory(self, factory: DataFactory) -> BenchmarkBuilder:
-        """Use a data factory callable (enables data config sweep)."""
-        self._data_factory_fn = factory
+    def data_factory(self, factory: DataFactoryLike) -> BenchmarkBuilder:
+        """Use a data factory or callable (enables data config sweep)."""
+        self._data_factory = DataFactory.ensure_factory(factory)
         return self
 
     def data_config(self, **kwargs) -> BenchmarkBuilder:
@@ -712,7 +690,7 @@ class BenchmarkBuilder:
 
     def data_config_filter(self, pred: ConfigFilter) -> BenchmarkBuilder:
         """Drop data configs where pred returns False."""
-        self._data_config_filter_fn = pred
+        self._data_config_filter = pred
         return self
 
     # ------------------------------------------------------------------
@@ -736,11 +714,11 @@ class BenchmarkBuilder:
     # ------------------------------------------------------------------
 
     def label(self, s: str) -> BenchmarkBuilder:
-        self._label_str = s
+        self._label = s
         return self
 
     def metadata(self, d: dict) -> BenchmarkBuilder:
-        self._metadata_dict = d
+        self._metadata = d
         return self
 
     # ------------------------------------------------------------------
@@ -758,7 +736,7 @@ class BenchmarkBuilder:
         self._validate_data_source()
 
     def _validate_pipeline_source(self) -> None:
-        if isinstance(self._source, Pipeline):
+        if isinstance(self._pipeline_source, Pipeline):
             has_pipeline_config = (
                 self._pipeline_config_dict
                 or self._pipeline_config_set is not None
@@ -773,29 +751,29 @@ class BenchmarkBuilder:
             raise ValueError("pipeline_config_set() and pipeline_config_axis() are mutually exclusive")
 
     def _validate_data_source(self) -> None:
-        if self._data_input_fn is not None and self._data_factory_fn is not None:
+        if self._input_fn is not None and self._data_factory is not None:
             raise ValueError("data_input() and data_factory() are mutually exclusive")
         has_data_config = (
             self._data_config_dict
             or self._data_config_set is not None
             or self._data_axes
         )
-        if has_data_config and self._data_input_fn is not None:
+        if has_data_config and self._input_fn is not None:
             raise ValueError(
                 "data config methods cannot be used with data_input() — "
                 "a concrete InputFn ignores config. Use data_factory() instead."
             )
-        if has_data_config and self._data_factory_fn is None and self._data_input_fn is None:
+        if has_data_config and self._data_factory is None and self._input_fn is None:
             raise ValueError("data_config*() requires data_factory() to be set")
         if self._data_config_set is not None and self._data_axes:
             raise ValueError("data_config_set() and data_config_axis() are mutually exclusive")
 
     def plan(self) -> str:
-        output = self._plan()
+        output = self._render_plan()
         print(output, file=sys.stderr)
         return output
 
-    def _plan(self) -> str:
+    def _render_plan(self) -> str:
         if not self._pipeline_axes:
             configs = self._resolve_pipeline_configs()
             rows = [f"  {i + 1}. {c}" for i, c in enumerate(configs)]
@@ -803,7 +781,7 @@ class BenchmarkBuilder:
 
         keys = list(self._pipeline_axes.keys())
         all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*self._pipeline_axes.values())]
-        pred = self._pipeline_config_filter_fn
+        pred = self._pipeline_config_filter
         active = {frozenset(c.items()) for c in all_combos if pred is None or pred(c)}
         col_w = max(len(f"{k}={v}") for c in all_combos for k, v in c.items())
         rows = []
@@ -828,7 +806,7 @@ class BenchmarkBuilder:
         n = len(keys)
         if n < 2 or n > 3:
             raise ValueError(f"grid() requires 2 or 3 axes, got {n}")
-        pred = self._pipeline_config_filter_fn
+        pred = self._pipeline_config_filter
         all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*axes.values())]
         active = {frozenset(c.items()) for c in all_combos if pred is None or pred(c)}
         row_key, col_key = keys[0], keys[1]
@@ -868,11 +846,11 @@ class BenchmarkBuilder:
         lines += ["", "○ = active  × = filtered"]
         return "\n".join(lines)
 
-    def _resolve_factory(self) -> PipelineFactory:
-        if isinstance(self._source, Pipeline):
-            _pipeline = self._source
-            return lambda _: _pipeline
-        return self._source
+    def _resolve_pipeline_factory(self) -> PipelineFactory:
+        if isinstance(self._pipeline_source, Pipeline):
+            _pipeline = self._pipeline_source
+            return PipelineFactory.from_callable(lambda: _pipeline)
+        return self._pipeline_source
 
     def _resolve_pipeline_configs(self) -> list[dict]:
         if self._pipeline_axes:
@@ -881,32 +859,32 @@ class BenchmarkBuilder:
                 {**self._pipeline_config_dict, **dict(zip(keys, combo))}
                 for combo in itertools.product(*self._pipeline_axes.values())
             ]
-            if self._pipeline_config_filter_fn:
-                configs = [c for c in configs if self._pipeline_config_filter_fn(c)]
+            if self._pipeline_config_filter:
+                configs = [c for c in configs if self._pipeline_config_filter(c)]
             return configs
         if self._pipeline_config_set is not None:
             return [{**self._pipeline_config_dict, **c} for c in self._pipeline_config_set]
         return [self._pipeline_config_dict]
 
     def _resolve_data_factory(self) -> DataFactory:
-        if self._data_input_fn is not None:
-            _fn = self._data_input_fn
-            return lambda _, fn=_fn: fn
-        if self._data_factory_fn is not None:
-            return self._data_factory_fn
+        if self._input_fn is not None:
+            _fn = self._input_fn
+            return DataFactory.from_callable(lambda: _fn)
+        if self._data_factory is not None:
+            return self._data_factory
         raise ValueError("no data_input() or data_factory() provided")
 
     def _resolve_data_configs(self) -> list[dict]:
-        if self._data_input_fn is not None:
-            return [{"_label": "input"}]
+        if self._input_fn is not None:
+            return [{}]
         if self._data_axes:
             keys = list(self._data_axes.keys())
             configs = [
                 {**self._data_config_dict, **dict(zip(keys, combo))}
                 for combo in itertools.product(*self._data_axes.values())
             ]
-            if self._data_config_filter_fn:
-                configs = [c for c in configs if self._data_config_filter_fn(c)]
+            if self._data_config_filter:
+                configs = [c for c in configs if self._data_config_filter(c)]
             return configs
         if self._data_config_set is not None:
             return [{**self._data_config_dict, **c} for c in self._data_config_set]
@@ -920,14 +898,14 @@ class BenchmarkBuilder:
         """Execute the benchmark(s) and return all results."""
         self._validate()
         if verbose:
-            print(self._plan(), file=sys.stderr)
+            print(self._render_plan(), file=sys.stderr)
             print(file=sys.stderr)
         return BenchmarkSweep(
-            factory=self._resolve_factory(),
+            factory=self._resolve_pipeline_factory(),
             configs=self._resolve_pipeline_configs(),
             data_factory=self._resolve_data_factory(),
             data_configs=self._resolve_data_configs(),
             measurement=self._build_measurement(),
-            label_prefix=self._label_str or None,
-            extra_metadata=self._metadata_dict or None,
+            label_prefix=self._label or None,
+            extra_metadata=self._metadata or None,
         ).run()

@@ -1,17 +1,15 @@
 """
-Variant sweep benchmark: compare YOLOv8 model sizes (n, s, m, l, x).
+Variant sweep example for YOLOv8 model sizes.
 
-Runs the same plain inference pipeline for each available model variant and
-produces a side-by-side latency table so you can see the accuracy/speed
-trade-off across model sizes.
+Unlike the other sweep examples, this script keeps the pipeline structure the
+same and only varies the model artifact behind it.
 
-Only variants whose model file is already present in the assets directory are
-included — missing variants are skipped with a warning rather than failing.
+Run from the repo root:
+    python examples/benchmarks/run_yolo8_benchmark_variants.py --variants n s --runs 20
+    python examples/benchmarks/run_yolo8_benchmark_variants.py --variants n s m --save results/
 
-Usage:
-    python run_yolo8_benchmark_variants.py
-    python run_yolo8_benchmark_variants.py --runs 20 --warmup 3
-    python run_yolo8_benchmark_variants.py --variants n s m --save results/
+See `BENCHMARKING.md` for shared sweep concepts, measurement options, and
+factory rules.
 """
 from __future__ import annotations
 

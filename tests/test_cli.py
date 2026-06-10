@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import functools
 import sys
 import types
 
 import pytest
 
+from ml_pipes import Pipeline
 from ml_pipes.factory import (
-    _DATA_FACTORY_ATTR,
-    _PIPELINE_FACTORY_ATTR,
+    PipelineFactory,
     data_factory,
-    discover_factory,
     pipeline_factory,
 )
 from ml_pipes.__main__ import (
@@ -20,42 +20,17 @@ from ml_pipes.__main__ import (
     _parse_config_axis,
     _parse_config_value,
     _parse_config_list,
+    _resolve_pipeline_factory,
     cmd_benchmark,
 )
 
 
-# ---------------------------------------------------------------------------
-# Decorator markers
-# ---------------------------------------------------------------------------
+def _passthrough_wrapper(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
 
-def test_pipeline_factory_sets_attribute():
-    def my_fn(model_path): pass
-    wrapped = pipeline_factory(my_fn)
-    assert getattr(wrapped, _PIPELINE_FACTORY_ATTR) is True
-
-
-def test_data_factory_sets_attribute():
-    def my_fn(): pass
-    wrapped = data_factory(my_fn)
-    assert getattr(wrapped, _DATA_FACTORY_ATTR) is True
-
-
-def test_pipeline_factory_preserves_name():
-    @pipeline_factory
-    def my_named_fn(x): pass
-    assert my_named_fn.__name__ == "my_named_fn"
-
-
-def test_pipeline_factory_preserves_wrapped():
-    def original(x): pass
-    wrapped = pipeline_factory(original)
-    assert wrapped.__wrapped__ is original
-
-
-def test_decorators_exported_from_init():
-    from ml_pipes import pipeline_factory as pf, data_factory as df
-    assert callable(pf)
-    assert callable(df)
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -132,10 +107,6 @@ def test_parse_config_list_non_dict_raises():
         _parse_config_list(["[1, 2, 3]"])
 
 
-# ---------------------------------------------------------------------------
-# Discovery
-# ---------------------------------------------------------------------------
-
 def _fake_module(name: str, **attrs) -> types.ModuleType:
     m = types.ModuleType(name)
     for k, v in attrs.items():
@@ -143,51 +114,24 @@ def _fake_module(name: str, **attrs) -> types.ModuleType:
     return m
 
 
-def test_discover_factory_single_found():
-    @pipeline_factory
-    def my_pf(x): pass
-    m = _fake_module("_test", my_pf=my_pf, other=lambda: None)
-    result = discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
-    assert result is my_pf
+# ---------------------------------------------------------------------------
+# CLI factory resolution
+# ---------------------------------------------------------------------------
 
+def test_resolve_pipeline_factory_explicit_undecorated_wraps_keyword_callable():
+    seen = {}
 
-def test_discover_factory_multiple_raises():
-    @pipeline_factory
-    def pf1(x): pass
-    @pipeline_factory
-    def pf2(x): pass
-    m = _fake_module("_test2", pf1=pf1, pf2=pf2)
-    with pytest.raises(ValueError, match="multiple @pipeline_factory"):
-        discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
+    def plain(x=1, y=2):
+        seen["args"] = (x, y)
+        return Pipeline([])
 
-
-def test_discover_factory_none_when_absent():
-    m = _fake_module("_test3", other=lambda: None)
-    result = discover_factory(m, None, _PIPELINE_FACTORY_ATTR, "pipeline")
-    assert result is None
-
-
-def test_discover_factory_explicit_bypasses_scan():
-    def explicit(config): pass
-    m = _fake_module("_test4")
-    result = discover_factory(m, explicit, _PIPELINE_FACTORY_ATTR, "pipeline")
-    # Undecorated explicit refs are wrapped — __wrapped__ points to the original
-    assert result.__wrapped__ is explicit
-
-
-def test_discover_factory_explicit_undecorated_wraps_for_dict_call():
-    def plain(x=1, y=2): return (x, y)
     m = _fake_module("_test5")
-    result = discover_factory(m, plain, _PIPELINE_FACTORY_ATTR, "pipeline")
-    assert result({"x": 10, "y": 20}) == (10, 20)
-
-
-def test_discover_factory_explicit_already_decorated_not_double_wrapped():
-    @pipeline_factory
-    def decorated(x=1): pass
-    m = _fake_module("_test6")
-    result = discover_factory(m, decorated, _PIPELINE_FACTORY_ATTR, "pipeline")
-    assert result is decorated
+    result = _resolve_pipeline_factory(m, plain, "_test5:plain")
+    assert isinstance(result, PipelineFactory)
+    assert isinstance(result(x=10, y=20), Pipeline)
+    assert seen["args"] == (10, 20)
+    assert isinstance(result.build({"x": 10, "y": 20}), Pipeline)
+    assert seen["args"] == (10, 20)
 
 
 # ---------------------------------------------------------------------------
@@ -294,10 +238,24 @@ def test_cmd_benchmark_missing_required_arg_raises(tmp_path):
             "--input", str(f),
             "--runs", "2", "--warmup", "1",
         ])
-        with pytest.raises(TypeError):
+        with pytest.raises(CLIError, match="pipeline factory is missing required config key"):
             cmd_benchmark(args)
     finally:
         del sys.modules["_test_bench_missing"]
+
+
+def test_resolve_pipeline_factory_wrapped_decorated_export_raises():
+    @pipeline_factory
+    def make_pipeline():
+        return Pipeline([_Identity()])
+
+    wrapped = _passthrough_wrapper(make_pipeline)
+
+    mod = types.ModuleType("_test_wrapped_factory")
+    mod.wrapped = wrapped
+
+    with pytest.raises(CLIError, match=r"@pipeline_factory must be the outermost decorator"):
+        _resolve_pipeline_factory(mod, None, "_test_wrapped_factory")
 
 
 # ---------------------------------------------------------------------------

@@ -1,21 +1,15 @@
 """
-Axis sweep benchmark: sweep slice_wh × overlap_wh axes for the tiled YOLOv8 pipeline.
+Axis-sweep example for tile size and overlap on the tiled YOLOv8 pipeline.
 
-BenchmarkBuilder expands the cartesian product of all axes automatically.
-Useful for finding the tile size / overlap combination that best balances
-latency and detection quality.
+Unlike the plain-vs-tiled sweep example, this script focuses on cartesian axis
+expansion plus filtering within one pipeline template.
 
-Axes swept:
-  slice_wh   — tile size in pixels (width × height)
-  overlap_wh — overlap between adjacent tiles in pixels
+Run from the repo root:
+    python examples/benchmarks/run_yolo8_benchmark_sweep_axis.py --model n --runs 20
+    python examples/benchmarks/run_yolo8_benchmark_sweep_axis.py --model s --save results/
 
-A filter drops combinations where overlap >= half the slice size, as those
-would produce more than 2× tile coverage and hurt latency with little gain.
-
-Usage:
-    python run_yolo8_benchmark_sweep_axis.py
-    python run_yolo8_benchmark_sweep_axis.py --runs 20 --warmup 3
-    python run_yolo8_benchmark_sweep_axis.py --model s --save results/
+See `BENCHMARKING.md` for shared sweep concepts, measurement options, and
+factory rules.
 """
 from __future__ import annotations
 

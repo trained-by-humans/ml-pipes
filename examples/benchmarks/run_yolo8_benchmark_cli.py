@@ -1,32 +1,17 @@
 """
-CLI benchmark example: YOLOv8 tiled pipeline annotated for python -m ml_pipes.
+CLI benchmark target for `python -m ml_pipes benchmark`.
 
-This module demonstrates how to expose a pipeline and its input for benchmarking
-directly from the command line, without writing a benchmark script.
+Unlike the script-based examples, this module is meant to be discovered by the
+benchmark CLI. It shows the reusable module-level factory pattern:
+`@pipeline_factory` for the pipeline and `@data_factory` for the input source.
 
-The two decorators do all the work:
-  @pipeline_factory  — marks the pipeline constructor; CLI calls it with config kwargs
-  @data_factory      — marks the input driver; CLI calls it to get an InputFn
-
-Usage (single run, with optional config overrides):
+Run from the repo root:
+    python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli
     python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
         --arg slice_wh=480x480 --runs 20 --warmup 3
 
-Usage (sweep over explicit configs):
-    python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
-        --config '{"slice_wh":[320,320],"overlap_wh":[80,80]}' \
-        --config '{"slice_wh":[480,480],"overlap_wh":[80,80]}' \
-        --runs 20 --warmup 3
-
-Usage (axis sweep — cartesian product of axes):
-    python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
-        --axis slice_wh=240x240,320x320,480x480 \
-        --axis overlap_wh=40x40,80x80 \
-        --runs 20 --warmup 3
-
-All parameters without defaults (model_path, output_path, image_path) must be
-supplied via --config or --axis when running from the CLI.  The defaults below
-are set up for running from the examples/ directory with the standard asset cache.
+See `BENCHMARKING.md` for sweep variants, shared CLI options, and factory
+rules.
 """
 from __future__ import annotations
 

@@ -1,20 +1,16 @@
 """
-Sweep benchmark: plain inference vs tiled inference for YOLOv8.
+Scripted `BenchmarkBuilder` sweep for plain vs tiled YOLOv8 inference.
 
-Compares two pipeline structures side by side:
-  - plain: standard single-pass inference at 640×640
-  - tiled: SAHI-style tiling with Scatter/Gather + NMM deduplication
+This example focuses on comparing two pipeline structures side by side in one
+script. It is the best reference for a handpicked config sweep built with
+reusable decorated factories plus a plain dynamic input callable.
 
-Each config is run with warmup + N measured runs. The resulting table shows
-per-operator latency for each variant so you can see exactly where tiling adds
-cost (Tile, Scatter/Gather, Stitch, NMM) vs plain inference.
+Run from the repo root:
+    python examples/benchmarks/run_yolo8_benchmark_sweep.py --model n --runs 20
+    python examples/benchmarks/run_yolo8_benchmark_sweep.py --model s --save results/
 
-Results are saved as JSON for later comparison or forwarding to MLflow / W&B.
-
-Usage:
-    python run_yolo8_benchmark_sweep.py
-    python run_yolo8_benchmark_sweep.py --runs 20 --warmup 3
-    python run_yolo8_benchmark_sweep.py --model s --save results/
+See `BENCHMARKING.md` for shared sweep concepts, measurement options, and
+factory rules.
 """
 from __future__ import annotations
 

@@ -12,11 +12,9 @@ from ml_pipes.benchmark import (
     BenchmarkResult,
 )
 from ml_pipes.factory import (
-    _DATA_FACTORY_ATTR,
-    _PIPELINE_FACTORY_ATTR,
+    DataFactory,
     InputFn,
-    discover_factory,
-    validate_factory_config,
+    PipelineFactory,
 )
 
 
@@ -62,17 +60,17 @@ def _load_ref(ref: str) -> tuple[Any, Any]:
 
 def _resolve_pipeline_factory(module: Any, explicit_fn: Any, ref: str):
     try:
-        fn = discover_factory(module, explicit_fn, _PIPELINE_FACTORY_ATTR, "pipeline")
-    except ValueError as exc:
+        factory = PipelineFactory.discover(module, explicit_fn)
+    except (TypeError, ValueError) as exc:
         raise CLIError(str(exc)) from exc
-    if fn is None:
+    if factory is None:
         mod_name = ref.split(":")[0]
         raise CLIError(
             f"no @pipeline_factory found in {mod_name!r}. "
             f"Decorate exactly one function with @pipeline_factory, "
             f"or use 'module:fn_name' syntax."
         )
-    return fn
+    return factory
 
 
 def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
@@ -80,8 +78,8 @@ def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
     if data_ref is not None:
         data_module, explicit_fn = _load_ref(data_ref)
         try:
-            data_fn = discover_factory(data_module, explicit_fn, _DATA_FACTORY_ATTR, "data")
-        except ValueError as exc:
+            data_fn = DataFactory.discover(data_module, explicit_fn)
+        except (TypeError, ValueError) as exc:
             raise CLIError(str(exc)) from exc
         if data_fn is None:
             raise CLIError(
@@ -91,9 +89,12 @@ def _resolve_data_factory(data_ref: str | None, pipeline_module: Any) -> Any:
         return data_fn
 
     try:
-        return discover_factory(pipeline_module, None, _DATA_FACTORY_ATTR, "data")
-    except ValueError as exc:
+        data_fn = DataFactory.discover(pipeline_module)
+    except (TypeError, ValueError) as exc:
         raise CLIError(str(exc)) from exc
+    if data_fn is None:
+        return None
+    return data_fn
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +110,11 @@ def _resolve_inputs(
     data_fn = _resolve_data_factory(data_ref, pipeline_module)
 
     if data_fn is not None:
-        input_fn = data_fn(data_config)
-        return [input_fn], [getattr(data_fn, "__wrapped__", data_fn).__name__]
+        try:
+            input_fn = data_fn.build(data_config)
+        except TypeError as exc:
+            raise CLIError(str(exc)) from exc
+        return [input_fn], [data_fn.__name__]
 
     if not input_paths:
         raise CLIError(
@@ -236,10 +240,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         data_config=data_config,
     )
     try:
-        validate_factory_config(factory, pipeline_config)
+        pipeline = factory.build(pipeline_config)
     except TypeError as exc:
-        raise CLIError(f"missing required argument for config {pipeline_config}: {exc}") from exc
-    pipeline = factory(pipeline_config)
+        raise CLIError(str(exc)) from exc
     for input_fn in input_fns:
         _, value, _, _ = input_fn()
         pipeline(value)
@@ -293,7 +296,10 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         builder.warmup(args.warmup)
     builder.percentiles(*args.percentiles)
 
-    results = builder.run()
+    try:
+        results = builder.run()
+    except TypeError as exc:
+        raise CLIError(str(exc)) from exc
     print(BenchmarkResult.to_comparison_table(results, expand_regions=expand_regions))
 
     if args.save:
