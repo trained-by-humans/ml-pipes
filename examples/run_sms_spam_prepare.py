@@ -592,6 +592,7 @@ def _write_sms_spam_lineage_artifacts(
     output_dir: Path | str,
     pipeline_description: str,
     run_args: dict[str, Any],
+    input_selection: dict[str, Any],
 ) -> None:
     output_path = Path(output_dir)
     output_locations = _output_locations(records)
@@ -643,6 +644,7 @@ def _write_sms_spam_lineage_artifacts(
             "path": str(dataset_path),
             "sha256": _sha256_file(dataset_path),
             "bytes": dataset_path.stat().st_size,
+            "selection": input_selection,
         },
         "output": {
             "path": str(output_path),
@@ -731,6 +733,7 @@ def main() -> int:
     assets_dir = args.assets_dir / "sms_spam_collection"
     output_dir = args.output_dir or (args.assets_dir / "sms_spam_prepared")
     sample_count = args.inspect_samples if args.inspect_html is not None and args.inspect_samples > 0 else 0
+    inspect_requested_samples = args.inspect_samples if args.inspect_html is not None else None
     pipeline = sms_spam_prepare_pipeline(
         min_chars=args.min_chars,
         min_tokens=args.min_tokens,
@@ -745,6 +748,11 @@ def main() -> int:
     )
     _, raw_rows, _, input_metadata = input_fn()
     dataset_path = Path(input_metadata["dataset_path"])
+    input_selection = {
+        "strategy": "head" if sample_count > 0 else "full",
+        "requested_rows": inspect_requested_samples,
+        "selected_rows": len(raw_rows),
+    }
 
     if args.inspect_html is not None and sample_count > 0:
         inspection = pipeline.inspect(raw_rows)
@@ -801,7 +809,12 @@ def main() -> int:
             "validation_ratio": args.validation_ratio,
             "test_ratio": args.test_ratio,
             "lazy": args.lazy,
+            "inspect_html": str(args.inspect_html) if args.inspect_html is not None else None,
+            "inspect_orientation": args.inspect_orientation if args.inspect_html is not None else None,
+            "inspect_samples_requested": inspect_requested_samples,
+            "selected_input_rows": len(raw_rows),
         },
+        input_selection=input_selection,
     )
 
     print(f"Dataset cached at: {dataset_path}")
