@@ -736,7 +736,7 @@ def test_builder_factory_constructor_preserves_plain_dict_factory():
     b = BenchmarkBuilder.factory(make_pipeline)
     assert isinstance(b._pipeline_source, PipelineFactory)
     assert b._pipeline_source is not make_pipeline
-    assert isinstance(b._pipeline_source.from_config({"labels": {"spam": 1}}), Pipeline)
+    assert isinstance(b._pipeline_source.build({"labels": {"spam": 1}}), Pipeline)
 
 
 def test_builder_factory_constructor_preserves_plain_keyword_factory():
@@ -746,7 +746,7 @@ def test_builder_factory_constructor_preserves_plain_keyword_factory():
     b = BenchmarkBuilder.factory(make_pipeline)
     assert isinstance(b._pipeline_source, PipelineFactory)
     assert b._pipeline_source is not make_pipeline
-    assert isinstance(b._pipeline_source.from_config({"value": 2}), Pipeline)
+    assert isinstance(b._pipeline_source.build({"value": 2}), Pipeline)
 
 
 def test_builder_data_factory_assignment_coerces_decorated_factory():
@@ -761,7 +761,7 @@ def test_builder_data_factory_assignment_preserves_plain_dict_factory():
     b = BenchmarkBuilder.pipeline(_make_pipeline()).data_factory(make_data)
     assert isinstance(b._data_factory, DataFactory)
     assert b._data_factory is not make_data
-    assert b._data_factory.from_config({"labels": {"spam": 1}}) is _builder_input_fn
+    assert b._data_factory.build({"labels": {"spam": 1}}) is _builder_input_fn
 
 
 def test_builder_resolved_concrete_pipeline_rejects_config_keys():
@@ -785,8 +785,8 @@ def test_builder_data_inputs_resolve_by_label():
         ["first", "second"],
     )
     factory = builder._resolve_data_factory()
-    assert factory.from_config({"_label": "first"}) is _builder_input_fn
-    assert factory.from_config({"_label": "second"}) is other_input_fn
+    assert factory.build({"_label": "first"}) is _builder_input_fn
+    assert factory.build({"_label": "second"}) is other_input_fn
 
 
 def test_builder_data_inputs_reject_extra_config_keys():

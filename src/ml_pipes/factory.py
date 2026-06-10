@@ -23,46 +23,10 @@ class Factory(Generic[FactoryOutputT]):
         self._source = source
         functools.update_wrapper(self, source)
 
-    @classmethod
-    def from_callable(
-        cls: type[FactoryT],
-        source: Callable[..., FactoryOutputT],
-    ) -> FactoryT:
-        """Build a ``Factory`` from a callable invoked as ``source(**config)``."""
-        if isinstance(source, Factory):
-            raise TypeError(
-                f"{cls.__name__}.from_callable() expects a plain callable; use {cls.__name__}.ensure_factory()."
-            )
-        annotated = _find_annotated_factory(source)
-        if annotated is not None:
-            decorator = _factory_decorator_name(type(annotated))
-            raise TypeError(
-                f"{cls.__name__}.from_callable() cannot wrap a callable that already wraps {decorator}. "
-                f"{decorator} must be the outermost decorator."
-            )
-        return cls(source)
-
-    @classmethod
-    def ensure_factory(
-        cls: type[FactoryT],
-        source: Callable[..., FactoryOutputT] | Factory[FactoryOutputT],
-    ) -> FactoryT:
-        """Normalize a plain callable or existing compatible factory."""
-        if isinstance(source, cls):
-            return source
-        if isinstance(source, Factory):
-            if type(source) is Factory:
-                return cls(source._source)
-            raise TypeError(
-                f"{cls.__name__}.ensure_factory() expects a callable or {cls.__name__}, "
-                f"got {type(source).__name__}."
-            )
-        return cls.from_callable(source)
-
     def __call__(self, *args, **kwargs) -> FactoryOutputT:
         return self._validate_output(self._source(*args, **kwargs))
 
-    def from_config(self, config: dict) -> FactoryOutputT:
+    def build(self, config: dict) -> FactoryOutputT:
         self.validate_config(config, name=self._factory_name)
         output = self._source(**config)
         return self._validate_output(output, config=config)
@@ -99,11 +63,48 @@ class Factory(Generic[FactoryOutputT]):
         return output
 
     @classmethod
-    def _discover_factory(
+    def from_callable(
+        cls: type[FactoryT],
+        source: Callable[..., FactoryOutputT],
+    ) -> FactoryT:
+        """Build a ``Factory`` from a callable invoked as ``source(**config)``."""
+        if isinstance(source, Factory):
+            raise TypeError(
+                f"{cls.__name__}.from_callable() expects a plain callable; use {cls.__name__}.ensure_factory()."
+            )
+        annotated = _find_annotated_factory(source)
+        if annotated is not None:
+            decorator = _factory_decorator_name(type(annotated))
+            raise TypeError(
+                f"{cls.__name__}.from_callable() cannot wrap a callable that already wraps {decorator}. "
+                f"{decorator} must be the outermost decorator."
+            )
+        return cls(source)
+
+    @classmethod
+    def ensure_factory(
+        cls: type[FactoryT],
+        source: Callable[..., FactoryOutputT] | Factory[FactoryOutputT],
+    ) -> FactoryT:
+        """Normalize a plain callable or existing compatible factory."""
+        if isinstance(source, cls):
+            return source
+        if isinstance(source, Factory):
+            if type(source) is Factory:
+                return cls(source._source)
+            raise TypeError(
+                f"{cls.__name__}.ensure_factory() expects a callable or {cls.__name__}, "
+                f"got {type(source).__name__}."
+            )
+        return cls.from_callable(source)
+
+    @classmethod
+    def discover(
         cls: type[FactoryT],
         module: Any,
-        explicit_fn: Any,
+        explicit_fn: Any = None,
     ) -> FactoryT | None:
+        """Discover the module's factory exported as ``cls``."""
         if explicit_fn is not None:
             return cls.ensure_factory(explicit_fn)
         return _discover_factory_in_module(module, cls)
@@ -113,11 +114,6 @@ class PipelineFactory(Factory[Pipeline]):
     """Factory subtype for pipeline-producing callables."""
 
     _factory_name = "pipeline factory"
-
-    @classmethod
-    def discover(cls, module: Any, explicit_fn: Any = None) -> PipelineFactory | None:
-        """Discover the module's pipeline factory, normalized to ``PipelineFactory``."""
-        return cls._discover_factory(module, explicit_fn)
 
     def _validate_output(
         self,
@@ -138,11 +134,6 @@ class DataFactory(Factory[InputFn]):
     """Factory subtype for input-producing callables."""
 
     _factory_name = "data factory"
-
-    @classmethod
-    def discover(cls, module: Any, explicit_fn: Any = None) -> DataFactory | None:
-        """Discover the module's data factory, normalized to ``DataFactory``."""
-        return cls._discover_factory(module, explicit_fn)
 
     def _validate_output(
         self,
@@ -168,7 +159,7 @@ def pipeline_factory(fn: Callable[..., Pipeline]) -> PipelineFactory:
     normalization raise an error instead of adapting it.
 
     The decorated value stays directly callable and also exposes
-    ``from_config(config)`` for CLI and benchmark helpers. Any parameter
+    ``build(config)`` for CLI and benchmark helpers. Any parameter
     without a default must be supplied through ``--arg``, ``--config``,
     or ``--axis``.
     """
@@ -183,7 +174,7 @@ def data_factory(fn: Callable[..., InputFn]) -> DataFactory:
     raise an error instead of adapting it.
 
     The decorated value stays directly callable and also exposes
-    ``from_config(config)`` for CLI and benchmark helpers. It must return an
+    ``build(config)`` for CLI and benchmark helpers. It must return an
     ``InputFn`` — a zero-argument callable yielding ``(id: str, value: Any,
     tag: str | None, metadata: dict | None)``.
     """

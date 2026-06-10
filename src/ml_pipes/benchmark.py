@@ -541,7 +541,7 @@ class BenchmarkSweep:
         is_single = len(self.configs) == 1 and len(data_configs) == 1
         results: list[BenchmarkResult] = []
         for data_config in data_configs:
-            input_fn = self.data_factory.from_config(data_config)
+            input_fn = self.data_factory.build(data_config)
             data_label = _format_config_label(data_config, default="input")
             for pipeline_config in self.configs:
                 pipeline_label = _format_config_label(pipeline_config, default="")
@@ -553,7 +553,7 @@ class BenchmarkSweep:
                 metadata: dict = {"pipeline_config": pipeline_config, "data_config": data_config}
                 if self.extra_metadata:
                     metadata.update(self.extra_metadata)
-                pipeline = self.factory.from_config(pipeline_config)
+                pipeline = self.factory.build(pipeline_config)
                 result = Benchmark(
                     pipeline=pipeline,
                     input_fn=input_fn,

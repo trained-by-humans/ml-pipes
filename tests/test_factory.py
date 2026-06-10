@@ -44,7 +44,7 @@ def test_pipeline_factory_returns_discoverable_factory():
     assert wrapped is not my_fn
     assert wrapped.__name__ == "my_fn"
     assert PipelineFactory.discover(module) is wrapped
-    assert isinstance(wrapped.from_config({"model_path": "x"}), Pipeline)
+    assert isinstance(wrapped.build({"model_path": "x"}), Pipeline)
 
 
 def test_data_factory_returns_discoverable_factory():
@@ -57,7 +57,7 @@ def test_data_factory_returns_discoverable_factory():
     assert wrapped is not my_fn
     assert wrapped.__name__ == "my_fn"
     assert DataFactory.discover(module) is wrapped
-    assert callable(wrapped.from_config({}))
+    assert callable(wrapped.build({}))
 
 
 def test_pipeline_factory_preserves_name():
@@ -98,7 +98,7 @@ def test_factory_from_callable_wraps_plain_callable_for_config_dict_call():
     wrapped = Factory.from_callable(plain)
     assert isinstance(wrapped, Factory)
     assert wrapped(x=10, y=20) == (10, 20)
-    assert wrapped.from_config({"x": 10, "y": 20}) == (10, 20)
+    assert wrapped.build({"x": 10, "y": 20}) == (10, 20)
 
 
 def test_factory_from_callable_passes_dict_values_as_keyword_args():
@@ -108,7 +108,7 @@ def test_factory_from_callable_passes_dict_values_as_keyword_args():
     wrapped = Factory.from_callable(plain)
     assert isinstance(wrapped, Factory)
     assert wrapped(labels={"x": 10}) == 10
-    assert wrapped.from_config({"labels": {"x": 10}}) == 10
+    assert wrapped.build({"labels": {"x": 10}}) == 10
 
 
 def test_factory_from_callable_rejects_existing_factory():
@@ -166,7 +166,7 @@ def test_factory_ensure_factory_wraps_plain_callable():
 
     wrapped = Factory.ensure_factory(plain)
     assert isinstance(wrapped, Factory)
-    assert wrapped.from_config({"value": 10}) == 10
+    assert wrapped.build({"value": 10}) == 10
 
 
 def test_factory_ensure_factory_is_idempotent():
@@ -184,25 +184,25 @@ def test_pipeline_factory_ensure_factory_promotes_base_factory():
     wrapped = Factory.from_callable(plain)
     promoted = PipelineFactory.ensure_factory(wrapped)
     assert isinstance(promoted, PipelineFactory)
-    assert isinstance(promoted.from_config({"value": 10}), Pipeline)
+    assert isinstance(promoted.build({"value": 10}), Pipeline)
 
 
-def test_pipeline_factory_from_config_validates_config():
+def test_pipeline_factory_build_validates_config():
     @pipeline_factory
     def build_pipeline(workers: int) -> Pipeline:
         return Pipeline([])
 
     with pytest.raises(TypeError, match="pipeline factory is missing required config key.*workers"):
-        build_pipeline.from_config({})
+        build_pipeline.build({})
 
 
-def test_data_factory_from_config_validates_config():
+def test_data_factory_build_validates_config():
     @data_factory
     def build_data(value: int):
         return lambda: ("id", value, None, None)
 
     with pytest.raises(TypeError, match="data factory is missing required config key.*value"):
-        build_data.from_config({})
+        build_data.build({})
 
 
 def test_pipeline_factory_validates_return_type_on_direct_call():
@@ -298,7 +298,7 @@ def test_discover_pipeline_factory_explicit_wraps_dict_valued_callable():
     result = PipelineFactory.discover(module, explicit)
     assert isinstance(result, PipelineFactory)
     assert result is not explicit
-    assert isinstance(result.from_config({"labels": {"x": 1}}), Pipeline)
+    assert isinstance(result.build({"labels": {"x": 1}}), Pipeline)
     assert seen["labels"] == {"x": 1}
 
 
@@ -315,7 +315,7 @@ def test_discover_pipeline_factory_explicit_wraps_keyword_callable():
     assert result is not explicit
     assert isinstance(result(x=3, y=4), Pipeline)
     assert seen["args"] == (3, 4)
-    assert isinstance(result.from_config({"x": 3, "y": 4}), Pipeline)
+    assert isinstance(result.build({"x": 3, "y": 4}), Pipeline)
     assert seen["args"] == (3, 4)
 
 

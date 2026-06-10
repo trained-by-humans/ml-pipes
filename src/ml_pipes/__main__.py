@@ -111,7 +111,7 @@ def _resolve_inputs(
 
     if data_fn is not None:
         try:
-            input_fn = data_fn.from_config(data_config)
+            input_fn = data_fn.build(data_config)
         except TypeError as exc:
             raise CLIError(str(exc)) from exc
         return [input_fn], [data_fn.__name__]
@@ -240,7 +240,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         data_config=data_config,
     )
     try:
-        pipeline = factory.from_config(pipeline_config)
+        pipeline = factory.build(pipeline_config)
     except TypeError as exc:
         raise CLIError(str(exc)) from exc
     for input_fn in input_fns:

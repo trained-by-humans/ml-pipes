@@ -238,7 +238,7 @@ results = (
 ```
 
 The decorator returns a factory object that stays directly callable while also
-exposing `from_config(...)` for discovery and config-driven execution.
+exposing `build(...)` for discovery and config-driven execution.
 
 Unknown config keys, missing required parameters, and wrong return types all
 produce descriptive errors that name the offending key and config:
@@ -331,7 +331,7 @@ results = (
 ```
 
 As with `@pipeline_factory`, the decorator returns a factory object that stays
-directly callable while exposing `from_config(...)` for config-driven use.
+directly callable while exposing `build(...)` for config-driven use.
 
 The same error feedback applies as for the pipeline factory.
 

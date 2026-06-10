@@ -130,7 +130,7 @@ def test_resolve_pipeline_factory_explicit_undecorated_wraps_keyword_callable():
     assert isinstance(result, PipelineFactory)
     assert isinstance(result(x=10, y=20), Pipeline)
     assert seen["args"] == (10, 20)
-    assert isinstance(result.from_config({"x": 10, "y": 20}), Pipeline)
+    assert isinstance(result.build({"x": 10, "y": 20}), Pipeline)
     assert seen["args"] == (10, 20)
 
 
