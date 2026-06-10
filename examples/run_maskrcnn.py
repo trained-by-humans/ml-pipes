@@ -19,6 +19,7 @@ from ml_pipes import (
     Infer,
     MapTensor,
     FilterTensorsByScore,
+    ImagePayload,
     Normalize,
     Pick,
     Pipeline,
@@ -27,6 +28,7 @@ from ml_pipes import (
     Recall,
     Resize,
     Extract,
+    Segmentations,
     Squeeze,
     Store,
     ToSegmentations,
@@ -44,7 +46,7 @@ _IMAGENET_MEAN_BGR = (102.9801, 115.9465, 122.7717)
 CONF_THRESHOLD = 0.7
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segmentations]:
     return Pipeline(
         [
             Resize((800, 800)),

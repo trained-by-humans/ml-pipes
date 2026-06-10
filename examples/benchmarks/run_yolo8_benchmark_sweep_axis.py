@@ -39,7 +39,7 @@ from examples.common import (
 from examples.run_yolo8_onnx import YOLO8_MODELS
 from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
-from ml_pipes import Pipeline, pipeline_factory
+from ml_pipes import Detections, ImagePayload, Pipeline, pipeline_factory
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
@@ -55,7 +55,7 @@ def yolo8_tiled_benchmark_pipeline(
     output_path: Path = _DEFAULT_OUTPUT_PATH,
     slice_wh: tuple[int, int] = (320, 320),
     overlap_wh: tuple[int, int] = (80, 80),
-) -> Pipeline:
+) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
     return (
         decode()
         + yolo8_tiled_pipeline(model_path, slice_wh=slice_wh, overlap_wh=overlap_wh)

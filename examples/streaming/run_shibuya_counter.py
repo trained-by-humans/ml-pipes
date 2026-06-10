@@ -21,6 +21,7 @@ from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
+    Detections,
     DrawBoxes,
     Extract,
     FilterPredictionsByArea,
@@ -54,7 +55,7 @@ _KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella
 _MAX_HUMAN_AREA = 1_000  # px² — filters out cars and other large objects
 
 
-def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
+def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePayload, Detections]:
     return Pipeline([
         Resize((640, 640)),
         Store("resize_transform", source=1),
@@ -77,7 +78,12 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
     ])
 
 
-def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers: int = 1) -> Pipeline:
+def build_pipeline(
+    model_path: Path,
+    conf_threshold: float,
+    tile: bool,
+    workers: int = 1,
+) -> Pipeline[ImagePayload, ImagePayload]:
     pre_process = Pipeline([
         Store("source_frame"),
     ])
@@ -134,7 +140,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     pending: collections.deque[Future] = collections.deque()
     stopped = False
 
-    def infer(frame: Any) -> Any:
+    def infer(frame: Any) -> ImagePayload:
         return pipeline(ImagePayload(array=frame, color_space="BGR", layout="HWC"))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:

@@ -82,7 +82,7 @@ class Mask2FormerInfer:
         )
 
 
-def build_mask2former_preprocess_pipeline() -> Pipeline:
+def build_mask2former_preprocess_pipeline() -> Pipeline[str | Path, np.ndarray]:
     return Pipeline(
         [
             LoadFile(),

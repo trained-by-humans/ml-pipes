@@ -26,7 +26,7 @@ from ml_pipes import (
 )
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_pipeline(model_path: Path) -> Pipeline[ImagePayload, ImagePayload]:
     return Pipeline([
         Store("source_frame"),
         Embed(yolo8_inference_pipeline(model_path)),

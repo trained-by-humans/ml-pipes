@@ -20,7 +20,9 @@ from common import (
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
+    Detections,
     GatherScores,
+    ImagePayload,
     Infer,
     NMS,
     Normalize,
@@ -49,7 +51,10 @@ YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
 }
 
 
-def yolo8_inference_pipeline(model_path: Path, conf_threshold: float = 0.25) -> Pipeline:
+def yolo8_inference_pipeline(
+    model_path: Path,
+    conf_threshold: float = 0.25,
+) -> Pipeline[ImagePayload, Detections]:
     return Pipeline(
         [
             Resize((640, 640)),

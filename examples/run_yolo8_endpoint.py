@@ -44,7 +44,7 @@ HOST = "localhost"
 PORT = 5000
 
 
-def build_pipeline(model_path: Path) -> Pipeline:
+def build_pipeline(model_path: Path) -> Pipeline[bytes, list[dict[str, object]]]:
     return Pipeline([
         Decode(),
         Embed(yolo8_inference_pipeline(model_path)),

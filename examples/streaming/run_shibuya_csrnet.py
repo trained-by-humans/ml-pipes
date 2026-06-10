@@ -179,7 +179,7 @@ class CSRNetInfer:
 # Pipeline composition
 # ---------------------------------------------------------------------------
 
-def build_preprocess_pipeline() -> Pipeline:
+def build_preprocess_pipeline() -> Pipeline[ImagePayload, TensorPayload]:
     return Pipeline([
         Store("source_frame"),
         Normalize(
@@ -192,7 +192,7 @@ def build_preprocess_pipeline() -> Pipeline:
     ])
 
 
-def build_postprocess_pipeline() -> Pipeline:
+def build_postprocess_pipeline() -> Pipeline[RuntimeOutputs, tuple[ImagePayload, float]]:
     return Pipeline([
         Extract("output0", as_="density"),
         Squeeze("density", axis=(0, 1)),
@@ -211,7 +211,7 @@ def build_postprocess_pipeline() -> Pipeline:
     ])
 
 
-def build_frame_pipeline(infer_op: Any) -> Pipeline:
+def build_frame_pipeline(infer_op: Any) -> Pipeline[ImagePayload, tuple[ImagePayload, float]]:
     pipeline = build_preprocess_pipeline() + Pipeline([infer_op]) + build_postprocess_pipeline()
     pipeline.validate()
     return pipeline

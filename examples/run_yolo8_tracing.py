@@ -31,7 +31,6 @@ from common import (
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     AggregateCollector,
-    Pipeline,
     PrintCollector,
 )
 
@@ -57,7 +56,7 @@ def main() -> int:
     download_if_missing(COCO_IMAGE_URL, image_path)
 
     infer_pipe = yolo8_inference_pipeline(model_path)
-    pipeline: Pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
+    pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)
     pipeline.validate()
     pipeline.describe()
 
