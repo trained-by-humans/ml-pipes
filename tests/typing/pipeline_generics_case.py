@@ -25,6 +25,7 @@ from ml_pipes import (
     MapPredictionsToObjects,
     MapTensor,
     Pipeline,
+    Pick,
     SaveImage,
     SideEffectOp,
     TensorPayload,
@@ -70,6 +71,12 @@ sample_registry = cast(TensorRegistry, None)
 
 string_effect = StringEffect()
 assert_type(string_effect("x"), str)
+
+pick_first: Pick[Literal[0]] = Pick(0)
+assert_type(pick_first((1, "value")), int)
+
+pick_second: Pick[Literal[1]] = Pick(1)
+assert_type(pick_second((1, "value")), str)
 
 assert_type(AsType("float16")(sample_tensor), TensorPayload)
 assert_type(AsType("float16")(sample_tensor_list), list[TensorPayload])

@@ -160,6 +160,13 @@ def test_pick_out_of_bounds_raises_on_concrete_input():
         pipeline.validate()
 
 
+def test_pick_negative_out_of_bounds_raises_on_concrete_input():
+    pipeline = Pipeline([IntToPair(), Pick(-3)])
+
+    with pytest.raises(PipelineValidationError, match="Pick\\(-3\\) is out of bounds"):
+        pipeline.validate()
+
+
 def test_pick_out_of_bounds_silent_on_vague_input():
     pipeline = Pipeline([Pick(5)])
 
@@ -177,7 +184,7 @@ def test_pick_establishes_tuple_input_boundary_from_downstream_type():
     contract = Pipeline([Pick(0), IntToString()]).validate()
 
     assert contract is not None
-    assert contract.input_type is tuple
+    assert contract.input_type == tuple[Any, ...]
 
 
 def test_select_validation_propagates_array_attribute_type():

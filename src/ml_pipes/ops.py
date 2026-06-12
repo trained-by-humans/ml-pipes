@@ -1483,6 +1483,9 @@ ScatterItemT = TypeVar("ScatterItemT")
 PayloadT = TypeVar("PayloadT")
 ObjectPrefixT = TypeVar("ObjectPrefixT")
 ObjectIndexT = TypeVar("ObjectIndexT", bound=int | None)
+PickIndexT = TypeVar("PickIndexT", bound=int)
+PickFirstT = TypeVar("PickFirstT")
+PickSecondT = TypeVar("PickSecondT")
 ObjectMapping: TypeAlias = dict[str, object]
 ObjectFieldSource: TypeAlias = str | Callable[[object], Sequence[object]]
 
@@ -1903,7 +1906,7 @@ class Select:
 
 
 @Operator
-class Pick:
+class Pick(Generic[PickIndexT]):
     """Selects one or more elements from a tuple by index, discarding the rest.
 
     A pure routing operator: it changes which value flows forward but never
@@ -1911,12 +1914,42 @@ class Pick:
     ResizeTransform and keep only the ImagePayload before inference.
     """
 
+    @overload
+    def __init__(self: "Pick[Literal[0]]", index: Literal[0]) -> None:
+        ...
+
+    @overload
+    def __init__(self: "Pick[Literal[1]]", index: Literal[1]) -> None:
+        ...
+
+    @overload
+    def __init__(self: "Pick[int]", *indices: int) -> None:
+        ...
+
     def __init__(self, *indices: int):
         if not indices:
             raise ValueError("Pick requires at least one index")
         self.indices = indices
 
-    def __call__(self, current: tuple) -> Any:
+    @overload
+    def __call__(
+        self: "Pick[Literal[0]]",
+        current: tuple[PickFirstT, PickSecondT],
+    ) -> PickFirstT:
+        ...
+
+    @overload
+    def __call__(
+        self: "Pick[Literal[1]]",
+        current: tuple[PickFirstT, PickSecondT],
+    ) -> PickSecondT:
+        ...
+
+    @overload
+    def __call__(self, current: tuple[Any, ...]) -> Any:
+        ...
+
+    def __call__(self, current: tuple[Any, ...]) -> Any:
         if not isinstance(current, tuple):
             raise TypeError("Pick can only be applied to tuple outputs")
         selected = tuple(current[index] for index in self.indices)
@@ -1931,27 +1964,61 @@ class Pick:
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        if current_output is Any:
-            return (Any,), Any
-        if get_origin(current_output) is tuple:
-            parts = get_args(current_output)
-        elif isinstance(current_output, tuple):
-            parts = current_output
-        else:
-            error_type = validation_error_type or PipelineValidationError
-            raise error_type(
-                f"Pick requires a tuple boundary, got {current_output}"
-            )
+        del stored_annotations, expand_output_annotation
+        error_type = validation_error_type or PipelineValidationError
 
-        selected = []
-        for i in self.indices:
-            if i >= len(parts):
-                raise validation_error_type(
-                    f"Pick({i}) is out of bounds for {current_output} (length {len(parts)})"
-                )
-            selected.append(parts[i])
-        selected = tuple(selected)
-        return (Any,), selected[0] if len(selected) == 1 else selected
+        if current_output is Any or current_output is tuple:
+            return (tuple[Any, ...],), Any
+
+        repeated_item = self._homogeneous_tuple_item(current_output)
+        if repeated_item is not None:
+            selected = tuple(repeated_item for _ in self.indices)
+            return (current_output,), selected[0] if len(selected) == 1 else tuple[selected]
+
+        parts = self._fixed_tuple_parts(current_output)
+        if parts is None:
+            raise error_type(f"Pick requires a tuple boundary, got {current_output}")
+
+        selected = tuple(
+            parts[self._normalize_fixed_index(index, len(parts), current_output, error_type)]
+            for index in self.indices
+        )
+        input_annotation = current_output if get_origin(current_output) is tuple else tuple[parts]
+        return (input_annotation,), selected[0] if len(selected) == 1 else tuple[selected]
+
+    @staticmethod
+    def _fixed_tuple_parts(annotation: Any) -> tuple[Any, ...] | None:
+        if isinstance(annotation, tuple):
+            return annotation
+        if get_origin(annotation) is not tuple:
+            return None
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return None
+        return args
+
+    @staticmethod
+    def _homogeneous_tuple_item(annotation: Any) -> Any | None:
+        if get_origin(annotation) is not tuple:
+            return None
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return args[0]
+        return None
+
+    @staticmethod
+    def _normalize_fixed_index(
+        index: int,
+        size: int,
+        current_output: Any,
+        error_type: type[Exception],
+    ) -> int:
+        normalized_index = index if index >= 0 else size + index
+        if normalized_index < 0 or normalized_index >= size:
+            raise error_type(
+                f"Pick({index}) is out of bounds for {current_output} (length {size})"
+            )
+        return normalized_index
 
 
 # ---------------------------------------------------------------------------
