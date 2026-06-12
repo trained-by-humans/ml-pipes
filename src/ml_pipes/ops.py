@@ -22,11 +22,14 @@ from .scatter import ScatterGate
 from .selector import Selector, SelectorInput
 from .tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, merge_traces
 from .types import (
+    BoxPrediction,
+    ClassPrediction,
     Detections,
     ImagePayload,
     Prediction,
     PredictionMask,
     RuntimeOutputs,
+    ScorePrediction,
     Segmentations,
     TensorPayload,
     TensorRegistry,
@@ -1479,7 +1482,9 @@ class ToSegmentations:
 # ---------------------------------------------------------------------------
 
 PredictionT = TypeVar("PredictionT", bound=Prediction)
-DetectionsT = TypeVar("DetectionsT", bound=Detections)
+ClassPredictionT = TypeVar("ClassPredictionT", bound=ClassPrediction)
+ScorePredictionT = TypeVar("ScorePredictionT", bound=ScorePrediction)
+BoxPredictionT = TypeVar("BoxPredictionT", bound=BoxPrediction)
 BatchItemT = TypeVar("BatchItemT")
 ScatterItemT = TypeVar("ScatterItemT")
 PayloadT = TypeVar("PayloadT")
@@ -1517,7 +1522,7 @@ class FilterPredictionsByClass:
     def __init__(self, classes: Collection[int]):
         self.classes = frozenset(classes)
 
-    def __call__(self, prediction: DetectionsT) -> DetectionsT:
+    def __call__(self, prediction: ClassPredictionT) -> ClassPredictionT:
         return prediction.filter([class_id in self.classes for class_id in prediction.classes])
 
 
@@ -1528,7 +1533,7 @@ class FilterPredictionsByScore:
     def __init__(self, min_score: float):
         self.min_score = min_score
 
-    def __call__(self, prediction: DetectionsT) -> DetectionsT:
+    def __call__(self, prediction: ScorePredictionT) -> ScorePredictionT:
         return prediction.filter([score >= self.min_score for score in prediction.scores])
 
 
@@ -1540,7 +1545,7 @@ class FilterPredictionsByArea:
         self.min_area = min_area
         self.max_area = max_area
 
-    def __call__(self, prediction: DetectionsT) -> DetectionsT:
+    def __call__(self, prediction: BoxPredictionT) -> BoxPredictionT:
         return prediction.filter([
             (x2 - x1) * (y2 - y1) >= self.min_area
             and (self.max_area is None or (x2 - x1) * (y2 - y1) <= self.max_area)

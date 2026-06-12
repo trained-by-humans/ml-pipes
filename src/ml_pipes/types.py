@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import copy
 import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, TypeAlias, TypeVar
+from typing import Any, Protocol, TypeAlias, TypeVar
 
 import numpy as np
 import numpy.typing as npt
+from typing_extensions import Self
 
 
 @dataclass(frozen=True)
@@ -104,43 +106,58 @@ class ResizeTransform:
     resized_shape: tuple[int, int]
 
 
-PredictionT = TypeVar("PredictionT", bound="Prediction")
 PredictionMask: TypeAlias = Sequence[bool] | npt.NDArray[np.bool_]
 PredictionIndices: TypeAlias = Sequence[int] | npt.NDArray[np.integer[Any]]
 
 
-@dataclass(frozen=True)
+class FilterablePrediction(Protocol):
+    def filter(self, mask: PredictionMask) -> Self:
+        ...
+
+
+class ClassPrediction(FilterablePrediction, Protocol):
+    classes: Sequence[int]
+
+
+class ScorePrediction(FilterablePrediction, Protocol):
+    scores: Sequence[float]
+
+
+class BoxPrediction(FilterablePrediction, Protocol):
+    boxes: Sequence[Sequence[float]]
+
+
+@dataclass
 class Prediction:
     """Base class for all typed prediction outputs.
 
-    All fields must be equal-length lists (one entry per detected instance).
+    All fields must be equal-length sequences (one entry per detected instance).
     The filter and select methods slice every field uniformly, so they work
     generically for any subclass without knowing its field names.
     """
 
-    def filter(self: PredictionT, mask: PredictionMask) -> PredictionT:
+    def filter(self, mask: PredictionMask) -> Self:
         kept = [i for i, keep in enumerate(mask) if bool(keep)]
         return self._slice(kept)
 
-    def select(self: PredictionT, indices: PredictionIndices) -> PredictionT:
+    def select(self, indices: PredictionIndices) -> Self:
         kept = [int(index) for index in indices]
         return self._slice(kept)
 
-    def _slice(self: PredictionT, kept: Sequence[int]) -> PredictionT:
-        sliced = {
-            f.name: [getattr(self, f.name)[i] for i in kept]
-            for f in dataclasses.fields(self)
-        }
-        return type(self)(**sliced)
+    def _slice(self, kept: Sequence[int]) -> Self:
+        clone = copy.copy(self)
+        for field in dataclasses.fields(self):
+            setattr(clone, field.name, [getattr(self, field.name)[i] for i in kept])
+        return clone
 
 
-@dataclass(frozen=True)
+@dataclass
 class Detections(Prediction):
-    boxes: list[list[float]]
-    scores: list[float]
-    classes: list[int]
+    boxes: Sequence[Sequence[float]]
+    scores: Sequence[float]
+    classes: Sequence[int]
 
 
-@dataclass(frozen=True)
+@dataclass
 class Segmentations(Detections):
-    masks: list[np.ndarray]
+    masks: Sequence[np.ndarray]
