@@ -1351,6 +1351,7 @@ class ProjectMasks:
 
         masks = registry[self.masks]   # (N, proto_H, proto_W)
         boxes = registry[self.boxes]   # (N, 4) xyxy — original image space
+        count = masks.shape[0]
         resized_h, resized_w = transform.resized_shape
         orig_h, orig_w = transform.original_shape
         scale_x, scale_y = transform.scale
@@ -1361,8 +1362,11 @@ class ProjectMasks:
         #   original → model input:  x_model = x_orig * scale + pad
         #   model input → prototype: x_proto = x_model * (proto / resized)
         proto_boxes = boxes.astype(np.float32).copy()
-        proto_boxes[:, [0, 2]] = (proto_boxes[:, [0, 2]] * scale_x + pad_x) * (proto_w / resized_w)
-        proto_boxes[:, [1, 3]] = (proto_boxes[:, [1, 3]] * scale_y + pad_y) * (proto_h / resized_h)
+        proto_x = (proto_boxes[:, [0, 2]] * scale_x + pad_x) * (proto_w / resized_w)
+        proto_boxes[:, [0, 2]] = proto_x
+
+        proto_y = (proto_boxes[:, [1, 3]] * scale_y + pad_y) * (proto_h / resized_h)
+        proto_boxes[:, [1, 3]] = proto_y
 
         # Zero outside each box — vectorised on the small (N, proto_H, proto_W) tensor
         x1 = proto_boxes[:, 0].clip(0, proto_w)[:, None, None]
@@ -1371,7 +1375,10 @@ class ProjectMasks:
         y2 = proto_boxes[:, 3].clip(0, proto_h)[:, None, None]
         cols = np.arange(proto_w, dtype=np.float32)[None, None, :]
         rows = np.arange(proto_h, dtype=np.float32)[None, :, None]
-        masks = masks * ((cols >= x1) & (cols < x2) & (rows >= y1) & (rows < y2))
+        inside_cols = (cols >= x1) & (cols < x2)
+        inside_rows = (rows >= y1) & (rows < y2)
+        inside_boxes = inside_cols & inside_rows
+        masks = masks * inside_boxes
 
         # Upsample each zeroed mask to original image size
         top    = max(int(round(pad_y - 0.1)), 0)
@@ -1379,11 +1386,13 @@ class ProjectMasks:
         bottom = min(int(round(resized_h - pad_y + 0.1)), resized_h)
         right  = min(int(round(resized_w - pad_x + 0.1)), resized_w)
 
-        projected = []
-        for mask in masks:
+        projected = np.empty((count, orig_h, orig_w), dtype=np.uint8)
+        for index, mask in enumerate(masks):
             upsampled = cv2.resize(mask, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
-            projected.append((cv2.resize(upsampled[top:bottom, left:right], (orig_w, orig_h),
-                                         interpolation=cv2.INTER_LINEAR) > self.mask_threshold).astype(np.uint8))
+            cropped = upsampled[top:bottom, left:right]
+            resized = cv2.resize(cropped, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+            thresholded = resized > self.mask_threshold
+            projected[index] = thresholded.astype(np.uint8)
 
         registry[self.masks] = projected
         return registry
@@ -1468,12 +1477,11 @@ class ToSegmentations:
         self.masks = masks
 
     def __call__(self, registry: TensorRegistry) -> Segmentations:
-        masks_data = registry[self.masks]
         return Segmentations(
             boxes=registry[self.boxes].tolist(),
             scores=registry[self.scores].tolist(),
             classes=registry[self.classes].tolist(),
-            masks=list(masks_data) if isinstance(masks_data, np.ndarray) else masks_data,
+            masks=list(registry[self.masks]),
         )
 
 

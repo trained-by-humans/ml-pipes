@@ -1026,8 +1026,27 @@ def test_project_masks_produces_binary_masks_at_original_size():
 
     result = ProjectMasks(mask_threshold=0.0)(registry, transform)
 
-    assert len(result["masks"]) == 1
+    assert isinstance(result["masks"], np.ndarray)
+    assert result["masks"].shape == (1, 2, 2)
     assert result["masks"][0].shape == (2, 2)
+
+
+def test_project_masks_returns_empty_mask_array_for_empty_input():
+    transform = ResizeTransform(
+        scale=(2.0, 2.0),
+        pad=(0.0, 0.0),
+        original_shape=(2, 3),
+        resized_shape=(4, 6),
+    )
+    registry = TensorRegistry()
+    registry["boxes"] = np.zeros((0, 4), dtype=np.float32)
+    registry["masks"] = np.zeros((0, 4, 4), dtype=np.float32)
+
+    result = ProjectMasks(mask_threshold=0.0)(registry, transform)
+
+    assert isinstance(result["masks"], np.ndarray)
+    assert result["masks"].shape == (0, 2, 3)
+    assert result["masks"].dtype == np.uint8
 
 
 # ---------------------------------------------------------------------------
@@ -1062,6 +1081,7 @@ def test_to_segmentations_converts_registry_to_segmentations():
     assert isinstance(result, Segmentations)
     assert result.boxes == [[1.0, 2.0, 3.0, 4.0]]
     assert len(result.masks) == 1
+    assert isinstance(result.masks[0], np.ndarray)
 
 
 # ---------------------------------------------------------------------------
