@@ -8,8 +8,8 @@ from .core import Pipeline
 
 FactoryOutputT = TypeVar("FactoryOutputT")
 FactoryT = TypeVar("FactoryT", bound="Factory[Any]")
-PipelineInputT = TypeVar("PipelineInputT")
-PipelineOutputT = TypeVar("PipelineOutputT")
+InputT = TypeVar("InputT")
+OutputT = TypeVar("OutputT")
 
 # InputFn returns (id, value, tag, metadata).
 # tag and metadata are reserved for future bucketing/annotation features and ignored for now.
@@ -112,7 +112,7 @@ class Factory(Generic[FactoryOutputT]):
         return _discover_factory_in_module(module, cls)
 
 
-class PipelineFactory(Factory[Pipeline[PipelineInputT, PipelineOutputT]], Generic[PipelineInputT, PipelineOutputT]):
+class PipelineFactory(Factory[Pipeline[InputT, OutputT]], Generic[InputT, OutputT]):
     """Factory subtype for pipeline-producing callables."""
 
     _factory_name = "pipeline factory"
@@ -120,28 +120,28 @@ class PipelineFactory(Factory[Pipeline[PipelineInputT, PipelineOutputT]], Generi
     @classmethod
     def from_callable(
         cls,
-        source: Callable[..., Pipeline[PipelineInputT, PipelineOutputT]],
-    ) -> "PipelineFactory[PipelineInputT, PipelineOutputT]":
-        return cast("PipelineFactory[PipelineInputT, PipelineOutputT]", super().from_callable(source))
+        source: Callable[..., Pipeline[InputT, OutputT]],
+    ) -> "PipelineFactory[InputT, OutputT]":
+        return cast("PipelineFactory[InputT, OutputT]", super().from_callable(source))
 
     @classmethod
     def ensure_factory(
         cls,
         source: (
-            Callable[..., Pipeline[PipelineInputT, PipelineOutputT]]
-            | Factory[Pipeline[PipelineInputT, PipelineOutputT]]
+            Callable[..., Pipeline[InputT, OutputT]]
+            | Factory[Pipeline[InputT, OutputT]]
         ),
-    ) -> "PipelineFactory[PipelineInputT, PipelineOutputT]":
-        return cast("PipelineFactory[PipelineInputT, PipelineOutputT]", super().ensure_factory(source))
+    ) -> "PipelineFactory[InputT, OutputT]":
+        return cast("PipelineFactory[InputT, OutputT]", super().ensure_factory(source))
 
     def _validate_output(
         self,
         output: Any,
         *,
         config: dict | None = None,
-    ) -> Pipeline[PipelineInputT, PipelineOutputT]:
+    ) -> Pipeline[InputT, OutputT]:
         if isinstance(output, Pipeline):
-            return cast(Pipeline[PipelineInputT, PipelineOutputT], output)
+            return cast(Pipeline[InputT, OutputT], output)
 
         config_suffix = f" for config {config!r}" if config is not None else ""
         raise TypeError(
@@ -171,8 +171,8 @@ class DataFactory(Factory[InputFn]):
 
 
 def pipeline_factory(
-    fn: Callable[..., Pipeline[PipelineInputT, PipelineOutputT]],
-) -> PipelineFactory[PipelineInputT, PipelineOutputT]:
+    fn: Callable[..., Pipeline[InputT, OutputT]],
+) -> PipelineFactory[InputT, OutputT]:
     """Wrap a declared reusable function as a discoverable pipeline factory.
 
     Place ``@pipeline_factory`` on the top decorator line. If another
