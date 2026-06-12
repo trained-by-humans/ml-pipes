@@ -16,10 +16,10 @@ import numpy as np
 from .batch import BatchGate, LeaderBatch
 from .control import SHORT_CIRCUIT
 from .operator import Operator
-from .region import RegionCloser, RegionOpener
+from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
 from .scatter import ScatterGate
 from .selector import Selector, SelectorInput
-from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
+from .tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, merge_traces
 from .types import (
     Detections,
     ImagePayload,
@@ -1442,6 +1442,8 @@ class ToSegmentations:
 # ---------------------------------------------------------------------------
 
 PredictionT = TypeVar("PredictionT", bound=Prediction)
+BatchItemT = TypeVar("BatchItemT")
+ScatterItemT = TypeVar("ScatterItemT")
 
 
 @Operator
@@ -1808,7 +1810,7 @@ class Pick:
 # Batch coordination
 # ---------------------------------------------------------------------------
 
-class UnBatch(RegionCloser):
+class UnBatch(RegionCloser[list[BatchItemT], BatchItemT]):
     """
     Batch coordination exit point.
 
@@ -1832,7 +1834,7 @@ class UnBatch(RegionCloser):
 
 
 @Operator
-class Batch(RegionOpener):
+class Batch(RegionOpener[BatchItemT, list[BatchItemT]]):
     """
     Batch coordination entry point.
 
@@ -1863,11 +1865,11 @@ class Batch(RegionOpener):
 
     def run_region(
         self,
-        current: Any,
+        current: BatchItemT,
         label: str,
-        execute_region: Callable,
-        trace: Any,
-        cfg: Any,
+        execute_region: RegionExecutor[list[BatchItemT], Any],
+        trace: RegionTraceLike,
+        cfg: TracingConfig | None,
     ) -> Any:
         gate = self.gate
 
@@ -1920,7 +1922,7 @@ class Batch(RegionOpener):
 # Scatter / Gather
 # ---------------------------------------------------------------------------
 
-class Gather(RegionCloser):
+class Gather(RegionCloser[ScatterItemT, list[ScatterItemT]]):
     """
     Scatter/Gather exit point.
 
@@ -1941,7 +1943,7 @@ class Gather(RegionCloser):
 
 
 @Operator
-class Scatter(RegionOpener):
+class Scatter(RegionOpener[list[ScatterItemT], ScatterItemT]):
     """
     Scatter/Gather entry point.
 
@@ -1972,15 +1974,15 @@ class Scatter(RegionOpener):
 
     def run_region(
         self,
-        current: Any,
+        current: list[ScatterItemT],
         label: str,
-        execute_region: Callable,
-        trace: Any,
-        cfg: Any,
+        execute_region: RegionExecutor[ScatterItemT, Any],
+        trace: RegionTraceLike,
+        cfg: TracingConfig | None,
     ) -> Any:
         gate = self.gate
         collecting = isinstance(trace, InvocationTrace)
-        items: list[Any] = current
+        items = current
         n_items = len(items)
 
         def run_region(entry: Any) -> None:

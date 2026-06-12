@@ -188,7 +188,7 @@ class PipelineValidator:
         return f"{i}:{name}"
 
     def _validate_regions(self) -> None:
-        stack: list[tuple[RegionOpener, int]] = []
+        stack: list[tuple[RegionOpener[Any, Any], int]] = []
         for i, op in enumerate(self.operators):
             match op:
                 case RegionOpener() if stack and type(stack[-1][0]) is type(op):
