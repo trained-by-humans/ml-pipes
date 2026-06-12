@@ -6,9 +6,9 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, Any, Generic, TypeAlias, TypeVar, cast, get_args, get_origin
+from typing import Literal, Any, Generic, TypeAlias, TypeVar, cast, get_args, get_origin, overload
 from typing import TextIO
 
 import numpy as np
@@ -1481,6 +1481,10 @@ PredictionT = TypeVar("PredictionT", bound=Prediction)
 BatchItemT = TypeVar("BatchItemT")
 ScatterItemT = TypeVar("ScatterItemT")
 PayloadT = TypeVar("PayloadT")
+ObjectPrefixT = TypeVar("ObjectPrefixT")
+ObjectIndexT = TypeVar("ObjectIndexT", bound=int | None)
+ObjectMapping: TypeAlias = dict[str, object]
+ObjectFieldSource: TypeAlias = str | Callable[[object], Sequence[object]]
 
 
 @Operator
@@ -1689,30 +1693,84 @@ class SaveImage(SideEffectOp[PayloadT], Generic[PayloadT]):
 
 
 @Operator
-class MapToObjects:
-    # Intentionally uses `object → Any`: output type depends on runtime `at` indexing
-    # and cannot be resolved without custom resolve_contract. Not a SideEffectOp.
+class MapPredictionsToObjects(Generic[ObjectIndexT]):
+    """Converts one prediction-like payload into row-oriented object records.
+
+    Typing stays intentionally narrow:
+    - `at=None` maps `Prediction -> list[dict[str, object]]`
+    - `at=1` maps `tuple[X, Prediction] -> tuple[X, list[dict[str, object]]]`
+
+    Other `at` values still work at runtime, but fall back to `Any` statically.
+    """
+
+    @overload
+    def __init__(
+        self: "MapPredictionsToObjects[None]",
+        fields: Mapping[str, ObjectFieldSource],
+        at: None = None,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self: "MapPredictionsToObjects[Literal[1]]",
+        fields: Mapping[str, ObjectFieldSource],
+        at: Literal[1],
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self: "MapPredictionsToObjects[int]",
+        fields: Mapping[str, ObjectFieldSource],
+        at: int,
+    ) -> None:
+        ...
+
     def __init__(
         self,
-        fields: dict[str, str | Callable[[object], Sequence[object]]],
+        fields: Mapping[str, ObjectFieldSource],
         at: int | None = None,
-    ):
+    ) -> None:
         self.fields = fields
         self.at = at
 
+    @overload
+    def __call__(self: "MapPredictionsToObjects[None]", payload: Prediction) -> list[ObjectMapping]:
+        ...
+
+    @overload
+    def __call__(
+        self: "MapPredictionsToObjects[Literal[1]]",
+        payload: tuple[ObjectPrefixT, Prediction],
+    ) -> tuple[ObjectPrefixT, list[ObjectMapping]]:
+        ...
+
+    @overload
     def __call__(self, payload: object) -> Any:
-        prediction_arrays = payload[self.at] if self.at is not None else payload
+        ...
+
+    def __call__(self, payload: object) -> Any:
+        prediction_arrays = self._resolve_prediction_value(payload)
         columns: dict[str, Sequence[object]] = {}
         for field_name, source in self.fields.items():
             if isinstance(source, str):
-                column = getattr(prediction_arrays, source)
+                try:
+                    column = getattr(prediction_arrays, source)
+                except AttributeError as exc:
+                    raise AttributeError(
+                        f"MapPredictionsToObjects field {field_name!r} references missing attribute "
+                        f"{source!r} on {type(prediction_arrays).__name__}"
+                    ) from exc
             else:
                 column = source(prediction_arrays)
             columns[field_name] = column
 
         lengths = {len(column) for column in columns.values()}
         if len(lengths) > 1:
-            raise ValueError(f"MapToObjects requires equal-length collections, got lengths {sorted(lengths)}")
+            raise ValueError(
+                f"MapPredictionsToObjects requires equal-length collections, got lengths {sorted(lengths)}"
+            )
 
         records: list[dict[str, object]] = []
         field_names = tuple(columns.keys())
@@ -1721,8 +1779,56 @@ class MapToObjects:
             record = dict(zip(field_names, row, strict=True))
             records.append(record)
         if self.at is not None:
-            return payload[:self.at] + (records,) + payload[self.at + 1:]
+            payload_tuple = cast(tuple[object, ...], payload)
+            return payload_tuple[:self.at] + (records,) + payload_tuple[self.at + 1:]
         return records
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations, expand_output_annotation
+        if self.at is None:
+            if current_output is not Any and is_annotation_compatible(current_output, (Prediction,)):
+                return (current_output,), list[ObjectMapping]
+            return (Any,), Any
+
+        if current_output is Any:
+            return (Any,), Any
+
+        if get_origin(current_output) is tuple:
+            parts = get_args(current_output)
+        elif isinstance(current_output, tuple):
+            parts = current_output
+        else:
+            return (Any,), Any
+
+        index = self.at
+        if index is None:
+            return (Any,), Any
+        normalized_index = index if index >= 0 else len(parts) + index
+        if normalized_index < 0 or normalized_index >= len(parts):
+            error_type = validation_error_type or PipelineValidationError
+            raise error_type(
+                f"MapPredictionsToObjects(at={self.at}) is out of bounds for "
+                f"{current_output} (length {len(parts)})"
+            )
+        if not is_annotation_compatible(parts[normalized_index], (Prediction,)):
+            return (Any,), Any
+        updated_parts = parts[:normalized_index] + (list[ObjectMapping],) + parts[normalized_index + 1:]
+        return (current_output,), updated_parts
+
+    def _resolve_prediction_value(self, payload: object) -> object:
+        if self.at is None:
+            return payload
+        if not isinstance(payload, tuple):
+            raise TypeError(
+                f"MapPredictionsToObjects(at={self.at}) requires a tuple payload, got {type(payload)!r}"
+            )
+        return payload[self.at]
 
 
 @Operator

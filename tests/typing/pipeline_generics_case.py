@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from typing import Literal, cast
+
+import numpy as np
 
 try:
     from typing import assert_type
@@ -12,7 +15,22 @@ from common import decode, visualize_detections_and_store
 from run_yolo8_batch import build_pipeline
 from run_yolo8_onnx import yolo8_inference_pipeline
 
-from ml_pipes import Detections, ImagePayload, Pipeline, pipeline_factory
+from ml_pipes import (
+    AsType,
+    CreateTensorMask,
+    Detections,
+    FilterTensors,
+    ImagePayload,
+    LogDetections,
+    MapPredictionsToObjects,
+    MapTensor,
+    Pipeline,
+    SaveImage,
+    SideEffectOp,
+    TensorPayload,
+    TensorRegistry,
+    pipeline_factory,
+)
 
 
 class IntToString:
@@ -23,6 +41,11 @@ class IntToString:
 class StringToFloat:
     def __call__(self, value: str) -> float:
         return float(value)
+
+
+class StringEffect(SideEffectOp[str]):
+    def effect(self, payload: str) -> None:
+        del payload
 
 
 def build_linear() -> Pipeline[int, float]:
@@ -38,6 +61,86 @@ assert_type((lhs + rhs)(1), float)
 linear = build_linear()
 assert_type(linear, Pipeline[int, float])
 assert_type(linear(1), float)
+
+sample_image = cast(ImagePayload, None)
+sample_detections = cast(Detections, None)
+sample_tensor = cast(TensorPayload, None)
+sample_tensor_list = cast(list[TensorPayload], None)
+sample_registry = cast(TensorRegistry, None)
+
+string_effect = StringEffect()
+assert_type(string_effect("x"), str)
+
+assert_type(AsType("float16")(sample_tensor), TensorPayload)
+assert_type(AsType("float16")(sample_tensor_list), list[TensorPayload])
+assert_type(AsType("float32", src="scores")(sample_registry), TensorRegistry)
+assert_type(
+    CreateTensorMask(
+        "scores",
+        predicate=lambda tensor: assert_type(tensor, np.ndarray) >= 0.5,
+        as_="keep",
+    ),
+    CreateTensorMask,
+)
+assert_type(
+    FilterTensors(
+        "scores",
+        by="classes",
+        predicate=lambda classes: assert_type(classes, np.ndarray) == 0,
+    ),
+    FilterTensors,
+)
+assert_type(
+    MapTensor(
+        "labels",
+        fn=lambda tensor: assert_type(tensor, np.ndarray).astype(np.int32),
+        as_="classes",
+    ),
+    MapTensor,
+)
+assert_type(
+    MapPredictionsToObjects(
+        fields={
+            "box": "boxes",
+            "score": "scores",
+            "class_id": "classes",
+        }
+    )(sample_detections),
+    list[dict[str, object]],
+)
+map_to_objects_at_one: MapPredictionsToObjects[Literal[1]] = MapPredictionsToObjects(
+    fields={
+        "box": "boxes",
+        "score": "scores",
+        "class_id": "classes",
+    },
+    at=1,
+)
+assert_type(
+    map_to_objects_at_one((sample_image, sample_detections)),
+    tuple[ImagePayload, list[dict[str, object]]],
+)
+
+save_image: SaveImage[ImagePayload] = SaveImage(Path("result.png"))
+assert_type(save_image(sample_image), ImagePayload)
+
+save_image_at_zero: SaveImage[tuple[ImagePayload, Detections]] = SaveImage(Path("result.png"), at=0)
+assert_type(save_image_at_zero((sample_image, sample_detections)), tuple[ImagePayload, Detections])
+
+objects = cast(list[dict[str, object]], None)
+log_detections: LogDetections[list[dict[str, object]]] = LogDetections("model.onnx", "image.jpg", "result.png")
+assert_type(log_detections(objects), list[dict[str, object]])
+
+log_detections_at_one: LogDetections[tuple[str, list[dict[str, object]]]] = LogDetections(
+    "model.onnx",
+    "image.jpg",
+    "result.png",
+    at=1,
+)
+assert_type(
+    log_detections_at_one(("prefix", objects)),
+    tuple[str, list[dict[str, object]]],
+)
 
 decoded = decode()
 assert_type(decoded, Pipeline[str | Path, ImagePayload])

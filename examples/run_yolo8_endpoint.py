@@ -17,7 +17,7 @@ from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from ml_pipes import (
     Decode,
     Embed,
-    MapToObjects,
+    MapPredictionsToObjects,
     Pipeline,
 )
 
@@ -48,7 +48,7 @@ def build_pipeline(model_path: Path) -> Pipeline[bytes, list[dict[str, object]]]
     return Pipeline([
         Decode(),
         Embed(yolo8_inference_pipeline(model_path)),
-        MapToObjects(fields={"box": "boxes", "score": "scores", "class_id": "classes"}),
+        MapPredictionsToObjects(fields={"box": "boxes", "score": "scores", "class_id": "classes"}),
     ], auto_validate=True)
 
 

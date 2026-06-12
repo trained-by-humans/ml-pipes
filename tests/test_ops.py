@@ -29,7 +29,7 @@ from ml_pipes.ops import (
     GatherScores,
     Infer,
     LogDetections,
-    MapToObjects,
+    MapPredictionsToObjects,
     MultiplyTensors,
     MeanMaskScores,
     MasksToBoxes,
@@ -1210,7 +1210,7 @@ def test_save_image_at_zero_writes_output_and_returns_tuple(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# MapToObjects / LogDetections
+# MapPredictionsToObjects / LogDetections
 # ---------------------------------------------------------------------------
 
 def test_map_to_objects_can_convert_detection_result():
@@ -1220,7 +1220,7 @@ def test_map_to_objects_can_convert_detection_result():
         classes=[1],
     )
 
-    result = MapToObjects(
+    result = MapPredictionsToObjects(
         fields={
             "box": "boxes",
             "score": "scores",
@@ -1235,6 +1235,64 @@ def test_map_to_objects_can_convert_detection_result():
             "class_id": 1,
         }
     ]
+
+
+def test_map_to_objects_at_one_replaces_prediction_slot():
+    payload = (
+        "prefix",
+        Detections(
+            boxes=[[1.0, 2.0, 3.0, 4.0]],
+            scores=[0.9],
+            classes=[1],
+        ),
+    )
+
+    result = MapPredictionsToObjects(
+        fields={
+            "box": "boxes",
+            "score": "scores",
+            "class_id": "classes",
+        },
+        at=1,
+    )(payload)
+
+    assert result == (
+        "prefix",
+        [
+            {
+                "box": [1.0, 2.0, 3.0, 4.0],
+                "score": 0.9,
+                "class_id": 1,
+            }
+        ],
+    )
+
+
+def test_map_to_objects_requires_equal_length_columns():
+    detections = Detections(
+        boxes=[[1.0, 2.0, 3.0, 4.0]],
+        scores=[0.9],
+        classes=[1],
+    )
+
+    with pytest.raises(ValueError, match="equal-length collections"):
+        MapPredictionsToObjects(
+            fields={
+                "box": "boxes",
+                "score": lambda prediction: prediction.scores + [0.1],
+            }
+        )(detections)
+
+
+def test_map_to_objects_with_at_requires_tuple_payload():
+    detections = Detections(
+        boxes=[[1.0, 2.0, 3.0, 4.0]],
+        scores=[0.9],
+        classes=[1],
+    )
+
+    with pytest.raises(TypeError, match="requires a tuple payload"):
+        MapPredictionsToObjects(fields={"box": "boxes"}, at=1)(detections)
 
 
 def test_log_detections_prints_json_and_returns_input():
