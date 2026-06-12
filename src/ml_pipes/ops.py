@@ -12,6 +12,7 @@ from typing import Literal, Any, Generic, TypeAlias, TypeVar, cast, get_args, ge
 from typing import TextIO
 
 import numpy as np
+import numpy.typing as npt
 
 from .batch import BatchGate, LeaderBatch
 from .control import SHORT_CIRCUIT
@@ -41,6 +42,7 @@ TensorLike: TypeAlias = (
     | list[TensorPayload]
     | list[np.ndarray]
 )
+TensorMask: TypeAlias = npt.NDArray[np.bool_]
 TensorInput: TypeAlias = TensorLike | TensorRegistry
 TensorInputT = TypeVar("TensorInputT", bound=TensorInput)
 
@@ -922,7 +924,7 @@ class NMM:
 class CreateTensorMask:
     """Creates a boolean mask tensor from one source tensor."""
 
-    def __init__(self, src: str, predicate: Callable[[Any], Any], as_: str):
+    def __init__(self, src: str, predicate: Callable[[np.ndarray], TensorMask], as_: str):
         self.src = src
         self.as_ = as_
         self.predicate = predicate
@@ -1020,7 +1022,7 @@ class FilterTensors:
     def __init__(
         self,
         *srcs: str,
-        predicate: Callable[[TensorRegistry], Any],
+        predicate: Callable[[TensorRegistry], np.ndarray | Sequence[int] | Sequence[bool]],
         as_: str | tuple[str, ...] | None = None,
     ):
         self.srcs = srcs
@@ -1096,7 +1098,7 @@ class MapTensor:
         MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes")
     """
 
-    def __init__(self, src: str, fn: Callable[[Any], Any], as_: str | None = None):
+    def __init__(self, src: str, fn: Callable[[np.ndarray], np.ndarray], as_: str | None = None):
         self.src = src
         self.fn = fn
         self.as_ = as_ or src
