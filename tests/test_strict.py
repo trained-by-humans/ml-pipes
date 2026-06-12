@@ -197,21 +197,21 @@ def test_strict_accepts_concrete_generic():
 # SideEffectOp
 # ---------------------------------------------------------------------------
 
-class RecordingEffect(SideEffectOp):
+class RecordingEffect(SideEffectOp[str]):
     def __init__(self):
-        self.calls = []
+        self.calls: list[str] = []
 
-    def effect(self, payload: Any) -> None:
+    def effect(self, payload: str) -> None:
         self.calls.append(payload)
 
 
 def test_side_effect_op_rejects_call_override():
     with pytest.raises(TypeError, match="must not override __call__"):
-        class BadEffect(SideEffectOp):
-            def __call__(self, payload: Any) -> Any:
+        class BadEffect(SideEffectOp[str]):
+            def __call__(self, payload: str) -> str:
                 return payload
 
-            def effect(self, payload: Any) -> None:
+            def effect(self, payload: str) -> None:
                 pass
 
 

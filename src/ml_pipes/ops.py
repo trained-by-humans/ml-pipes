@@ -8,7 +8,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Literal, Any, TypeVar, get_args, get_origin
+from typing import Literal, Any, Generic, TypeVar, get_args, get_origin
 from typing import TextIO
 
 import numpy as np
@@ -1444,6 +1444,7 @@ class ToSegmentations:
 PredictionT = TypeVar("PredictionT", bound=Prediction)
 BatchItemT = TypeVar("BatchItemT")
 ScatterItemT = TypeVar("ScatterItemT")
+PayloadT = TypeVar("PayloadT")
 
 
 @Operator
@@ -1507,13 +1508,16 @@ class FilterPredictionsByArea:
 # Side-effect base class
 # ---------------------------------------------------------------------------
 
-class SideEffectOp(ABC):
+class SideEffectOp(ABC, Generic[PayloadT]):
     """Base for operators that perform a side effect and return their input unchanged.
 
     Subclasses implement `effect(payload)` instead of `__call__`. The base class
     owns `__call__` to enforce the passthrough contract — the input is always
     returned verbatim. `resolve_contract` threads the upstream type through so
     these operators work transparently in strict pipelines.
+
+    For static typing, ``SideEffectOp[T]`` behaves like a ``T -> T`` operator
+    whose only purpose is to introduce an external effect.
     """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -1524,10 +1528,10 @@ class SideEffectOp(ABC):
             )
 
     @abstractmethod
-    def effect(self, payload: Any) -> None:
+    def effect(self, payload: PayloadT) -> None:
         raise NotImplementedError
 
-    def __call__(self, payload: Any) -> Any:
+    def __call__(self, payload: PayloadT) -> PayloadT:
         self.effect(payload)
         return payload
 
@@ -1629,15 +1633,16 @@ class DrawMasks:
 
 
 @Operator
-class SaveImage(SideEffectOp):
+class SaveImage(SideEffectOp[PayloadT], Generic[PayloadT]):
     def __init__(self, output_path: str | Path, at: int | None = None):
         self.output_path = Path(output_path)
         self.at = at
 
-    def effect(self, payload: Any) -> None:
+    def effect(self, payload: PayloadT) -> None:
         import cv2
 
-        image_payload = payload[self.at] if self.at is not None else payload
+        payload_value: Any = payload
+        image_payload = payload_value[self.at] if self.at is not None else payload_value
         if image_payload.layout != "HWC":
             raise ValueError(f"SaveImage expects HWC image layout, got {image_payload.layout}")
 
@@ -1685,7 +1690,7 @@ class MapToObjects:
 
 
 @Operator
-class LogDetections(SideEffectOp):
+class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
     def __init__(
         self,
         model_path: str | Path,
@@ -1702,8 +1707,9 @@ class LogDetections(SideEffectOp):
         self.stream = stream or sys.stdout
         self.at = at
 
-    def effect(self, payload: Any) -> None:
-        prediction_objects = payload[self.at] if self.at is not None else payload
+    def effect(self, payload: PayloadT) -> None:
+        payload_value: Any = payload
+        prediction_objects = payload_value[self.at] if self.at is not None else payload_value
         print(
             json.dumps(
                 {

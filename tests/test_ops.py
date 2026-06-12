@@ -1173,6 +1173,20 @@ def test_save_image_writes_output(tmp_path: Path):
     assert result is payload
 
 
+def test_save_image_at_zero_writes_output_and_returns_tuple(tmp_path: Path):
+    image = np.full((16, 16, 3), 255, dtype=np.uint8)
+    output_path = tmp_path / "annotated.jpg"
+
+    payload = (
+        ImagePayload(array=image, color_space="BGR", layout="HWC"),
+        {"meta": 1},
+    )
+    result = SaveImage(output_path, at=0)(payload)
+
+    assert output_path.is_file()
+    assert result is payload
+
+
 # ---------------------------------------------------------------------------
 # MapToObjects / LogDetections
 # ---------------------------------------------------------------------------
@@ -1213,6 +1227,28 @@ def test_log_detections_prints_json_and_returns_input():
     )(detections)
 
     assert result is detections
+    output = stream.getvalue()
+    assert '"model": "model.onnx"' in output
+    assert '"image": "image.jpg"' in output
+    assert '"annotated_image": "image_model.jpg"' in output
+
+
+def test_log_detections_at_one_prints_json_and_returns_input():
+    stream = io.StringIO()
+    payload = (
+        "prefix",
+        [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "class_id": 1}],
+    )
+
+    result = LogDetections(
+        model_path="model.onnx",
+        image_path="image.jpg",
+        annotated_image_path="image_model.jpg",
+        stream=stream,
+        at=1,
+    )(payload)
+
+    assert result is payload
     output = stream.getvalue()
     assert '"model": "model.onnx"' in output
     assert '"image": "image.jpg"' in output
