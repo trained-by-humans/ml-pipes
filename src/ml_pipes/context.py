@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Generic, Literal, Mapping, TypeVar, overload
 
 from .operator import Operator
 from .selector import Selector, SelectorInput
+
+CurrentT = TypeVar("CurrentT")
+InputT = TypeVar("InputT", contravariant=True)
+OutputT = TypeVar("OutputT", covariant=True)
+StoredT = TypeVar("StoredT")
+InsertIndexT = TypeVar("InsertIndexT", bound=int | None)
 
 
 @dataclass(frozen=True)
@@ -44,9 +50,22 @@ class Context:
         return Context(merged)
 
 
-class ContextOp(ABC):
+class ContextOp(ABC, Generic[InputT, OutputT]):
+    """Operator with a pipeline-visible boundary and hidden context plumbing.
+
+    For static typing, ``ContextOp[In, Out]`` should be read as if the
+    operator were a normal ``In -> Out`` pipeline step. The ``Context``
+    argument and returned ``Context`` are internal runtime details used by the
+    pipeline executor to thread context updates through the operator chain.
+
+    Most context operators can express their public boundary directly through
+    the class declaration, for example ``Store(ContextOp[T, T])``. Operators
+    whose output also depends on the incoming current shape, such as
+    ``Recall``, can refine that public boundary with overloads on ``apply``.
+    """
+
     @abstractmethod
-    def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
+    def apply(self, current: InputT, context: Context) -> tuple[OutputT, Context]:
         raise NotImplementedError
 
     @abstractmethod
@@ -61,7 +80,7 @@ class ContextOp(ABC):
 
 
 @Operator
-class Store(ContextOp):
+class Store(ContextOp[CurrentT, CurrentT]):
     def __init__(
         self,
         name: str,
@@ -71,7 +90,7 @@ class Store(ContextOp):
         self.name = name
         self._selector = Selector.from_input(source)
 
-    def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
+    def apply(self, current: CurrentT, context: Context) -> tuple[CurrentT, Context]:
         value = self._selector.select_value(
             current,
             error_prefix=f"Store({self.name!r}, {self._selector!r})",
@@ -94,12 +113,55 @@ class Store(ContextOp):
 
 
 @Operator
-class Recall(ContextOp):
+class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
+    """Recall a stored value and splice it into the current tuple shape.
+
+    The public boundary depends on both the stored value type and the incoming
+    ``current`` shape, so the class declaration stays broad and the ``apply``
+    overloads carry the precise external typing.
+    """
+
+    @overload
+    def __init__(self: "Recall[StoredT, None]", name: str, index: None = None) -> None:
+        ...
+
+    @overload
+    def __init__(self: "Recall[StoredT, Literal[0]]", name: str, index: Literal[0]) -> None:
+        ...
+
+    @overload
+    def __init__(self: "Recall[StoredT, int]", name: str, index: int) -> None:
+        ...
+
     def __init__(self, name: str, index: int | None = None):
         self.name = name
         self.index = index
 
-    def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
+    @overload
+    def apply(
+        self: "Recall[StoredT, None]",
+        current: CurrentT,
+        context: Context,
+    ) -> tuple[tuple[CurrentT, StoredT], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[0]]",
+        current: CurrentT,
+        context: Context,
+    ) -> tuple[tuple[StoredT, CurrentT], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, int]",
+        current: CurrentT,
+        context: Context,
+    ) -> tuple[Any, Context]:
+        ...
+
+    def apply(self, current: CurrentT, context: Context) -> tuple[Any, Context]:
         stored = context.load(self.name)
         current_tuple = current if isinstance(current, tuple) else (current,)
         if self.index is None:
