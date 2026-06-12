@@ -139,7 +139,10 @@ For `RegionOpener` subclasses, the engine:
 3. Calls `operator.run_region(...)`.
 4. Skips the operator index forward to the matching closer.
 
-So regions are not interpreted by the main loop one operator at a time. The opener takes control and decides how the enclosed slice executes.
+So regions are not interpreted by the main loop one operator at a time. The
+opener takes control and decides how the enclosed slice executes. This is a
+runtime detail only; static typing can still treat the region boundaries as
+linear `In -> Out` steps in the operator list.
 
 ## Composition
 

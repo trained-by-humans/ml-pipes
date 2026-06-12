@@ -25,6 +25,7 @@ from ml_pipes.torch import (
     TorchCreateTensorMaskByThreshold,
     TorchDistribute,
     TorchExtract,
+    TorchFilterTensorsByClasses,
     TorchFilterTensorsByMasksArea,
     TorchFilterTensorsByScore,
     TorchGatherRows,
@@ -530,6 +531,26 @@ def test_torch_filter_tensors_by_masks_area_can_write_to_new_keys():
     assert torch.allclose(registry["selected_scores"], torch.tensor([0.9]))
     assert registry["selected_classes"].tolist() == [2]
     assert torch.allclose(registry["scores"], torch.tensor([0.2, 0.9]))
+
+
+def test_torch_filter_tensors_by_classes_can_write_to_new_keys():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 1, 2], dtype=torch.int64),
+        }
+    )
+
+    TorchFilterTensorsByClasses(
+        "scores",
+        classes="classes",
+        keep_classes=[0, 2],
+        as_=("selected_classes", "selected_scores"),
+    )(registry)
+
+    assert registry["selected_classes"].tolist() == [0, 2]
+    assert torch.allclose(registry["selected_scores"], torch.tensor([0.9, 0.8]))
+    assert registry["classes"].tolist() == [0, 1, 2]
 
 
 def test_torch_sort_tensors_by_can_write_to_new_keys():

@@ -18,6 +18,7 @@ from ml_pipes.ops import (
     ConvertBoxFormat,
     DrawBoxes,
     Extract,
+    FilterTensorsByClasses,
     FilterTensorsByMasksArea,
     FilterPredictions,
     FilterPredictionsByArea,
@@ -775,7 +776,8 @@ def test_filter_tensors_can_write_to_new_keys():
     result = FilterTensors(
         "scores",
         "classes",
-        predicate=lambda reg: reg["classes"] == 0,
+        by="classes",
+        predicate=lambda classes: classes == 0,
         as_=("selected_scores", "selected_classes"),
     )(registry)
 
@@ -802,6 +804,26 @@ def test_filter_tensors_by_score_can_write_to_new_keys():
     assert np.allclose(result["selected_scores"], [0.9, 0.8])
     assert result["selected_classes"].tolist() == [0, 0]
     assert np.allclose(result["scores"], [0.9, 0.5, 0.8])
+
+
+def test_filter_tensors_by_classes_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.9, 0.5, 0.8], dtype=np.float32),
+            "classes": np.array([0, 1, 2], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByClasses(
+        "scores",
+        classes="classes",
+        keep_classes=[0, 2],
+        as_=("selected_classes", "selected_scores"),
+    )(registry)
+
+    assert result["selected_classes"].tolist() == [0, 2]
+    assert np.allclose(result["selected_scores"], [0.9, 0.8])
+    assert result["classes"].tolist() == [0, 1, 2]
 
 
 def test_filter_tensors_by_masks_area_can_write_to_new_keys():
@@ -1362,7 +1384,7 @@ def test_filter_tensors_applies_predicate():
         scores=np.array([0.9, 0.5, 0.8]),
         classes=np.array([0, 1, 0]),
     )
-    result = FilterTensors("scores", predicate=lambda reg: reg["classes"] == 0)(r)
+    result = FilterTensors("scores", by="classes", predicate=lambda classes: classes == 0)(r)
     assert result["scores"].tolist() == [0.9, 0.8]
 
 
@@ -1372,7 +1394,13 @@ def test_filter_tensors_applies_to_multiple_keys():
         scores=np.array([0.9, 0.5, 0.8]),
         classes=np.array([0, 1, 0]),
     )
-    result = FilterTensors("boxes", "scores", "classes", predicate=lambda reg: reg["classes"] == 0)(r)
+    result = FilterTensors(
+        "boxes",
+        "scores",
+        "classes",
+        by="classes",
+        predicate=lambda classes: classes == 0,
+    )(r)
     assert result["scores"].tolist() == [0.9, 0.8]
     assert result["classes"].tolist() == [0, 0]
     assert len(result["boxes"]) == 2

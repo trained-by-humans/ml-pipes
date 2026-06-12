@@ -14,7 +14,6 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.streaming"
 
 import cv2
-
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from ..run_yolo8_onnx import YOLO8_MODELS
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
@@ -26,7 +25,7 @@ from ml_pipes import (
     Extract,
     FilterPredictionsByArea,
     FilterPredictionsByClass,
-    FilterTensors,
+    FilterTensorsByClasses,
     Gather,
     GatherScores,
     ImagePayload,
@@ -69,7 +68,12 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePa
         Slice("preds", slice(4, None), as_="scores"),
         ArgMax("scores", as_="classes"),
         GatherScores("scores", "classes"),
-        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in _KEEP_CLASSES for c in r["classes"]]),
+        FilterTensorsByClasses(
+            "boxes",
+            "scores",
+            "classes",
+            keep_classes=_KEEP_CLASSES,
+        ),
         ConvertBoxFormat(from_="cxcywh"),
         NMS(conf_threshold=conf_threshold),
         Recall("resize_transform"),

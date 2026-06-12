@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import Literal, Any, Generic, TypeAlias, TypeVar, cast, get_args, get_origin
 from typing import TextIO
@@ -1010,27 +1010,35 @@ class SelectTensors:
 
 @Operator
 class FilterTensors:
-    """Filters one or more tensors using a single user-supplied predicate.
+    """Filters one or more tensors using a mask derived from one source tensor.
 
-    The predicate is evaluated once and the resulting mask is applied to every
-    key. All keys are updated in-place.
+    The predicate is evaluated once against ``registry[by]`` and the resulting
+    mask is applied to every source key. All keys are updated in-place.
 
     Example — keep only person and car before NMS:
-        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in {0, 2} for c in r["classes"]])
+        FilterTensors(
+            "boxes",
+            "scores",
+            "classes",
+            by="classes",
+            predicate=lambda classes: np.isin(classes, [0, 2]),
+        )
     """
 
     def __init__(
         self,
         *srcs: str,
-        predicate: Callable[[TensorRegistry], np.ndarray | Sequence[int] | Sequence[bool]],
+        by: str,
+        predicate: Callable[[np.ndarray], TensorMask],
         as_: str | tuple[str, ...] | None = None,
     ):
         self.srcs = srcs
+        self.by = by
         self.predicate = predicate
         self.dst_names = _resolve_multi_output_names("FilterTensors", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        mask = self.predicate(registry)
+        mask = np.asarray(self.predicate(registry[self.by]), dtype=bool)
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][mask]
         return registry
@@ -1056,7 +1064,32 @@ class FilterTensorsByScore:
         all_srcs = (score,) + tuple(s for s in srcs if s != score)
         self._inner = FilterTensors(
             *all_srcs,
-            predicate=lambda r: r[score] >= min_score,
+            by=score,
+            predicate=lambda scores: scores >= min_score,
+            as_=as_,
+        )
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
+@Operator
+class FilterTensorsByClasses:
+    """Filters tensors by class id membership."""
+
+    def __init__(
+        self,
+        *srcs: str,
+        classes: str = "classes",
+        keep_classes: Collection[int],
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        all_srcs = (classes,) + tuple(src for src in srcs if src != classes)
+        allowed_classes = tuple(keep_classes)
+        self._inner = FilterTensors(
+            *all_srcs,
+            by=classes,
+            predicate=lambda values: np.isin(values, allowed_classes),
             as_=as_,
         )
 
@@ -1076,18 +1109,15 @@ class FilterTensorsByMasksArea:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
-        self.srcs = all_srcs
-        self.masks = masks
-        self.min_area = min_area
-        self.dst_names = _resolve_multi_output_names("FilterTensorsByMasksArea", all_srcs, as_)
+        self._inner = FilterTensors(
+            *all_srcs,
+            by=masks,
+            predicate=lambda tensor: _flatten_leading_dim(np.asarray(tensor, dtype=bool)).sum(axis=1) >= min_area,
+            as_=as_,
+        )
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        masks = registry[self.masks]
-        areas = _flatten_leading_dim(np.asarray(masks, dtype=bool)).sum(axis=1)
-        keep = areas >= self.min_area
-        for src, dst in zip(self.srcs, self.dst_names, strict=True):
-            registry[dst] = registry[src][keep]
-        return registry
+        return self._inner(registry)
 
 
 @Operator
