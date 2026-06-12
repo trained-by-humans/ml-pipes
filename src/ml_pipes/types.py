@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, TypeAlias, TypeVar
 
 import numpy as np
+import numpy.typing as npt
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,8 @@ class ResizeTransform:
 
 
 PredictionT = TypeVar("PredictionT", bound="Prediction")
+PredictionMask: TypeAlias = Sequence[bool] | npt.NDArray[np.bool_]
+PredictionIndices: TypeAlias = Sequence[int] | npt.NDArray[np.integer[Any]]
 
 
 @dataclass(frozen=True)
@@ -110,19 +114,23 @@ class Prediction:
     """Base class for all typed prediction outputs.
 
     All fields must be equal-length lists (one entry per detected instance).
-    The filter method slices every field by index, so it works generically for
-    any subclass without knowing its field names.
+    The filter and select methods slice every field uniformly, so they work
+    generically for any subclass without knowing its field names.
     """
 
-    def filter(self: PredictionT, mask: Any) -> PredictionT:
-        if len(mask) == 0:
-            kept: list[int] = []
-        elif isinstance(mask[0], (bool, np.bool_)):
-            kept = [i for i, m in enumerate(mask) if m]
-        else:
-            kept = [int(i) for i in mask]
-        sliced = {f.name: [getattr(self, f.name)[i] for i in kept]
-                  for f in dataclasses.fields(self)}
+    def filter(self: PredictionT, mask: PredictionMask) -> PredictionT:
+        kept = [i for i, keep in enumerate(mask) if bool(keep)]
+        return self._slice(kept)
+
+    def select(self: PredictionT, indices: PredictionIndices) -> PredictionT:
+        kept = [int(index) for index in indices]
+        return self._slice(kept)
+
+    def _slice(self: PredictionT, kept: Sequence[int]) -> PredictionT:
+        sliced = {
+            f.name: [getattr(self, f.name)[i] for i in kept]
+            for f in dataclasses.fields(self)
+        }
         return type(self)(**sliced)
 
 

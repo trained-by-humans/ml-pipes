@@ -25,6 +25,7 @@ from .types import (
     Detections,
     ImagePayload,
     Prediction,
+    PredictionMask,
     RuntimeOutputs,
     Segmentations,
     TensorPayload,
@@ -1478,6 +1479,7 @@ class ToSegmentations:
 # ---------------------------------------------------------------------------
 
 PredictionT = TypeVar("PredictionT", bound=Prediction)
+DetectionsT = TypeVar("DetectionsT", bound=Detections)
 BatchItemT = TypeVar("BatchItemT")
 ScatterItemT = TypeVar("ScatterItemT")
 PayloadT = TypeVar("PayloadT")
@@ -1491,17 +1493,17 @@ ObjectFieldSource: TypeAlias = str | Callable[[object], Sequence[object]]
 
 
 @Operator
-class FilterPredictions:
+class FilterPredictions(Generic[PredictionT]):
     """Filters a Prediction (or any subclass) using a user-supplied predicate.
 
-    The predicate receives the full Prediction and must return a bool list or
-    index array. Every field is sliced uniformly via Prediction.filter().
+    The predicate receives the full Prediction and must return a boolean mask.
+    Every field is sliced uniformly via Prediction.filter().
 
     Example:
         FilterPredictions(predicate=lambda p: [c in {0, 2} for c in p.classes])
     """
 
-    def __init__(self, predicate: Callable[[Any], Any]):
+    def __init__(self, predicate: Callable[[PredictionT], PredictionMask]):
         self.predicate = predicate
 
     def __call__(self, prediction: PredictionT) -> PredictionT:
@@ -1512,11 +1514,11 @@ class FilterPredictions:
 class FilterPredictionsByClass:
     """Keep only predictions whose class is in the given set."""
 
-    def __init__(self, classes: set[int]):
-        self._inner = FilterPredictions(lambda p: [c in classes for c in p.classes])
+    def __init__(self, classes: Collection[int]):
+        self.classes = frozenset(classes)
 
-    def __call__(self, prediction: PredictionT) -> PredictionT:
-        return self._inner(prediction)
+    def __call__(self, prediction: DetectionsT) -> DetectionsT:
+        return prediction.filter([class_id in self.classes for class_id in prediction.classes])
 
 
 @Operator
@@ -1524,10 +1526,10 @@ class FilterPredictionsByScore:
     """Drop predictions below min_score."""
 
     def __init__(self, min_score: float):
-        self._inner = FilterPredictions(lambda p: [s >= min_score for s in p.scores])
+        self.min_score = min_score
 
-    def __call__(self, prediction: PredictionT) -> PredictionT:
-        return self._inner(prediction)
+    def __call__(self, prediction: DetectionsT) -> DetectionsT:
+        return prediction.filter([score >= self.min_score for score in prediction.scores])
 
 
 @Operator
@@ -1535,16 +1537,15 @@ class FilterPredictionsByArea:
     """Drop predictions whose box area (xyxy) falls outside [min_area, max_area] pixel²."""
 
     def __init__(self, min_area: float = 0, max_area: float | None = None):
-        def predicate(p: Any) -> list[bool]:
-            result = []
-            for x1, y1, x2, y2 in p.boxes:
-                area = (x2 - x1) * (y2 - y1)
-                result.append(area >= min_area and (max_area is None or area <= max_area))
-            return result
-        self._inner = FilterPredictions(predicate)
+        self.min_area = min_area
+        self.max_area = max_area
 
-    def __call__(self, prediction: PredictionT) -> PredictionT:
-        return self._inner(prediction)
+    def __call__(self, prediction: DetectionsT) -> DetectionsT:
+        return prediction.filter([
+            (x2 - x1) * (y2 - y1) >= self.min_area
+            and (self.max_area is None or (x2 - x1) * (y2 - y1) <= self.max_area)
+            for x1, y1, x2, y2 in prediction.boxes
+        ])
 
 
 # ---------------------------------------------------------------------------

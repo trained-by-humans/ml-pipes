@@ -1547,7 +1547,7 @@ def test_filter_predictions_by_area_max():
 
 
 # ---------------------------------------------------------------------------
-# Prediction.filter — mask variants
+# Prediction.filter / Prediction.select — variants
 # ---------------------------------------------------------------------------
 
 def test_filter_bool_list():
@@ -1579,31 +1579,31 @@ def test_filter_numpy_bool_array():
     assert result.scores == [0.9, 0.8]
 
 
-def test_filter_index_list():
+def test_select_index_list():
     d = _detections()
-    result = d.filter([0, 2])
+    result = d.select([0, 2])
     assert result.scores == [0.9, 0.8]
     assert result.classes == [0, 0]
 
 
-def test_filter_index_list_single():
+def test_select_index_list_single():
     d = _detections()
-    result = d.filter([1])
+    result = d.select([1])
     assert result.scores == [0.5]
     assert result.classes == [1]
 
 
-def test_filter_numpy_index_array():
+def test_select_numpy_index_array():
     d = _detections()
-    result = d.filter(np.array([0, 2]))
+    result = d.select(np.array([0, 2]))
     assert result.scores == [0.9, 0.8]
 
 
-def test_filter_numpy_argsort():
+def test_select_numpy_argsort():
     d = _detections()
     # argsort ascending by score: [1, 2, 0] → keep top-2 → indices [2, 0]
     indices = np.argsort(d.scores)[-2:]
-    result = d.filter(indices)
+    result = d.select(indices)
     assert set(result.scores) == {0.9, 0.8}
 
 
@@ -1615,10 +1615,10 @@ def test_filter_empty_mask():
     assert result.classes == []
 
 
-def test_filter_index_out_of_bounds_raises():
+def test_select_index_out_of_bounds_raises():
     d = _detections()
     with pytest.raises(IndexError):
-        d.filter([0, 99])
+        d.select([0, 99])
 
 
 def test_filter_bool_mask_too_long_raises():

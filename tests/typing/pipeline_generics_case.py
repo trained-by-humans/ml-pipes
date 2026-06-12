@@ -19,6 +19,8 @@ from ml_pipes import (
     AsType,
     CreateTensorMask,
     Detections,
+    FilterPredictions,
+    FilterPredictionsByClass,
     FilterTensors,
     ImagePayload,
     LogDetections,
@@ -27,6 +29,7 @@ from ml_pipes import (
     Pipeline,
     Pick,
     SaveImage,
+    Segmentations,
     SideEffectOp,
     TensorPayload,
     TensorRegistry,
@@ -65,6 +68,7 @@ assert_type(linear(1), float)
 
 sample_image = cast(ImagePayload, None)
 sample_detections = cast(Detections, None)
+sample_segmentations = cast(Segmentations, None)
 sample_tensor = cast(TensorPayload, None)
 sample_tensor_list = cast(list[TensorPayload], None)
 sample_registry = cast(TensorRegistry, None)
@@ -77,6 +81,12 @@ assert_type(pick_first((1, "value")), int)
 
 pick_second: Pick[Literal[1]] = Pick(1)
 assert_type(pick_second((1, "value")), str)
+
+detection_filter: FilterPredictions[Detections] = FilterPredictions(
+    lambda prediction: [score > 0.5 for score in prediction.scores]
+)
+assert_type(detection_filter(sample_detections), Detections)
+assert_type(FilterPredictionsByClass({0})(sample_segmentations), Segmentations)
 
 assert_type(AsType("float16")(sample_tensor), TensorPayload)
 assert_type(AsType("float16")(sample_tensor_list), list[TensorPayload])
