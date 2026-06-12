@@ -511,6 +511,26 @@ def test_unbound_identity_typevar_preserves_declared_input_type():
     pipeline.validate(pipeline_input_type=_Child)
 
 
+def test_validate_publishes_bound_for_unresolved_typevar_boundary():
+    class IdentityTypeVar:
+        def __call__(self, x: _T) -> _T: ...  # type: ignore[empty-body]
+
+    contract = Pipeline([IdentityTypeVar()]).validate()
+
+    assert contract.input_type is _Base
+    assert contract.output_type is _Base
+
+
+def test_validate_recursively_publishes_bound_inside_generic_output():
+    class WrapTypeVarInList:
+        def __call__(self, x: _T) -> list[_T]: ...  # type: ignore[empty-body]
+
+    contract = Pipeline([WrapTypeVarInList()]).validate()
+
+    assert contract.input_type is _Base
+    assert contract.output_type == list[_Base]
+
+
 def test_resolve_typevar_output_recursively_specializes_nested_output():
     assert _resolve_typevar_output(list[_T], _Child, (_T,)) == list[_Child]
 

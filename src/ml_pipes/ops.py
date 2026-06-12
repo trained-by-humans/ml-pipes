@@ -8,7 +8,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Literal, Any, Generic, TypeVar, get_args, get_origin
+from typing import Literal, Any, Generic, TypeAlias, TypeVar, cast, get_args, get_origin
 from typing import TextIO
 
 import numpy as np
@@ -31,6 +31,18 @@ from .types import (
 )
 from .types import ResizeTransform
 from .validation import PipelineValidationError, is_annotation_compatible
+
+
+TensorLike: TypeAlias = (
+    TensorPayload
+    | np.ndarray
+    | tuple[TensorPayload, ...]
+    | tuple[np.ndarray, ...]
+    | list[TensorPayload]
+    | list[np.ndarray]
+)
+TensorInput: TypeAlias = TensorLike | TensorRegistry
+TensorInputT = TypeVar("TensorInputT", bound=TensorInput)
 
 
 # ---------------------------------------------------------------------------
@@ -270,35 +282,27 @@ class AsType:
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
         if self.src is not None:
             return (TensorRegistry,), TensorRegistry
-        tensor_like = (
-            TensorPayload
-            | np.ndarray
-            | tuple[TensorPayload, ...]
-            | tuple[np.ndarray, ...]
-            | list[TensorPayload]
-            | list[np.ndarray]
-        )
-        if current_output is not Any and is_annotation_compatible(current_output, (tensor_like,)):
+        if current_output is not Any and is_annotation_compatible(current_output, (TensorLike,)):
             return (current_output,), current_output
-        return (tensor_like,), tensor_like
+        return (TensorLike,), TensorLike
 
-    def __call__(self, value: object) -> object:
+    def __call__(self, value: TensorInputT) -> TensorInputT:
         if self.src is not None:
             if not isinstance(value, TensorRegistry):
                 raise TypeError(f"AsType src={self.src!r} requires TensorRegistry, got {type(value)!r}")
             value[self.as_] = self._cast_array(value[self.src])
             return value
-        return self._cast_value(value)
+        return cast(TensorInputT, self._cast_value(cast(TensorLike, value)))
 
-    def _cast_value(self, value: object) -> object:
+    def _cast_value(self, value: TensorLike) -> TensorLike:
         if isinstance(value, TensorPayload):
             return TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype))
         if isinstance(value, np.ndarray):
             return self._cast_array(value)
         if isinstance(value, tuple):
-            return tuple(self._cast_sequence_item(item) for item in value)
+            return cast(TensorLike, tuple(self._cast_sequence_item(item) for item in value))
         if isinstance(value, list):
-            return [self._cast_sequence_item(item) for item in value]
+            return cast(TensorLike, [self._cast_sequence_item(item) for item in value])
         raise TypeError(f"AsType does not support value type {type(value)!r}")
 
     def _cast_sequence_item(self, value: object) -> TensorPayload | np.ndarray:
