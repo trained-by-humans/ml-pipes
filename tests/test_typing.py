@@ -33,6 +33,7 @@ def test_mypy_pipeline_generics_smoke() -> None:
             "--python-version",
             f"{sys.version_info.major}.{sys.version_info.minor}",
             "tests/typing/pipeline_generics_case.py",
+            "tests/typing/draw_operator_generics_case.py",
         ],
         cwd=ROOT,
         env=env,

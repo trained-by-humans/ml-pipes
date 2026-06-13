@@ -49,6 +49,8 @@ TensorLike: TypeAlias = (
 TensorMask: TypeAlias = npt.NDArray[np.bool_]
 TensorInput: TypeAlias = TensorLike | TensorRegistry
 TensorInputT = TypeVar("TensorInputT", bound=TensorInput)
+DetectT = TypeVar("DetectT", bound=Detections)
+SegT = TypeVar("SegT", bound=Segmentations)
 
 
 # ---------------------------------------------------------------------------
@@ -1620,7 +1622,7 @@ class DrawBoxes:
         self.thickness = thickness
         self.font_scale = font_scale
 
-    def __call__(self, source_image: ImagePayload, detections: Detections) -> tuple[ImagePayload, Detections]:
+    def __call__(self, source_image: ImagePayload, detections: DetectT) -> tuple[ImagePayload, DetectT]:
         import cv2
 
         if source_image is None:
@@ -1665,7 +1667,7 @@ class DrawMasks:
         self.class_names = tuple(class_names) if class_names is not None else None
         self.alpha = alpha
 
-    def __call__(self, source_image: ImagePayload, segmentations: Segmentations) -> tuple[ImagePayload, Segmentations]:
+    def __call__(self, source_image: ImagePayload, segmentations: SegT) -> tuple[ImagePayload, SegT]:
         if source_image is None:
             raise ValueError("source_image missing from context; cannot draw masks")
 

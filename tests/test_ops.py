@@ -17,6 +17,7 @@ from ml_pipes.ops import (
     CreateTensorMaskByThreshold,
     ConvertBoxFormat,
     DrawBoxes,
+    DrawMasks,
     Extract,
     FilterTensorsByClasses,
     FilterTensorsByMasksArea,
@@ -1205,6 +1206,44 @@ def test_draw_boxes_draws_on_source_image():
     assert result.layout == "HWC"
     assert np.any(result.array != 0)
     assert returned_detections is detections
+
+
+def test_draw_boxes_preserves_segmentations_instance():
+    image = np.zeros((32, 32, 3), dtype=np.uint8)
+    source = ImagePayload(array=image, color_space="BGR", layout="HWC")
+    segmentations = Segmentations(
+        boxes=[[4.0, 4.0, 20.0, 20.0]],
+        scores=[0.9],
+        classes=[1],
+        masks=[np.zeros((32, 32), dtype=bool)],
+    )
+
+    result, returned_segmentations = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(source, segmentations)
+
+    assert result.array.shape == image.shape
+    assert np.any(result.array != 0)
+    assert returned_segmentations is segmentations
+
+
+def test_draw_masks_draws_on_source_image():
+    image = np.zeros((32, 32, 3), dtype=np.uint8)
+    source = ImagePayload(array=image, color_space="BGR", layout="HWC")
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[8:24, 8:24] = True
+    segmentations = Segmentations(
+        boxes=[[8.0, 8.0, 24.0, 24.0]],
+        scores=[0.9],
+        classes=[1],
+        masks=[mask],
+    )
+
+    result, returned_segmentations = DrawMasks(alpha=0.6)(source, segmentations)
+
+    assert result.array.shape == image.shape
+    assert result.color_space == "BGR"
+    assert result.layout == "HWC"
+    assert np.any(result.array != 0)
+    assert returned_segmentations is segmentations
 
 
 # ---------------------------------------------------------------------------
