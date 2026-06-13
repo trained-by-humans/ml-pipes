@@ -4,6 +4,7 @@ import argparse
 import collections
 import sys
 import urllib.error
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -211,7 +212,9 @@ def build_postprocess_pipeline() -> Pipeline[RuntimeOutputs, tuple[ImagePayload,
     ])
 
 
-def build_frame_pipeline(infer_op: Any) -> Pipeline[ImagePayload, tuple[ImagePayload, float]]:
+def build_frame_pipeline(
+    infer_op: Callable[[TensorPayload], RuntimeOutputs],
+) -> Pipeline[ImagePayload, tuple[ImagePayload, float]]:
     pipeline = build_preprocess_pipeline() + Pipeline([infer_op]) + build_postprocess_pipeline()
     pipeline.validate()
     return pipeline
@@ -244,7 +247,7 @@ def run(
         return 1
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
-    pending: collections.deque[Future] = collections.deque()
+    pending: collections.deque[Future[tuple[ImagePayload, float]]] = collections.deque()
     stopped = False
     frame_pipeline = build_frame_pipeline(CSRNetInfer(model, torch, resolved_device))
     frame_pipeline.set_tracing(throughput)
@@ -257,7 +260,7 @@ def run(
         file=sys.stderr,
     )
 
-    def infer(frame: Any) -> tuple[ImagePayload, float]:
+    def infer(frame: np.ndarray) -> tuple[ImagePayload, float]:
         return frame_pipeline(ImagePayload(array=frame, color_space="BGR", layout="HWC"))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
