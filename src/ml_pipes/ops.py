@@ -1491,7 +1491,7 @@ class ToSegmentations:
 # Prediction filtering
 # ---------------------------------------------------------------------------
 
-PredictionT = TypeVar("PredictionT", bound=Prediction)
+PredictionT = TypeVar("PredictionT", bound=Prediction, default=Prediction)
 ClassPredictionT = TypeVar("ClassPredictionT", bound=ClassPrediction)
 ScorePredictionT = TypeVar("ScorePredictionT", bound=ScorePrediction)
 BoxPredictionT = TypeVar("BoxPredictionT", bound=BoxPrediction)
@@ -1504,7 +1504,6 @@ PickIndexT = TypeVar("PickIndexT", bound=int)
 PickFirstT = TypeVar("PickFirstT")
 PickSecondT = TypeVar("PickSecondT")
 ObjectMapping: TypeAlias = dict[str, object]
-ObjectFieldSource: TypeAlias = str | Callable[[object], Sequence[object]]
 
 
 @Operator
@@ -1712,7 +1711,7 @@ class SaveImage(SideEffectOp[PayloadT], Generic[PayloadT]):
 
 
 @Operator
-class MapPredictionsToObjects(Generic[ObjectIndexT]):
+class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
     """Converts one prediction-like payload into row-oriented object records.
 
     Typing stays intentionally narrow:
@@ -1724,44 +1723,47 @@ class MapPredictionsToObjects(Generic[ObjectIndexT]):
 
     @overload
     def __init__(
-        self: "MapPredictionsToObjects[None]",
-        fields: Mapping[str, ObjectFieldSource],
+        self: "MapPredictionsToObjects[None, PredictionT]",
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
         at: None = None,
     ) -> None:
         ...
 
     @overload
     def __init__(
-        self: "MapPredictionsToObjects[Literal[1]]",
-        fields: Mapping[str, ObjectFieldSource],
+        self: "MapPredictionsToObjects[Literal[1], PredictionT]",
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
         at: Literal[1],
     ) -> None:
         ...
 
     @overload
     def __init__(
-        self: "MapPredictionsToObjects[int]",
-        fields: Mapping[str, ObjectFieldSource],
+        self: "MapPredictionsToObjects[int, PredictionT]",
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
         at: int,
     ) -> None:
         ...
 
     def __init__(
         self,
-        fields: Mapping[str, ObjectFieldSource],
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
         at: int | None = None,
     ) -> None:
         self.fields = fields
         self.at = at
 
     @overload
-    def __call__(self: "MapPredictionsToObjects[None]", payload: Prediction) -> list[ObjectMapping]:
+    def __call__(
+        self: "MapPredictionsToObjects[None, PredictionT]",
+        payload: PredictionT,
+    ) -> list[ObjectMapping]:
         ...
 
     @overload
     def __call__(
-        self: "MapPredictionsToObjects[Literal[1]]",
-        payload: tuple[ObjectPrefixT, Prediction],
+        self: "MapPredictionsToObjects[Literal[1], PredictionT]",
+        payload: tuple[ObjectPrefixT, PredictionT],
     ) -> tuple[ObjectPrefixT, list[ObjectMapping]]:
         ...
 
@@ -1840,14 +1842,14 @@ class MapPredictionsToObjects(Generic[ObjectIndexT]):
         updated_parts = parts[:normalized_index] + (list[ObjectMapping],) + parts[normalized_index + 1:]
         return (current_output,), updated_parts
 
-    def _resolve_prediction_value(self, payload: object) -> object:
+    def _resolve_prediction_value(self, payload: object) -> PredictionT:
         if self.at is None:
-            return payload
+            return cast(PredictionT, payload)
         if not isinstance(payload, tuple):
             raise TypeError(
                 f"MapPredictionsToObjects(at={self.at}) requires a tuple payload, got {type(payload)!r}"
             )
-        return payload[self.at]
+        return cast(PredictionT, payload[self.at])
 
 
 @Operator
