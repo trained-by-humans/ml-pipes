@@ -3,9 +3,10 @@ from __future__ import annotations
 import contextlib
 import threading
 from collections.abc import Callable, Collection, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, cast
 
 import numpy as np
+import numpy.typing as npt
 import torch
 
 from ml_pipes.operator import Operator
@@ -19,6 +20,30 @@ from .types import (
     canonical_torch_dtype,
     resolve_torch_dtype,
 )
+
+if TYPE_CHECKING:
+    TorchTensorLike: TypeAlias = (
+        TorchTensorPayload
+        | torch.Tensor
+        | tuple[TorchTensorPayload, ...]
+        | tuple[torch.Tensor, ...]
+        | list[TorchTensorPayload]
+        | list[torch.Tensor]
+    )
+    TorchTensorInput: TypeAlias = TorchTensorLike | TorchTensorRegistry
+    TorchTransferInput: TypeAlias = TorchTensorInput | TorchRuntimeOutputs
+    TorchTensorMask: TypeAlias = torch.Tensor | npt.NDArray[np.bool_]
+    TorchInferOutput: TypeAlias = torch.Tensor | Sequence[torch.Tensor]
+    TorchTensorInputT = TypeVar("TorchTensorInputT", bound=TorchTensorInput)
+    TorchTransferInputT = TypeVar("TorchTransferInputT", bound=TorchTransferInput)
+else:
+    TorchTensorLike: TypeAlias = Any
+    TorchTensorInput: TypeAlias = Any
+    TorchTransferInput: TypeAlias = Any
+    TorchTensorMask: TypeAlias = Any
+    TorchInferOutput: TypeAlias = Any
+    TorchTensorInputT = TypeVar("TorchTensorInputT")
+    TorchTransferInputT = TypeVar("TorchTransferInputT")
 
 
 def _synchronize_torch_device(device: torch.device) -> None:
@@ -187,44 +212,57 @@ class ToDevice:
         self.device = canonical_torch_device(device)
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        torch_like = TorchTensorPayload | TorchTensorRegistry
-        if current_output is not Any and is_annotation_compatible(current_output, (torch_like,)):
+        if current_output is not Any and is_annotation_compatible(current_output, (TorchTransferInput,)):
             return (current_output,), current_output
-        return (torch_like,), torch_like
+        return (TorchTransferInput,), TorchTransferInput
 
-    def __call__(self, value: object) -> object:
+    def __call__(self, value: TorchTransferInputT) -> TorchTransferInputT:
+        return cast(TorchTransferInputT, self._move_value(value))
+
+    def _move_value(self, value: TorchTransferInput) -> TorchTransferInput:
         if isinstance(value, TorchTensorPayload):
-            tensor = value.array.to(device=self.device)
-            return TorchTensorPayload(
-                array=tensor,
-                layout=value.layout,
-                dtype=canonical_torch_dtype(tensor.dtype),
-                device=canonical_torch_device(tensor.device),
-            )
+            return self._move_payload(value)
         if isinstance(value, TorchTensorRegistry):
             for name, tensor in value._tensors.items():
                 value[name] = tensor.to(device=self.device)
             return value
+        if isinstance(value, TorchRuntimeOutputs):
+            return TorchRuntimeOutputs(
+                tensors=tuple(self._move_payload(tensor) for tensor in value.tensors),
+                names=value.names,
+            )
+        if isinstance(value, torch.Tensor):
+            return value.to(device=self.device)
+        if isinstance(value, tuple):
+            return cast(TorchTensorLike, tuple(self._move_sequence_item(item) for item in value))
+        if isinstance(value, list):
+            return cast(TorchTensorLike, [self._move_sequence_item(item) for item in value])
         raise TypeError(f"ToDevice does not support value type {type(value)!r}")
+
+    def _move_sequence_item(self, value: object) -> TorchTensorPayload | torch.Tensor:
+        if isinstance(value, TorchTensorPayload):
+            return self._move_payload(value)
+        if isinstance(value, torch.Tensor):
+            return value.to(device=self.device)
+        raise TypeError(f"ToDevice does not support sequence item type {type(value)!r}")
+
+    def _move_payload(self, value: TorchTensorPayload) -> TorchTensorPayload:
+        tensor = value.array.to(device=self.device)
+        return TorchTensorPayload(
+            array=tensor,
+            layout=value.layout,
+            dtype=canonical_torch_dtype(tensor.dtype),
+            device=canonical_torch_device(tensor.device),
+        )
 
 
 class TorchSynchronizeTensors:
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        torch_like = (
-            TorchTensorPayload
-            | TorchTensorRegistry
-            | TorchRuntimeOutputs
-            | torch.Tensor
-            | tuple[TorchTensorPayload, ...]
-            | tuple[torch.Tensor, ...]
-            | list[TorchTensorPayload]
-            | list[torch.Tensor]
-        )
-        if current_output is not Any and is_annotation_compatible(current_output, (torch_like,)):
+        if current_output is not Any and is_annotation_compatible(current_output, (TorchTransferInput,)):
             return (current_output,), current_output
-        return (torch_like,), torch_like
+        return (TorchTransferInput,), TorchTransferInput
 
-    def __call__(self, value: object) -> object:
+    def __call__(self, value: TorchTransferInputT) -> TorchTransferInputT:
         devices = _collect_torch_devices(value)
         if not devices:
             raise TypeError(f"TorchSynchronizeTensors does not support value type {type(value)!r}")
@@ -244,19 +282,11 @@ class TorchAsType:
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
         if self.src is not None:
             return (TorchTensorRegistry,), TorchTensorRegistry
-        tensor_like = (
-            TorchTensorPayload
-            | torch.Tensor
-            | tuple[TorchTensorPayload, ...]
-            | tuple[torch.Tensor, ...]
-            | list[TorchTensorPayload]
-            | list[torch.Tensor]
-        )
-        if current_output is not Any and is_annotation_compatible(current_output, (tensor_like,)):
+        if current_output is not Any and is_annotation_compatible(current_output, (TorchTensorLike,)):
             return (current_output,), current_output
-        return (tensor_like,), tensor_like
+        return (TorchTensorLike,), TorchTensorLike
 
-    def __call__(self, value: object) -> object:
+    def __call__(self, value: TorchTensorInputT) -> TorchTensorInputT:
         if self.src is not None:
             if not isinstance(value, TorchTensorRegistry):
                 raise TypeError(
@@ -266,21 +296,24 @@ class TorchAsType:
             return value
         return self._cast_value(value)
 
-    def _cast_value(self, value: object) -> object:
+    def _cast_value(self, value: TorchTensorInputT) -> TorchTensorInputT:
         if isinstance(value, TorchTensorPayload):
             tensor = self._cast_tensor(value.array)
-            return TorchTensorPayload(
-                array=tensor,
-                layout=value.layout,
-                dtype=canonical_torch_dtype(tensor.dtype),
-                device=canonical_torch_device(tensor.device),
+            return cast(
+                TorchTensorInputT,
+                TorchTensorPayload(
+                    array=tensor,
+                    layout=value.layout,
+                    dtype=canonical_torch_dtype(tensor.dtype),
+                    device=canonical_torch_device(tensor.device),
+                ),
             )
         if isinstance(value, torch.Tensor):
-            return self._cast_tensor(value)
+            return cast(TorchTensorInputT, self._cast_tensor(value))
         if isinstance(value, tuple):
-            return tuple(self._cast_sequence_item(item) for item in value)
+            return cast(TorchTensorInputT, tuple(self._cast_sequence_item(item) for item in value))
         if isinstance(value, list):
-            return [self._cast_sequence_item(item) for item in value]
+            return cast(TorchTensorInputT, [self._cast_sequence_item(item) for item in value])
         raise TypeError(f"TorchAsType does not support value type {type(value)!r}")
 
     def _cast_sequence_item(self, value: object) -> TorchTensorPayload | torch.Tensor:
@@ -449,7 +482,7 @@ class TorchMultiplyTensors:
 
 @Operator
 class TorchCreateTensorMask:
-    def __init__(self, src: str, predicate: Callable[[torch.Tensor], Any], as_: str):
+    def __init__(self, src: str, predicate: Callable[[torch.Tensor], TorchTensorMask], as_: str):
         self.src = src
         self.as_ = as_
         self.predicate = predicate
@@ -732,7 +765,7 @@ class TorchMasksToBoxes:
 class TorchInfer:
     def __init__(
         self,
-        module_or_callable: Callable[[torch.Tensor], Any],
+        module_or_callable: Callable[[torch.Tensor], TorchInferOutput],
         input_layout: str = "NCHW",
         dtype: str | None = None,
         output_names: Sequence[str] | None = None,
@@ -764,15 +797,15 @@ class TorchInfer:
 
         if isinstance(outputs, torch.Tensor):
             output_tensors = (outputs,)
-        elif isinstance(outputs, (tuple, list)):
+        elif isinstance(outputs, Sequence):
             output_tensors = tuple(outputs)
             if any(not isinstance(output, torch.Tensor) for output in output_tensors):
                 raise TypeError(
-                    "TorchInfer supports only torch.Tensor outputs or tuple/list of torch.Tensor outputs"
+                    "TorchInfer supports only torch.Tensor outputs or sequences of torch.Tensor outputs"
                 )
         else:
             raise TypeError(
-                "TorchInfer supports only torch.Tensor outputs or tuple/list of torch.Tensor outputs"
+                "TorchInfer supports only torch.Tensor outputs or sequences of torch.Tensor outputs"
             )
 
         if self.output_layouts is None:

@@ -130,6 +130,24 @@ def test_torch_infer_extract_and_registry_conversion_round_trip():
     assert np.array_equal(result["scores"], np.full((1, 2, 2), 3.0, dtype=np.float32))
 
 
+def test_torch_infer_accepts_sequence_outputs():
+    def _infer(x: torch.Tensor) -> list[torch.Tensor]:
+        return [x + 1, x.sum(dim=1)]
+
+    payload = _torch_payload(torch.ones((1, 3, 2, 2), dtype=torch.float32))
+
+    result = TorchInfer(
+        _infer,
+        output_names=("boxes", "scores"),
+        output_layouts=("NCHW", "NHW"),
+    )(payload)
+
+    assert result.names == ("boxes", "scores")
+    assert len(result.tensors) == 2
+    assert tuple(result.tensors[0].array.shape) == (1, 3, 2, 2)
+    assert tuple(result.tensors[1].array.shape) == (1, 2, 2)
+
+
 def test_to_torch_copy_false_shares_cpu_numpy_storage():
     payload = TensorPayload(
         array=np.array([1.0, 2.0], dtype=np.float32),
@@ -710,6 +728,23 @@ def test_to_device_updates_payload_and_registry_devices():
     registry = TorchTensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
     moved_registry = ToDevice("cpu")(registry)
     assert moved_registry["scores"].device.type == "cpu"
+
+
+def test_to_device_supports_tensor_sequences_and_runtime_outputs():
+    tensor = torch.ones((2,), dtype=torch.float32)
+    moved_tensor = ToDevice("cpu")(tensor)
+    assert moved_tensor.device.type == "cpu"
+
+    payloads = [_torch_payload(torch.ones((1, 2), dtype=torch.float32), layout="NC")]
+    moved_payloads = ToDevice("cpu")(payloads)
+    assert moved_payloads[0].device == "cpu"
+
+    outputs = TorchRuntimeOutputs(
+        tensors=(_torch_payload(torch.ones((1, 2), dtype=torch.float32), layout="NC"),),
+        names=("scores",),
+    )
+    moved_outputs = ToDevice("cpu")(outputs)
+    assert moved_outputs.tensors[0].device == "cpu"
 
 
 def test_torch_synchronize_tensors_passthrough_on_payload():

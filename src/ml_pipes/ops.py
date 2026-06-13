@@ -300,17 +300,20 @@ class AsType:
                 raise TypeError(f"AsType src={self.src!r} requires TensorRegistry, got {type(value)!r}")
             value[self.as_] = self._cast_array(value[self.src])
             return value
-        return cast(TensorInputT, self._cast_value(cast(TensorLike, value)))
+        return self._cast_value(value)
 
-    def _cast_value(self, value: TensorLike) -> TensorLike:
+    def _cast_value(self, value: TensorInputT) -> TensorInputT:
         if isinstance(value, TensorPayload):
-            return TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype))
+            return cast(
+                TensorInputT,
+                TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype)),
+            )
         if isinstance(value, np.ndarray):
-            return self._cast_array(value)
+            return cast(TensorInputT, self._cast_array(value))
         if isinstance(value, tuple):
-            return cast(TensorLike, tuple(self._cast_sequence_item(item) for item in value))
+            return cast(TensorInputT, tuple(self._cast_sequence_item(item) for item in value))
         if isinstance(value, list):
-            return cast(TensorLike, [self._cast_sequence_item(item) for item in value])
+            return cast(TensorInputT, [self._cast_sequence_item(item) for item in value])
         raise TypeError(f"AsType does not support value type {type(value)!r}")
 
     def _cast_sequence_item(self, value: object) -> TensorPayload | np.ndarray:

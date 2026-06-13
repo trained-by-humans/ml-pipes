@@ -34,6 +34,36 @@ def test_mypy_pipeline_generics_smoke() -> None:
             f"{sys.version_info.major}.{sys.version_info.minor}",
             "tests/typing/pipeline_generics_case.py",
             "tests/typing/draw_operator_generics_case.py",
+            "tests/typing/map_predictions_to_objects_case.py",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_mypy_torch_operator_generics_smoke() -> None:
+    pytest.importorskip("mypy")
+    pytest.importorskip("torch")
+
+    env = os.environ.copy()
+    env["MYPYPATH"] = str(ROOT / "src")
+    env["PYTHONPATH"] = str(ROOT / "src")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mypy",
+            "--config-file",
+            os.devnull,
+            "--python-version",
+            f"{sys.version_info.major}.{sys.version_info.minor}",
+            "tests/typing/torch_operator_generics_case.py",
         ],
         cwd=ROOT,
         env=env,

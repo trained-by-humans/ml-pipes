@@ -1334,6 +1334,25 @@ def test_map_to_objects_at_one_replaces_prediction_slot():
     )
 
 
+def test_map_to_objects_supports_segmentation_callbacks():
+    segmentations = Segmentations(
+        boxes=[[1.0, 2.0, 3.0, 4.0]],
+        scores=[0.9],
+        classes=[1],
+        masks=[np.array([[True, False], [True, True]], dtype=bool)],
+    )
+    mapper = MapPredictionsToObjects(
+        fields={
+            "class_id": "classes",
+            "area": lambda prediction: [int(np.asarray(mask, dtype=bool).sum()) for mask in prediction.masks],
+        },
+    )
+
+    result = mapper(segmentations)
+
+    assert result == [{"class_id": 1, "area": 3}]
+
+
 def test_map_to_objects_requires_equal_length_columns():
     detections = Detections(
         boxes=[[1.0, 2.0, 3.0, 4.0]],
