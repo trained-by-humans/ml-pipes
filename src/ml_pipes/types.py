@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -161,10 +160,11 @@ class Prediction:
         return self._slice(kept)
 
     def _slice(self, kept: Sequence[int]) -> Self:
-        clone = copy.copy(self)
-        for field in dataclasses.fields(self):
-            setattr(clone, field.name, [getattr(self, field.name)[i] for i in kept])
-        return clone
+        sliced = {
+            field.name: [getattr(self, field.name)[i] for i in kept]
+            for field in dataclasses.fields(self)
+        }
+        return type(self)(**sliced)
 
 
 @dataclass

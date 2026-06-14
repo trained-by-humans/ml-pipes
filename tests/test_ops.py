@@ -1,4 +1,5 @@
 import io
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,14 @@ from ml_pipes.types import (
     TensorPayload,
     TensorRegistry,
 )
+
+
+@dataclass
+class _NormalizedDetections(Detections):
+    def __post_init__(self) -> None:
+        self.boxes = tuple(tuple(box) for box in self.boxes)
+        self.scores = tuple(self.scores)
+        self.classes = tuple(self.classes)
 
 
 class StringToFloat:
@@ -1728,6 +1737,32 @@ def test_select_numpy_argsort():
     indices = np.argsort(d.scores)[-2:]
     result = d.select(indices)
     assert set(result.scores) == {0.9, 0.8}
+
+
+def test_filter_reconstructs_prediction_subclass_via_init():
+    d = _NormalizedDetections(
+        boxes=[[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]],
+        scores=[0.9, 0.5, 0.8],
+        classes=[0, 1, 0],
+    )
+    result = d.filter([True, False, True])
+    assert isinstance(result, _NormalizedDetections)
+    assert result.boxes == ((0, 0, 1, 1), (2, 2, 3, 3))
+    assert result.scores == (0.9, 0.8)
+    assert result.classes == (0, 0)
+
+
+def test_select_reconstructs_prediction_subclass_via_init():
+    d = _NormalizedDetections(
+        boxes=[[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]],
+        scores=[0.9, 0.5, 0.8],
+        classes=[0, 1, 0],
+    )
+    result = d.select([0, 2])
+    assert isinstance(result, _NormalizedDetections)
+    assert result.boxes == ((0, 0, 1, 1), (2, 2, 3, 3))
+    assert result.scores == (0.9, 0.8)
+    assert result.classes == (0, 0)
 
 
 def test_filter_empty_mask():
