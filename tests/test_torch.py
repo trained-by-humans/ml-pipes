@@ -271,6 +271,25 @@ def test_torch_as_type_supports_payload_registry_and_sequence_forms():
     assert sequence[0].dtype == torch.float16
 
 
+def test_torch_as_type_without_src_rejects_registry_input():
+    registry = TorchTensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
+
+    with pytest.raises(TypeError):
+        TorchAsType("float16")(registry)
+
+
+def test_torch_as_type_with_src_rejects_payload_input():
+    payload = _torch_payload(torch.ones((1, 2), dtype=torch.float32), layout="NC")
+
+    with pytest.raises(TypeError):
+        TorchAsType("float16", src="scores")(payload)
+
+
+def test_torch_as_type_rejects_as_without_src():
+    with pytest.raises(ValueError):
+        TorchAsType("float16", as_="scores_fp16")
+
+
 def test_torch_argmax_and_multiply_tensors_work_on_registry():
     registry = TorchTensorRegistry(
         {

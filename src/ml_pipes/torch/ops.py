@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import threading
 from collections.abc import Callable, Collection, Sequence
-from typing import Any, TypeAlias, TypeVar, cast
+from typing import Any, Generic, Literal, TypeAlias, TypeVar, cast, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -33,7 +33,8 @@ TorchTensorInput: TypeAlias = TorchTensorLike | TorchTensorRegistry
 TorchTransferInput: TypeAlias = TorchTensorInput | TorchRuntimeOutputs
 TorchTensorMask: TypeAlias = torch.Tensor | npt.NDArray[np.bool_]
 TorchInferOutput: TypeAlias = torch.Tensor | Sequence[torch.Tensor]
-TorchTensorInputT = TypeVar("TorchTensorInputT", bound=TorchTensorInput)
+TorchTensorValueT = TypeVar("TorchTensorValueT", bound=TorchTensorLike)
+TorchAsTypeModeT = TypeVar("TorchAsTypeModeT", bound=bool)
 TorchTransferInputT = TypeVar("TorchTransferInputT", bound=TorchTransferInput)
 
 
@@ -263,8 +264,28 @@ class TorchSynchronizeTensors:
 
 
 @Operator
-class TorchAsType:
+class TorchAsType(Generic[TorchAsTypeModeT]):
+    @overload
+    def __init__(
+        self: "TorchAsType[Literal[False]]",
+        dtype: str,
+        src: None = None,
+        as_: None = None,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self: "TorchAsType[Literal[True]]",
+        dtype: str,
+        src: str,
+        as_: str | None = None,
+    ) -> None:
+        ...
+
     def __init__(self, dtype: str, src: str | None = None, as_: str | None = None):
+        if src is None and as_ is not None:
+            raise ValueError("TorchAsType as_ requires src.")
         self.dtype = dtype
         self._torch_dtype = resolve_torch_dtype(dtype)
         self.src = src
@@ -277,7 +298,15 @@ class TorchAsType:
             return (current_output,), current_output
         return (TorchTensorLike,), TorchTensorLike
 
-    def __call__(self, value: TorchTensorInputT) -> TorchTensorInputT:
+    @overload
+    def __call__(self: "TorchAsType[Literal[False]]", value: TorchTensorValueT) -> TorchTensorValueT:
+        ...
+
+    @overload
+    def __call__(self: "TorchAsType[Literal[True]]", value: TorchTensorRegistry) -> TorchTensorRegistry:
+        ...
+
+    def __call__(self, value: Any) -> Any:
         if self.src is not None:
             if not isinstance(value, TorchTensorRegistry):
                 raise TypeError(
@@ -287,11 +316,11 @@ class TorchAsType:
             return value
         return self._cast_value(value)
 
-    def _cast_value(self, value: TorchTensorInputT) -> TorchTensorInputT:
+    def _cast_value(self, value: TorchTensorValueT) -> TorchTensorValueT:
         if isinstance(value, TorchTensorPayload):
             tensor = self._cast_tensor(value.array)
             return cast(
-                TorchTensorInputT,
+                TorchTensorValueT,
                 TorchTensorPayload(
                     array=tensor,
                     layout=value.layout,
@@ -300,11 +329,11 @@ class TorchAsType:
                 ),
             )
         if isinstance(value, torch.Tensor):
-            return cast(TorchTensorInputT, self._cast_tensor(value))
+            return cast(TorchTensorValueT, self._cast_tensor(value))
         if isinstance(value, tuple):
-            return cast(TorchTensorInputT, tuple(self._cast_sequence_item(item) for item in value))
+            return cast(TorchTensorValueT, tuple(self._cast_sequence_item(item) for item in value))
         if isinstance(value, list):
-            return cast(TorchTensorInputT, [self._cast_sequence_item(item) for item in value])
+            return cast(TorchTensorValueT, [self._cast_sequence_item(item) for item in value])
         raise TypeError(f"TorchAsType does not support value type {type(value)!r}")
 
     def _cast_sequence_item(self, value: object) -> TorchTensorPayload | torch.Tensor:

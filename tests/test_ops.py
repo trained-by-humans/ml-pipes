@@ -1160,6 +1160,29 @@ def test_as_type_can_write_named_registry_tensor_to_new_key() -> None:
     assert result["density_fp32"].dtype == np.float32
 
 
+def test_as_type_without_src_rejects_registry_input() -> None:
+    registry = TensorRegistry({"density": np.array([[1.0, 2.0]], dtype=np.float16)})
+
+    with pytest.raises(TypeError):
+        AsType(dtype="float32")(registry)
+
+
+def test_as_type_with_src_rejects_tensor_payload_input() -> None:
+    payload = TensorPayload(
+        array=np.array([[1.0, 2.0]], dtype=np.float32),
+        layout="NCHW",
+        dtype="float32",
+    )
+
+    with pytest.raises(TypeError):
+        AsType(src="density", dtype="float32")(payload)
+
+
+def test_as_type_rejects_as_without_src() -> None:
+    with pytest.raises(ValueError):
+        AsType(dtype="float32", as_="density_fp32")
+
+
 # ---------------------------------------------------------------------------
 # Infer (mocked)
 # ---------------------------------------------------------------------------

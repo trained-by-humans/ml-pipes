@@ -48,7 +48,8 @@ TensorLike: TypeAlias = (
 )
 TensorMask: TypeAlias = npt.NDArray[np.bool_]
 TensorInput: TypeAlias = TensorLike | TensorRegistry
-TensorInputT = TypeVar("TensorInputT", bound=TensorInput)
+TensorValueT = TypeVar("TensorValueT", bound=TensorLike)
+AsTypeModeT = TypeVar("AsTypeModeT", bound=bool)
 DetectT = TypeVar("DetectT", bound=Detections)
 SegT = TypeVar("SegT", bound=Segmentations)
 
@@ -281,8 +282,28 @@ class Normalize:
 
 
 @Operator
-class AsType:
+class AsType(Generic[AsTypeModeT]):
+    @overload
+    def __init__(
+        self: "AsType[Literal[False]]",
+        dtype: str,
+        src: None = None,
+        as_: None = None,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self: "AsType[Literal[True]]",
+        dtype: str,
+        src: str,
+        as_: str | None = None,
+    ) -> None:
+        ...
+
     def __init__(self, dtype: str, src: str | None = None, as_: str | None = None):
+        if src is None and as_ is not None:
+            raise ValueError("AsType as_ requires src.")
         self.dtype = np.dtype(dtype)
         self.src = src
         self.as_ = as_ or src
@@ -294,7 +315,15 @@ class AsType:
             return (current_output,), current_output
         return (TensorLike,), TensorLike
 
-    def __call__(self, value: TensorInputT) -> TensorInputT:
+    @overload
+    def __call__(self: "AsType[Literal[False]]", value: TensorValueT) -> TensorValueT:
+        ...
+
+    @overload
+    def __call__(self: "AsType[Literal[True]]", value: TensorRegistry) -> TensorRegistry:
+        ...
+
+    def __call__(self, value: Any) -> Any:
         if self.src is not None:
             if not isinstance(value, TensorRegistry):
                 raise TypeError(f"AsType src={self.src!r} requires TensorRegistry, got {type(value)!r}")
@@ -302,18 +331,18 @@ class AsType:
             return value
         return self._cast_value(value)
 
-    def _cast_value(self, value: TensorInputT) -> TensorInputT:
+    def _cast_value(self, value: TensorValueT) -> TensorValueT:
         if isinstance(value, TensorPayload):
             return cast(
-                TensorInputT,
+                TensorValueT,
                 TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype)),
             )
         if isinstance(value, np.ndarray):
-            return cast(TensorInputT, self._cast_array(value))
+            return cast(TensorValueT, self._cast_array(value))
         if isinstance(value, tuple):
-            return cast(TensorInputT, tuple(self._cast_sequence_item(item) for item in value))
+            return cast(TensorValueT, tuple(self._cast_sequence_item(item) for item in value))
         if isinstance(value, list):
-            return cast(TensorInputT, [self._cast_sequence_item(item) for item in value])
+            return cast(TensorValueT, [self._cast_sequence_item(item) for item in value])
         raise TypeError(f"AsType does not support value type {type(value)!r}")
 
     def _cast_sequence_item(self, value: object) -> TensorPayload | np.ndarray:
