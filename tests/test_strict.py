@@ -184,6 +184,18 @@ def test_strict_rejects_tuple_with_any_output():
         Pipeline([ReturnsTupleWithAny()]).validate(strict=True)
 
 
+def test_strict_rejects_dynamic_tuple_output_with_any():
+    class DynamicTupleWithAnyOutput:
+        def __call__(self, value: int) -> tuple[int, Any]:
+            return value, value
+
+        def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+            return (int,), (int, Any)
+
+    with pytest.raises(PipelineValidationError, match="output type is unresolved"):
+        Pipeline([DynamicTupleWithAnyOutput()]).validate(strict=True)
+
+
 def test_strict_rejects_list_any_input():
     with pytest.raises(PipelineValidationError, match="input type is unresolved"):
         Pipeline([AcceptsListAny()]).validate(strict=True)

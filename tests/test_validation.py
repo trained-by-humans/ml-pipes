@@ -4,7 +4,11 @@ import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
-from ml_pipes.validation import _resolve_typevar_output, is_single_annotation_compatible
+from ml_pipes.validation import (
+    _resolve_typevar_output,
+    is_single_annotation_compatible,
+    specialize_input_from_output_template,
+)
 
 
 class IntToString:
@@ -382,6 +386,11 @@ def test_declared_pipeline_input_can_surface_incompatible_entry_type():
         pipeline.validate(pipeline_input_type=str)
 
 
+def test_entry_contract_mismatch_reports_pipeline_input():
+    with pytest.raises(PipelineValidationError, match="Pipeline input provides"):
+        Pipeline([IntToString()]).validate(pipeline_input_type=str)
+
+
 # ---------------------------------------------------------------------------
 # TypeVar compatibility
 # ---------------------------------------------------------------------------
@@ -546,12 +555,28 @@ def test_resolve_typevar_output_recursively_specializes_nested_output():
     assert _resolve_typevar_output(list[_T], _Child, (_T,)) == list[_Child]
 
 
+def test_resolve_typevar_output_recursively_specializes_plain_tuple_output():
+    assert _resolve_typevar_output((_T, list[_T]), _Child, (_T,)) == (_Child, list[_Child])
+
+
+def test_resolve_typevar_output_merges_repeated_typevar_inputs():
+    assert _resolve_typevar_output(_T, tuple[_Base, _Child], (_T, _T)) is _Base
+
+
 def test_resolve_typevar_output_through_generic_subtyping():
     assert _resolve_typevar_output(
         list[_U],
         list[int | None],
         (Iterable[_U | None],),
     ) == list[int]
+
+
+def test_specialize_input_from_output_template_matches_plain_tuple_template():
+    assert specialize_input_from_output_template(
+        Any,
+        (Any, str),
+        tuple[int, str],
+    ) is int
 
 
 def test_typevar_output_resolved_from_multi_parameter_signature():

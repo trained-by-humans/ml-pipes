@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, MutableMapping, MutableSequence, MutableSet, Sequence, Set as AbstractSet
+from collections.abc import (
+    Collection,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    MutableSet,
+    Sequence,
+    Set as AbstractSet,
+)
 import inspect
 from dataclasses import dataclass
 from types import UnionType
@@ -39,6 +48,21 @@ class _BoundarySignature:
     output_type: Any
 
 
+def expand_annotation_parts(annotation: Any) -> tuple[Any, ...]:
+    origin = get_origin(annotation)
+    if origin is tuple:
+        return get_args(annotation)
+    if isinstance(annotation, tuple):
+        return annotation
+    return (annotation,)
+
+
+def collapse_annotation_parts(annotation_parts: tuple[Any, ...]) -> Any:
+    if len(annotation_parts) == 1:
+        return annotation_parts[0]
+    return tuple[annotation_parts]
+
+
 @dataclass
 class _OperatorBoundary:
     operator: Any
@@ -59,38 +83,32 @@ class _OperatorBoundary:
     def effective_output_type(self) -> Any:
         return self.effective_boundary.output_type
 
-    @staticmethod
-    def _collapse_input_types(input_types: tuple[Any, ...]) -> Any:
-        if len(input_types) == 1:
-            return input_types[0]
-        return tuple[input_types]
-
     @property
-    def collapsed_input_type(self) -> Any:
-        static_input = (
-            self._collapse_input_types(self.static_boundary.input_types)
+    def collapsed_input_annotation(self) -> Any:
+        static_input_annotation = (
+            collapse_annotation_parts(self.static_boundary.input_types)
             if self.static_boundary is not None
             else None
         )
-        dynamic_input = (
-            self._collapse_input_types(self.dynamic_boundary.input_types)
+        dynamic_input_annotation = (
+            collapse_annotation_parts(self.dynamic_boundary.input_types)
             if self.dynamic_boundary is not None
             else None
         )
 
-        match (static_input, dynamic_input):
-            case (None, input_type):
-                return input_type
-            case (input_type, None):
-                return input_type
-            case (static_input, dynamic_input):
-                return refine_input_constraint(static_input, dynamic_input)
+        match (static_input_annotation, dynamic_input_annotation):
+            case (None, input_annotation):
+                return input_annotation
+            case (input_annotation, None):
+                return input_annotation
+            case (static_input_annotation, dynamic_input_annotation):
+                return tighten_annotation(static_input_annotation, dynamic_input_annotation)
 
     @property
-    def collapsed_dynamic_input_type(self) -> Any | None:
+    def collapsed_dynamic_input_annotation(self) -> Any | None:
         if self.dynamic_boundary is None:
             return None
-        return self._collapse_input_types(self.dynamic_boundary.input_types)
+        return collapse_annotation_parts(self.dynamic_boundary.input_types)
 
     def probe_contract(self, probe_input: Any) -> tuple[tuple[Any, ...], Any] | None:
         if self.dynamic_boundary is None:
@@ -101,7 +119,7 @@ class _OperatorBoundary:
             return self.operator.resolve_contract(
                 probe_input,
                 probe_annotations,
-                expand_output_annotation,
+                expand_annotation_parts,
                 None,
             )
         except Exception:
@@ -112,9 +130,9 @@ class _OperatorBoundary:
             return False
         probe_input = materialize_probe_annotation(self.previous_output_type)
         if probe_input is Any:
-            if self.collapsed_dynamic_input_type is None:
+            if self.collapsed_dynamic_input_annotation is None:
                 return False
-            probe_input = materialize_probe_annotation(self.collapsed_dynamic_input_type)
+            probe_input = materialize_probe_annotation(self.collapsed_dynamic_input_annotation)
         if probe_input is Any:
             return False
         result = self.probe_contract(probe_input)
@@ -158,17 +176,17 @@ class PipelineValidator:
         boundaries = self._run_forward_boundary_resolution_pass(pipeline_input_type)
         self._validate_downstream_compatibility(boundaries)
 
-        entry_input_type = boundaries[0].collapsed_input_type
-        resolved_pipeline_input_type = tighten_if_more_concrete(
+        entry_input_annotation = boundaries[0].collapsed_input_annotation
+        resolved_pipeline_input_type = tighten_annotation(
             pipeline_input_type,
-            entry_input_type,
+            entry_input_annotation,
         )
 
         if inference:
-            inferred_input_type = self._run_backward_input_tightening_pass(boundaries)
-            resolved_pipeline_input_type = tighten_if_more_concrete(
+            inferred_input_annotation = self._run_backward_input_tightening_pass(boundaries)
+            resolved_pipeline_input_type = tighten_annotation(
                 resolved_pipeline_input_type,
-                inferred_input_type,
+                inferred_input_annotation,
             )
 
         if strict:
@@ -248,7 +266,7 @@ class PipelineValidator:
         input_types, output_type = operator.resolve_contract(
             previous_output_type,
             stored_annotations,
-            expand_output_annotation,
+            expand_annotation_parts,
             PipelineValidationError,
         )
         return _BoundarySignature(input_types=input_types, output_type=output_type)
@@ -304,11 +322,14 @@ class PipelineValidator:
             if is_annotation_compatible(boundary.previous_output_type, boundary.effective_input_types):
                 continue
 
-            previous_name = type(boundaries[i - 1].operator).__name__
             operator = boundary.operator
+            if i == 0:
+                upstream_label = "Pipeline input"
+            else:
+                upstream_label = type(boundaries[i - 1].operator).__name__
             raise PipelineValidationError(
                 f"Pipeline contract mismatch at {self._label_for(i, operator)}: "
-                f"{previous_name} returns {format_annotation(boundary.previous_output_type)} "
+                f"{upstream_label} provides {format_annotation(boundary.previous_output_type)} "
                 f"but {operator.__class__.__name__} expects {format_parameter_annotations(boundary.effective_input_types)}"
             )
 
@@ -317,21 +338,24 @@ class PipelineValidator:
         required_upstream_type: Any = Any
         for boundary in reversed(boundaries):
             # Example: static says `object`, dynamic says `tuple[int, Any]` -> start from `tuple[int, Any]`.
-            boundary_input_type = boundary.collapsed_input_type
+            boundary_input_annotation = boundary.collapsed_input_annotation
             # Example: downstream needs `tuple[int, str]` -> project that shape backward through this operator.
-            projected_input_type = cls._project_input_back_through(boundary, required_upstream_type)
+            projected_input_annotation = cls._project_input_back_through(boundary, required_upstream_type)
             # Example: local says `tuple[int, Any]`, projection says `tuple[int, str]` -> keep `tuple[int, str]`.
-            required_upstream_type = refine_input_constraint(boundary_input_type, projected_input_type)
+            required_upstream_type = tighten_annotation(
+                boundary_input_annotation,
+                projected_input_annotation,
+            )
         return required_upstream_type
 
     @classmethod
     def _project_input_back_through(cls, boundary: _OperatorBoundary, inferred: Any) -> Any:
         contract_input = cls._project_contract_input_back_through(boundary, inferred)
-        boundary_input_type = boundary.collapsed_input_type
+        boundary_input_annotation = boundary.collapsed_input_annotation
         if contract_input is not Any:
-            return refine_input_constraint(boundary_input_type, contract_input)
+            return tighten_annotation(boundary_input_annotation, contract_input)
         if is_annotation_compatible(boundary.effective_output_type, (inferred,)):
-            return boundary_input_type
+            return boundary_input_annotation
         return Any
 
     @classmethod
@@ -339,7 +363,7 @@ class PipelineValidator:
         if boundary.dynamic_boundary is None:
             return Any
 
-        template_input = boundary.collapsed_dynamic_input_type
+        template_input = boundary.collapsed_dynamic_input_annotation
         specialized_input = specialize_input_from_output_template(
             template_input,
             boundary.dynamic_boundary.output_type,
@@ -352,7 +376,7 @@ class PipelineValidator:
         if contract_probe is None:
             return Any
         input_types, output_type = contract_probe
-        collapsed_input = boundary._collapse_input_types(input_types)
+        collapsed_input = collapse_annotation_parts(input_types)
         if output_type == inferred and collapsed_input == inferred:
             return inferred
         return Any
@@ -367,13 +391,16 @@ class PipelineValidator:
 
     def _validate_contracts_strictly(self, boundaries: list[_OperatorBoundary]) -> None:
         for i, boundary in enumerate(boundaries):
-            if boundary.dynamic_boundary is None and any(not is_concrete(t) for t in boundary.effective_input_types):
+            if boundary.dynamic_boundary is None and any(
+                not is_concrete_annotation(input_annotation)
+                for input_annotation in boundary.effective_input_types
+            ):
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: input type is unresolved (Any).\n"
                     f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                     f"to accept and thread the upstream type dynamically."
                 )
-            if not is_concrete(boundary.effective_output_type) and not boundary.is_explicitly_transitive():
+            if not is_concrete_annotation(boundary.effective_output_type) and not boundary.is_explicitly_transitive():
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
@@ -388,96 +415,125 @@ def specialize_input_from_output_template(input_template: Any, output_template: 
     return replace_any_placeholder(input_template, binding)
 
 
-def bind_any_placeholder(template: Any, value: Any, binding: Any) -> Any:
-    # Example: template=`Any`, value=`int`, binding=None -> first placeholder binds to `int`.
-    if template is Any and binding is None:
-        return value
-    # Example: template=`Any`, value=`int`, binding=`int` -> placeholder stays bound to `int`.
-    if template is Any and binding == value:
-        return binding
-    # Example: template=`Any`, value=`str`, binding=`int` -> conflicting binding, so fail.
-    if template is Any:
-        return _UNBOUND
-    # Example: template=`tuple[int, str]`, value=`tuple[int, str]` -> exact structure match.
-    if template == value:
-        return binding
-    template_origin = get_origin(template)
-    value_origin = get_origin(value)
-    # Example: template=`tuple[Any, str]`, value=`list[int, str]` -> different origins, so fail.
-    if template_origin is None or template_origin != value_origin:
-        return _UNBOUND
-    template_args = get_args(template)
-    value_args = get_args(value)
-    # Example: template=`tuple[Any, str]`, value=`tuple[int, str, float]` -> different arity, so fail.
-    if len(template_args) != len(value_args):
-        return _UNBOUND
-    return bind_any_placeholder_args(template_args, value_args, binding)
-
-
-def bind_any_placeholder_args(template_args: tuple[Any, ...], value_args: tuple[Any, ...], binding: Any) -> Any:
-    for template_arg, value_arg in zip(template_args, value_args, strict=True):
-        binding = bind_any_placeholder(template_arg, value_arg, binding)
-        if binding is _UNBOUND:
-            return _UNBOUND
-    return binding
-
-
-def replace_any_placeholder(template: Any, binding: Any) -> Any:
-    if template is Any:
-        return Any if binding is None else binding
-    origin = get_origin(template)
+def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
+    if isinstance(annotation, tuple):
+        return tuple, annotation
+    origin = get_origin(annotation)
     if origin is None:
-        return template
-    args = tuple(replace_any_placeholder(arg, binding) for arg in get_args(template))
+        return None
+    return origin, get_args(annotation)
+
+
+def _rebuild_annotation_like(annotation: Any, args: tuple[Any, ...]) -> Any:
+    if isinstance(annotation, tuple):
+        return tuple(args)
+    origin = get_origin(annotation)
+    if origin is None:
+        return annotation
     return _rebuild_annotation(origin, args)
 
 
-def refine_input_constraint(current: Any, candidate: Any) -> Any:
-    merged = merge_annotations(current, candidate)
-    if merged is not _UNBOUND:
-        return merged
-    return current
+def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> Any:
+    shape = _annotation_shape(annotation)
+    if shape is None:
+        return transform(annotation)
+    _, args = shape
+    rebuilt = _rebuild_annotation_like(
+        annotation,
+        tuple(_transform_annotation(arg, transform) for arg in args),
+    )
+    return transform(rebuilt)
 
 
-def tighten_if_more_concrete(current: Any, candidate: Any) -> Any:
-    merged = merge_annotations(current, candidate)
-    if merged is not _UNBOUND:
-        return merged
-    return current
+def bind_any_placeholder(template_annotation: Any, value_annotation: Any, current_binding: Any) -> Any:
+    # Example: template=`Any`, value=`int`, binding=None -> first placeholder binds to `int`.
+    if template_annotation is Any and current_binding is None:
+        return value_annotation
+    # Example: template=`Any`, value=`int`, binding=`int` -> placeholder stays bound to `int`.
+    if template_annotation is Any and current_binding == value_annotation:
+        return current_binding
+    # Example: template=`Any`, value=`str`, binding=`int` -> conflicting binding, so fail.
+    if template_annotation is Any:
+        return _UNBOUND
+    # Example: template=`tuple[int, str]`, value=`tuple[int, str]` -> exact structure match.
+    if template_annotation == value_annotation:
+        return current_binding
+
+    template_shape = _annotation_shape(template_annotation)
+    value_shape = _annotation_shape(value_annotation)
+    # Example: template=`tuple[Any, str]`, value=`list[int, str]` -> different origins, so fail.
+    if template_shape is None or value_shape is None:
+        return _UNBOUND
+    template_origin, template_children = template_shape
+    value_origin, value_children = value_shape
+    if template_origin != value_origin:
+        return _UNBOUND
+    # Example: template=`tuple[Any, str]`, value=`tuple[int, str, float]` -> different arity, so fail.
+    if len(template_children) != len(value_children):
+        return _UNBOUND
+
+    for template_child, value_child in zip(template_children, value_children, strict=True):
+        current_binding = bind_any_placeholder(template_child, value_child, current_binding)
+        if current_binding is _UNBOUND:
+            return _UNBOUND
+    return current_binding
 
 
-def merge_annotations(left: Any, right: Any) -> Any:
-    if left is None or left is Any:
-        return right
-    if right is None or right is Any:
-        return left
-    if isinstance(left, TypeVar):
-        return _merge_typevar_annotation(left, right)
-    if isinstance(right, TypeVar):
-        return _merge_typevar_annotation(right, left)
-    if left == right:
-        return left
-    if left is object:
-        return right
-    if right is object:
-        return left
-    if isinstance(left, type) and isinstance(right, type):
+def _replace_any_placeholder(annotation: Any, binding: Any) -> Any:
+    if annotation is not Any:
+        return annotation
+    return Any if binding is None else binding
+
+
+def replace_any_placeholder(template: Any, binding: Any) -> Any:
+    return _transform_annotation(
+        template,
+        lambda annotation: _replace_any_placeholder(annotation, binding),
+    )
+
+
+def tighten_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+    merged_annotation = try_merge_annotations(current_annotation, candidate_annotation)
+    if merged_annotation is not _UNBOUND:
+        return merged_annotation
+    return current_annotation
+
+
+def try_merge_annotations(left_annotation: Any, right_annotation: Any) -> Any:
+    if left_annotation is None or left_annotation is Any:
+        return right_annotation
+    if right_annotation is None or right_annotation is Any:
+        return left_annotation
+    if isinstance(left_annotation, TypeVar):
+        return _merge_typevar_annotation(left_annotation, right_annotation)
+    if isinstance(right_annotation, TypeVar):
+        return _merge_typevar_annotation(right_annotation, left_annotation)
+    if left_annotation == right_annotation:
+        return left_annotation
+    if left_annotation is object:
+        return right_annotation
+    if right_annotation is object:
+        return left_annotation
+    if isinstance(left_annotation, type) and isinstance(right_annotation, type):
         try:
-            if issubclass(left, right):
-                return left
-            if issubclass(right, left):
-                return right
+            if issubclass(left_annotation, right_annotation):
+                return left_annotation
+            if issubclass(right_annotation, left_annotation):
+                return right_annotation
         except TypeError:
             return _UNBOUND
         return _UNBOUND
 
-    left_origin = get_origin(left)
-    right_origin = get_origin(right)
-    if left_origin != right_origin or left_origin is None:
+    left_shape = _annotation_shape(left_annotation)
+    right_shape = _annotation_shape(right_annotation)
+    if left_shape is None or right_shape is None:
         return _UNBOUND
 
-    left_args = get_args(left)
-    right_args = get_args(right)
+    left_origin, left_args = left_shape
+    right_origin, right_args = right_shape
+    if left_origin != right_origin:
+        return _UNBOUND
+
     arg_pairs = _generic_argument_pairs(left_origin, left_args, left_origin, right_args)
     if arg_pairs is None:
         return _UNBOUND
@@ -485,14 +541,14 @@ def merge_annotations(left: Any, right: Any) -> Any:
     merged_args = []
     for left_arg, right_arg, variance in arg_pairs:
         if variance == _INVARIANT:
-            merged_arg = _merge_invariant_annotations(left_arg, right_arg)
+            merged_arg = _try_merge_invariant_annotations(left_arg, right_arg)
         else:
-            merged_arg = merge_annotations(left_arg, right_arg)
+            merged_arg = try_merge_annotations(left_arg, right_arg)
         if merged_arg is _UNBOUND:
             return _UNBOUND
         merged_args.append(merged_arg)
 
-    return _rebuild_annotation(left_origin, tuple(merged_args))
+    return _rebuild_annotation_like(left_annotation, tuple(merged_args))
 
 
 def can_refine_annotation(current: Any, candidate: Any) -> bool:
@@ -513,13 +569,15 @@ def can_refine_annotation(current: Any, candidate: Any) -> bool:
             return issubclass(candidate, current)
         except TypeError:
             return False
-    candidate_origin = get_origin(candidate)
-    current_origin = get_origin(current)
+    candidate_shape = _annotation_shape(candidate)
+    current_shape = _annotation_shape(current)
     # Example: current=`tuple[int, Any]`, candidate=`list[int, str]` -> different container kinds cannot refine.
-    if candidate_origin != current_origin or candidate_origin is None:
+    if candidate_shape is None or current_shape is None:
         return False
-    candidate_args = get_args(candidate)
-    current_args = get_args(current)
+    candidate_origin, candidate_args = candidate_shape
+    current_origin, current_args = current_shape
+    if candidate_origin != current_origin:
+        return False
     arg_pairs = _generic_argument_pairs(candidate_origin, candidate_args, current_origin, current_args)
     # Example: current=`tuple[int, Any]`, candidate=`tuple[int, str, float]` -> different arity cannot refine.
     if arg_pairs is None:
@@ -548,21 +606,18 @@ def can_refine_annotation(current: Any, candidate: Any) -> bool:
     return changed
 
 
-def materialize_probe_annotation(annotation: Any) -> Any:
+def _materialize_probe_annotation(annotation: Any) -> Any:
     if isinstance(annotation, TypeVar):
-        annotation = normalize_published_annotation(annotation)
+        return materialize_probe_annotation(
+            normalize_published_annotation(_typevar_constraint_annotation(annotation))
+        )
     if annotation is Any or annotation is None or annotation is object:
         return int
+    return annotation
 
-    if isinstance(annotation, tuple):
-        return tuple(materialize_probe_annotation(arg) for arg in annotation)
 
-    origin = get_origin(annotation)
-    if origin is None:
-        return annotation
-
-    args = tuple(materialize_probe_annotation(arg) for arg in get_args(annotation))
-    return _rebuild_annotation(origin, args)
+def materialize_probe_annotation(annotation: Any) -> Any:
+    return _transform_annotation(annotation, _materialize_probe_annotation)
 
 
 def get_signature_target(operator: Callable[..., Any]) -> Any:
@@ -607,19 +662,10 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
     return tuple(input_types), hints["return"]
 
 
-def expand_output_annotation(annotation: Any) -> tuple[Any, ...]:
-    origin = get_origin(annotation)
-    if origin is tuple:
-        return get_args(annotation)
-    if isinstance(annotation, tuple):
-        return annotation
-    return (annotation,)
-
-
 def is_annotation_compatible(produced: Any, expected_inputs: tuple[Any, ...]) -> bool:
     if len(expected_inputs) == 1:
         return is_single_annotation_compatible(produced, expected_inputs[0])
-    produced_types = expand_output_annotation(produced)
+    produced_types = expand_annotation_parts(produced)
     if len(produced_types) != len(expected_inputs):
         return False
     return all(
@@ -628,15 +674,32 @@ def is_annotation_compatible(produced: Any, expected_inputs: tuple[Any, ...]) ->
     )
 
 
+def _are_generic_annotations_compatible(produced: Any, expected: Any) -> bool:
+    produced_shape = _annotation_shape(produced)
+    if produced_shape is None:
+        return False
+    expected_shape = _annotation_shape(expected)
+    produced_origin, produced_args = produced_shape
+    if expected_shape is None:
+        return is_concrete_assignable(produced_origin, expected)
+    expected_origin, expected_args = expected_shape
+    if not _generic_origins_compatible(produced_origin, expected_origin):
+        return False
+
+    arg_pairs = _generic_argument_pairs(produced_origin, produced_args, expected_origin, expected_args)
+    if arg_pairs is None:
+        return False
+    return all(
+        _is_compatible_under_variance(produced_arg, expected_arg, variance)
+        for produced_arg, expected_arg, variance in arg_pairs
+    )
+
+
 def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
     if isinstance(expected, TypeVar):
-        bound = _typevar_constraint_annotation(expected)
-        return bound is Any or is_single_annotation_compatible(produced, bound)
+        expected = _typevar_constraint_annotation(expected)
     if isinstance(produced, TypeVar):
-        bound = _typevar_constraint_annotation(produced)
-        if bound is Any:
-            return True
-        return is_single_annotation_compatible(bound, expected)
+        produced = _typevar_constraint_annotation(produced)
     if expected is Any or produced is Any:
         return True
     if produced == expected:
@@ -651,25 +714,9 @@ def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
             )
             for produced_option in _union_options(produced)
         )
-    produced_origin = get_origin(produced)
-    expected_origin = get_origin(expected)
     if is_union_annotation(produced):
         return all(is_single_annotation_compatible(option, expected) for option in get_args(produced))
-    if produced_origin is None:
-        return False
-    if expected_origin is None:
-        return is_concrete_assignable(produced_origin, expected)
-    if not _generic_origins_compatible(produced_origin, expected_origin):
-        return False
-    produced_args = get_args(produced)
-    expected_args = get_args(expected)
-    arg_pairs = _generic_argument_pairs(produced_origin, produced_args, expected_origin, expected_args)
-    if arg_pairs is None:
-        return False
-    return all(
-        _is_compatible_under_variance(produced_arg, expected_arg, variance)
-        for produced_arg, expected_arg, variance in arg_pairs
-    )
+    return _are_generic_annotations_compatible(produced, expected)
 
 
 def _combine_annotations(*annotations: Any) -> Any:
@@ -708,25 +755,20 @@ def _merge_typevar_annotation(typevar: TypeVar, candidate: Any) -> Any:
         return candidate
 
     normalized_constraint = normalize_published_annotation(constraint)
-    merged = merge_annotations(normalized_constraint, candidate)
+    merged = try_merge_annotations(normalized_constraint, candidate)
     if merged is not _UNBOUND:
         return merged
     return _UNBOUND
 
 
-def normalize_published_annotation(annotation: Any) -> Any:
-    if isinstance(annotation, TypeVar):
-        return normalize_published_annotation(_typevar_constraint_annotation(annotation))
-
-    if isinstance(annotation, tuple):
-        return tuple(normalize_published_annotation(arg) for arg in annotation)
-
-    origin = get_origin(annotation)
-    if origin is None:
+def _normalize_published_annotation(annotation: Any) -> Any:
+    if not isinstance(annotation, TypeVar):
         return annotation
+    return normalize_published_annotation(_typevar_constraint_annotation(annotation))
 
-    normalized_args = tuple(normalize_published_annotation(arg) for arg in get_args(annotation))
-    return _rebuild_annotation(origin, normalized_args)
+
+def normalize_published_annotation(annotation: Any) -> Any:
+    return _transform_annotation(annotation, _normalize_published_annotation)
 
 
 def _generic_origins_compatible(produced_origin: Any, expected_origin: Any) -> bool:
@@ -805,7 +847,7 @@ def _is_compatible_under_variance(produced: Any, expected: Any, variance: str) -
     return is_single_annotation_compatible(produced, expected)
 
 
-def _merge_invariant_annotations(left: Any, right: Any) -> Any:
+def _try_merge_invariant_annotations(left: Any, right: Any) -> Any:
     if left is None or left is Any:
         return right
     if right is None or right is Any:
@@ -838,82 +880,129 @@ def _rebuild_annotation(origin: Any, args: tuple[Any, ...]) -> Any:
     return origin[args]
 
 
-def _expand_input_annotations_for_binding(input_type: Any, input_types: tuple[Any, ...]) -> tuple[Any, ...] | None:
-    if len(input_types) == 1:
-        return (input_type,)
-    expanded_input_type = expand_output_annotation(input_type)
-    if len(expanded_input_type) != len(input_types):
-        return None
-    return expanded_input_type
+def _resolve_typevar_output(output_type: Any, input_type: Any, input_types: tuple[Any, ...]) -> Any:
+    inferred_typevar_bindings = _infer_typevar_bindings_from_inputs(input_type, input_types)
+    if not inferred_typevar_bindings:
+        return output_type
+    return _apply_typevar_bindings(output_type, inferred_typevar_bindings)
 
 
-def _bind_typevars_from_inputs(
+def _infer_typevar_bindings_from_inputs(
     input_type: Any,
     input_types: tuple[Any, ...],
 ) -> dict[TypeVar, Any] | None:
-    actual_input_types = _expand_input_annotations_for_binding(input_type, input_types)
-    if actual_input_types is None:
+    expanded_input_annotations = expand_annotation_parts(input_type)
+    if len(expanded_input_annotations) != len(input_types):
         return None
 
-    bindings: dict[TypeVar, Any] = {}
-    for template_input, actual_input in zip(input_types, actual_input_types, strict=True):
-        if not is_single_annotation_compatible(actual_input, template_input):
+    inferred_bindings: dict[TypeVar, Any] = {}
+    for template_input_annotation, input_annotation in zip(
+        input_types,
+        expanded_input_annotations,
+        strict=True,
+    ):
+        if not is_single_annotation_compatible(input_annotation, template_input_annotation):
             return None
-        if not _bind_typevars(template_input, actual_input, bindings):
+
+        pair_bindings = _infer_typevar_bindings_from_annotation_pair(
+            template_input_annotation,
+            input_annotation,
+        )
+        if pair_bindings is None:
             return None
-    return bindings
+
+        inferred_bindings = _merge_typevar_bindings(inferred_bindings, pair_bindings)
+        if inferred_bindings is None:
+            return None
+    return inferred_bindings
 
 
-def _bind_typevars(template: Any, value: Any, bindings: dict[TypeVar, Any]) -> bool:
-    if isinstance(template, TypeVar):
-        return _bind_single_typevar(template, value, bindings)
+def _infer_typevar_bindings_from_annotation_pair(
+    template_annotation: Any,
+    input_annotation: Any,
+) -> dict[TypeVar, Any] | None:
+    if isinstance(template_annotation, TypeVar):
+        return _infer_single_typevar_binding(template_annotation, input_annotation)
 
-    template_origin = get_origin(template)
-    if template_origin is None:
-        return True
+    template_shape = _annotation_shape(template_annotation)
+    if template_shape is None:
+        return {}
 
-    value_origin = get_origin(value)
-    if value_origin is None or not _generic_origins_compatible(value_origin, template_origin):
-        return True
+    input_shape = _annotation_shape(input_annotation)
+    if input_shape is None:
+        return {}
 
-    template_args = get_args(template)
-    value_args = get_args(value)
-    arg_pairs = _generic_argument_pairs(value_origin, value_args, template_origin, template_args)
-    if arg_pairs is None:
-        return True
+    template_origin, template_child_annotations = template_shape
+    input_origin, input_child_annotations = input_shape
+    if not _generic_origins_compatible(input_origin, template_origin):
+        return {}
 
-    for value_arg, template_arg, _ in arg_pairs:
-        if not _bind_typevars(template_arg, value_arg, bindings):
-            return False
-    return True
+    child_annotation_pairs = _generic_argument_pairs(
+        input_origin,
+        input_child_annotations,
+        template_origin,
+        template_child_annotations,
+    )
+    if child_annotation_pairs is None:
+        return {}
+
+    inferred_bindings: dict[TypeVar, Any] = {}
+    for actual_child_annotation, template_child_annotation, _ in child_annotation_pairs:
+        child_bindings = _infer_typevar_bindings_from_annotation_pair(
+            template_child_annotation,
+            actual_child_annotation,
+        )
+        if child_bindings is None:
+            return None
+
+        inferred_bindings = _merge_typevar_bindings(inferred_bindings, child_bindings)
+        if inferred_bindings is None:
+            return None
+    return inferred_bindings
 
 
-def _bind_single_typevar(typevar: TypeVar, value: Any, bindings: dict[TypeVar, Any]) -> bool:
-    if value is Any and typevar.__bound__ is not None:
-        return True
-    if not _value_satisfies_typevar_bound(typevar, value):
-        return False
-
-    if typevar not in bindings:
-        bindings[typevar] = value
-        return True
-
-    existing = bindings[typevar]
-    merged = _merge_typevar_binding(existing, value)
-    if merged is _UNBOUND or not _value_satisfies_typevar_bound(typevar, merged):
-        return False
-    bindings[typevar] = merged
-    return True
+def _infer_single_typevar_binding(
+    typevar: TypeVar,
+    input_annotation: Any,
+) -> dict[TypeVar, Any] | None:
+    if input_annotation is Any and typevar.__bound__ is not None:
+        return {}
+    if not _annotation_satisfies_typevar_bound(typevar, input_annotation):
+        return None
+    return {typevar: input_annotation}
 
 
-def _value_satisfies_typevar_bound(typevar: TypeVar, value: Any) -> bool:
+def _merge_typevar_bindings(
+    existing_bindings: dict[TypeVar, Any],
+    new_bindings: dict[TypeVar, Any],
+) -> dict[TypeVar, Any] | None:
+    if not new_bindings:
+        return existing_bindings
+
+    merged_bindings = dict(existing_bindings)
+    for typevar, candidate_annotation in new_bindings.items():
+        if typevar not in merged_bindings:
+            merged_bindings[typevar] = candidate_annotation
+            continue
+
+        merged_annotation = _merge_inferred_typevar_binding(
+            merged_bindings[typevar],
+            candidate_annotation,
+        )
+        if merged_annotation is _UNBOUND or not _annotation_satisfies_typevar_bound(typevar, merged_annotation):
+            return None
+        merged_bindings[typevar] = merged_annotation
+    return merged_bindings
+
+
+def _annotation_satisfies_typevar_bound(typevar: TypeVar, annotation: Any) -> bool:
     bound = typevar.__bound__
     if bound is None:
         return True
-    return is_single_annotation_compatible(value, bound)
+    return is_single_annotation_compatible(annotation, bound)
 
 
-def _merge_typevar_binding(existing: Any, candidate: Any) -> Any:
+def _merge_inferred_typevar_binding(existing: Any, candidate: Any) -> Any:
     if existing == candidate:
         return existing
     if is_single_annotation_compatible(candidate, existing):
@@ -923,26 +1012,17 @@ def _merge_typevar_binding(existing: Any, candidate: Any) -> Any:
     return _UNBOUND
 
 
-def _replace_typevars(annotation: Any, bindings: dict[TypeVar, Any]) -> Any:
-    if isinstance(annotation, TypeVar):
-        return bindings.get(annotation, annotation)
-
-    if isinstance(annotation, tuple):
-        return tuple(_replace_typevars(arg, bindings) for arg in annotation)
-
-    origin = get_origin(annotation)
-    if origin is None:
+def _apply_typevar_binding(annotation: Any, bindings: dict[TypeVar, Any]) -> Any:
+    if not isinstance(annotation, TypeVar):
         return annotation
-
-    replaced_args = tuple(_replace_typevars(arg, bindings) for arg in get_args(annotation))
-    return _rebuild_annotation(origin, replaced_args)
+    return bindings.get(annotation, annotation)
 
 
-def _resolve_typevar_output(output_type: Any, input_type: Any, input_types: tuple[Any, ...]) -> Any:
-    bindings = _bind_typevars_from_inputs(input_type, input_types)
-    if not bindings:
-        return output_type
-    return _replace_typevars(output_type, bindings)
+def _apply_typevar_bindings(annotation: Any, bindings: dict[TypeVar, Any]) -> Any:
+    return _transform_annotation(
+        annotation,
+        lambda candidate: _apply_typevar_binding(candidate, bindings),
+    )
 
 
 def is_concrete_assignable(produced: Any, expected: Any) -> bool:
@@ -954,10 +1034,14 @@ def is_concrete_assignable(produced: Any, expected: Any) -> bool:
         return False
 
 
-def is_concrete(annotation: Any) -> bool:
+def is_concrete_annotation(annotation: Any) -> bool:
     if annotation is None or annotation is Any:
         return False
-    return all(is_concrete(arg) for arg in get_args(annotation))
+    shape = _annotation_shape(annotation)
+    if shape is None:
+        return True
+    _, child_annotations = shape
+    return all(is_concrete_annotation(child_annotation) for child_annotation in child_annotations)
 
 
 def is_union_annotation(annotation: Any) -> bool:
