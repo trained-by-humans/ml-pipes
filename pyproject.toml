@@ -12,13 +12,13 @@ dependencies = [
     "numpy>=1.26",
     "opencv-python>=4.9",
     "onnxruntime>=1.18",
+    "typing_extensions>=4.9",
 ]
 
 [project.optional-dependencies]
 dev = [
     "mypy>=1.10",
     "pytest>=8.0",
-    "typing_extensions>=4.9",
 ]
 otel = [
     "opentelemetry-api>=1.20",
