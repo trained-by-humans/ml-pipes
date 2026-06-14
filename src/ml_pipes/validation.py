@@ -110,11 +110,16 @@ class _OperatorBoundary:
             return None
         return collapse_annotation_parts(self.dynamic_boundary.input_types)
 
-    def probe_contract(self, probe_input: Any) -> tuple[tuple[Any, ...], Any] | None:
+    def probe_contract(
+        self,
+        probe_input: Any,
+        probe_annotations: dict[str, Any] | None = None,
+    ) -> tuple[tuple[Any, ...], Any] | None:
         if self.dynamic_boundary is None:
             return None
 
-        probe_annotations = dict(self.context_inputs or {})
+        if probe_annotations is None:
+            probe_annotations = dict(self.context_inputs or {})
         try:
             return self.operator.resolve_contract(
                 probe_input,
@@ -125,7 +130,7 @@ class _OperatorBoundary:
         except Exception:
             return None
 
-    def is_explicitly_transitive(self) -> bool:
+    def does_contract_resolve_concretely(self) -> bool:
         if self.dynamic_boundary is None:
             return False
         probe_input = materialize_probe_annotation(self.previous_output_type)
@@ -135,11 +140,18 @@ class _OperatorBoundary:
             probe_input = materialize_probe_annotation(self.collapsed_dynamic_input_annotation)
         if probe_input is Any:
             return False
-        result = self.probe_contract(probe_input)
+        probe_annotations = {
+            name: materialize_probe_annotation(annotation)
+            for name, annotation in (self.context_inputs or {}).items()
+        }
+        result = self.probe_contract(probe_input, probe_annotations)
         if result is None:
             return False
         _, probe_output = result
-        return can_refine_annotation(self.effective_output_type, probe_output)
+        return is_concrete_annotation(probe_output) and can_refine_annotation(
+            self.effective_output_type,
+            probe_output,
+        )
 
 
 class PipelineValidator:
@@ -403,7 +415,10 @@ class PipelineValidator:
                     f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                     f"to accept and thread the upstream type dynamically."
                 )
-            if not is_concrete_annotation(boundary.effective_output_type) and not boundary.is_explicitly_transitive():
+            if (
+                not is_concrete_annotation(boundary.effective_output_type)
+                and not boundary.does_contract_resolve_concretely()
+            ):
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
