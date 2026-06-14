@@ -554,6 +554,9 @@ def materialize_probe_annotation(annotation: Any) -> Any:
     if annotation is Any or annotation is None or annotation is object:
         return int
 
+    if isinstance(annotation, tuple):
+        return tuple(materialize_probe_annotation(arg) for arg in annotation)
+
     origin = get_origin(annotation)
     if origin is None:
         return annotation
@@ -714,6 +717,9 @@ def _merge_typevar_annotation(typevar: TypeVar, candidate: Any) -> Any:
 def normalize_published_annotation(annotation: Any) -> Any:
     if isinstance(annotation, TypeVar):
         return normalize_published_annotation(_typevar_constraint_annotation(annotation))
+
+    if isinstance(annotation, tuple):
+        return tuple(normalize_published_annotation(arg) for arg in annotation)
 
     origin = get_origin(annotation)
     if origin is None:
@@ -920,6 +926,9 @@ def _merge_typevar_binding(existing: Any, candidate: Any) -> Any:
 def _replace_typevars(annotation: Any, bindings: dict[TypeVar, Any]) -> Any:
     if isinstance(annotation, TypeVar):
         return bindings.get(annotation, annotation)
+
+    if isinstance(annotation, tuple):
+        return tuple(_replace_typevars(arg, bindings) for arg in annotation)
 
     origin = get_origin(annotation)
     if origin is None:

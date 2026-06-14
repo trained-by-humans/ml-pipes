@@ -3,7 +3,7 @@ from collections.abc import Iterable
 import pytest
 from typing import Any, TypeVar
 
-from ml_pipes import Pipeline, PipelineValidationError, Scatter, Gather, Batch, UnBatch
+from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
 from ml_pipes.validation import _resolve_typevar_output, is_single_annotation_compatible
 
 
@@ -529,6 +529,17 @@ def test_validate_recursively_publishes_bound_inside_generic_output():
 
     assert contract.input_type is _Base
     assert contract.output_type == list[_Base]
+
+
+def test_validate_recursively_publishes_bound_inside_dynamic_tuple_output():
+    class WrapTypeVarInList:
+        def __call__(self, x: _T) -> list[_T]: ...  # type: ignore[empty-body]
+
+    typed_recall: Recall[list[_T], None] = Recall("saved")
+    contract = Pipeline([WrapTypeVarInList(), Store("saved"), typed_recall]).validate()
+
+    assert contract.input_type is _Base
+    assert contract.output_type == (list[_Base], list[_Base])
 
 
 def test_resolve_typevar_output_recursively_specializes_nested_output():
