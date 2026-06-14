@@ -153,7 +153,11 @@ class Prediction:
         return self._slice(kept)
 
     def select(self, indices: PredictionIndices) -> Self:
-        kept = [int(index) for index in indices]
+        kept: list[int] = []
+        for index in indices:
+            if isinstance(index, (bool, np.bool_)):
+                raise TypeError("Prediction.select expects integer indices; use filter() for boolean masks.")
+            kept.append(int(index))
         return self._slice(kept)
 
     def _slice(self, kept: Sequence[int]) -> Self:

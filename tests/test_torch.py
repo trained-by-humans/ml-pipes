@@ -699,6 +699,18 @@ def test_torch_select_tensors_writes_to_new_key():
     assert torch.allclose(registry["scores"], torch.tensor([0.9, 0.5, 0.8]))
 
 
+def test_torch_select_tensors_rejects_boolean_mask():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "keep": torch.tensor([True, False, True], dtype=torch.bool),
+        }
+    )
+
+    with pytest.raises(TypeError):
+        TorchSelectTensors("scores", indices="keep")(registry)
+
+
 def test_torch_select_tensors_can_write_multiple_outputs():
     registry = TorchTensorRegistry(
         {

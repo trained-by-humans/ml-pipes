@@ -1499,6 +1499,15 @@ def test_select_tensors_can_write_multiple_outputs():
     assert result["scores"].tolist() == [0.9, 0.5, 0.8]
 
 
+def test_select_tensors_rejects_boolean_mask():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        keep=np.array([True, False, True]),
+    )
+    with pytest.raises(TypeError):
+        SelectTensors("scores", indices="keep")(r)
+
+
 def test_apply_tensor_mask_applies_boolean_mask():
     r = _registry(
         scores=np.array([0.9, 0.5, 0.8]),
@@ -1547,6 +1556,19 @@ def test_filter_tensors_applies_to_multiple_keys():
     assert result["scores"].tolist() == [0.9, 0.8]
     assert result["classes"].tolist() == [0, 0]
     assert len(result["boxes"]) == 2
+
+
+def test_filter_tensors_rejects_integer_index_output():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([0, 1, 0]),
+    )
+    with pytest.raises(TypeError):
+        FilterTensors(
+            "scores",
+            by="scores",
+            predicate=lambda scores: np.argsort(scores)[-2:],
+        )(r)
 
 
 def test_filter_tensors_by_score_applies_score_predicate():
@@ -1697,6 +1719,12 @@ def test_filter_integer_indices_raise():
     d = _detections()
     with pytest.raises(TypeError):
         d.filter([0, 2])
+
+
+def test_select_boolean_mask_raise():
+    d = _detections()
+    with pytest.raises(TypeError):
+        d.select([True, False])
 
 
 def test_select_index_out_of_bounds_raises():

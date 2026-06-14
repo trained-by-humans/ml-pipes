@@ -1012,6 +1012,8 @@ class SelectTensors:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         indices = registry[self.indices]
+        if np.issubdtype(indices.dtype, np.bool_):
+            raise TypeError("SelectTensors indices must be integers; use ApplyTensorMask for boolean masks.")
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][indices]
         return registry
@@ -1047,7 +1049,9 @@ class FilterTensors:
         self.dst_names = _resolve_multi_output_names("FilterTensors", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        mask = np.asarray(self.predicate(registry[self.by]), dtype=bool)
+        mask = np.asarray(self.predicate(registry[self.by]))
+        if not np.issubdtype(mask.dtype, np.bool_):
+            raise TypeError("FilterTensors predicate must return a boolean mask.")
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][mask]
         return registry

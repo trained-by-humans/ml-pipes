@@ -552,6 +552,8 @@ class TorchSelectTensors:
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         indices = registry[self.indices]
+        if indices.dtype == torch.bool:
+            raise TypeError("TorchSelectTensors indices must be integers; use TorchApplyTensorMask for boolean masks.")
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][indices]
         return registry
