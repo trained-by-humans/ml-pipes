@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar
 
 import numpy as np
+import numpy.typing as npt
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
+else:  # pragma: no cover
+    try:
+        from typing import Self
+    except ImportError:
+        Self = TypeVar("Self")
 
 
 @dataclass(frozen=True)
@@ -102,37 +112,68 @@ class ResizeTransform:
     resized_shape: tuple[int, int]
 
 
-PredictionT = TypeVar("PredictionT", bound="Prediction")
+PredictionMask: TypeAlias = Sequence[bool] | npt.NDArray[np.bool_]
+PredictionIndices: TypeAlias = Sequence[int] | npt.NDArray[np.integer[Any]]
 
 
-@dataclass(frozen=True)
+class FilterablePrediction(Protocol):
+    def filter(self, mask: PredictionMask) -> Self:
+        ...
+
+
+class ClassPrediction(FilterablePrediction, Protocol):
+    classes: Sequence[int]
+
+
+class ScorePrediction(FilterablePrediction, Protocol):
+    scores: Sequence[float]
+
+
+class BoxPrediction(FilterablePrediction, Protocol):
+    boxes: Sequence[Sequence[float]]
+
+
+@dataclass
 class Prediction:
     """Base class for all typed prediction outputs.
 
-    All fields must be equal-length lists (one entry per detected instance).
-    The filter method slices every field by index, so it works generically for
-    any subclass without knowing its field names.
+    All fields must be equal-length sequences (one entry per detected instance).
+    The filter and select methods slice every field uniformly, so they work
+    generically for any subclass without knowing its field names.
     """
 
-    def filter(self: PredictionT, mask: Any) -> PredictionT:
-        if len(mask) == 0:
-            kept: list[int] = []
-        elif isinstance(mask[0], (bool, np.bool_)):
-            kept = [i for i, m in enumerate(mask) if m]
-        else:
-            kept = [int(i) for i in mask]
-        sliced = {f.name: [getattr(self, f.name)[i] for i in kept]
-                  for f in dataclasses.fields(self)}
+    def filter(self, mask: PredictionMask) -> Self:
+        kept: list[int] = []
+        for i, keep in enumerate(mask):
+            if not isinstance(keep, (bool, np.bool_)):
+                raise TypeError("Prediction.filter expects a boolean mask; use select() for integer indices.")
+            if bool(keep):
+                kept.append(i)
+        return self._slice(kept)
+
+    def select(self, indices: PredictionIndices) -> Self:
+        kept: list[int] = []
+        for index in indices:
+            if isinstance(index, (bool, np.bool_)):
+                raise TypeError("Prediction.select expects integer indices; use filter() for boolean masks.")
+            kept.append(int(index))
+        return self._slice(kept)
+
+    def _slice(self, kept: Sequence[int]) -> Self:
+        sliced = {
+            field.name: [getattr(self, field.name)[i] for i in kept]
+            for field in dataclasses.fields(self)
+        }
         return type(self)(**sliced)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Detections(Prediction):
-    boxes: list[list[float]]
-    scores: list[float]
-    classes: list[int]
+    boxes: Sequence[Sequence[float]]
+    scores: Sequence[float]
+    classes: Sequence[int]
 
 
-@dataclass(frozen=True)
+@dataclass
 class Segmentations(Detections):
-    masks: list[np.ndarray]
+    masks: Sequence[np.ndarray]

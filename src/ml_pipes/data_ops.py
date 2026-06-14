@@ -9,9 +9,9 @@ from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get
 
 from .control import SHORT_CIRCUIT
 from .operator import Operator
-from .region import RegionCloser, RegionOpener
+from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
 from .selector import Selector, SelectorInput
-from .tracing import PendingSpan, InvocationTrace, StepSpan, _NoOpTrace, _extract_shape, capture_value, operator_config
+from .tracing import PendingSpan, InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, _extract_shape, capture_value, operator_config
 from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
 
 
@@ -335,7 +335,7 @@ def _require_assignment_compatible(
 
 
 @Operator
-class CollectItems(RegionCloser):
+class CollectItems(RegionCloser[ItemT, list[ItemT]]):
     """Region boundary that materializes per-item outputs as a list."""
 
     def resolve_contract(
@@ -421,9 +421,9 @@ class _MeasuredIterable:
     def __init__(
         self,
         current: Iterable[object],
-        execute_region: Any,
+        execute_region: RegionExecutor[Any, Any],
         span: PendingSpan | None,
-        cfg: Any,
+        cfg: TracingConfig | None,
     ) -> None:
         self._source = iter(current)
         self._execute_region = execute_region
@@ -544,7 +544,7 @@ class _MeasuredIterable:
 
 
 @Operator
-class PerItem(RegionOpener):
+class PerItem(RegionOpener[Iterable[ItemT], ItemT]):
     """Run the enclosed operators once per item from the current item iterable boundary.
 
     Items that short-circuit inside the region are treated as dropped and are
@@ -555,14 +555,14 @@ class PerItem(RegionOpener):
 
     def run_region(
         self,
-        current: Iterable[object],
+        current: Iterable[ItemT],
         label: str,
-        execute_region: Any,
-        trace: InvocationTrace | _NoOpTrace,
-        cfg: Any,
+        execute_region: RegionExecutor[ItemT, Any],
+        trace: RegionTraceLike,
+        cfg: TracingConfig | None,
     ) -> list[Any]:
         collecting = isinstance(trace, InvocationTrace)
-        source = iter(_require_item_iterable(current, operator_name=type(self).__name__))
+        source = iter(cast(Iterable[ItemT], _require_item_iterable(current, operator_name=type(self).__name__)))
         results: list[Any] = []
         child_traces: list[InvocationTrace] = []
         seen = 0
@@ -649,7 +649,7 @@ class PerItem(RegionOpener):
 
 
 @Operator
-class StreamItems(RegionCloser):
+class StreamItems(RegionCloser[ItemT, Iterable[ItemT]]):
     """Region boundary that exposes per-item outputs as a lazy item iterable."""
 
     def resolve_contract(
@@ -665,20 +665,20 @@ class StreamItems(RegionCloser):
 
 
 @Operator
-class LazyPerItem(RegionOpener):
+class LazyPerItem(RegionOpener[Iterable[ItemT], ItemT]):
     """Run the enclosed operators once per item from the current item iterable boundary."""
 
     closing_type = StreamItems
 
     def run_region(
         self,
-        current: Iterable[object],
+        current: Iterable[ItemT],
         label: str,
-        execute_region: Any,
-        trace: InvocationTrace | _NoOpTrace,
-        cfg: Any,
+        execute_region: RegionExecutor[ItemT, Any],
+        trace: RegionTraceLike,
+        cfg: TracingConfig | None,
     ) -> _MeasuredIterable:
-        current = _require_item_iterable(current, operator_name=type(self).__name__)
+        current = cast(Iterable[ItemT], _require_item_iterable(current, operator_name=type(self).__name__))
         span = None
         if isinstance(trace, InvocationTrace):
             span = PendingSpan(

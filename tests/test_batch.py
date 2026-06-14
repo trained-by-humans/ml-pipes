@@ -38,18 +38,18 @@ class _FailBatchOp:
         raise RuntimeError("batch failed")
 
 
-def _make_pipeline(size: int, timeout: float, batch_op) -> Pipeline:
+def _make_pipeline(size: int, timeout: float, batch_op) -> Pipeline[Any, Any]:
     return Pipeline([Batch(size=size, timeout=timeout), batch_op, UnBatch()])
 
 
-def _run_threads(pipeline: Pipeline, inputs: list, timeout: float = 2.0) -> list:
+def _run_threads(pipeline: Pipeline[Any, Any], inputs: list[Any], timeout: float = 2.0) -> list[Any]:
     """
     Call pipeline(inputs[i]) from N threads started simultaneously via a
     Barrier.  Returns a list where results[i] is the return value of thread i
     (or the exception it raised).
     """
     n = len(inputs)
-    results: list = [None] * n
+    results: list[Any] = [None] * n
     barrier = threading.Barrier(n)
 
     def call(i: int) -> None:

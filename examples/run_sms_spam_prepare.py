@@ -442,7 +442,7 @@ def sms_spam_prepare_pipeline(
     validation_ratio: float = 0.1,
     test_ratio: float = 0.1,
     lazy: bool = False,
-) -> Pipeline:
+) -> Pipeline[list[dict[str, str]], list[PreparedSmsExample]]:
     if min_chars < 0:
         raise ValueError(f"min_chars must be >= 0, got {min_chars}")
     if min_tokens < 0:

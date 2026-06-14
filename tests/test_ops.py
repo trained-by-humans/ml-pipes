@@ -1,4 +1,5 @@
 import io
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,9 @@ from ml_pipes.ops import (
     CreateTensorMaskByThreshold,
     ConvertBoxFormat,
     DrawBoxes,
+    DrawMasks,
     Extract,
+    FilterTensorsByClasses,
     FilterTensorsByMasksArea,
     FilterPredictions,
     FilterPredictionsByArea,
@@ -28,7 +31,7 @@ from ml_pipes.ops import (
     GatherScores,
     Infer,
     LogDetections,
-    MapToObjects,
+    MapPredictionsToObjects,
     MultiplyTensors,
     MeanMaskScores,
     MasksToBoxes,
@@ -66,6 +69,14 @@ from ml_pipes.types import (
     TensorPayload,
     TensorRegistry,
 )
+
+
+@dataclass
+class _NormalizedDetections(Detections):
+    def __post_init__(self) -> None:
+        self.boxes = tuple(tuple(box) for box in self.boxes)
+        self.scores = tuple(self.scores)
+        self.classes = tuple(self.classes)
 
 
 class StringToFloat:
@@ -159,6 +170,13 @@ def test_pick_out_of_bounds_raises_on_concrete_input():
         pipeline.validate()
 
 
+def test_pick_negative_out_of_bounds_raises_on_concrete_input():
+    pipeline = Pipeline([IntToPair(), Pick(-3)])
+
+    with pytest.raises(PipelineValidationError, match="Pick\\(-3\\) is out of bounds"):
+        pipeline.validate()
+
+
 def test_pick_out_of_bounds_silent_on_vague_input():
     pipeline = Pipeline([Pick(5)])
 
@@ -176,7 +194,7 @@ def test_pick_establishes_tuple_input_boundary_from_downstream_type():
     contract = Pipeline([Pick(0), IntToString()]).validate()
 
     assert contract is not None
-    assert contract.input_type is tuple
+    assert contract.input_type == tuple[Any, ...]
 
 
 def test_select_validation_propagates_array_attribute_type():
@@ -775,7 +793,8 @@ def test_filter_tensors_can_write_to_new_keys():
     result = FilterTensors(
         "scores",
         "classes",
-        predicate=lambda reg: reg["classes"] == 0,
+        by="classes",
+        predicate=lambda classes: classes == 0,
         as_=("selected_scores", "selected_classes"),
     )(registry)
 
@@ -802,6 +821,26 @@ def test_filter_tensors_by_score_can_write_to_new_keys():
     assert np.allclose(result["selected_scores"], [0.9, 0.8])
     assert result["selected_classes"].tolist() == [0, 0]
     assert np.allclose(result["scores"], [0.9, 0.5, 0.8])
+
+
+def test_filter_tensors_by_classes_can_write_to_new_keys():
+    registry = TensorRegistry(
+        {
+            "scores": np.array([0.9, 0.5, 0.8], dtype=np.float32),
+            "classes": np.array([0, 1, 2], dtype=np.int64),
+        }
+    )
+
+    result = FilterTensorsByClasses(
+        "scores",
+        classes="classes",
+        keep_classes=[0, 2],
+        as_=("selected_classes", "selected_scores"),
+    )(registry)
+
+    assert result["selected_classes"].tolist() == [0, 2]
+    assert np.allclose(result["selected_scores"], [0.9, 0.8])
+    assert result["classes"].tolist() == [0, 1, 2]
 
 
 def test_filter_tensors_by_masks_area_can_write_to_new_keys():
@@ -997,8 +1036,27 @@ def test_project_masks_produces_binary_masks_at_original_size():
 
     result = ProjectMasks(mask_threshold=0.0)(registry, transform)
 
-    assert len(result["masks"]) == 1
+    assert isinstance(result["masks"], np.ndarray)
+    assert result["masks"].shape == (1, 2, 2)
     assert result["masks"][0].shape == (2, 2)
+
+
+def test_project_masks_returns_empty_mask_array_for_empty_input():
+    transform = ResizeTransform(
+        scale=(2.0, 2.0),
+        pad=(0.0, 0.0),
+        original_shape=(2, 3),
+        resized_shape=(4, 6),
+    )
+    registry = TensorRegistry()
+    registry["boxes"] = np.zeros((0, 4), dtype=np.float32)
+    registry["masks"] = np.zeros((0, 4, 4), dtype=np.float32)
+
+    result = ProjectMasks(mask_threshold=0.0)(registry, transform)
+
+    assert isinstance(result["masks"], np.ndarray)
+    assert result["masks"].shape == (0, 2, 3)
+    assert result["masks"].dtype == np.uint8
 
 
 # ---------------------------------------------------------------------------
@@ -1033,6 +1091,7 @@ def test_to_segmentations_converts_registry_to_segmentations():
     assert isinstance(result, Segmentations)
     assert result.boxes == [[1.0, 2.0, 3.0, 4.0]]
     assert len(result.masks) == 1
+    assert isinstance(result.masks[0], np.ndarray)
 
 
 # ---------------------------------------------------------------------------
@@ -1110,6 +1169,29 @@ def test_as_type_can_write_named_registry_tensor_to_new_key() -> None:
     assert result["density_fp32"].dtype == np.float32
 
 
+def test_as_type_without_src_rejects_registry_input() -> None:
+    registry = TensorRegistry({"density": np.array([[1.0, 2.0]], dtype=np.float16)})
+
+    with pytest.raises(TypeError):
+        AsType(dtype="float32")(registry)
+
+
+def test_as_type_with_src_rejects_tensor_payload_input() -> None:
+    payload = TensorPayload(
+        array=np.array([[1.0, 2.0]], dtype=np.float32),
+        layout="NCHW",
+        dtype="float32",
+    )
+
+    with pytest.raises(TypeError):
+        AsType(src="density", dtype="float32")(payload)
+
+
+def test_as_type_rejects_as_without_src() -> None:
+    with pytest.raises(ValueError):
+        AsType(dtype="float32", as_="density_fp32")
+
+
 # ---------------------------------------------------------------------------
 # Infer (mocked)
 # ---------------------------------------------------------------------------
@@ -1158,6 +1240,44 @@ def test_draw_boxes_draws_on_source_image():
     assert returned_detections is detections
 
 
+def test_draw_boxes_preserves_segmentations_instance():
+    image = np.zeros((32, 32, 3), dtype=np.uint8)
+    source = ImagePayload(array=image, color_space="BGR", layout="HWC")
+    segmentations = Segmentations(
+        boxes=[[4.0, 4.0, 20.0, 20.0]],
+        scores=[0.9],
+        classes=[1],
+        masks=[np.zeros((32, 32), dtype=bool)],
+    )
+
+    result, returned_segmentations = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(source, segmentations)
+
+    assert result.array.shape == image.shape
+    assert np.any(result.array != 0)
+    assert returned_segmentations is segmentations
+
+
+def test_draw_masks_draws_on_source_image():
+    image = np.zeros((32, 32, 3), dtype=np.uint8)
+    source = ImagePayload(array=image, color_space="BGR", layout="HWC")
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[8:24, 8:24] = True
+    segmentations = Segmentations(
+        boxes=[[8.0, 8.0, 24.0, 24.0]],
+        scores=[0.9],
+        classes=[1],
+        masks=[mask],
+    )
+
+    result, returned_segmentations = DrawMasks(alpha=0.6)(source, segmentations)
+
+    assert result.array.shape == image.shape
+    assert result.color_space == "BGR"
+    assert result.layout == "HWC"
+    assert np.any(result.array != 0)
+    assert returned_segmentations is segmentations
+
+
 # ---------------------------------------------------------------------------
 # SaveImage
 # ---------------------------------------------------------------------------
@@ -1173,8 +1293,22 @@ def test_save_image_writes_output(tmp_path: Path):
     assert result is payload
 
 
+def test_save_image_at_zero_writes_output_and_returns_tuple(tmp_path: Path):
+    image = np.full((16, 16, 3), 255, dtype=np.uint8)
+    output_path = tmp_path / "annotated.jpg"
+
+    payload = (
+        ImagePayload(array=image, color_space="BGR", layout="HWC"),
+        {"meta": 1},
+    )
+    result = SaveImage(output_path, at=0)(payload)
+
+    assert output_path.is_file()
+    assert result is payload
+
+
 # ---------------------------------------------------------------------------
-# MapToObjects / LogDetections
+# MapPredictionsToObjects / LogDetections
 # ---------------------------------------------------------------------------
 
 def test_map_to_objects_can_convert_detection_result():
@@ -1184,7 +1318,7 @@ def test_map_to_objects_can_convert_detection_result():
         classes=[1],
     )
 
-    result = MapToObjects(
+    result = MapPredictionsToObjects(
         fields={
             "box": "boxes",
             "score": "scores",
@@ -1201,6 +1335,83 @@ def test_map_to_objects_can_convert_detection_result():
     ]
 
 
+def test_map_to_objects_at_one_replaces_prediction_slot():
+    payload = (
+        "prefix",
+        Detections(
+            boxes=[[1.0, 2.0, 3.0, 4.0]],
+            scores=[0.9],
+            classes=[1],
+        ),
+    )
+
+    result = MapPredictionsToObjects(
+        fields={
+            "box": "boxes",
+            "score": "scores",
+            "class_id": "classes",
+        },
+        at=1,
+    )(payload)
+
+    assert result == (
+        "prefix",
+        [
+            {
+                "box": [1.0, 2.0, 3.0, 4.0],
+                "score": 0.9,
+                "class_id": 1,
+            }
+        ],
+    )
+
+
+def test_map_to_objects_supports_segmentation_callbacks():
+    segmentations = Segmentations(
+        boxes=[[1.0, 2.0, 3.0, 4.0]],
+        scores=[0.9],
+        classes=[1],
+        masks=[np.array([[True, False], [True, True]], dtype=bool)],
+    )
+    mapper = MapPredictionsToObjects(
+        fields={
+            "class_id": "classes",
+            "area": lambda prediction: [int(np.asarray(mask, dtype=bool).sum()) for mask in prediction.masks],
+        },
+    )
+
+    result = mapper(segmentations)
+
+    assert result == [{"class_id": 1, "area": 3}]
+
+
+def test_map_to_objects_requires_equal_length_columns():
+    detections = Detections(
+        boxes=[[1.0, 2.0, 3.0, 4.0]],
+        scores=[0.9],
+        classes=[1],
+    )
+
+    with pytest.raises(ValueError, match="equal-length collections"):
+        MapPredictionsToObjects(
+            fields={
+                "box": "boxes",
+                "score": lambda prediction: prediction.scores + [0.1],
+            }
+        )(detections)
+
+
+def test_map_to_objects_with_at_requires_tuple_payload():
+    detections = Detections(
+        boxes=[[1.0, 2.0, 3.0, 4.0]],
+        scores=[0.9],
+        classes=[1],
+    )
+
+    with pytest.raises(TypeError, match="requires a tuple payload"):
+        MapPredictionsToObjects(fields={"box": "boxes"}, at=1)(detections)
+
+
 def test_log_detections_prints_json_and_returns_input():
     stream = io.StringIO()
     detections = [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "class_id": 1}]
@@ -1213,6 +1424,28 @@ def test_log_detections_prints_json_and_returns_input():
     )(detections)
 
     assert result is detections
+    output = stream.getvalue()
+    assert '"model": "model.onnx"' in output
+    assert '"image": "image.jpg"' in output
+    assert '"annotated_image": "image_model.jpg"' in output
+
+
+def test_log_detections_at_one_prints_json_and_returns_input():
+    stream = io.StringIO()
+    payload = (
+        "prefix",
+        [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "class_id": 1}],
+    )
+
+    result = LogDetections(
+        model_path="model.onnx",
+        image_path="image.jpg",
+        annotated_image_path="image_model.jpg",
+        stream=stream,
+        at=1,
+    )(payload)
+
+    assert result is payload
     output = stream.getvalue()
     assert '"model": "model.onnx"' in output
     assert '"image": "image.jpg"' in output
@@ -1298,6 +1531,15 @@ def test_select_tensors_can_write_multiple_outputs():
     assert result["scores"].tolist() == [0.9, 0.5, 0.8]
 
 
+def test_select_tensors_rejects_boolean_mask():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        keep=np.array([True, False, True]),
+    )
+    with pytest.raises(TypeError):
+        SelectTensors("scores", indices="keep")(r)
+
+
 def test_apply_tensor_mask_applies_boolean_mask():
     r = _registry(
         scores=np.array([0.9, 0.5, 0.8]),
@@ -1326,7 +1568,7 @@ def test_filter_tensors_applies_predicate():
         scores=np.array([0.9, 0.5, 0.8]),
         classes=np.array([0, 1, 0]),
     )
-    result = FilterTensors("scores", predicate=lambda reg: reg["classes"] == 0)(r)
+    result = FilterTensors("scores", by="classes", predicate=lambda classes: classes == 0)(r)
     assert result["scores"].tolist() == [0.9, 0.8]
 
 
@@ -1336,10 +1578,29 @@ def test_filter_tensors_applies_to_multiple_keys():
         scores=np.array([0.9, 0.5, 0.8]),
         classes=np.array([0, 1, 0]),
     )
-    result = FilterTensors("boxes", "scores", "classes", predicate=lambda reg: reg["classes"] == 0)(r)
+    result = FilterTensors(
+        "boxes",
+        "scores",
+        "classes",
+        by="classes",
+        predicate=lambda classes: classes == 0,
+    )(r)
     assert result["scores"].tolist() == [0.9, 0.8]
     assert result["classes"].tolist() == [0, 0]
     assert len(result["boxes"]) == 2
+
+
+def test_filter_tensors_rejects_integer_index_output():
+    r = _registry(
+        scores=np.array([0.9, 0.5, 0.8]),
+        classes=np.array([0, 1, 0]),
+    )
+    with pytest.raises(TypeError):
+        FilterTensors(
+            "scores",
+            by="scores",
+            predicate=lambda scores: np.argsort(scores)[-2:],
+        )(r)
 
 
 def test_filter_tensors_by_score_applies_score_predicate():
@@ -1418,7 +1679,7 @@ def test_filter_predictions_by_area_max():
 
 
 # ---------------------------------------------------------------------------
-# Prediction.filter — mask variants
+# Prediction.filter / Prediction.select — variants
 # ---------------------------------------------------------------------------
 
 def test_filter_bool_list():
@@ -1450,32 +1711,58 @@ def test_filter_numpy_bool_array():
     assert result.scores == [0.9, 0.8]
 
 
-def test_filter_index_list():
+def test_select_index_list():
     d = _detections()
-    result = d.filter([0, 2])
+    result = d.select([0, 2])
     assert result.scores == [0.9, 0.8]
     assert result.classes == [0, 0]
 
 
-def test_filter_index_list_single():
+def test_select_index_list_single():
     d = _detections()
-    result = d.filter([1])
+    result = d.select([1])
     assert result.scores == [0.5]
     assert result.classes == [1]
 
 
-def test_filter_numpy_index_array():
+def test_select_numpy_index_array():
     d = _detections()
-    result = d.filter(np.array([0, 2]))
+    result = d.select(np.array([0, 2]))
     assert result.scores == [0.9, 0.8]
 
 
-def test_filter_numpy_argsort():
+def test_select_numpy_argsort():
     d = _detections()
     # argsort ascending by score: [1, 2, 0] → keep top-2 → indices [2, 0]
     indices = np.argsort(d.scores)[-2:]
-    result = d.filter(indices)
+    result = d.select(indices)
     assert set(result.scores) == {0.9, 0.8}
+
+
+def test_filter_reconstructs_prediction_subclass_via_init():
+    d = _NormalizedDetections(
+        boxes=[[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]],
+        scores=[0.9, 0.5, 0.8],
+        classes=[0, 1, 0],
+    )
+    result = d.filter([True, False, True])
+    assert isinstance(result, _NormalizedDetections)
+    assert result.boxes == ((0, 0, 1, 1), (2, 2, 3, 3))
+    assert result.scores == (0.9, 0.8)
+    assert result.classes == (0, 0)
+
+
+def test_select_reconstructs_prediction_subclass_via_init():
+    d = _NormalizedDetections(
+        boxes=[[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]],
+        scores=[0.9, 0.5, 0.8],
+        classes=[0, 1, 0],
+    )
+    result = d.select([0, 2])
+    assert isinstance(result, _NormalizedDetections)
+    assert result.boxes == ((0, 0, 1, 1), (2, 2, 3, 3))
+    assert result.scores == (0.9, 0.8)
+    assert result.classes == (0, 0)
 
 
 def test_filter_empty_mask():
@@ -1486,10 +1773,22 @@ def test_filter_empty_mask():
     assert result.classes == []
 
 
-def test_filter_index_out_of_bounds_raises():
+def test_filter_integer_indices_raise():
+    d = _detections()
+    with pytest.raises(TypeError):
+        d.filter([0, 2])
+
+
+def test_select_boolean_mask_raise():
+    d = _detections()
+    with pytest.raises(TypeError):
+        d.select([True, False])
+
+
+def test_select_index_out_of_bounds_raises():
     d = _detections()
     with pytest.raises(IndexError):
-        d.filter([0, 99])
+        d.select([0, 99])
 
 
 def test_filter_bool_mask_too_long_raises():

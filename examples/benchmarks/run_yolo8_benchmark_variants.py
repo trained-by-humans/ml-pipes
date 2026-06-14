@@ -37,7 +37,7 @@ from examples.common import (
 )
 from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 
-from ml_pipes import Pipeline, pipeline_factory
+from ml_pipes import Detections, ImagePayload, Pipeline, pipeline_factory
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
@@ -46,7 +46,7 @@ def yolo8_variant_pipeline(
     model_path: Path = ASSETS_DIR / "yolov8n.onnx",
     output_path: Path = ASSETS_DIR / "out.jpg",
     conf_threshold: float = 0.25,
-) -> Pipeline:
+) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
     return (
         decode()
         + yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)

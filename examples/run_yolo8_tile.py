@@ -33,7 +33,9 @@ from common import (
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 
 from ml_pipes import (
+    Detections,
     Gather,
+    ImagePayload,
     Inline,
     NMM,
     Pick,
@@ -53,7 +55,7 @@ def yolo8_tiled_pipeline(
     overlap_wh: tuple[int, int] = (40, 40),
     max_concurrency: int = 4,
     iou_threshold: float = 0.4,
-) -> Pipeline:
+) -> Pipeline[ImagePayload, Detections]:
     """Tiled YOLOv8 inference pipeline.
 
     Tiles → parallel inference per tile → stitch → NMM to suppress cross-tile duplicates.

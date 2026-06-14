@@ -76,7 +76,7 @@ Image file into an inference-ready tensor:
 |---|---|---|
 | `ToDetections(boxes, scores, classes)` | `TensorRegistry` → `Detections` | Finalises a detection pipeline |
 | `ToSegmentations(boxes, scores, classes, masks)` | `TensorRegistry` → `Segmentations` | Finalises a segmentation pipeline |
-| `MapToObjects(fields)` | `Detections / Segmentations` → `list[dict]` | Converts typed prediction arrays to a list of per-object dicts |
+| `MapPredictionsToObjects(fields)` | `Detections / Segmentations` → `list[dict]` | Converts typed prediction arrays to a list of per-object dicts |
 
 ---
 

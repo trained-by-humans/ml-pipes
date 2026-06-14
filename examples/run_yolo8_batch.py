@@ -13,6 +13,7 @@ from ml_pipes import (
     Collate,
     ConvertBoxFormat,
     Decode,
+    Detections,
     Distribute,
     LoadFile,
     GatherScores,
@@ -69,7 +70,7 @@ def _export_dynamic_model(dst: Path) -> None:
 
 
 def build_pipeline(model_path: Path, batch_size: int, timeout: float,
-                   serialize: bool = False) -> Pipeline:
+                   serialize: bool = False) -> Pipeline[str | Path, Detections]:
     return Pipeline([
         LoadFile(),
         Decode(),

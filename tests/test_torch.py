@@ -25,6 +25,7 @@ from ml_pipes.torch import (
     TorchCreateTensorMaskByThreshold,
     TorchDistribute,
     TorchExtract,
+    TorchFilterTensorsByClasses,
     TorchFilterTensorsByMasksArea,
     TorchFilterTensorsByScore,
     TorchGatherRows,
@@ -127,6 +128,24 @@ def test_torch_infer_extract_and_registry_conversion_round_trip():
     result = pipeline(payload)
 
     assert np.array_equal(result["scores"], np.full((1, 2, 2), 3.0, dtype=np.float32))
+
+
+def test_torch_infer_accepts_sequence_outputs():
+    def _infer(x: torch.Tensor) -> list[torch.Tensor]:
+        return [x + 1, x.sum(dim=1)]
+
+    payload = _torch_payload(torch.ones((1, 3, 2, 2), dtype=torch.float32))
+
+    result = TorchInfer(
+        _infer,
+        output_names=("boxes", "scores"),
+        output_layouts=("NCHW", "NHW"),
+    )(payload)
+
+    assert result.names == ("boxes", "scores")
+    assert len(result.tensors) == 2
+    assert tuple(result.tensors[0].array.shape) == (1, 3, 2, 2)
+    assert tuple(result.tensors[1].array.shape) == (1, 2, 2)
 
 
 def test_to_torch_copy_false_shares_cpu_numpy_storage():
@@ -250,6 +269,25 @@ def test_torch_as_type_supports_payload_registry_and_sequence_forms():
 
     sequence = TorchAsType("float16")([torch.ones((1,), dtype=torch.float32)])
     assert sequence[0].dtype == torch.float16
+
+
+def test_torch_as_type_without_src_rejects_registry_input():
+    registry = TorchTensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
+
+    with pytest.raises(TypeError):
+        TorchAsType("float16")(registry)
+
+
+def test_torch_as_type_with_src_rejects_payload_input():
+    payload = _torch_payload(torch.ones((1, 2), dtype=torch.float32), layout="NC")
+
+    with pytest.raises(TypeError):
+        TorchAsType("float16", src="scores")(payload)
+
+
+def test_torch_as_type_rejects_as_without_src():
+    with pytest.raises(ValueError):
+        TorchAsType("float16", as_="scores_fp16")
 
 
 def test_torch_argmax_and_multiply_tensors_work_on_registry():
@@ -532,6 +570,26 @@ def test_torch_filter_tensors_by_masks_area_can_write_to_new_keys():
     assert torch.allclose(registry["scores"], torch.tensor([0.2, 0.9]))
 
 
+def test_torch_filter_tensors_by_classes_can_write_to_new_keys():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 1, 2], dtype=torch.int64),
+        }
+    )
+
+    TorchFilterTensorsByClasses(
+        "scores",
+        classes="classes",
+        keep_classes=[0, 2],
+        as_=("selected_classes", "selected_scores"),
+    )(registry)
+
+    assert registry["selected_classes"].tolist() == [0, 2]
+    assert torch.allclose(registry["selected_scores"], torch.tensor([0.9, 0.8]))
+    assert registry["classes"].tolist() == [0, 1, 2]
+
+
 def test_torch_sort_tensors_by_can_write_to_new_keys():
     registry = TorchTensorRegistry(
         {
@@ -660,6 +718,18 @@ def test_torch_select_tensors_writes_to_new_key():
     assert torch.allclose(registry["scores"], torch.tensor([0.9, 0.5, 0.8]))
 
 
+def test_torch_select_tensors_rejects_boolean_mask():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "keep": torch.tensor([True, False, True], dtype=torch.bool),
+        }
+    )
+
+    with pytest.raises(TypeError):
+        TorchSelectTensors("scores", indices="keep")(registry)
+
+
 def test_torch_select_tensors_can_write_multiple_outputs():
     registry = TorchTensorRegistry(
         {
@@ -689,6 +759,23 @@ def test_to_device_updates_payload_and_registry_devices():
     registry = TorchTensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
     moved_registry = ToDevice("cpu")(registry)
     assert moved_registry["scores"].device.type == "cpu"
+
+
+def test_to_device_supports_tensor_sequences_and_runtime_outputs():
+    tensor = torch.ones((2,), dtype=torch.float32)
+    moved_tensor = ToDevice("cpu")(tensor)
+    assert moved_tensor.device.type == "cpu"
+
+    payloads = [_torch_payload(torch.ones((1, 2), dtype=torch.float32), layout="NC")]
+    moved_payloads = ToDevice("cpu")(payloads)
+    assert moved_payloads[0].device == "cpu"
+
+    outputs = TorchRuntimeOutputs(
+        tensors=(_torch_payload(torch.ones((1, 2), dtype=torch.float32), layout="NC"),),
+        names=("scores",),
+    )
+    moved_outputs = ToDevice("cpu")(outputs)
+    assert moved_outputs.tensors[0].device == "cpu"
 
 
 def test_torch_synchronize_tensors_passthrough_on_payload():
@@ -919,6 +1006,13 @@ def test_torch_validation_accepts_to_device_and_torch_as_type_boundaries():
 
     assert contract.input_type is TensorPayload
     assert contract.output_type is TorchTensorPayload
+
+
+def test_torch_validation_rejects_registry_op_after_to_device_payload():
+    with pytest.raises(PipelineValidationError):
+        Pipeline([ToDevice("cpu"), TorchArgMax("scores")]).validate(
+            pipeline_input_type=TorchTensorPayload
+        )
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")

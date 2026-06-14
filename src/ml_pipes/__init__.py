@@ -19,7 +19,16 @@ from .collectors import (
 )
 from .context import Context, Recall, Store
 from .control import SHORT_CIRCUIT
-from .core import Pipeline, PipelineDescription, Embed, embed, Inline, inline, Operator, OperatorLike
+from .core import (
+    Pipeline,
+    PipelineDescription,
+    Embed,
+    embed,
+    Inline,
+    inline,
+    Operator,
+    OperatorLike,
+)
 from .data_ops import (
     CollectItems,
     Distinct,
@@ -77,6 +86,7 @@ from .ops import (
     CreateTensorMask,
     CreateTensorMaskByThreshold,
     BinarizeTensorByThreshold,
+    FilterTensorsByClasses,
     FilterTensorsByMasksArea,
     FilterTensors,
     FilterTensorsByScore,
@@ -92,7 +102,7 @@ from .ops import (
     TopKIndices2D,
     Infer,
     LogDetections,
-    MapToObjects,
+    MapPredictionsToObjects,
     NMM,
     NMS,
     Normalize,
@@ -186,6 +196,7 @@ __all__ = [
     "CreateTensorMask",
     "CreateTensorMaskByThreshold",
     "BinarizeTensorByThreshold",
+    "FilterTensorsByClasses",
     "FilterTensorsByMasksArea",
     "Extract",
     "FilterPredictions",
@@ -233,7 +244,7 @@ __all__ = [
     "Map",
     "MapNotNull",
     "MapValue",
-    "MapToObjects",
+    "MapPredictionsToObjects",
     "NMM",
     "Operator",
     "OperatorLike",

@@ -14,18 +14,18 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.streaming"
 
 import cv2
-
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from ..run_yolo8_onnx import YOLO8_MODELS
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
+    Detections,
     DrawBoxes,
     Extract,
     FilterPredictionsByArea,
     FilterPredictionsByClass,
-    FilterTensors,
+    FilterTensorsByClasses,
     Gather,
     GatherScores,
     ImagePayload,
@@ -54,7 +54,7 @@ _KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella
 _MAX_HUMAN_AREA = 1_000  # px² — filters out cars and other large objects
 
 
-def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
+def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePayload, Detections]:
     return Pipeline([
         Resize((640, 640)),
         Store("resize_transform", source=1),
@@ -68,7 +68,12 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
         Slice("preds", slice(4, None), as_="scores"),
         ArgMax("scores", as_="classes"),
         GatherScores("scores", "classes"),
-        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in _KEEP_CLASSES for c in r["classes"]]),
+        FilterTensorsByClasses(
+            "boxes",
+            "scores",
+            "classes",
+            keep_classes=_KEEP_CLASSES,
+        ),
         ConvertBoxFormat(from_="cxcywh"),
         NMS(conf_threshold=conf_threshold),
         Recall("resize_transform"),
@@ -77,7 +82,12 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline:
     ])
 
 
-def build_pipeline(model_path: Path, conf_threshold: float, tile: bool, workers: int = 1) -> Pipeline:
+def build_pipeline(
+    model_path: Path,
+    conf_threshold: float,
+    tile: bool,
+    workers: int = 1,
+) -> Pipeline[ImagePayload, ImagePayload]:
     pre_process = Pipeline([
         Store("source_frame"),
     ])
@@ -134,7 +144,7 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
     pending: collections.deque[Future] = collections.deque()
     stopped = False
 
-    def infer(frame: Any) -> Any:
+    def infer(frame: Any) -> ImagePayload:
         return pipeline(ImagePayload(array=frame, color_space="BGR", layout="HWC"))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:

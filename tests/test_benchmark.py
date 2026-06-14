@@ -44,7 +44,7 @@ def _static_input(value: int = 0) -> tuple[str, int, None, None]:
     return ("input", value, None, None)
 
 
-def _make_pipeline() -> Pipeline:
+def _make_pipeline() -> Pipeline[int, int]:
     return Pipeline([_AddOne(), _Double()])
 
 
@@ -291,7 +291,7 @@ def test_benchmark_per_operator_spans_present():
 # BenchmarkSweep
 # ---------------------------------------------------------------------------
 
-def _make_sweep_pipeline(**_) -> Pipeline:
+def _make_sweep_pipeline(**_) -> Pipeline[int, int]:
     return _make_pipeline()
 
 
@@ -700,7 +700,7 @@ def test_slug_colon_replaced():
 from ml_pipes.factory import pipeline_factory as _pipeline_factory, data_factory as _data_factory
 
 @_pipeline_factory
-def _builder_pipeline_factory(**_) -> Pipeline:
+def _builder_pipeline_factory(**_) -> Pipeline[int, int]:
     return Pipeline([_AddOne(), _Double()])
 
 
@@ -730,7 +730,7 @@ def test_builder_factory_constructor():
 
 
 def test_builder_factory_constructor_preserves_plain_dict_factory():
-    def make_pipeline(labels: dict[str, int]) -> Pipeline:
+    def make_pipeline(labels: dict[str, int]) -> Pipeline[int, int]:
         return _make_pipeline()
 
     b = BenchmarkBuilder.factory(make_pipeline)
@@ -740,7 +740,7 @@ def test_builder_factory_constructor_preserves_plain_dict_factory():
 
 
 def test_builder_factory_constructor_preserves_plain_keyword_factory():
-    def make_pipeline(value: int = 1) -> Pipeline:
+    def make_pipeline(value: int = 1) -> Pipeline[int, int]:
         return _make_pipeline()
 
     b = BenchmarkBuilder.factory(make_pipeline)
@@ -1374,7 +1374,7 @@ from ml_pipes import pipeline_factory, data_factory as data_factory_decorator
 
 
 @pipeline_factory
-def _strict_pipeline_factory(workers: int) -> Pipeline:
+def _strict_pipeline_factory(workers: int) -> Pipeline[int, int]:
     return _make_pipeline()
 
 

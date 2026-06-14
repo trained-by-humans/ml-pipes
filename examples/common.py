@@ -5,7 +5,19 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-from ml_pipes import Decode, DrawBoxes, DrawMasks, LoadFile, Pipeline, Recall, SaveImage, Store
+from ml_pipes import (
+    Decode,
+    Detections,
+    DrawBoxes,
+    DrawMasks,
+    ImagePayload,
+    LoadFile,
+    Pipeline,
+    Recall,
+    SaveImage,
+    Segmentations,
+    Store,
+)
 
 ASSETS_DIR = Path(__file__).parent / ".example_assets"
 
@@ -108,7 +120,7 @@ def download_if_missing(url: str, destination: Path) -> None:
         shutil.copyfileobj(response, target)
 
 
-def decode() -> Pipeline:
+def decode() -> Pipeline[str | Path, ImagePayload]:
     return Pipeline([
         LoadFile(),
         Decode(),
@@ -116,7 +128,10 @@ def decode() -> Pipeline:
     ])
 
 
-def visualize_and_store(output_path: Path, class_names: list[str] | None = None) -> Pipeline:
+def visualize_and_store(
+    output_path: Path,
+    class_names: list[str] | None = None,
+) -> Pipeline[Segmentations, tuple[ImagePayload, Segmentations]]:
     return Pipeline([
         Recall("source_image", index=0),
         DrawMasks(class_names=class_names),
@@ -125,7 +140,10 @@ def visualize_and_store(output_path: Path, class_names: list[str] | None = None)
     ])
 
 
-def visualize_detections_and_store(output_path: Path, class_names: list[str] | None = None) -> Pipeline:
+def visualize_detections_and_store(
+    output_path: Path,
+    class_names: list[str] | None = None,
+) -> Pipeline[Detections, tuple[ImagePayload, Detections]]:
     return Pipeline([
         Recall("source_image", index=0),
         DrawBoxes(class_names=class_names),

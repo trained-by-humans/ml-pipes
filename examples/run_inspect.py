@@ -75,7 +75,7 @@ from ml_pipes import (
 # ---------------------------------------------------------------------------
 
 def run_inspection_simple(model_path: Path, image_path: Path, output_path: Path) -> InspectionResult:
-    pipeline: Pipeline = (
+    pipeline = (
         decode()
         + yolo8_inference_pipeline(model_path)
         + visualize_detections_and_store(output_path, COCO_CLASSES)

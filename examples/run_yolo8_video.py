@@ -28,7 +28,7 @@ from ml_pipes import (
 #   python run_yolo8_video.py --input clip.mp4
 #   python run_yolo8_video.py --input clip.mp4 --output annotated.mp4
 
-def build_video_annotation_pipeline(model_path: Path) -> Pipeline:
+def build_video_annotation_pipeline(model_path: Path) -> Pipeline[ImagePayload, ImagePayload]:
     return Pipeline([
         Store("source_frame"),
         Embed(yolo8_inference_pipeline(model_path)),

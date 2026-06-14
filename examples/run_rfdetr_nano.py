@@ -15,7 +15,9 @@ from common import (
 from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
+    Detections,
     GatherScores,
+    ImagePayload,
     Infer,
     NMS,
     Normalize,
@@ -40,7 +42,7 @@ MODEL_NAME = "rfdetr_nano.onnx"
 INPUT_SIZE = (640, 640)
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detections]:
     return Pipeline(
         [
             Resize(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),

@@ -11,7 +11,7 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.torch"
 
 from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
-from ml_pipes import LogDetections, MapToObjects, Pipeline, Recall, ToSegmentations, inline
+from ml_pipes import LogDetections, MapPredictionsToObjects, Pipeline, Recall, ToSegmentations, inline
 from ml_pipes.torch import (
     ToNumpyRegistry,
     TorchArgMax,
@@ -244,7 +244,7 @@ def main() -> int:
                 ToNumpyRegistry(),
                 ToSegmentations(),
                 inline(visualize_and_store(output_path, bundle.class_names)),
-                MapToObjects(fields=record_fields, at=1),
+                MapPredictionsToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
         else:
@@ -273,7 +273,7 @@ def main() -> int:
                 ToNumpyRegistry(),
                 ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
                 inline(visualize_and_store(output_path, bundle.class_names)),
-                MapToObjects(fields=record_fields, at=1),
+                MapPredictionsToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
 

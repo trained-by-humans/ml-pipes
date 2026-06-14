@@ -178,8 +178,8 @@ class PipelineValidator:
             self._validate_contracts_strictly(boundaries)
 
         return TypeContract(
-            input_type=resolved_pipeline_input_type,
-            output_type=boundaries[-1].effective_output_type,
+            input_type=normalize_published_annotation(resolved_pipeline_input_type),
+            output_type=normalize_published_annotation(boundaries[-1].effective_output_type),
         )
 
     @staticmethod
@@ -188,7 +188,7 @@ class PipelineValidator:
         return f"{i}:{name}"
 
     def _validate_regions(self) -> None:
-        stack: list[tuple[RegionOpener, int]] = []
+        stack: list[tuple[RegionOpener[Any, Any], int]] = []
         for i, op in enumerate(self.operators):
             match op:
                 case RegionOpener() if stack and type(stack[-1][0]) is type(op):
@@ -451,6 +451,10 @@ def merge_annotations(left: Any, right: Any) -> Any:
         return right
     if right is None or right is Any:
         return left
+    if isinstance(left, TypeVar):
+        return _merge_typevar_annotation(left, right)
+    if isinstance(right, TypeVar):
+        return _merge_typevar_annotation(right, left)
     if left == right:
         return left
     if left is object:
@@ -545,8 +549,13 @@ def can_refine_annotation(current: Any, candidate: Any) -> bool:
 
 
 def materialize_probe_annotation(annotation: Any) -> Any:
+    if isinstance(annotation, TypeVar):
+        annotation = normalize_published_annotation(annotation)
     if annotation is Any or annotation is None or annotation is object:
         return int
+
+    if isinstance(annotation, tuple):
+        return tuple(materialize_probe_annotation(arg) for arg in annotation)
 
     origin = get_origin(annotation)
     if origin is None:
@@ -621,11 +630,11 @@ def is_annotation_compatible(produced: Any, expected_inputs: tuple[Any, ...]) ->
 
 def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
     if isinstance(expected, TypeVar):
-        bound = expected.__bound__
-        return bound is None or is_single_annotation_compatible(produced, bound)
+        bound = _typevar_constraint_annotation(expected)
+        return bound is Any or is_single_annotation_compatible(produced, bound)
     if isinstance(produced, TypeVar):
-        bound = produced.__bound__
-        if bound is None:
+        bound = _typevar_constraint_annotation(produced)
+        if bound is Any:
             return True
         return is_single_annotation_compatible(bound, expected)
     if expected is Any or produced is Any:
@@ -634,10 +643,16 @@ def is_single_annotation_compatible(produced: Any, expected: Any) -> bool:
         return True
     if is_concrete_assignable(produced, expected):
         return True
+    if is_union_annotation(expected):
+        return all(
+            any(
+                is_single_annotation_compatible(produced_option, expected_option)
+                for expected_option in get_args(expected)
+            )
+            for produced_option in _union_options(produced)
+        )
     produced_origin = get_origin(produced)
     expected_origin = get_origin(expected)
-    if is_union_annotation(expected):
-        return any(is_single_annotation_compatible(produced, option) for option in get_args(expected))
     if is_union_annotation(produced):
         return all(is_single_annotation_compatible(option, expected) for option in get_args(produced))
     if produced_origin is None:
@@ -664,6 +679,54 @@ def _combine_annotations(*annotations: Any) -> Any:
     for annotation in annotations[1:]:
         combined = combined | annotation
     return combined
+
+
+def _union_options(annotation: Any) -> tuple[Any, ...]:
+    if is_union_annotation(annotation):
+        return get_args(annotation)
+    return (annotation,)
+
+
+def _typevar_constraint_annotation(typevar: TypeVar) -> Any:
+    if typevar.__bound__ is not None:
+        return typevar.__bound__
+    if typevar.__constraints__:
+        return _combine_annotations(*typevar.__constraints__)
+    return Any
+
+
+def _merge_typevar_annotation(typevar: TypeVar, candidate: Any) -> Any:
+    if candidate == typevar:
+        return typevar
+    if candidate is Any or candidate is None:
+        return typevar
+
+    constraint = _typevar_constraint_annotation(typevar)
+    if constraint is Any:
+        return candidate
+    if is_single_annotation_compatible(candidate, constraint):
+        return candidate
+
+    normalized_constraint = normalize_published_annotation(constraint)
+    merged = merge_annotations(normalized_constraint, candidate)
+    if merged is not _UNBOUND:
+        return merged
+    return _UNBOUND
+
+
+def normalize_published_annotation(annotation: Any) -> Any:
+    if isinstance(annotation, TypeVar):
+        return normalize_published_annotation(_typevar_constraint_annotation(annotation))
+
+    if isinstance(annotation, tuple):
+        return tuple(normalize_published_annotation(arg) for arg in annotation)
+
+    origin = get_origin(annotation)
+    if origin is None:
+        return annotation
+
+    normalized_args = tuple(normalize_published_annotation(arg) for arg in get_args(annotation))
+    return _rebuild_annotation(origin, normalized_args)
 
 
 def _generic_origins_compatible(produced_origin: Any, expected_origin: Any) -> bool:
@@ -863,6 +926,9 @@ def _merge_typevar_binding(existing: Any, candidate: Any) -> Any:
 def _replace_typevars(annotation: Any, bindings: dict[TypeVar, Any]) -> Any:
     if isinstance(annotation, TypeVar):
         return bindings.get(annotation, annotation)
+
+    if isinstance(annotation, tuple):
+        return tuple(_replace_typevars(arg, bindings) for arg in annotation)
 
     origin = get_origin(annotation)
     if origin is None:

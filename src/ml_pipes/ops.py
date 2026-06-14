@@ -6,31 +6,52 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, Any, TypeVar, get_args, get_origin
+from typing import Literal, Any, Generic, TypeAlias, TypeVar, cast, get_args, get_origin, overload
 from typing import TextIO
 
 import numpy as np
+import numpy.typing as npt
 
 from .batch import BatchGate, LeaderBatch
 from .control import SHORT_CIRCUIT
 from .operator import Operator
-from .region import RegionCloser, RegionOpener
+from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
 from .scatter import ScatterGate
 from .selector import Selector, SelectorInput
-from .tracing import InvocationTrace, StepSpan, _NoOpTrace, merge_traces
+from .tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, merge_traces
 from .types import (
+    BoxPrediction,
+    ClassPrediction,
     Detections,
     ImagePayload,
     Prediction,
+    PredictionMask,
     RuntimeOutputs,
+    ScorePrediction,
     Segmentations,
     TensorPayload,
     TensorRegistry,
 )
 from .types import ResizeTransform
 from .validation import PipelineValidationError, is_annotation_compatible
+
+
+TensorLike: TypeAlias = (
+    TensorPayload
+    | np.ndarray
+    | tuple[TensorPayload, ...]
+    | tuple[np.ndarray, ...]
+    | list[TensorPayload]
+    | list[np.ndarray]
+)
+TensorMask: TypeAlias = npt.NDArray[np.bool_]
+TensorInput: TypeAlias = TensorLike | TensorRegistry
+TensorValueT = TypeVar("TensorValueT", bound=TensorLike)
+AsTypeModeT = TypeVar("AsTypeModeT", bound=bool)
+DetectT = TypeVar("DetectT", bound=Detections)
+SegT = TypeVar("SegT", bound=Segmentations)
 
 
 # ---------------------------------------------------------------------------
@@ -261,8 +282,28 @@ class Normalize:
 
 
 @Operator
-class AsType:
+class AsType(Generic[AsTypeModeT]):
+    @overload
+    def __init__(
+        self: "AsType[Literal[False]]",
+        dtype: str,
+        src: None = None,
+        as_: None = None,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self: "AsType[Literal[True]]",
+        dtype: str,
+        src: str,
+        as_: str | None = None,
+    ) -> None:
+        ...
+
     def __init__(self, dtype: str, src: str | None = None, as_: str | None = None):
+        if src is None and as_ is not None:
+            raise ValueError("AsType as_ requires src.")
         self.dtype = np.dtype(dtype)
         self.src = src
         self.as_ = as_ or src
@@ -270,19 +311,19 @@ class AsType:
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
         if self.src is not None:
             return (TensorRegistry,), TensorRegistry
-        tensor_like = (
-            TensorPayload
-            | np.ndarray
-            | tuple[TensorPayload, ...]
-            | tuple[np.ndarray, ...]
-            | list[TensorPayload]
-            | list[np.ndarray]
-        )
-        if current_output is not Any and is_annotation_compatible(current_output, (tensor_like,)):
+        if current_output is not Any and is_annotation_compatible(current_output, (TensorLike,)):
             return (current_output,), current_output
-        return (tensor_like,), tensor_like
+        return (TensorLike,), TensorLike
 
-    def __call__(self, value: object) -> object:
+    @overload
+    def __call__(self: "AsType[Literal[False]]", value: TensorValueT) -> TensorValueT:
+        ...
+
+    @overload
+    def __call__(self: "AsType[Literal[True]]", value: TensorRegistry) -> TensorRegistry:
+        ...
+
+    def __call__(self, value: Any) -> Any:
         if self.src is not None:
             if not isinstance(value, TensorRegistry):
                 raise TypeError(f"AsType src={self.src!r} requires TensorRegistry, got {type(value)!r}")
@@ -290,15 +331,18 @@ class AsType:
             return value
         return self._cast_value(value)
 
-    def _cast_value(self, value: object) -> object:
+    def _cast_value(self, value: TensorValueT) -> TensorValueT:
         if isinstance(value, TensorPayload):
-            return TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype))
+            return cast(
+                TensorValueT,
+                TensorPayload(array=value.array.astype(self.dtype, copy=False), layout=value.layout, dtype=str(self.dtype)),
+            )
         if isinstance(value, np.ndarray):
-            return self._cast_array(value)
+            return cast(TensorValueT, self._cast_array(value))
         if isinstance(value, tuple):
-            return tuple(self._cast_sequence_item(item) for item in value)
+            return cast(TensorValueT, tuple(self._cast_sequence_item(item) for item in value))
         if isinstance(value, list):
-            return [self._cast_sequence_item(item) for item in value]
+            return cast(TensorValueT, [self._cast_sequence_item(item) for item in value])
         raise TypeError(f"AsType does not support value type {type(value)!r}")
 
     def _cast_sequence_item(self, value: object) -> TensorPayload | np.ndarray:
@@ -918,7 +962,7 @@ class NMM:
 class CreateTensorMask:
     """Creates a boolean mask tensor from one source tensor."""
 
-    def __init__(self, src: str, predicate: Callable[[Any], Any], as_: str):
+    def __init__(self, src: str, predicate: Callable[[np.ndarray], TensorMask], as_: str):
         self.src = src
         self.as_ = as_
         self.predicate = predicate
@@ -997,6 +1041,8 @@ class SelectTensors:
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         indices = registry[self.indices]
+        if np.issubdtype(indices.dtype, np.bool_):
+            raise TypeError("SelectTensors indices must be integers; use ApplyTensorMask for boolean masks.")
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][indices]
         return registry
@@ -1004,27 +1050,37 @@ class SelectTensors:
 
 @Operator
 class FilterTensors:
-    """Filters one or more tensors using a single user-supplied predicate.
+    """Filters one or more tensors using a mask derived from one source tensor.
 
-    The predicate is evaluated once and the resulting mask is applied to every
-    key. All keys are updated in-place.
+    The predicate is evaluated once against ``registry[by]`` and the resulting
+    mask is applied to every source key. All keys are updated in-place.
 
     Example — keep only person and car before NMS:
-        FilterTensors("boxes", "scores", "classes", predicate=lambda r: [c in {0, 2} for c in r["classes"]])
+        FilterTensors(
+            "boxes",
+            "scores",
+            "classes",
+            by="classes",
+            predicate=lambda classes: np.isin(classes, [0, 2]),
+        )
     """
 
     def __init__(
         self,
         *srcs: str,
-        predicate: Callable[[TensorRegistry], Any],
+        by: str,
+        predicate: Callable[[np.ndarray], TensorMask],
         as_: str | tuple[str, ...] | None = None,
     ):
         self.srcs = srcs
+        self.by = by
         self.predicate = predicate
         self.dst_names = _resolve_multi_output_names("FilterTensors", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        mask = self.predicate(registry)
+        mask = np.asarray(self.predicate(registry[self.by]))
+        if not np.issubdtype(mask.dtype, np.bool_):
+            raise TypeError("FilterTensors predicate must return a boolean mask.")
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][mask]
         return registry
@@ -1050,7 +1106,32 @@ class FilterTensorsByScore:
         all_srcs = (score,) + tuple(s for s in srcs if s != score)
         self._inner = FilterTensors(
             *all_srcs,
-            predicate=lambda r: r[score] >= min_score,
+            by=score,
+            predicate=lambda scores: scores >= min_score,
+            as_=as_,
+        )
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
+@Operator
+class FilterTensorsByClasses:
+    """Filters tensors by class id membership."""
+
+    def __init__(
+        self,
+        *srcs: str,
+        classes: str = "classes",
+        keep_classes: Collection[int],
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        all_srcs = (classes,) + tuple(src for src in srcs if src != classes)
+        allowed_classes = tuple(keep_classes)
+        self._inner = FilterTensors(
+            *all_srcs,
+            by=classes,
+            predicate=lambda values: np.isin(values, allowed_classes),
             as_=as_,
         )
 
@@ -1070,18 +1151,15 @@ class FilterTensorsByMasksArea:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
-        self.srcs = all_srcs
-        self.masks = masks
-        self.min_area = min_area
-        self.dst_names = _resolve_multi_output_names("FilterTensorsByMasksArea", all_srcs, as_)
+        self._inner = FilterTensors(
+            *all_srcs,
+            by=masks,
+            predicate=lambda tensor: _flatten_leading_dim(np.asarray(tensor, dtype=bool)).sum(axis=1) >= min_area,
+            as_=as_,
+        )
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        masks = registry[self.masks]
-        areas = _flatten_leading_dim(np.asarray(masks, dtype=bool)).sum(axis=1)
-        keep = areas >= self.min_area
-        for src, dst in zip(self.srcs, self.dst_names, strict=True):
-            registry[dst] = registry[src][keep]
-        return registry
+        return self._inner(registry)
 
 
 @Operator
@@ -1092,7 +1170,7 @@ class MapTensor:
         MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes")
     """
 
-    def __init__(self, src: str, fn: Callable[[Any], Any], as_: str | None = None):
+    def __init__(self, src: str, fn: Callable[[np.ndarray], np.ndarray], as_: str | None = None):
         self.src = src
         self.fn = fn
         self.as_ = as_ or src
@@ -1311,6 +1389,7 @@ class ProjectMasks:
 
         masks = registry[self.masks]   # (N, proto_H, proto_W)
         boxes = registry[self.boxes]   # (N, 4) xyxy — original image space
+        count = masks.shape[0]
         resized_h, resized_w = transform.resized_shape
         orig_h, orig_w = transform.original_shape
         scale_x, scale_y = transform.scale
@@ -1321,8 +1400,11 @@ class ProjectMasks:
         #   original → model input:  x_model = x_orig * scale + pad
         #   model input → prototype: x_proto = x_model * (proto / resized)
         proto_boxes = boxes.astype(np.float32).copy()
-        proto_boxes[:, [0, 2]] = (proto_boxes[:, [0, 2]] * scale_x + pad_x) * (proto_w / resized_w)
-        proto_boxes[:, [1, 3]] = (proto_boxes[:, [1, 3]] * scale_y + pad_y) * (proto_h / resized_h)
+        proto_x = (proto_boxes[:, [0, 2]] * scale_x + pad_x) * (proto_w / resized_w)
+        proto_boxes[:, [0, 2]] = proto_x
+
+        proto_y = (proto_boxes[:, [1, 3]] * scale_y + pad_y) * (proto_h / resized_h)
+        proto_boxes[:, [1, 3]] = proto_y
 
         # Zero outside each box — vectorised on the small (N, proto_H, proto_W) tensor
         x1 = proto_boxes[:, 0].clip(0, proto_w)[:, None, None]
@@ -1331,7 +1413,10 @@ class ProjectMasks:
         y2 = proto_boxes[:, 3].clip(0, proto_h)[:, None, None]
         cols = np.arange(proto_w, dtype=np.float32)[None, None, :]
         rows = np.arange(proto_h, dtype=np.float32)[None, :, None]
-        masks = masks * ((cols >= x1) & (cols < x2) & (rows >= y1) & (rows < y2))
+        inside_cols = (cols >= x1) & (cols < x2)
+        inside_rows = (rows >= y1) & (rows < y2)
+        inside_boxes = inside_cols & inside_rows
+        masks = masks * inside_boxes
 
         # Upsample each zeroed mask to original image size
         top    = max(int(round(pad_y - 0.1)), 0)
@@ -1339,11 +1424,13 @@ class ProjectMasks:
         bottom = min(int(round(resized_h - pad_y + 0.1)), resized_h)
         right  = min(int(round(resized_w - pad_x + 0.1)), resized_w)
 
-        projected = []
-        for mask in masks:
+        projected = np.empty((count, orig_h, orig_w), dtype=np.uint8)
+        for index, mask in enumerate(masks):
             upsampled = cv2.resize(mask, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
-            projected.append((cv2.resize(upsampled[top:bottom, left:right], (orig_w, orig_h),
-                                         interpolation=cv2.INTER_LINEAR) > self.mask_threshold).astype(np.uint8))
+            cropped = upsampled[top:bottom, left:right]
+            resized = cv2.resize(cropped, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+            thresholded = resized > self.mask_threshold
+            projected[index] = thresholded.astype(np.uint8)
 
         registry[self.masks] = projected
         return registry
@@ -1428,12 +1515,11 @@ class ToSegmentations:
         self.masks = masks
 
     def __call__(self, registry: TensorRegistry) -> Segmentations:
-        masks_data = registry[self.masks]
         return Segmentations(
             boxes=registry[self.boxes].tolist(),
             scores=registry[self.scores].tolist(),
             classes=registry[self.classes].tolist(),
-            masks=list(masks_data) if isinstance(masks_data, np.ndarray) else masks_data,
+            masks=list(registry[self.masks]),
         )
 
 
@@ -1442,20 +1528,32 @@ class ToSegmentations:
 # ---------------------------------------------------------------------------
 
 PredictionT = TypeVar("PredictionT", bound=Prediction)
+ClassPredictionT = TypeVar("ClassPredictionT", bound=ClassPrediction)
+ScorePredictionT = TypeVar("ScorePredictionT", bound=ScorePrediction)
+BoxPredictionT = TypeVar("BoxPredictionT", bound=BoxPrediction)
+BatchItemT = TypeVar("BatchItemT")
+ScatterItemT = TypeVar("ScatterItemT")
+PayloadT = TypeVar("PayloadT")
+ObjectPrefixT = TypeVar("ObjectPrefixT")
+ObjectIndexT = TypeVar("ObjectIndexT", bound=int | None)
+PickIndexT = TypeVar("PickIndexT", bound=int)
+PickFirstT = TypeVar("PickFirstT")
+PickSecondT = TypeVar("PickSecondT")
+ObjectMapping: TypeAlias = dict[str, object]
 
 
 @Operator
-class FilterPredictions:
+class FilterPredictions(Generic[PredictionT]):
     """Filters a Prediction (or any subclass) using a user-supplied predicate.
 
-    The predicate receives the full Prediction and must return a bool list or
-    index array. Every field is sliced uniformly via Prediction.filter().
+    The predicate receives the full Prediction and must return a boolean mask.
+    Every field is sliced uniformly via Prediction.filter().
 
     Example:
         FilterPredictions(predicate=lambda p: [c in {0, 2} for c in p.classes])
     """
 
-    def __init__(self, predicate: Callable[[Any], Any]):
+    def __init__(self, predicate: Callable[[PredictionT], PredictionMask]):
         self.predicate = predicate
 
     def __call__(self, prediction: PredictionT) -> PredictionT:
@@ -1466,11 +1564,11 @@ class FilterPredictions:
 class FilterPredictionsByClass:
     """Keep only predictions whose class is in the given set."""
 
-    def __init__(self, classes: set[int]):
-        self._inner = FilterPredictions(lambda p: [c in classes for c in p.classes])
+    def __init__(self, classes: Collection[int]):
+        self.classes = frozenset(classes)
 
-    def __call__(self, prediction: PredictionT) -> PredictionT:
-        return self._inner(prediction)
+    def __call__(self, prediction: ClassPredictionT) -> ClassPredictionT:
+        return prediction.filter([class_id in self.classes for class_id in prediction.classes])
 
 
 @Operator
@@ -1478,10 +1576,10 @@ class FilterPredictionsByScore:
     """Drop predictions below min_score."""
 
     def __init__(self, min_score: float):
-        self._inner = FilterPredictions(lambda p: [s >= min_score for s in p.scores])
+        self.min_score = min_score
 
-    def __call__(self, prediction: PredictionT) -> PredictionT:
-        return self._inner(prediction)
+    def __call__(self, prediction: ScorePredictionT) -> ScorePredictionT:
+        return prediction.filter([score >= self.min_score for score in prediction.scores])
 
 
 @Operator
@@ -1489,29 +1587,31 @@ class FilterPredictionsByArea:
     """Drop predictions whose box area (xyxy) falls outside [min_area, max_area] pixel²."""
 
     def __init__(self, min_area: float = 0, max_area: float | None = None):
-        def predicate(p: Any) -> list[bool]:
-            result = []
-            for x1, y1, x2, y2 in p.boxes:
-                area = (x2 - x1) * (y2 - y1)
-                result.append(area >= min_area and (max_area is None or area <= max_area))
-            return result
-        self._inner = FilterPredictions(predicate)
+        self.min_area = min_area
+        self.max_area = max_area
 
-    def __call__(self, prediction: PredictionT) -> PredictionT:
-        return self._inner(prediction)
+    def __call__(self, prediction: BoxPredictionT) -> BoxPredictionT:
+        return prediction.filter([
+            (x2 - x1) * (y2 - y1) >= self.min_area
+            and (self.max_area is None or (x2 - x1) * (y2 - y1) <= self.max_area)
+            for x1, y1, x2, y2 in prediction.boxes
+        ])
 
 
 # ---------------------------------------------------------------------------
 # Side-effect base class
 # ---------------------------------------------------------------------------
 
-class SideEffectOp(ABC):
+class SideEffectOp(ABC, Generic[PayloadT]):
     """Base for operators that perform a side effect and return their input unchanged.
 
     Subclasses implement `effect(payload)` instead of `__call__`. The base class
     owns `__call__` to enforce the passthrough contract — the input is always
     returned verbatim. `resolve_contract` threads the upstream type through so
     these operators work transparently in strict pipelines.
+
+    For static typing, ``SideEffectOp[T]`` behaves like a ``T -> T`` operator
+    whose only purpose is to introduce an external effect.
     """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -1522,10 +1622,10 @@ class SideEffectOp(ABC):
             )
 
     @abstractmethod
-    def effect(self, payload: Any) -> None:
+    def effect(self, payload: PayloadT) -> None:
         raise NotImplementedError
 
-    def __call__(self, payload: Any) -> Any:
+    def __call__(self, payload: PayloadT) -> PayloadT:
         self.effect(payload)
         return payload
 
@@ -1557,7 +1657,7 @@ class DrawBoxes:
         self.thickness = thickness
         self.font_scale = font_scale
 
-    def __call__(self, source_image: ImagePayload, detections: Detections) -> tuple[ImagePayload, Detections]:
+    def __call__(self, source_image: ImagePayload, detections: DetectT) -> tuple[ImagePayload, DetectT]:
         import cv2
 
         if source_image is None:
@@ -1602,7 +1702,7 @@ class DrawMasks:
         self.class_names = tuple(class_names) if class_names is not None else None
         self.alpha = alpha
 
-    def __call__(self, source_image: ImagePayload, segmentations: Segmentations) -> tuple[ImagePayload, Segmentations]:
+    def __call__(self, source_image: ImagePayload, segmentations: SegT) -> tuple[ImagePayload, SegT]:
         if source_image is None:
             raise ValueError("source_image missing from context; cannot draw masks")
 
@@ -1627,15 +1727,16 @@ class DrawMasks:
 
 
 @Operator
-class SaveImage(SideEffectOp):
+class SaveImage(SideEffectOp[PayloadT], Generic[PayloadT]):
     def __init__(self, output_path: str | Path, at: int | None = None):
         self.output_path = Path(output_path)
         self.at = at
 
-    def effect(self, payload: Any) -> None:
+    def effect(self, payload: PayloadT) -> None:
         import cv2
 
-        image_payload = payload[self.at] if self.at is not None else payload
+        payload_value: Any = payload
+        image_payload = payload_value[self.at] if self.at is not None else payload_value
         if image_payload.layout != "HWC":
             raise ValueError(f"SaveImage expects HWC image layout, got {image_payload.layout}")
 
@@ -1646,30 +1747,87 @@ class SaveImage(SideEffectOp):
 
 
 @Operator
-class MapToObjects:
-    # Intentionally uses `object → Any`: output type depends on runtime `at` indexing
-    # and cannot be resolved without custom resolve_contract. Not a SideEffectOp.
+class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
+    """Converts one prediction-like payload into row-oriented object records.
+
+    Typing stays intentionally narrow:
+    - `at=None` maps `Prediction -> list[dict[str, object]]`
+    - `at=1` maps `tuple[X, Prediction] -> tuple[X, list[dict[str, object]]]`
+
+    Other `at` values still work at runtime, but fall back to `Any` statically.
+    """
+
+    @overload
+    def __init__(
+        self: "MapPredictionsToObjects[None, PredictionT]",
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
+        at: None = None,
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self: "MapPredictionsToObjects[Literal[1], PredictionT]",
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
+        at: Literal[1],
+    ) -> None:
+        ...
+
+    @overload
+    def __init__(
+        self: "MapPredictionsToObjects[int, PredictionT]",
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
+        at: int,
+    ) -> None:
+        ...
+
     def __init__(
         self,
-        fields: dict[str, str | Callable[[object], Sequence[object]]],
+        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
         at: int | None = None,
-    ):
+    ) -> None:
         self.fields = fields
         self.at = at
 
+    @overload
+    def __call__(
+        self: "MapPredictionsToObjects[None, PredictionT]",
+        payload: PredictionT,
+    ) -> list[ObjectMapping]:
+        ...
+
+    @overload
+    def __call__(
+        self: "MapPredictionsToObjects[Literal[1], PredictionT]",
+        payload: tuple[ObjectPrefixT, PredictionT],
+    ) -> tuple[ObjectPrefixT, list[ObjectMapping]]:
+        ...
+
+    @overload
     def __call__(self, payload: object) -> Any:
-        prediction_arrays = payload[self.at] if self.at is not None else payload
+        ...
+
+    def __call__(self, payload: object) -> Any:
+        prediction_arrays = self._resolve_prediction_value(payload)
         columns: dict[str, Sequence[object]] = {}
         for field_name, source in self.fields.items():
             if isinstance(source, str):
-                column = getattr(prediction_arrays, source)
+                try:
+                    column = getattr(prediction_arrays, source)
+                except AttributeError as exc:
+                    raise AttributeError(
+                        f"MapPredictionsToObjects field {field_name!r} references missing attribute "
+                        f"{source!r} on {type(prediction_arrays).__name__}"
+                    ) from exc
             else:
                 column = source(prediction_arrays)
             columns[field_name] = column
 
         lengths = {len(column) for column in columns.values()}
         if len(lengths) > 1:
-            raise ValueError(f"MapToObjects requires equal-length collections, got lengths {sorted(lengths)}")
+            raise ValueError(
+                f"MapPredictionsToObjects requires equal-length collections, got lengths {sorted(lengths)}"
+            )
 
         records: list[dict[str, object]] = []
         field_names = tuple(columns.keys())
@@ -1678,12 +1836,60 @@ class MapToObjects:
             record = dict(zip(field_names, row, strict=True))
             records.append(record)
         if self.at is not None:
-            return payload[:self.at] + (records,) + payload[self.at + 1:]
+            payload_tuple = cast(tuple[object, ...], payload)
+            return payload_tuple[:self.at] + (records,) + payload_tuple[self.at + 1:]
         return records
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations, expand_output_annotation
+        if self.at is None:
+            if current_output is not Any and is_annotation_compatible(current_output, (Prediction,)):
+                return (current_output,), list[ObjectMapping]
+            return (Any,), Any
+
+        if current_output is Any:
+            return (Any,), Any
+
+        if get_origin(current_output) is tuple:
+            parts = get_args(current_output)
+        elif isinstance(current_output, tuple):
+            parts = current_output
+        else:
+            return (Any,), Any
+
+        index = self.at
+        if index is None:
+            return (Any,), Any
+        normalized_index = index if index >= 0 else len(parts) + index
+        if normalized_index < 0 or normalized_index >= len(parts):
+            error_type = validation_error_type or PipelineValidationError
+            raise error_type(
+                f"MapPredictionsToObjects(at={self.at}) is out of bounds for "
+                f"{current_output} (length {len(parts)})"
+            )
+        if not is_annotation_compatible(parts[normalized_index], (Prediction,)):
+            return (Any,), Any
+        updated_parts = parts[:normalized_index] + (list[ObjectMapping],) + parts[normalized_index + 1:]
+        return (current_output,), updated_parts
+
+    def _resolve_prediction_value(self, payload: object) -> PredictionT:
+        if self.at is None:
+            return cast(PredictionT, payload)
+        if not isinstance(payload, tuple):
+            raise TypeError(
+                f"MapPredictionsToObjects(at={self.at}) requires a tuple payload, got {type(payload)!r}"
+            )
+        return cast(PredictionT, payload[self.at])
 
 
 @Operator
-class LogDetections(SideEffectOp):
+class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
     def __init__(
         self,
         model_path: str | Path,
@@ -1700,8 +1906,9 @@ class LogDetections(SideEffectOp):
         self.stream = stream or sys.stdout
         self.at = at
 
-    def effect(self, payload: Any) -> None:
-        prediction_objects = payload[self.at] if self.at is not None else payload
+    def effect(self, payload: PayloadT) -> None:
+        payload_value: Any = payload
+        prediction_objects = payload_value[self.at] if self.at is not None else payload_value
         print(
             json.dumps(
                 {
@@ -1753,7 +1960,7 @@ class Select:
 
 
 @Operator
-class Pick:
+class Pick(Generic[PickIndexT]):
     """Selects one or more elements from a tuple by index, discarding the rest.
 
     A pure routing operator: it changes which value flows forward but never
@@ -1761,12 +1968,42 @@ class Pick:
     ResizeTransform and keep only the ImagePayload before inference.
     """
 
+    @overload
+    def __init__(self: "Pick[Literal[0]]", index: Literal[0]) -> None:
+        ...
+
+    @overload
+    def __init__(self: "Pick[Literal[1]]", index: Literal[1]) -> None:
+        ...
+
+    @overload
+    def __init__(self: "Pick[int]", *indices: int) -> None:
+        ...
+
     def __init__(self, *indices: int):
         if not indices:
             raise ValueError("Pick requires at least one index")
         self.indices = indices
 
-    def __call__(self, current: tuple) -> Any:
+    @overload
+    def __call__(
+        self: "Pick[Literal[0]]",
+        current: tuple[PickFirstT, PickSecondT],
+    ) -> PickFirstT:
+        ...
+
+    @overload
+    def __call__(
+        self: "Pick[Literal[1]]",
+        current: tuple[PickFirstT, PickSecondT],
+    ) -> PickSecondT:
+        ...
+
+    @overload
+    def __call__(self, current: tuple[Any, ...]) -> Any:
+        ...
+
+    def __call__(self, current: tuple[Any, ...]) -> Any:
         if not isinstance(current, tuple):
             raise TypeError("Pick can only be applied to tuple outputs")
         selected = tuple(current[index] for index in self.indices)
@@ -1781,34 +2018,68 @@ class Pick:
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        if current_output is Any:
-            return (Any,), Any
-        if get_origin(current_output) is tuple:
-            parts = get_args(current_output)
-        elif isinstance(current_output, tuple):
-            parts = current_output
-        else:
-            error_type = validation_error_type or PipelineValidationError
-            raise error_type(
-                f"Pick requires a tuple boundary, got {current_output}"
-            )
+        del stored_annotations, expand_output_annotation
+        error_type = validation_error_type or PipelineValidationError
 
-        selected = []
-        for i in self.indices:
-            if i >= len(parts):
-                raise validation_error_type(
-                    f"Pick({i}) is out of bounds for {current_output} (length {len(parts)})"
-                )
-            selected.append(parts[i])
-        selected = tuple(selected)
-        return (Any,), selected[0] if len(selected) == 1 else selected
+        if current_output is Any or current_output is tuple:
+            return (tuple[Any, ...],), Any
+
+        repeated_item = self._homogeneous_tuple_item(current_output)
+        if repeated_item is not None:
+            selected = tuple(repeated_item for _ in self.indices)
+            return (current_output,), selected[0] if len(selected) == 1 else tuple[selected]
+
+        parts = self._fixed_tuple_parts(current_output)
+        if parts is None:
+            raise error_type(f"Pick requires a tuple boundary, got {current_output}")
+
+        selected = tuple(
+            parts[self._normalize_fixed_index(index, len(parts), current_output, error_type)]
+            for index in self.indices
+        )
+        input_annotation = current_output if get_origin(current_output) is tuple else tuple[parts]
+        return (input_annotation,), selected[0] if len(selected) == 1 else tuple[selected]
+
+    @staticmethod
+    def _fixed_tuple_parts(annotation: Any) -> tuple[Any, ...] | None:
+        if isinstance(annotation, tuple):
+            return annotation
+        if get_origin(annotation) is not tuple:
+            return None
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return None
+        return args
+
+    @staticmethod
+    def _homogeneous_tuple_item(annotation: Any) -> Any | None:
+        if get_origin(annotation) is not tuple:
+            return None
+        args = get_args(annotation)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return args[0]
+        return None
+
+    @staticmethod
+    def _normalize_fixed_index(
+        index: int,
+        size: int,
+        current_output: Any,
+        error_type: type[Exception],
+    ) -> int:
+        normalized_index = index if index >= 0 else size + index
+        if normalized_index < 0 or normalized_index >= size:
+            raise error_type(
+                f"Pick({index}) is out of bounds for {current_output} (length {size})"
+            )
+        return normalized_index
 
 
 # ---------------------------------------------------------------------------
 # Batch coordination
 # ---------------------------------------------------------------------------
 
-class UnBatch(RegionCloser):
+class UnBatch(RegionCloser[list[BatchItemT], BatchItemT]):
     """
     Batch coordination exit point.
 
@@ -1832,7 +2103,7 @@ class UnBatch(RegionCloser):
 
 
 @Operator
-class Batch(RegionOpener):
+class Batch(RegionOpener[BatchItemT, list[BatchItemT]]):
     """
     Batch coordination entry point.
 
@@ -1863,11 +2134,11 @@ class Batch(RegionOpener):
 
     def run_region(
         self,
-        current: Any,
+        current: BatchItemT,
         label: str,
-        execute_region: Callable,
-        trace: Any,
-        cfg: Any,
+        execute_region: RegionExecutor[list[BatchItemT], Any],
+        trace: RegionTraceLike,
+        cfg: TracingConfig | None,
     ) -> Any:
         gate = self.gate
 
@@ -1920,7 +2191,7 @@ class Batch(RegionOpener):
 # Scatter / Gather
 # ---------------------------------------------------------------------------
 
-class Gather(RegionCloser):
+class Gather(RegionCloser[ScatterItemT, list[ScatterItemT]]):
     """
     Scatter/Gather exit point.
 
@@ -1941,7 +2212,7 @@ class Gather(RegionCloser):
 
 
 @Operator
-class Scatter(RegionOpener):
+class Scatter(RegionOpener[list[ScatterItemT], ScatterItemT]):
     """
     Scatter/Gather entry point.
 
@@ -1972,15 +2243,15 @@ class Scatter(RegionOpener):
 
     def run_region(
         self,
-        current: Any,
+        current: list[ScatterItemT],
         label: str,
-        execute_region: Callable,
-        trace: Any,
-        cfg: Any,
+        execute_region: RegionExecutor[ScatterItemT, Any],
+        trace: RegionTraceLike,
+        cfg: TracingConfig | None,
     ) -> Any:
         gate = self.gate
         collecting = isinstance(trace, InvocationTrace)
-        items: list[Any] = current
+        items = current
         n_items = len(items)
 
         def run_region(entry: Any) -> None:

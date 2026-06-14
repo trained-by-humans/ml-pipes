@@ -33,11 +33,14 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TypeVar
 
 import numpy as np
 
 from ml_pipes import Gather, Inline, Pipeline, PipelineInspector, Scatter
+
+
+ValueT = TypeVar("ValueT")
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +65,7 @@ class Fail:
     def __init__(self, message: str = "intentional failure") -> None:
         self.message = message
 
-    def __call__(self, value: Any) -> Any:
+    def __call__(self, value: ValueT) -> ValueT:
         raise RuntimeError(self.message)
 
 
@@ -75,7 +78,7 @@ class AddOne:
 # Scenarios
 # ---------------------------------------------------------------------------
 
-def run_mid_pipeline() -> Any:
+def run_mid_pipeline():
     pipeline = Pipeline([MakeArray(), _ScaleArray(2.0), Fail(), AddOne()])
     pipeline.describe()
     result = pipeline.inspect(100)
@@ -83,7 +86,7 @@ def run_mid_pipeline() -> Any:
     return result
 
 
-def run_first_step() -> Any:
+def run_first_step():
     pipeline = Pipeline([Fail("bad input"), _ScaleArray(1.5), AddOne()])
     pipeline.describe()
     result = pipeline.inspect(42)
@@ -91,7 +94,7 @@ def run_first_step() -> Any:
     return result
 
 
-def run_nested() -> Any:
+def run_nested():
     inner = Pipeline([_ScaleArray(3.0), Fail("inner failure"), AddOne()])
     pipeline = Pipeline([
         Scatter(max_concurrency=2),

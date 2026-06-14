@@ -7,6 +7,7 @@ from ml_pipes import (
     ArgMax,
     ConvertBoxFormat,
     Decode,
+    Detections,
     LoadFile,
     GatherScores,
     Infer,
@@ -32,7 +33,7 @@ def main() -> int:
         return 1
 
     model_path, image_path = sys.argv[1], sys.argv[2]
-    pipeline = Pipeline(
+    pipeline: Pipeline[str, Detections] = Pipeline(
         [
             LoadFile(),
             Decode(),

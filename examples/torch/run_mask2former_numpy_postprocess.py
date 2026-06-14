@@ -19,7 +19,7 @@ from ml_pipes import (
     FilterTensorsByScore,
     GatherScores,
     LogDetections,
-    MapToObjects,
+    MapPredictionsToObjects,
     MasksToBoxes,
     MeanMaskScores,
     MultiplyTensors,
@@ -246,7 +246,7 @@ def main() -> int:
                 MasksToBoxes(as_="boxes"),
                 ToSegmentations(),
                 inline(visualize_and_store(output_path, bundle.class_names)),
-                MapToObjects(fields=record_fields, at=1),
+                MapPredictionsToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
         else:
@@ -275,7 +275,7 @@ def main() -> int:
                 MasksToBoxes(masks="binary_masks", as_="boxes"),
                 ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
                 inline(visualize_and_store(output_path, bundle.class_names)),
-                MapToObjects(fields=record_fields, at=1),
+                MapPredictionsToObjects(fields=record_fields, at=1),
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
 

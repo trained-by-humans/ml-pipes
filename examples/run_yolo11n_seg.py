@@ -18,6 +18,7 @@ from ml_pipes import (
     SelectTensors,
     ConvertBoxFormat,
     GatherScores,
+    ImagePayload,
     Infer,
     NMS,
     Normalize,
@@ -29,6 +30,7 @@ from ml_pipes import (
     Recall,
     Resize,
     Extract,
+    Segmentations,
     Slice,
     Squeeze,
     Store,
@@ -44,7 +46,7 @@ MODEL_NAME = "yolo11n-seg.onnx"
 NUM_MASKS = 32
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segmentations]:
     return Pipeline(
         [
             Resize((640, 640)),

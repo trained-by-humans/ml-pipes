@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import types
+from typing import Any
 
 import pytest
 
@@ -189,7 +190,7 @@ def test_pipeline_factory_ensure_factory_promotes_base_factory():
 
 def test_pipeline_factory_build_validates_config():
     @pipeline_factory
-    def build_pipeline(workers: int) -> Pipeline:
+    def build_pipeline(workers: int) -> Pipeline[Any, Any]:
         return Pipeline([])
 
     with pytest.raises(TypeError, match="pipeline factory is missing required config key.*workers"):

@@ -12,10 +12,12 @@ dependencies = [
     "numpy>=1.26",
     "opencv-python>=4.9",
     "onnxruntime>=1.18",
+    "typing_extensions>=4.9",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "mypy>=1.10",
     "pytest>=8.0",
 ]
 otel = [
@@ -35,6 +37,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ml_pipes = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

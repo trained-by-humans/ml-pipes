@@ -11,6 +11,7 @@ from ml_pipes import (
     Extract,
     FilterPredictionsByClass,
     FilterPredictionsByScore,
+    FilterTensorsByClasses,
     FilterTensorsByScore,
     Gather,
     InvocationTrace,
@@ -564,6 +565,15 @@ def test_describe_captures_wrapper_constructor_args():
     }
     assert repr(Pipeline([FilterTensorsByScore("boxes", score="scores", min_score=0.75)])) == _pipeline_text(
         "FilterTensorsByScore('boxes', score='scores', min_score=0.75)"
+    )
+
+    assert Pipeline([FilterTensorsByClasses("boxes", classes="classes", keep_classes=[0, 2])]).describe().operators[0].passed_args == {
+        "srcs": ("boxes",),
+        "classes": "classes",
+        "keep_classes": [0, 2],
+    }
+    assert repr(Pipeline([FilterTensorsByClasses("boxes", classes="classes", keep_classes=[0, 2])])) == _pipeline_text(
+        "FilterTensorsByClasses('boxes', classes='classes', keep_classes=[0, 2])"
     )
 
     assert Pipeline([AsType("float16")]).describe().operators[0].passed_args == {

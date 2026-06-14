@@ -17,7 +17,9 @@ from ml_pipes import (
     AsType,
     ArgMax,
     ConvertBoxFormat,
+    Detections,
     GatherScores,
+    ImagePayload,
     Infer,
     NMS,
     Normalize,
@@ -38,7 +40,7 @@ MODEL_URL = "https://huggingface.co/webnn/yolo11n/resolve/main/onnx/yolo11n_fp16
 MODEL_NAME = "yolo11n_fp16.onnx"
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detections]:
     return Pipeline(
         [
             Resize(

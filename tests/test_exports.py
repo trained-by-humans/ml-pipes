@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.resources
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,10 @@ def test_ml_pipes_exports_operator_decorator_and_type_alias() -> None:
     assert hasattr(ml_pipes, "OperatorLike")
     assert "Operator" in ml_pipes.__all__
     assert "OperatorLike" in ml_pipes.__all__
+
+
+def test_ml_pipes_includes_py_typed_marker() -> None:
+    assert importlib.resources.files("ml_pipes").joinpath("py.typed").is_file()
 
 
 def test_ml_pipes_torch_exports_all_public_ops_and_aliases() -> None:

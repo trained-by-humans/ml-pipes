@@ -104,7 +104,7 @@ At a high level, mixed pipelines would look like this:
 Example boundary crossing:
 
 ```python
-from ml_pipes import ArgMax, Decode, GatherScores, MapToObjects, Normalize, Pipeline, Resize, Slice, ToDetections
+from ml_pipes import ArgMax, Decode, GatherScores, MapPredictionsToObjects, Normalize, Pipeline, Resize, Slice, ToDetections
 from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
 
 pipeline = Pipeline([
@@ -120,7 +120,7 @@ pipeline = Pipeline([
     ArgMax("class_scores", as_="classes"),
     GatherScores("class_scores", "classes", as_="scores"),
     ToDetections(boxes="boxes", scores="scores", classes="classes"),
-    MapToObjects(fields={"score": "scores", "class_id": "classes", "box": "boxes"}),
+    MapPredictionsToObjects(fields={"score": "scores", "class_id": "classes", "box": "boxes"}),
 ])
 ```
 

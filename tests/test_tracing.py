@@ -71,7 +71,7 @@ def _failing(x: int) -> int:
     raise ValueError("boom")
 
 
-def _make_pipeline(ops: list, **kw) -> tuple[Pipeline, _Capture]:
+def _make_pipeline(ops: list[Any], **kw) -> tuple[Pipeline[Any, Any], _Capture]:
     cap = _Capture()
     p = Pipeline(ops, tracing=TracingConfig(collector=cap, **kw))
     return p, cap
@@ -323,8 +323,8 @@ def test_shapes_recorded_for_tensor_payload():
 # Batch — traced path span structure
 # ---------------------------------------------------------------------------
 
-def _make_batch_pipeline(capture: _Capture) -> Pipeline:
-    def _identity_batch(x: list[Any]) -> list[Any]:
+def _make_batch_pipeline(capture: _Capture) -> Pipeline[int, int]:
+    def _identity_batch(x: list[int]) -> list[int]:
         return x
 
     return Pipeline(
@@ -333,7 +333,7 @@ def _make_batch_pipeline(capture: _Capture) -> Pipeline:
     )
 
 
-def _run_two_threads(pipeline: Pipeline) -> list[Any]:
+def _run_two_threads(pipeline: Pipeline[int, int]) -> list[int]:
     results = [None, None]
 
     def run(idx, val):
@@ -343,7 +343,7 @@ def _run_two_threads(pipeline: Pipeline) -> list[Any]:
     t2 = threading.Thread(target=run, args=(1, 2))
     t1.start(); t2.start()
     t1.join(); t2.join()
-    return results
+    return [int(result) for result in results]
 
 
 def test_batch_wait_span_present_on_all_threads():
