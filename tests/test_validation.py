@@ -71,6 +71,11 @@ class TripleConsumer:
         return f"{x}-{y}-{z}"
 
 
+class PairConsumer:
+    def __call__(self, left: int, right: int) -> str:
+        return f"{left}-{right}"
+
+
 class VagueOp:
     def __call__(self, value: Any) -> Any:
         return value
@@ -114,6 +119,22 @@ class DynamicFixedDictOutput:
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
         return (Any,), dict[str, int]
+
+
+class PlainTupleProjection:
+    def __call__(self, value: Any) -> tuple[Any, Any]:
+        return value, value
+
+    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+        return (Any,), (current_output, current_output)
+
+
+class PartiallyResolvedTupleOutput:
+    def __call__(self, value: Any) -> tuple[Any, Any]:
+        return value, value
+
+    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+        return (Any,), (current_output, Any)
 
 
 VALIDATION_MODE_CASES = [
@@ -319,6 +340,26 @@ def test_resolved_input_type_stops_backpropagating_at_vague_operator():
     contract = inner.validate(inference=True)
 
     assert contract.input_type == list[Any]
+
+
+def test_resolved_input_type_backpropagates_through_plain_tuple_contract_projection():
+    contract = Pipeline([
+        ContractPassthrough(),
+        PlainTupleProjection(),
+        PairConsumer(),
+    ]).validate(inference=True)
+
+    assert contract.input_type is int
+
+
+def test_resolved_input_type_does_not_backpropagate_through_partially_unresolved_tuple_output():
+    contract = Pipeline([
+        ContractPassthrough(),
+        PartiallyResolvedTupleOutput(),
+        PairConsumer(),
+    ]).validate(inference=True)
+
+    assert contract.input_type is Any
 
 
 def test_validate_does_not_run_backward_inference_by_default():
@@ -563,6 +604,10 @@ def test_resolve_typevar_output_merges_repeated_typevar_inputs():
     assert _resolve_typevar_output(_T, tuple[_Base, _Child], (_T, _T)) is _Base
 
 
+def test_resolve_typevar_output_from_single_tuple_parameter():
+    assert _resolve_typevar_output(_T, tuple[_Child, int], (tuple[_T, int],)) is _Child
+
+
 def test_resolve_typevar_output_through_generic_subtyping():
     assert _resolve_typevar_output(
         list[_U],
@@ -589,6 +634,19 @@ def test_typevar_output_resolved_from_multi_parameter_signature():
     Pipeline([MultiInputTypeVar(), ConsumesChild()]).validate(
         pipeline_input_type=tuple[_Child, int]
     )
+
+
+def test_single_tuple_parameter_typevar_pipeline_rejects_mixed_tuple_input():
+    class IterableToList:
+        def __call__(self, x: Iterable[_U]) -> list[_U]: ...  # type: ignore[empty-body]
+
+    class ConsumesChildList:
+        def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([IterableToList(), ConsumesChildList()]).validate(
+            pipeline_input_type=tuple[_Child, int]
+        )
 
 
 def test_nested_typevar_output_is_recursively_specialized():

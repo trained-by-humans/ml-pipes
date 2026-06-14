@@ -377,7 +377,10 @@ class PipelineValidator:
             return Any
         input_types, output_type = contract_probe
         collapsed_input = collapse_annotation_parts(input_types)
-        if output_type == inferred and collapsed_input == inferred:
+        if _are_annotations_equivalent(output_type, inferred) and _are_annotations_equivalent(
+            collapsed_input,
+            inferred,
+        ):
             return inferred
         return Any
 
@@ -387,7 +390,7 @@ class PipelineValidator:
         if contract_probe is None:
             return False
         _, output_type = contract_probe
-        return output_type == inferred
+        return _are_annotations_equivalent(output_type, inferred)
 
     def _validate_contracts_strictly(self, boundaries: list[_OperatorBoundary]) -> None:
         for i, boundary in enumerate(boundaries):
@@ -422,6 +425,30 @@ def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
     if origin is None:
         return None
     return origin, get_args(annotation)
+
+
+def _are_annotations_equivalent(left_annotation: Any, right_annotation: Any) -> bool:
+    if left_annotation == right_annotation:
+        return True
+
+    left_shape = _annotation_shape(left_annotation)
+    right_shape = _annotation_shape(right_annotation)
+    if left_shape is None or right_shape is None:
+        return False
+
+    left_origin, left_child_annotations = left_shape
+    right_origin, right_child_annotations = right_shape
+    if left_origin != right_origin or len(left_child_annotations) != len(right_child_annotations):
+        return False
+
+    return all(
+        _are_annotations_equivalent(left_child_annotation, right_child_annotation)
+        for left_child_annotation, right_child_annotation in zip(
+            left_child_annotations,
+            right_child_annotations,
+            strict=True,
+        )
+    )
 
 
 def _rebuild_annotation_like(annotation: Any, args: tuple[Any, ...]) -> Any:
@@ -891,14 +918,17 @@ def _infer_typevar_bindings_from_inputs(
     input_type: Any,
     input_types: tuple[Any, ...],
 ) -> dict[TypeVar, Any] | None:
-    expanded_input_annotations = expand_annotation_parts(input_type)
-    if len(expanded_input_annotations) != len(input_types):
-        return None
+    if len(input_types) == 1:
+        input_annotations = (input_type,)
+    else:
+        input_annotations = expand_annotation_parts(input_type)
+        if len(input_annotations) != len(input_types):
+            return None
 
     inferred_bindings: dict[TypeVar, Any] = {}
     for template_input_annotation, input_annotation in zip(
         input_types,
-        expanded_input_annotations,
+        input_annotations,
         strict=True,
     ):
         if not is_single_annotation_compatible(input_annotation, template_input_annotation):
