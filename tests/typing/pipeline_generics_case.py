@@ -116,7 +116,7 @@ assert_type(
     MapTensor,
 )
 assert_type(
-    MapPredictionsToObjects(
+    MapPredictionsToObjects[None, Detections](
         fields={
             "box": "boxes",
             "score": "scores",
@@ -125,11 +125,11 @@ assert_type(
     )(sample_detections),
     list[dict[str, object]],
 )
-map_to_objects_at_one: MapPredictionsToObjects[Literal[1]] = MapPredictionsToObjects(
+map_to_objects_at_one: MapPredictionsToObjects[Literal[1], Detections] = MapPredictionsToObjects[Literal[1], Detections](
     fields={
         "box": "boxes",
         "score": "scores",
-        "class_id": "classes",
+        "class_id": lambda prediction: list(prediction.classes),
     },
     at=1,
 )

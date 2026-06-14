@@ -57,6 +57,6 @@ assert_type(
     list[dict[str, object]],
 )
 assert_type(
-    MapPredictionsToObjects(fields={"box": "boxes"})(sample_detections),
+    MapPredictionsToObjects[None, Detections](fields={"box": "boxes"})(sample_detections),
     list[dict[str, object]],
 )

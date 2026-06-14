@@ -4,11 +4,18 @@ import copy
 import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar
 
 import numpy as np
 import numpy.typing as npt
-from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
+else:  # pragma: no cover
+    try:
+        from typing import Self
+    except ImportError:
+        Self = TypeVar("Self")
 
 
 @dataclass(frozen=True)
@@ -137,7 +144,12 @@ class Prediction:
     """
 
     def filter(self, mask: PredictionMask) -> Self:
-        kept = [i for i, keep in enumerate(mask) if bool(keep)]
+        kept: list[int] = []
+        for i, keep in enumerate(mask):
+            if not isinstance(keep, (bool, np.bool_)):
+                raise TypeError("Prediction.filter expects a boolean mask; use select() for integer indices.")
+            if bool(keep):
+                kept.append(i)
         return self._slice(kept)
 
     def select(self, indices: PredictionIndices) -> Self:

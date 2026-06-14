@@ -977,6 +977,13 @@ def test_torch_validation_accepts_to_device_and_torch_as_type_boundaries():
     assert contract.output_type is TorchTensorPayload
 
 
+def test_torch_validation_rejects_registry_op_after_to_device_payload():
+    with pytest.raises(PipelineValidationError):
+        Pipeline([ToDevice("cpu"), TorchArgMax("scores")]).validate(
+            pipeline_input_type=TorchTensorPayload
+        )
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
 def test_cuda_smoke_for_to_torch_and_to_device():
     payload = TensorPayload(

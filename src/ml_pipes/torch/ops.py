@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import threading
 from collections.abc import Callable, Collection, Sequence
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar, cast
+from typing import Any, TypeAlias, TypeVar, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -21,29 +21,20 @@ from .types import (
     resolve_torch_dtype,
 )
 
-if TYPE_CHECKING:
-    TorchTensorLike: TypeAlias = (
-        TorchTensorPayload
-        | torch.Tensor
-        | tuple[TorchTensorPayload, ...]
-        | tuple[torch.Tensor, ...]
-        | list[TorchTensorPayload]
-        | list[torch.Tensor]
-    )
-    TorchTensorInput: TypeAlias = TorchTensorLike | TorchTensorRegistry
-    TorchTransferInput: TypeAlias = TorchTensorInput | TorchRuntimeOutputs
-    TorchTensorMask: TypeAlias = torch.Tensor | npt.NDArray[np.bool_]
-    TorchInferOutput: TypeAlias = torch.Tensor | Sequence[torch.Tensor]
-    TorchTensorInputT = TypeVar("TorchTensorInputT", bound=TorchTensorInput)
-    TorchTransferInputT = TypeVar("TorchTransferInputT", bound=TorchTransferInput)
-else:
-    TorchTensorLike: TypeAlias = Any
-    TorchTensorInput: TypeAlias = Any
-    TorchTransferInput: TypeAlias = Any
-    TorchTensorMask: TypeAlias = Any
-    TorchInferOutput: TypeAlias = Any
-    TorchTensorInputT = TypeVar("TorchTensorInputT")
-    TorchTransferInputT = TypeVar("TorchTransferInputT")
+TorchTensorLike: TypeAlias = (
+    TorchTensorPayload
+    | torch.Tensor
+    | tuple[TorchTensorPayload, ...]
+    | tuple[torch.Tensor, ...]
+    | list[TorchTensorPayload]
+    | list[torch.Tensor]
+)
+TorchTensorInput: TypeAlias = TorchTensorLike | TorchTensorRegistry
+TorchTransferInput: TypeAlias = TorchTensorInput | TorchRuntimeOutputs
+TorchTensorMask: TypeAlias = torch.Tensor | npt.NDArray[np.bool_]
+TorchInferOutput: TypeAlias = torch.Tensor | Sequence[torch.Tensor]
+TorchTensorInputT = TypeVar("TorchTensorInputT", bound=TorchTensorInput)
+TorchTransferInputT = TypeVar("TorchTransferInputT", bound=TorchTransferInput)
 
 
 def _synchronize_torch_device(device: torch.device) -> None:

@@ -1693,6 +1693,12 @@ def test_filter_empty_mask():
     assert result.classes == []
 
 
+def test_filter_integer_indices_raise():
+    d = _detections()
+    with pytest.raises(TypeError):
+        d.filter([0, 2])
+
+
 def test_select_index_out_of_bounds_raises():
     d = _detections()
     with pytest.raises(IndexError):

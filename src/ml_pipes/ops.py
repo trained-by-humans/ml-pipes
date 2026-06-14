@@ -1494,7 +1494,7 @@ class ToSegmentations:
 # Prediction filtering
 # ---------------------------------------------------------------------------
 
-PredictionT = TypeVar("PredictionT", bound=Prediction, default=Prediction)
+PredictionT = TypeVar("PredictionT", bound=Prediction)
 ClassPredictionT = TypeVar("ClassPredictionT", bound=ClassPrediction)
 ScorePredictionT = TypeVar("ScorePredictionT", bound=ScorePrediction)
 BoxPredictionT = TypeVar("BoxPredictionT", bound=BoxPrediction)
