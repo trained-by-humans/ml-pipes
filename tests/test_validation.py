@@ -108,6 +108,17 @@ class MixedVariadicConsumer:
         return (value, *rest)
 
 
+class KeywordOnlyConsumer:
+    def __call__(self, value: int, *, scale: int) -> int:
+        return value * scale
+
+
+class VarKeywordConsumer:
+    def __call__(self, value: int, **metadata: object) -> int:
+        del metadata
+        return value
+
+
 class VagueOp:
     def __call__(self, value: Any) -> Any:
         return value
@@ -308,15 +319,30 @@ def test_pipeline_validate_keeps_variadic_tuple_as_single_input_boundary(operato
 
 
 @pytest.mark.parametrize(
-    "operator",
+    ("operator", "parameter_name"),
     [
-        pytest.param(VariadicCollector(), id="variadic-only"),
-        pytest.param(MixedVariadicConsumer(), id="mixed-fixed-and-variadic"),
+        pytest.param(VariadicCollector(), "values", id="variadic-only"),
+        pytest.param(MixedVariadicConsumer(), "rest", id="mixed-fixed-and-variadic"),
     ],
 )
-def test_pipeline_validate_rejects_variadic_positional_operator(operator):
-    with pytest.raises(PipelineValidationError, match="variadic positional parameters"):
-        Pipeline([IntToPair(), operator]).validate()
+def test_pipeline_validate_rejects_variadic_positional_operator_parameters(operator, parameter_name):
+    with pytest.raises(
+        PipelineValidationError,
+        match=rf"variadic positional parameters.*{parameter_name}",
+    ):
+        Pipeline([operator]).validate()
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param(KeywordOnlyConsumer(), id="keyword-only"),
+        pytest.param(VarKeywordConsumer(), id="var-keyword"),
+    ],
+)
+def test_pipeline_validate_rejects_other_non_positional_operator_parameters(operator):
+    with pytest.raises(PipelineValidationError, match="chains operators by argument position"):
+        Pipeline([operator]).validate()
 
 
 def test_pipeline_validate_rejects_tuple_output_with_wrong_arity():

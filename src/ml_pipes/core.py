@@ -188,10 +188,11 @@ class Pipeline(Generic[InputT, OutputT]):
         final boundary-tightening mode used to compute the returned input type.
 
         Validation and runtime dispatch only unpack fixed positional
-        boundaries. Variadic positional `__call__` parameters (`*args`) are
-        not supported. Variadic tuple annotations such as `tuple[T, ...]`
-        remain atomic instead of being expanded as multi-parameter
-        boundaries.
+        boundaries. Non-positional `__call__` parameters such as `*args`,
+        keyword-only parameters, and `**kwargs` are not supported because
+        Pipeline chains operators by argument position. Variadic tuple
+        annotations such as `tuple[T, ...]` remain atomic instead of being
+        expanded as multi-parameter boundaries.
         """
         if not self.operators:
             return None
@@ -322,10 +323,40 @@ class Pipeline(Generic[InputT, OutputT]):
     @staticmethod
     def _build_call_args(operator: Callable[..., Any], current: Any) -> tuple[Any, ...]:
         signature = inspect.signature(Pipeline._get_signature_target(operator))
-        if any(parameter.kind is inspect.Parameter.VAR_POSITIONAL for parameter in signature.parameters.values()):
+        variadic_parameters = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind is inspect.Parameter.VAR_POSITIONAL
+        ]
+        if variadic_parameters:
+            variadic_parameter_descriptions = ", ".join(
+                f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
+                for parameter in variadic_parameters
+            )
             raise TypeError(
-                f"{operator.__class__.__name__} uses variadic positional parameters (*args), "
+                f"{operator.__class__.__name__} uses variadic positional parameters "
+                f"({variadic_parameter_descriptions}), "
                 f"which Pipeline does not support. Use a single tuple-typed parameter instead."
+            )
+        unsupported_parameters = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind
+            not in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.VAR_POSITIONAL,
+            )
+        ]
+        if unsupported_parameters:
+            unsupported_parameter_descriptions = ", ".join(
+                f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
+                for parameter in unsupported_parameters
+            )
+            raise TypeError(
+                f"{operator.__class__.__name__} uses non-positional parameters "
+                f"({unsupported_parameter_descriptions}), but Pipeline chains operators by argument "
+                f"position. Use only positional parameters in __call__."
             )
         parameters = [
             parameter

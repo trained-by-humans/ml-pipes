@@ -706,21 +706,46 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
     target = get_signature_target(operator)
     hints = get_type_hints(target)
     signature = inspect.signature(target)
-    positional_parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
     variadic_parameters = [
         parameter
         for parameter in signature.parameters.values()
         if parameter.kind is inspect.Parameter.VAR_POSITIONAL
     ]
-
     if variadic_parameters:
+        variadic_parameter_descriptions = ", ".join(
+            f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
+            for parameter in variadic_parameters
+        )
         raise PipelineValidationError(
-            f"{operator.__class__.__name__} uses variadic positional parameters (*args), "
+            f"{operator.__class__.__name__} uses variadic positional parameters "
+            f"({variadic_parameter_descriptions}), "
             f"which Pipeline validation does not support. Use a single tuple-typed parameter instead."
+        )
+    unsupported_parameters = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind
+        not in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.VAR_POSITIONAL,
+        )
+    ]
+    positional_parameters = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+
+    if unsupported_parameters:
+        unsupported_parameter_descriptions = ", ".join(
+            f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
+            for parameter in unsupported_parameters
+        )
+        raise PipelineValidationError(
+            f"{operator.__class__.__name__} uses non-positional parameters "
+            f"({unsupported_parameter_descriptions}), but Pipeline chains operators by argument "
+            f"position. Use only positional parameters in __call__."
         )
 
     parameters = positional_parameters

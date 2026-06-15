@@ -69,6 +69,17 @@ class MixedVariadicConsumer:
         return (value, *rest)
 
 
+class KeywordOnlyConsumer:
+    def __call__(self, value: int, *, scale: int) -> int:
+        return value * scale
+
+
+class VarKeywordConsumer:
+    def __call__(self, value: int, **metadata: object) -> int:
+        del metadata
+        return value
+
+
 def test_context_add_returns_new_context():
     context = Context()
     next_context = context.store("resize_transform", "resize")
@@ -109,20 +120,30 @@ def test_pipeline_unpacks_tuple_output_into_next_operator():
 
 
 @pytest.mark.parametrize(
-    "operator",
+    ("operator", "parameter_name"),
     [
-        pytest.param(VariadicCollector(), id="variadic-only"),
-        pytest.param(MixedVariadicConsumer(), id="mixed-fixed-and-variadic"),
+        pytest.param(VariadicCollector(), "values", id="variadic-only"),
+        pytest.param(MixedVariadicConsumer(), "rest", id="mixed-fixed-and-variadic"),
     ],
 )
-def test_pipeline_rejects_variadic_positional_operator(operator):
-    class IntToPair:
-        def __call__(self, value: int) -> tuple[int, str]:
-            return value, str(value)
+def test_pipeline_rejects_variadic_positional_operator_parameters(operator, parameter_name):
+    pipeline = Pipeline([operator])
 
-    pipeline = Pipeline([IntToPair(), operator])
+    with pytest.raises(TypeError, match=rf"variadic positional parameters.*{parameter_name}"):
+        pipeline(7)
 
-    with pytest.raises(TypeError, match="variadic positional parameters"):
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param(KeywordOnlyConsumer(), id="keyword-only"),
+        pytest.param(VarKeywordConsumer(), id="var-keyword"),
+    ],
+)
+def test_pipeline_rejects_other_non_positional_operator_parameters(operator):
+    pipeline = Pipeline([operator])
+
+    with pytest.raises(TypeError, match="chains operators by argument position"):
         pipeline(7)
 
 
