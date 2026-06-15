@@ -14,8 +14,8 @@ import inspect
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any, Callable, TypeVar, get_args, get_origin, get_type_hints
-import warnings
 
+from ._typing.signatures import validate_operator_signature
 from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
 
@@ -290,10 +290,12 @@ class PipelineValidator:
         )
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
-    @staticmethod
-    def _resolve_static_boundary(operator: Callable[..., Any]) -> _BoundarySignature | None:
+    def _resolve_static_boundary(self, i: int, operator: Callable[..., Any]) -> _BoundarySignature | None:
         try:
-            input_types, output_type = resolve_operator_contract(operator)
+            input_types, output_type = resolve_operator_contract(
+                operator,
+                label=self._label_for(i, operator),
+            )
         except StaticContractUnavailableError:
             return None
         return _BoundarySignature(input_types=input_types, output_type=output_type)
@@ -313,7 +315,7 @@ class PipelineValidator:
 
             input_context = dict(stored_annotations) if isinstance(operator, ContextOp) else None
             dynamic_boundary = self._resolve_dynamic_boundary(operator, previous_output_type, stored_annotations)
-            static_boundary = self._resolve_static_boundary(operator)
+            static_boundary = self._resolve_static_boundary(i, operator)
             if dynamic_boundary is None and static_boundary is None:
                 raise PipelineValidationError(
                     f"{operator.__class__.__name__} must define resolve_contract"
@@ -707,56 +709,19 @@ def get_signature_target(operator: Callable[..., Any]) -> Any:
         ) from exc
 
 
-def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, ...], Any]:
+def resolve_operator_contract(
+    operator: Callable[..., Any],
+    *,
+    label: str,
+) -> tuple[tuple[Any, ...], Any]:
     target = get_signature_target(operator)
     hints = get_type_hints(target)
-    signature = inspect.signature(target)
-    variadic_parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind is inspect.Parameter.VAR_POSITIONAL
-    ]
-    if variadic_parameters:
-        variadic_parameter_descriptions = ", ".join(
-            f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
-            for parameter in variadic_parameters
-        )
-        raise PipelineValidationError(
-            f"{operator.__class__.__name__} uses variadic positional parameters "
-            f"({variadic_parameter_descriptions}), "
-            f"which Pipeline validation does not support. Use a single tuple-typed parameter instead."
-        )
-    unsupported_parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind
-        not in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.VAR_POSITIONAL,
-        )
-    ]
-    positional_parameters = list(signature.parameters.values())
-
-    if unsupported_parameters:
-        unsupported_parameter_descriptions = ", ".join(
-            f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
-            for parameter in unsupported_parameters
-        )
-        raise PipelineValidationError(
-            f"{operator.__class__.__name__} uses non-positional parameters "
-            f"({unsupported_parameter_descriptions}), but Pipeline chains operators by argument "
-            f"position. Use only positional parameters in __call__."
-        )
-
-    parameters = positional_parameters
-
-    if not parameters:
-        raise PipelineValidationError(
-            f"{operator.__class__.__name__} must define at least one positional input parameter in __call__"
-        )
-
-    _warn_on_ambiguous_positional_defaults(operator, parameters)
+    parameters = validate_operator_signature(
+        target,
+        label=label,
+        error_type=PipelineValidationError,
+        warning_type=PipelineValidationWarning,
+    )
 
     input_types: list[Any] = []
     for parameter in parameters:
@@ -770,32 +735,6 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
             f"{operator.__class__.__name__} is missing a return type annotation for __call__"
         )
     return tuple(input_types), hints["return"]
-
-
-def _warn_on_ambiguous_positional_defaults(
-    operator: Callable[..., Any],
-    positional_parameters: list[inspect.Parameter],
-) -> None:
-    if len(positional_parameters) <= 1:
-        return
-
-    defaulted_parameters = [
-        parameter
-        for parameter in positional_parameters
-        if parameter.default is not inspect.Parameter.empty
-    ]
-    if not defaulted_parameters:
-        return
-
-    defaulted_parameter_names = ", ".join(parameter.name for parameter in defaulted_parameters)
-    warnings.warn(
-        f"{operator.__class__.__name__} defines positional defaults ({defaulted_parameter_names}), "
-        f"but Pipeline ignores positional defaults for dispatch to avoid ambiguity with tuple-valued "
-        f"pipeline outputs. Validation will treat this operator as requiring "
-        f"{len(positional_parameters)} positional pipeline inputs.",
-        PipelineValidationWarning,
-        stacklevel=4,
-    )
 
 
 def is_annotation_compatible(produced: Any, expected_inputs: tuple[Any, ...]) -> bool:

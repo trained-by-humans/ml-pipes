@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Iterable, TypeVar
 
+from ._typing.signatures import validate_operator_signature
 from .collectors import CaptureCollector
 from .context import Context, ContextOp
 from .control import SHORT_CIRCUIT
@@ -324,44 +325,11 @@ class Pipeline(Generic[InputT, OutputT]):
 
     @staticmethod
     def _build_call_args(operator: Callable[..., Any], current: Any, label: str) -> tuple[Any, ...]:
-        signature = inspect.signature(Pipeline._get_signature_target(operator))
-        variadic_parameters = [
-            parameter
-            for parameter in signature.parameters.values()
-            if parameter.kind is inspect.Parameter.VAR_POSITIONAL
-        ]
-        if variadic_parameters:
-            variadic_parameter_descriptions = ", ".join(
-                f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
-                for parameter in variadic_parameters
-            )
-            raise TypeError(
-                f"Pipeline step {label} uses variadic positional parameters "
-                f"({variadic_parameter_descriptions}), "
-                f"which Pipeline does not support. Use a single tuple-typed parameter instead."
-            )
-        unsupported_parameters = [
-            parameter
-            for parameter in signature.parameters.values()
-            if parameter.kind
-            not in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                inspect.Parameter.VAR_POSITIONAL,
-            )
-        ]
-        if unsupported_parameters:
-            unsupported_parameter_descriptions = ", ".join(
-                f"{parameter.name} ({parameter.kind.name.lower().replace('_', ' ')})"
-                for parameter in unsupported_parameters
-            )
-            raise TypeError(
-                f"Pipeline step {label} uses non-positional parameters "
-                f"({unsupported_parameter_descriptions}), but Pipeline chains operators by argument "
-                f"position. Use only positional parameters in __call__."
-            )
-
-        parameters = list(signature.parameters.values())
+        parameters = validate_operator_signature(
+            operator,
+            label=label,
+            error_type=TypeError,
+        )
         if len(parameters) == 1:
             return (current,)
         if isinstance(current, tuple):
@@ -375,12 +343,6 @@ class Pipeline(Generic[InputT, OutputT]):
             f"Pipeline step {label} expects {len(parameters)} positional arguments, "
             f"but got current={current!r}"
         )
-
-    @staticmethod
-    def _get_signature_target(operator: Callable[..., Any]) -> Any:
-        if inspect.isfunction(operator) or inspect.ismethod(operator):
-            return operator
-        return getattr(operator, "__call__")
 
 class Inline(Generic[InputT, OutputT]):
     """

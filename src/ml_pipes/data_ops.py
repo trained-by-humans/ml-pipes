@@ -270,7 +270,10 @@ def _resolve_callable_contract(
     ignore_explicit_none: bool = True,
 ) -> tuple[Any, Any] | None:
     try:
-        input_types, output_type = resolve_operator_contract(function)
+        input_types, output_type = resolve_operator_contract(
+            function,
+            label=callable_label,
+        )
     except (PipelineValidationError, StaticContractUnavailableError):
         contract = None
     else:
