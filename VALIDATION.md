@@ -147,6 +147,13 @@ tuple[int, str] -> (int, str)
 PairToBool(number: int, text: str) -> bool
 ```
 
+This positional unpacking only supports fixed-length tuple boundaries.
+Variadic tuple annotations such as `tuple[int, ...]` remain atomic and are
+not treated as multi-parameter pipeline boundaries. Variadic positional
+`__call__` signatures (`*args`) are not supported; use a single tuple-typed
+parameter instead if the operator should consume a variadic tuple value
+atomically.
+
 Broader downstream input types are allowed:
 
 ```text

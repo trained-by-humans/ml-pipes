@@ -10,6 +10,8 @@ from ml_pipes.validation import (
     specialize_input_from_output_template,
 )
 
+_VariadicT = TypeVar("_VariadicT")
+
 
 class IntToString:
     def __call__(self, value: int) -> str:
@@ -74,6 +76,36 @@ class TripleConsumer:
 class PairConsumer:
     def __call__(self, left: int, right: int) -> str:
         return f"{left}-{right}"
+
+
+class VariadicTupleConsumer:
+    def __call__(self, value: tuple[int, ...]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class GenericVariadicTupleConsumer:
+    def __call__(self, value: tuple[_VariadicT, ...]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class IntIterableConsumer:
+    def __call__(self, value: Iterable[int]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class GenericIterableConsumer:
+    def __call__(self, value: Iterable[_VariadicT]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class VariadicCollector:
+    def __call__(self, *values: object) -> tuple[object, ...]:
+        return values
+
+
+class MixedVariadicConsumer:
+    def __call__(self, value: int, *rest: int) -> tuple[int, ...]:
+        return (value, *rest)
 
 
 class VagueOp:
@@ -257,6 +289,34 @@ def test_pipeline_validate_accepts_tuple_output_for_multi_arg_operator():
     pipeline = Pipeline([IntToPair(), PairToBool()])
 
     pipeline.validate()
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param(VariadicTupleConsumer(), id="tuple[int,...]-to-tuple[int,...]"),
+        pytest.param(GenericVariadicTupleConsumer(), id="tuple[int,...]-to-tuple[T,...]"),
+        pytest.param(IntIterableConsumer(), id="tuple[int,...]-to-Iterable[int]"),
+        pytest.param(GenericIterableConsumer(), id="tuple[int,...]-to-Iterable[T]"),
+    ],
+)
+def test_pipeline_validate_keeps_variadic_tuple_as_single_input_boundary(operator):
+    contract = Pipeline([operator]).validate(pipeline_input_type=tuple[int, ...])
+
+    assert contract.input_type == tuple[int, ...]
+    assert contract.output_type is str
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param(VariadicCollector(), id="variadic-only"),
+        pytest.param(MixedVariadicConsumer(), id="mixed-fixed-and-variadic"),
+    ],
+)
+def test_pipeline_validate_rejects_variadic_positional_operator(operator):
+    with pytest.raises(PipelineValidationError, match="variadic positional parameters"):
+        Pipeline([IntToPair(), operator]).validate()
 
 
 def test_pipeline_validate_rejects_tuple_output_with_wrong_arity():
@@ -682,3 +742,14 @@ def test_typevar_pipeline_rejects_incompatible_consumer():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         Pipeline([ProducesTypeVar(), ConsumesUnrelated()], auto_validate=True)
+
+
+def test_validation_rejects_variadic_tuple_projection_with_pipeline_error():
+    class IterableConsumer:
+        def __call__(self, value: Iterable[int]) -> str:
+            return "ok"
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([Store("saved"), Recall("saved"), IterableConsumer()]).validate(
+            pipeline_input_type=tuple[int, ...]
+        )

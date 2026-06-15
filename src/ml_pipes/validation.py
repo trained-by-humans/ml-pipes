@@ -49,6 +49,8 @@ class _BoundarySignature:
 
 
 def expand_annotation_parts(annotation: Any) -> tuple[Any, ...]:
+    if _is_variadic_tuple_annotation(annotation):
+        return (annotation,)
     origin = get_origin(annotation)
     if origin is tuple:
         return get_args(annotation)
@@ -435,11 +437,23 @@ def specialize_input_from_output_template(input_template: Any, output_template: 
 
 def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
     if isinstance(annotation, tuple):
+        if any(part is Ellipsis for part in annotation):
+            return None
         return tuple, annotation
     origin = get_origin(annotation)
     if origin is None:
         return None
     return origin, get_args(annotation)
+
+
+def _is_variadic_tuple_annotation(annotation: Any) -> bool:
+    if isinstance(annotation, tuple):
+        return any(part is Ellipsis for part in annotation)
+    origin = get_origin(annotation)
+    if origin is not tuple:
+        return False
+    args = get_args(annotation)
+    return len(args) == 2 and args[1] is Ellipsis
 
 
 def _are_annotations_equivalent(left_annotation: Any, right_annotation: Any) -> bool:
@@ -469,10 +483,23 @@ def _are_annotations_equivalent(left_annotation: Any, right_annotation: Any) -> 
 def _rebuild_annotation_like(annotation: Any, args: tuple[Any, ...]) -> Any:
     if isinstance(annotation, tuple):
         return tuple(args)
+    rebuilt_variadic_tuple = _rebuild_variadic_tuple_annotation(annotation, args)
+    if rebuilt_variadic_tuple is not None:
+        return rebuilt_variadic_tuple
     origin = get_origin(annotation)
     if origin is None:
         return annotation
     return _rebuild_annotation(origin, args)
+
+
+def _rebuild_variadic_tuple_annotation(annotation: Any, args: tuple[Any, ...]) -> Any | None:
+    if not _is_variadic_tuple_annotation(annotation):
+        return None
+    if len(args) == 1:
+        return tuple[args[0], ...]
+    if len(args) == 2 and args[1] is Ellipsis:
+        return tuple[args[0], ...]
+    return tuple[args]
 
 
 def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> Any:
@@ -679,11 +706,24 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
     target = get_signature_target(operator)
     hints = get_type_hints(target)
     signature = inspect.signature(target)
-    parameters = [
+    positional_parameters = [
         parameter
         for parameter in signature.parameters.values()
         if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
+    variadic_parameters = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL
+    ]
+
+    if variadic_parameters:
+        raise PipelineValidationError(
+            f"{operator.__class__.__name__} uses variadic positional parameters (*args), "
+            f"which Pipeline validation does not support. Use a single tuple-typed parameter instead."
+        )
+
+    parameters = positional_parameters
 
     if not parameters:
         raise PipelineValidationError(

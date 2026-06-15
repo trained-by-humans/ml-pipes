@@ -1,4 +1,11 @@
+from collections.abc import Iterable
+from typing import TypeVar
+
+import pytest
+
 from ml_pipes import Context, Pipeline, SHORT_CIRCUIT
+
+_T = TypeVar("_T")
 
 
 class IntToString:
@@ -30,6 +37,36 @@ class FailIfCalled:
         del value
         self.called = True
         raise AssertionError("downstream operator should not run after SHORT_CIRCUIT")
+
+
+class VariadicTupleConsumer:
+    def __call__(self, value: tuple[int, ...]) -> tuple[int, ...]:
+        return value
+
+
+class GenericVariadicTupleConsumer:
+    def __call__(self, value: tuple[_T, ...]) -> tuple[_T, ...]:
+        return value
+
+
+class IntIterableConsumer:
+    def __call__(self, value: Iterable[int]) -> tuple[int, ...]:
+        return tuple(value)
+
+
+class GenericIterableConsumer:
+    def __call__(self, value: Iterable[_T]) -> tuple[_T, ...]:
+        return tuple(value)
+
+
+class VariadicCollector:
+    def __call__(self, *values: object) -> tuple[object, ...]:
+        return values
+
+
+class MixedVariadicConsumer:
+    def __call__(self, value: int, *rest: int) -> tuple[int, ...]:
+        return (value, *rest)
 
 
 def test_context_add_returns_new_context():
@@ -69,6 +106,39 @@ def test_pipeline_unpacks_tuple_output_into_next_operator():
     pipeline = Pipeline([IntToPair(), PairToString()])
 
     assert pipeline(7) == "7:7"
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param(VariadicCollector(), id="variadic-only"),
+        pytest.param(MixedVariadicConsumer(), id="mixed-fixed-and-variadic"),
+    ],
+)
+def test_pipeline_rejects_variadic_positional_operator(operator):
+    class IntToPair:
+        def __call__(self, value: int) -> tuple[int, str]:
+            return value, str(value)
+
+    pipeline = Pipeline([IntToPair(), operator])
+
+    with pytest.raises(TypeError, match="variadic positional parameters"):
+        pipeline(7)
+
+
+@pytest.mark.parametrize(
+    ("operator", "expected"),
+    [
+        pytest.param(VariadicTupleConsumer(), (1, 2, 3), id="tuple[int,...]-to-tuple[int,...]"),
+        pytest.param(GenericVariadicTupleConsumer(), (1, 2, 3), id="tuple[int,...]-to-tuple[T,...]"),
+        pytest.param(IntIterableConsumer(), (1, 2, 3), id="tuple[int,...]-to-Iterable[int]"),
+        pytest.param(GenericIterableConsumer(), (1, 2, 3), id="tuple[int,...]-to-Iterable[T]"),
+    ],
+)
+def test_pipeline_passes_variadic_tuple_as_single_argument(operator, expected):
+    pipeline = Pipeline([operator])
+
+    assert pipeline((1, 2, 3)) == expected
 
 
 def test_pipeline_can_store_select_and_recall_values():

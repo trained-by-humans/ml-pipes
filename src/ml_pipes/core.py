@@ -186,6 +186,12 @@ class Pipeline(Generic[InputT, OutputT]):
 
         Strict mode is orthogonal: it validates operator boundaries, not the
         final boundary-tightening mode used to compute the returned input type.
+
+        Validation and runtime dispatch only unpack fixed positional
+        boundaries. Variadic positional `__call__` parameters (`*args`) are
+        not supported. Variadic tuple annotations such as `tuple[T, ...]`
+        remain atomic instead of being expanded as multi-parameter
+        boundaries.
         """
         if not self.operators:
             return None
@@ -316,12 +322,16 @@ class Pipeline(Generic[InputT, OutputT]):
     @staticmethod
     def _build_call_args(operator: Callable[..., Any], current: Any) -> tuple[Any, ...]:
         signature = inspect.signature(Pipeline._get_signature_target(operator))
+        if any(parameter.kind is inspect.Parameter.VAR_POSITIONAL for parameter in signature.parameters.values()):
+            raise TypeError(
+                f"{operator.__class__.__name__} uses variadic positional parameters (*args), "
+                f"which Pipeline does not support. Use a single tuple-typed parameter instead."
+            )
         parameters = [
             parameter
             for parameter in signature.parameters.values()
             if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
         ]
-
         if len(parameters) == 1:
             return (current,)
         if isinstance(current, tuple):
