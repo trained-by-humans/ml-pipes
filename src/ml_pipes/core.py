@@ -275,7 +275,7 @@ class Pipeline(Generic[InputT, OutputT]):
             if isinstance(operator, ContextOp):
                 result, ctx_out = operator.apply(current, context)
             else:
-                args = self._build_call_args(operator, current)
+                args = self._build_call_args(operator, current, label)
                 result = operator(*args)
                 ctx_out = context
         except Exception:
@@ -323,7 +323,7 @@ class Pipeline(Generic[InputT, OutputT]):
         return flat
 
     @staticmethod
-    def _build_call_args(operator: Callable[..., Any], current: Any) -> tuple[Any, ...]:
+    def _build_call_args(operator: Callable[..., Any], current: Any, label: str) -> tuple[Any, ...]:
         signature = inspect.signature(Pipeline._get_signature_target(operator))
         variadic_parameters = [
             parameter
@@ -336,7 +336,7 @@ class Pipeline(Generic[InputT, OutputT]):
                 for parameter in variadic_parameters
             )
             raise TypeError(
-                f"{operator.__class__.__name__} uses variadic positional parameters "
+                f"Pipeline step {label} uses variadic positional parameters "
                 f"({variadic_parameter_descriptions}), "
                 f"which Pipeline does not support. Use a single tuple-typed parameter instead."
             )
@@ -356,26 +356,24 @@ class Pipeline(Generic[InputT, OutputT]):
                 for parameter in unsupported_parameters
             )
             raise TypeError(
-                f"{operator.__class__.__name__} uses non-positional parameters "
+                f"Pipeline step {label} uses non-positional parameters "
                 f"({unsupported_parameter_descriptions}), but Pipeline chains operators by argument "
                 f"position. Use only positional parameters in __call__."
             )
-        parameters = [
-            parameter
-            for parameter in signature.parameters.values()
-            if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-        ]
+
+        parameters = list(signature.parameters.values())
         if len(parameters) == 1:
             return (current,)
         if isinstance(current, tuple):
             if len(current) != len(parameters):
                 raise TypeError(
-                    f"{operator.__class__.__name__} expects {len(parameters)} positional arguments, "
-                    f"got tuple of length {len(current)}"
+                    f"Pipeline step {label} expects {len(parameters)} positional arguments, "
+                    f"but got current={current!r} (tuple of length {len(current)})"
                 )
             return current
         raise TypeError(
-            f"{operator.__class__.__name__} expects {len(parameters)} positional arguments, got 1"
+            f"Pipeline step {label} expects {len(parameters)} positional arguments, "
+            f"but got current={current!r}"
         )
 
     @staticmethod

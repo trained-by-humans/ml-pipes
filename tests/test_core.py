@@ -129,22 +129,49 @@ def test_pipeline_unpacks_tuple_output_into_next_operator():
 def test_pipeline_rejects_variadic_positional_operator_parameters(operator, parameter_name):
     pipeline = Pipeline([operator])
 
-    with pytest.raises(TypeError, match=rf"variadic positional parameters.*{parameter_name}"):
+    with pytest.raises(
+        TypeError,
+        match=rf"Pipeline step 0:{type(operator).__name__}.*variadic positional parameters.*{parameter_name}",
+    ):
         pipeline(7)
 
 
 @pytest.mark.parametrize(
-    "operator",
+    ("operator", "parameter_name"),
     [
-        pytest.param(KeywordOnlyConsumer(), id="keyword-only"),
-        pytest.param(VarKeywordConsumer(), id="var-keyword"),
+        pytest.param(KeywordOnlyConsumer(), "scale", id="keyword-only"),
+        pytest.param(VarKeywordConsumer(), "metadata", id="var-keyword"),
     ],
 )
-def test_pipeline_rejects_other_non_positional_operator_parameters(operator):
+def test_pipeline_rejects_other_non_positional_operator_parameters(operator, parameter_name):
     pipeline = Pipeline([operator])
 
-    with pytest.raises(TypeError, match="chains operators by argument position"):
+    with pytest.raises(
+        TypeError,
+        match=rf"Pipeline step 0:{type(operator).__name__}.*non-positional parameters.*{parameter_name}",
+    ):
         pipeline(7)
+
+
+@pytest.mark.parametrize(
+    ("current", "current_pattern"),
+    [
+        pytest.param((1,), r"current=\(1,\)", id="tuple-arity-mismatch"),
+        pytest.param(1, r"current=1", id="scalar-for-multi-arg"),
+    ],
+)
+def test_pipeline_argument_mismatch_error_includes_current(current, current_pattern):
+    class PairConsumer:
+        def __call__(self, left: int, right: int) -> str:
+            return f"{left}|{right}"
+
+    pipeline = Pipeline([PairConsumer()])
+
+    with pytest.raises(
+        TypeError,
+        match=rf"Pipeline step 0:PairConsumer.*{current_pattern}",
+    ):
+        pipeline(current)
 
 
 @pytest.mark.parametrize(

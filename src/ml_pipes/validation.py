@@ -736,11 +736,7 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
             inspect.Parameter.VAR_POSITIONAL,
         )
     ]
-    positional_parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
+    positional_parameters = list(signature.parameters.values())
 
     if unsupported_parameters:
         unsupported_parameter_descriptions = ", ".join(
