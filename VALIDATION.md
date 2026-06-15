@@ -155,6 +155,11 @@ not treated as multi-parameter pipeline boundaries. Non-positional
 position. Use a single tuple-typed parameter instead if the operator should
 consume a variadic tuple value atomically.
 
+If a multi-parameter operator uses positional defaults, validation emits a
+warning. Pipeline ignores those defaults for dispatch and still treats the
+operator as a fixed-arity positional boundary to avoid ambiguity with
+tuple-valued outputs.
+
 Broader downstream input types are allowed:
 
 ```text

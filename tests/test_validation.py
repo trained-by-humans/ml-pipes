@@ -1,10 +1,12 @@
 from collections.abc import Iterable
+import warnings
 
 import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
 from ml_pipes.validation import (
+    PipelineValidationWarning,
     _resolve_typevar_output,
     is_single_annotation_compatible,
     specialize_input_from_output_template,
@@ -116,6 +118,16 @@ class KeywordOnlyConsumer:
 class VarKeywordConsumer:
     def __call__(self, value: int, **metadata: object) -> int:
         del metadata
+        return value
+
+
+class MultiArgDefaultConsumer:
+    def __call__(self, value: tuple[int, int], scale: int = 0) -> int:
+        return sum(value) + scale
+
+
+class SingleArgDefaultConsumer:
+    def __call__(self, value: int = 0) -> int:
         return value
 
 
@@ -343,6 +355,22 @@ def test_pipeline_validate_rejects_variadic_positional_operator_parameters(opera
 def test_pipeline_validate_rejects_other_non_positional_operator_parameters(operator):
     with pytest.raises(PipelineValidationError, match="chains operators by argument position"):
         Pipeline([operator]).validate()
+
+
+def test_pipeline_validate_warns_when_multi_arg_operator_uses_positional_defaults():
+    with pytest.warns(
+        PipelineValidationWarning,
+        match=r"positional defaults \(scale\).*requiring 2 positional pipeline inputs",
+    ):
+        Pipeline([MultiArgDefaultConsumer()]).validate(
+            pipeline_input_type=tuple[tuple[int, int], int]
+        )
+
+
+def test_pipeline_validate_does_not_warn_for_single_arg_positional_default():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PipelineValidationWarning)
+        Pipeline([SingleArgDefaultConsumer()]).validate()
 
 
 def test_pipeline_validate_rejects_tuple_output_with_wrong_arity():

@@ -14,6 +14,7 @@ import inspect
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any, Callable, TypeVar, get_args, get_origin, get_type_hints
+import warnings
 
 from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
@@ -25,6 +26,10 @@ _CONTRAVARIANT = "contravariant"
 
 
 class PipelineValidationError(ValueError):
+    pass
+
+
+class PipelineValidationWarning(UserWarning):
     pass
 
 
@@ -755,6 +760,8 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
             f"{operator.__class__.__name__} must define at least one positional input parameter in __call__"
         )
 
+    _warn_on_ambiguous_positional_defaults(operator, parameters)
+
     input_types: list[Any] = []
     for parameter in parameters:
         if parameter.name not in hints:
@@ -767,6 +774,32 @@ def resolve_operator_contract(operator: Callable[..., Any]) -> tuple[tuple[Any, 
             f"{operator.__class__.__name__} is missing a return type annotation for __call__"
         )
     return tuple(input_types), hints["return"]
+
+
+def _warn_on_ambiguous_positional_defaults(
+    operator: Callable[..., Any],
+    positional_parameters: list[inspect.Parameter],
+) -> None:
+    if len(positional_parameters) <= 1:
+        return
+
+    defaulted_parameters = [
+        parameter
+        for parameter in positional_parameters
+        if parameter.default is not inspect.Parameter.empty
+    ]
+    if not defaulted_parameters:
+        return
+
+    defaulted_parameter_names = ", ".join(parameter.name for parameter in defaulted_parameters)
+    warnings.warn(
+        f"{operator.__class__.__name__} defines positional defaults ({defaulted_parameter_names}), "
+        f"but Pipeline ignores positional defaults for dispatch to avoid ambiguity with tuple-valued "
+        f"pipeline outputs. Validation will treat this operator as requiring "
+        f"{len(positional_parameters)} positional pipeline inputs.",
+        PipelineValidationWarning,
+        stacklevel=4,
+    )
 
 
 def is_annotation_compatible(produced: Any, expected_inputs: tuple[Any, ...]) -> bool:

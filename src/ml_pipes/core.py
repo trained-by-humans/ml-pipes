@@ -192,7 +192,9 @@ class Pipeline(Generic[InputT, OutputT]):
         keyword-only parameters, and `**kwargs` are not supported because
         Pipeline chains operators by argument position. Variadic tuple
         annotations such as `tuple[T, ...]` remain atomic instead of being
-        expanded as multi-parameter boundaries.
+        expanded as multi-parameter boundaries. Validation warns when a
+        multi-parameter operator defines positional defaults, because
+        Pipeline ignores those defaults for dispatch.
         """
         if not self.operators:
             return None
