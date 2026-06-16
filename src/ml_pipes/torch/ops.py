@@ -9,9 +9,9 @@ import numpy as np
 import numpy.typing as npt
 import torch
 
+from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.operator import Operator
 from ml_pipes.types import TensorPayload, TensorRegistry
-from ml_pipes.validation import is_annotation_compatible
 from .types import (
     TorchRuntimeOutputs,
     TorchTensorPayload,
@@ -204,7 +204,10 @@ class ToDevice:
         self.device = canonical_torch_device(device)
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        if current_output is not Any and is_annotation_compatible(current_output, (TorchTransferInput,)):
+        if current_output is not Any and is_assignable(
+            current_output,
+            TorchTransferInput,
+        ):
             return (current_output,), current_output
         return (TorchTransferInput,), TorchTransferInput
 
@@ -250,7 +253,10 @@ class ToDevice:
 
 class TorchSynchronizeTensors:
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        if current_output is not Any and is_annotation_compatible(current_output, (TorchTransferInput,)):
+        if current_output is not Any and is_assignable(
+            current_output,
+            TorchTransferInput,
+        ):
             return (current_output,), current_output
         return (TorchTransferInput,), TorchTransferInput
 
@@ -294,7 +300,10 @@ class TorchAsType(Generic[TorchAsTypeModeT]):
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
         if self.src is not None:
             return (TorchTensorRegistry,), TorchTensorRegistry
-        if current_output is not Any and is_annotation_compatible(current_output, (TorchTensorLike,)):
+        if current_output is not Any and is_assignable(
+            current_output,
+            TorchTensorLike,
+        ):
             return (current_output,), current_output
         return (TorchTensorLike,), TorchTensorLike
 

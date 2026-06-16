@@ -5,11 +5,13 @@ import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
+from ml_pipes._typing.annotation import (
+    is_assignable,
+    specialize_input_from_output_template,
+)
 from ml_pipes.validation import (
     PipelineValidationWarning,
     _resolve_typevar_output,
-    is_single_annotation_compatible,
-    specialize_input_from_output_template,
 )
 
 _VariadicT = TypeVar("_VariadicT")
@@ -565,51 +567,51 @@ _U = TypeVar("_U")  # unbound
 
 def test_typevar_in_expected_accepts_bound_subclass():
     # produced=_Child, expected=~_T (bound=_Base) → _Child is subclass of _Base
-    assert is_single_annotation_compatible(_Child, _T)
+    assert is_assignable(_Child, _T)
 
 
 def test_typevar_in_expected_accepts_exact_bound():
-    assert is_single_annotation_compatible(_Base, _T)
+    assert is_assignable(_Base, _T)
 
 
 def test_typevar_in_expected_rejects_unrelated():
-    assert not is_single_annotation_compatible(_Unrelated, _T)
+    assert not is_assignable(_Unrelated, _T)
 
 
 def test_typevar_in_produced_accepts_when_bound_subclass_of_expected():
     # produced=~_T (bound=_Base), expected=_Base → bound is assignable to expected
-    assert is_single_annotation_compatible(_T, _Base)
+    assert is_assignable(_T, _Base)
 
 
 def test_typevar_in_produced_rejects_when_expected_is_subtype_of_bound():
     # produced=~_T (bound=_Base), expected=_Child → _Child < _Base but _Base is not assignable to _Child
-    assert not is_single_annotation_compatible(_T, _Child)
+    assert not is_assignable(_T, _Child)
 
 
 def test_typevar_in_produced_rejects_fully_unrelated():
-    assert not is_single_annotation_compatible(_T, _Unrelated)
+    assert not is_assignable(_T, _Unrelated)
 
 
 def test_unbound_typevar_in_expected_accepts_anything():
-    assert is_single_annotation_compatible(int, _U)
-    assert is_single_annotation_compatible(_Base, _U)
+    assert is_assignable(int, _U)
+    assert is_assignable(_Base, _U)
 
 
 def test_unbound_typevar_in_produced_accepts_anything():
-    assert is_single_annotation_compatible(_U, int)
-    assert is_single_annotation_compatible(_U, _Base)
+    assert is_assignable(_U, int)
+    assert is_assignable(_U, _Base)
 
 
 def test_generic_subtyping_accepts_list_as_iterable():
-    assert is_single_annotation_compatible(list[int], Iterable[int])
+    assert is_assignable(list[int], Iterable[int])
 
 
 def test_generic_covariance_accepts_child_list_as_base_iterable():
-    assert is_single_annotation_compatible(list[_Child], Iterable[_Base])
+    assert is_assignable(list[_Child], Iterable[_Base])
 
 
 def test_generic_invariance_rejects_child_list_as_base_list():
-    assert not is_single_annotation_compatible(list[_Child], list[_Base])
+    assert not is_assignable(list[_Child], list[_Base])
 
 
 def test_typevar_output_resolved_when_same_typevar_flows_through_input():

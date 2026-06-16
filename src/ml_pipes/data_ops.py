@@ -6,6 +6,7 @@ from itertools import islice, takewhile
 from types import UnionType
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin
 
+from ._typing.annotation import is_assignable
 from ._typing.inspection import InspectionUnavailableError, probe_callable, resolve_callable_annotations
 from ._typing.signatures import validate_nullary_callable_signature, validate_positional_callable_signature
 from .control import SHORT_CIRCUIT
@@ -13,7 +14,6 @@ from .operator import Operator
 from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
 from .selector import Selector, SelectorInput
 from .tracing import PendingSpan, InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, _extract_shape, capture_value, operator_config
-from .validation import is_annotation_compatible
 
 
 StateT = TypeVar("StateT")
@@ -284,7 +284,10 @@ def _resolve_callable_contract(
 
     input_type, output_type = contract
     comparable_source = _without_none(source_annotation) if ignore_explicit_none else source_annotation
-    if comparable_source is not Any and not is_annotation_compatible(comparable_source, (input_type,)):
+    if comparable_source is not Any and not is_assignable(
+        comparable_source,
+        input_type,
+    ):
         raise validation_error_type(
             f"{operator_name} {callable_label} expects {input_type} "
             f"but {source_label} resolves to {source_annotation}"
@@ -351,7 +354,7 @@ def _require_assignment_compatible(
 ) -> None:
     if value_annotation is Any or target_annotation is Any:
         return
-    if is_annotation_compatible(value_annotation, (target_annotation,)):
+    if is_assignable(value_annotation, target_annotation):
         return
     raise validation_error_type(
         f"{operator_name} {target_label} expects {target_annotation} "

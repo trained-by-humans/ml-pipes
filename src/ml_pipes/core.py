@@ -6,6 +6,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Iterable, TypeVar
 
+from ._typing.annotation import (
+    format_annotation,
+    is_assignable,
+)
 from ._typing.signatures import validate_operator_signature
 from .collectors import CaptureCollector
 from .context import Context, ContextOp
@@ -24,7 +28,7 @@ from .tracing import (
     freeze_trace,
     operator_config,
 )
-from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
+from .validation import PipelineValidationError, PipelineValidator, TypeContract
 
 _log = logging.getLogger(__name__)
 
@@ -413,8 +417,9 @@ class Embed(Generic[InputT, OutputT]):
         if type_contract is None:
             return (Any,), current_output
 
-        if current_output is not None and not is_annotation_compatible(
-            current_output, (type_contract.input_type,)
+        if current_output is not None and not is_assignable(
+            current_output,
+            type_contract.input_type,
         ):
             raise validation_error_type(
                 f"Pipeline contract mismatch: incoming type "
