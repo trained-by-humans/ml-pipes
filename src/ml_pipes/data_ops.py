@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-import inspect
 import time
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from itertools import islice, takewhile
 from types import UnionType
-from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin
 
+from ._typing.inspection import InspectionUnavailableError, probe_callable, resolve_callable_annotations
+from ._typing.signatures import validate_nullary_callable_signature, validate_positional_callable_signature
 from .control import SHORT_CIRCUIT
 from .operator import Operator
 from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
 from .selector import Selector, SelectorInput
 from .tracing import PendingSpan, InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, _extract_shape, capture_value, operator_config
-from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
+from .validation import is_annotation_compatible
 
 
 StateT = TypeVar("StateT")
@@ -269,15 +270,13 @@ def _resolve_callable_contract(
     operator_name: str,
     ignore_explicit_none: bool = True,
 ) -> tuple[Any, Any] | None:
-    try:
-        input_types, output_type = resolve_operator_contract(
-            function,
-            label=callable_label,
-        )
-    except (PipelineValidationError, StaticContractUnavailableError):
-        contract = None
-    else:
-        contract = (input_types[0], output_type) if len(input_types) == 1 else None
+    contract = _resolve_unary_callable_contract(
+        function,
+        callable_label=callable_label,
+        source_label=source_label,
+        validation_error_type=validation_error_type,
+        operator_name=operator_name,
+    )
     if source_annotation in {None, Any}:
         return contract
     if contract is None:
@@ -293,29 +292,52 @@ def _resolve_callable_contract(
     return input_type, output_type
 
 
-def _resolve_nullary_callable_output(function: Callable[..., Any]) -> Any | None:
-    if inspect.isclass(function):
-        return function
-
+def _resolve_unary_callable_contract(
+    function: Callable[..., Any],
+    *,
+    callable_label: str,
+    source_label: str,
+    validation_error_type: type[Exception],
+    operator_name: str,
+) -> tuple[Any, Any] | None:
     try:
-        target = function if inspect.isfunction(function) or inspect.ismethod(function) else getattr(function, "__call__")
-    except AttributeError:
+        input_parameter = validate_positional_callable_signature(
+            function,
+            label=f"{operator_name} {callable_label}",
+            source_label=source_label,
+            error_type=validation_error_type,
+        )
+        probe_callable(function, object())
+        hints, output_type = resolve_callable_annotations(function)
+    except InspectionUnavailableError:
         return None
+    except TypeError as exc:
+        raise validation_error_type(
+            f"{operator_name} {callable_label} cannot be called with {source_label}: {exc}"
+        ) from exc
+    if input_parameter.name not in hints:
+        return None
+    return hints[input_parameter.name], output_type
 
+
+def _resolve_nullary_callable_output(
+    function: Callable[..., Any],
+    *,
+    callable_label: str,
+    source_label: str,
+    validation_error_type: type[Exception],
+) -> Any | None:
     try:
-        hints = get_type_hints(target)
-        signature = inspect.signature(target)
-    except (TypeError, ValueError, NameError):
+        validate_nullary_callable_signature(
+            function,
+            label=callable_label,
+            source_label=source_label,
+            error_type=validation_error_type,
+        )
+        _, output_type = resolve_callable_annotations(function)
+    except InspectionUnavailableError:
         return None
-
-    parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
-    if parameters:
-        return None
-    return hints.get("return")
+    return output_type
 
 
 def _require_assignment_compatible(
@@ -751,7 +773,12 @@ class WrapMappingInObject(Generic[StateT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        factory_output = _resolve_nullary_callable_output(self.state_factory)
+        factory_output = _resolve_nullary_callable_output(
+            self.state_factory,
+            callable_label=f"{type(self).__name__} state_factory",
+            source_label="the operator invokes it without arguments",
+            validation_error_type=validation_error_type,
+        )
         input_type = current_output if _is_mapping_annotation(current_output) else AnyMapping | None
         base_output = factory_output if factory_output is not None else object
         target_annotation = self._target.validate_write(

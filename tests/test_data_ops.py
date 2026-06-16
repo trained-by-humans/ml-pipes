@@ -65,9 +65,34 @@ def _int_to_text(value: int) -> str:
     return str(value)
 
 
+def _scale_int(value: int, *, factor: int = 1) -> int:
+    return value * factor
+
+
+def _scale_int_requires_factor(value: int, *, factor: int) -> int:
+    return value * factor
+
+
+def _add_two_ints(left: int, right: int) -> int:
+    return left + right
+
+
+def _text_has_min_length_with_floor(text: str, *, floor: int = 0) -> bool:
+    return len(text) > floor
+
+
+def _append_suffix(text: str, *, suffix: str = "") -> str:
+    return text + suffix
+
+
 class AcceptInt:
     def __call__(self, value: int) -> str:
         return str(value)
+
+
+class AcceptString:
+    def __call__(self, value: str) -> str:
+        return value.upper()
 
 
 class AcceptCarrier:
@@ -106,8 +131,26 @@ class StrictCarrier:
 
 
 @dataclass
+class StrictMappedCarrier:
+    cleaned: str
+    length: int
+
+
+@dataclass
 class WrongPayloadCarrier:
     payload: str = ""
+
+
+def _make_carrier() -> Carrier:
+    return Carrier()
+
+
+def _make_carrier_with_default_payload(payload: dict[str, object] | None = None) -> Carrier:
+    return Carrier(payload=payload)
+
+
+def _make_wrong_payload_carrier() -> WrongPayloadCarrier:
+    return WrongPayloadCarrier()
 
 
 def _is_positive(value: int) -> bool:
@@ -242,6 +285,14 @@ def test_filter_validation_rejects_missing_selector_even_for_untyped_predicate()
         )
 
 
+def test_filter_validation_rejects_predicate_with_non_positional_parameters() -> None:
+    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
+        Pipeline([Filter(_text_has_min_length_with_floor)]).validate(
+            pipeline_input_type=int,
+            strict=True,
+        )
+
+
 def test_map_validation_requires_optional_aware_mapper_for_optional_input() -> None:
     with pytest.raises(PipelineValidationError, match="fn expects"):
         Pipeline([Map(_text_length)]).validate(
@@ -258,6 +309,30 @@ def test_map_validation_accepts_optional_aware_mapper_for_optional_input() -> No
 
     assert contract.input_type == str | None
     assert contract.output_type == int
+
+
+def test_map_validation_rejects_mapper_with_non_positional_parameters() -> None:
+    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
+        Pipeline([Map(_scale_int), AcceptString()]).validate(
+            pipeline_input_type=int,
+            strict=True,
+        )
+
+
+def test_map_validation_rejects_mapper_with_required_keyword_only_parameter() -> None:
+    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
+        Pipeline([Map(_scale_int_requires_factor)]).validate(
+            pipeline_input_type=int,
+            strict=True,
+        )
+
+
+def test_map_validation_rejects_mapper_with_required_additional_positional_parameter() -> None:
+    with pytest.raises(PipelineValidationError, match="cannot be called"):
+        Pipeline([Map(_add_two_ints)]).validate(
+            pipeline_input_type=int,
+            strict=True,
+        )
 
 
 def test_map_not_null_validation_preserves_concrete_output_for_non_optional_mapper() -> None:
@@ -335,6 +410,14 @@ def test_map_value_validation_rejects_incompatible_target_annotation() -> None:
         )
 
 
+def test_map_value_validation_rejects_mapper_with_non_positional_parameters() -> None:
+    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
+        Pipeline([MapValue(_append_suffix, source="cleaned", target="length")]).validate(
+            pipeline_input_type=StrictMappedCarrier,
+            strict=True,
+        )
+
+
 def test_filter_not_null_drops_missing_selector() -> None:
     carrier = Carrier(payload={})
 
@@ -378,21 +461,29 @@ def test_filter_raises_on_missing_selector() -> None:
 
 
 def test_wrap_mapping_in_object_seeds_object_factory() -> None:
-    result = WrapMappingInObject(target="payload", state_factory=Carrier)(_message("spam", "hello"))
+    result = WrapMappingInObject(target="payload", state_factory=_make_carrier)(_message("spam", "hello"))
 
     assert isinstance(result, Carrier)
     assert result.payload == {"label": "spam", "msg": "hello"}
 
 
 def test_wrap_mapping_in_object_validation_returns_factory_output_when_input_is_unknown() -> None:
-    contract = Pipeline([WrapMappingInObject(target="payload", state_factory=Carrier)]).validate()
+    contract = Pipeline([WrapMappingInObject(target="payload", state_factory=_make_carrier)]).validate()
 
     assert contract.output_type == Carrier
 
 
+def test_wrap_mapping_in_object_validation_rejects_factory_with_hidden_parameters() -> None:
+    with pytest.raises(PipelineValidationError, match="state_factory must define no parameters"):
+        Pipeline([WrapMappingInObject(target="payload", state_factory=_make_carrier_with_default_payload)]).validate(
+            pipeline_input_type=dict[str, object],
+            strict=True,
+        )
+
+
 def test_wrap_mapping_in_object_validation_rejects_incompatible_target_annotation() -> None:
     with pytest.raises(PipelineValidationError, match="target"):
-        Pipeline([WrapMappingInObject(target="payload", state_factory=WrongPayloadCarrier)]).validate(
+        Pipeline([WrapMappingInObject(target="payload", state_factory=_make_wrong_payload_carrier)]).validate(
             pipeline_input_type=dict[str, object],
             strict=True,
         )
@@ -956,7 +1047,7 @@ def test_per_item_pipeline_composes_primitives_for_dataset_processing() -> None:
     pipeline = Pipeline(
         [
             PerItem(),
-            WrapMappingInObject(target="payload", state_factory=Carrier),
+            WrapMappingInObject(target="payload", state_factory=_make_carrier),
             MapValue(str.strip, source="payload.msg", target="cleaned"),
             FilterNotNull(source="cleaned"),
             Filter(lambda text: len(text) >= 5, source="cleaned"),
@@ -992,7 +1083,7 @@ def test_map_validation_threads_annotated_mapper_output() -> None:
 def test_wrap_mapping_in_object_validation_resolves_factory_output() -> None:
     contract = Pipeline(
         [
-            WrapMappingInObject(target="payload", state_factory=Carrier),
+            WrapMappingInObject(target="payload", state_factory=_make_carrier),
             AcceptCarrier(),
         ]
     ).validate(
@@ -1008,7 +1099,7 @@ def test_region_and_sequence_ops_preserve_item_type_for_validation() -> None:
     contract = Pipeline(
         [
             PerItem(),
-            WrapMappingInObject(target="payload", state_factory=Carrier),
+            WrapMappingInObject(target="payload", state_factory=_make_carrier),
             MapValue(str.strip, source="payload.msg", target="cleaned"),
             FilterNotNull(source="cleaned"),
             Filter(_has_min_length_or_none, source="cleaned"),
