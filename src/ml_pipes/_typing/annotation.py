@@ -196,6 +196,39 @@ def format_parameter_annotations(annotations: tuple[Any, ...]) -> str:
     return "(" + ", ".join(format_annotation(annotation) for annotation in annotations) + ")"
 
 
+def _are_annotations_equivalent(left_annotation: Any, right_annotation: Any) -> bool:
+    if left_annotation == right_annotation:
+        return True
+    left_shape = _annotation_shape(left_annotation)
+    right_shape = _annotation_shape(right_annotation)
+    if left_shape is None or right_shape is None:
+        return False
+
+    left_origin, left_child_annotations = left_shape
+    right_origin, right_child_annotations = right_shape
+    if left_origin != right_origin or len(left_child_annotations) != len(right_child_annotations):
+        return False
+
+    return all(
+        _are_annotations_equivalent(left_child_annotation, right_child_annotation)
+        for left_child_annotation, right_child_annotation in zip(
+            left_child_annotations,
+            right_child_annotations,
+            strict=True,
+        )
+    )
+
+
+def _all_annotations_equivalent(annotations: list[Any]) -> bool:
+    if len(annotations) < 2:
+        return True
+    first_annotation = annotations[0]
+    return all(
+        _are_annotations_equivalent(first_annotation, annotation)
+        for annotation in annotations[1:]
+    )
+
+
 def _can_assign_generic_source_to_target_annotation(source_annotation: Any, target_annotation: Any) -> bool:
     source_shape = _annotation_shape(source_annotation)
     if source_shape is None:
@@ -365,45 +398,88 @@ def _materialize_probe_annotation(annotation: Any) -> Any:
     return annotation
 
 
-def _bind_any_placeholder(template_annotation: Any, value_annotation: Any, current_binding: Any) -> Any:
-    if template_annotation is Any and current_binding is None:
-        return value_annotation
-    if template_annotation is Any and current_binding == value_annotation:
-        return current_binding
+def _collect_any_placeholder_bindings(
+    template_annotation: Any,
+    value_annotation: Any,
+) -> list[Any] | None:
+    bindings: list[Any] = []
+    if not _collect_any_placeholder_bindings_into(template_annotation, value_annotation, bindings):
+        return None
+    return bindings
+
+
+def _collect_any_placeholder_bindings_into(
+    template_annotation: Any,
+    value_annotation: Any,
+    bindings: list[Any],
+) -> bool:
     if template_annotation is Any:
-        return _UNBOUND
+        bindings.append(value_annotation)
+        return True
     if template_annotation == value_annotation:
-        return current_binding
+        return True
 
     template_shape = _annotation_shape(template_annotation)
     value_shape = _annotation_shape(value_annotation)
     if template_shape is None or value_shape is None:
-        return _UNBOUND
+        return False
     template_origin, template_children = template_shape
     value_origin, value_children = value_shape
     if template_origin != value_origin:
-        return _UNBOUND
+        return False
     if len(template_children) != len(value_children):
-        return _UNBOUND
+        return False
 
-    for template_child, value_child in zip(template_children, value_children, strict=True):
-        current_binding = _bind_any_placeholder(template_child, value_child, current_binding)
-        if current_binding is _UNBOUND:
-            return _UNBOUND
-    return current_binding
-
-
-def _replace_any_placeholder(annotation: Any, binding: Any) -> Any:
-    if annotation is not Any:
-        return annotation
-    return Any if binding is None else binding
-
-
-def _replace_any_placeholder_tree(template: Any, binding: Any) -> Any:
-    return _transform_annotation(
-        template,
-        lambda annotation: _replace_any_placeholder(annotation, binding),
+    return all(
+        _collect_any_placeholder_bindings_into(template_child, value_child, bindings)
+        for template_child, value_child in zip(template_children, value_children, strict=True)
     )
+
+
+def _replace_any_placeholders_in_order(
+    template_annotation: Any,
+    bindings: list[Any],
+) -> Any | None:
+    replacement = _replace_any_placeholders_in_order_recursive(
+        template_annotation,
+        bindings,
+        0,
+    )
+    if replacement is None:
+        return None
+    replaced_annotation, consumed_bindings = replacement
+    if consumed_bindings != len(bindings) and not _all_annotations_equivalent(bindings):
+        return None
+    return replaced_annotation
+
+
+def _replace_any_placeholders_in_order_recursive(
+    template_annotation: Any,
+    bindings: list[Any],
+    binding_index: int,
+) -> tuple[Any, int] | None:
+    if template_annotation is Any:
+        if binding_index >= len(bindings):
+            return None
+        return bindings[binding_index], binding_index + 1
+
+    template_shape = _annotation_shape(template_annotation)
+    if template_shape is None:
+        return template_annotation, binding_index
+
+    _, template_children = template_shape
+    replaced_children = []
+    for template_child in template_children:
+        replacement = _replace_any_placeholders_in_order_recursive(
+            template_child,
+            bindings,
+            binding_index,
+        )
+        if replacement is None:
+            return None
+        replaced_child, binding_index = replacement
+        replaced_children.append(replaced_child)
+    return _rebuild_annotation_like(template_annotation, tuple(replaced_children)), binding_index
 
 
 def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:

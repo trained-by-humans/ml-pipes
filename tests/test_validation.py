@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
@@ -9,6 +10,8 @@ from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.validation import (
     PipelineValidator,
     PipelineValidationWarning,
+    _BoundarySignature,
+    _OperatorBoundary,
     _resolve_typevar_output,
 )
 
@@ -730,12 +733,182 @@ def test_resolve_typevar_output_through_generic_subtyping():
     ) == list[int]
 
 
-def test_guess_input_annotation_from_output_template_matches_plain_tuple_template():
-    assert PipelineValidator._guess_input_annotation_from_output_template(
-        Any,
-        (Any, str),
+def _make_projection_boundary(
+    operator: Any,
+    *,
+    input_types: tuple[Any, ...],
+    output_type: Any,
+) -> _OperatorBoundary:
+    return _OperatorBoundary(
+        operator=operator,
+        previous_output_type=Any,
+        context_inputs=None,
+        dynamic_boundary=_BoundarySignature(
+            input_types=input_types,
+            output_type=output_type,
+        ),
+        static_boundary=None,
+    )
+
+
+def test_project_input_annotation_from_output_template_matches_plain_tuple_template():
+    class PlainTupleProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (current_output, str)
+
+    boundary = _make_projection_boundary(
+        PlainTupleProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
         tuple[int, str],
     ) is int
+
+
+def test_project_input_annotation_from_output_template_supports_ordered_any_bindings():
+    class OrderedListProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, validation_error_type
+            left_annotation, right_annotation = expand_output_annotation(current_output)
+            return expand_output_annotation(current_output), tuple[list[left_annotation], list[right_annotation]]
+
+    boundary = _make_projection_boundary(
+        OrderedListProjectionContract(),
+        input_types=(Any, Any),
+        output_type=tuple[list[Any], list[Any]],
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[list[int], list[str]],
+    ) == tuple[int, str]
+
+
+def test_project_input_annotation_from_output_template_rejects_placeholder_count_mismatch():
+    class OrderedListProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, validation_error_type
+            left_annotation, right_annotation = expand_output_annotation(current_output)
+            return expand_output_annotation(current_output), tuple[list[left_annotation], list[right_annotation]]
+
+    boundary = _make_projection_boundary(
+        OrderedListProjectionContract(),
+        input_types=(Any,),
+        output_type=tuple[list[Any], list[Any]],
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[list[int], list[str]],
+    ) is None
+
+
+def test_project_input_annotation_from_output_template_returns_none_when_projection_fails_confirmation():
+    class RejectingProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (str, current_output)
+
+    boundary = _make_projection_boundary(
+        RejectingProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[int, str],
+    ) is None
+
+
+def test_project_input_annotation_from_output_template_returns_none_when_binding_collection_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class PlainTupleProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (current_output, str)
+
+    boundary = _make_projection_boundary(
+        PlainTupleProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "_collect_any_placeholder_bindings",
+        lambda *args: None,
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[int, str],
+    ) is None
+
+
+def test_project_input_annotation_from_output_template_returns_none_when_placeholder_replacement_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class PlainTupleProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (current_output, str)
+
+    boundary = _make_projection_boundary(
+        PlainTupleProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "_replace_any_placeholders_in_order",
+        lambda *args: None,
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[int, str],
+    ) is None
 
 
 def test_typevar_output_resolved_from_multi_parameter_signature():

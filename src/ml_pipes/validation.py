@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, TypeVar, get_type_hints
 
 from ._typing.annotation import (
-    _UNBOUND as _ANNOTATION_UNBOUND,
     _annotation_shape,
-    _bind_any_placeholder,
+    _are_annotations_equivalent,
+    _collect_any_placeholder_bindings,
     _generic_argument_pairs,
     _generic_origins_compatible,
-    _replace_any_placeholder_tree,
+    _replace_any_placeholders_in_order,
     _transform_annotation,
     _typevar_constraint_annotation,
     collapse_annotation_parts,
@@ -372,33 +372,30 @@ class PipelineValidator:
         if boundary.dynamic_boundary is None:
             return Any
 
-        guessed_input_annotation = cls._guess_input_annotation_from_output_template(
-            boundary.collapsed_dynamic_input_annotation,
-            boundary.dynamic_boundary.output_type,
-            required_output_annotation,
-        )
-        if guessed_input_annotation is not Any and cls._confirm_contract_projection(
-            boundary,
-            guessed_input_annotation,
-            required_output_annotation,
-        ):
-            return guessed_input_annotation
+        projected_input_annotation = cls._project_input_annotation_from_output_template(boundary, required_output_annotation)
+        if projected_input_annotation is not None:
+            return projected_input_annotation
 
         if cls._does_contract_preserve_annotation(boundary, required_output_annotation):
             return required_output_annotation
         return Any
 
     @classmethod
-    def _guess_input_annotation_from_output_template(
+    def _project_input_annotation_from_output_template(
         cls,
-        input_template: Any,
-        output_template: Any,
+        boundary: _OperatorBoundary,
         required_output_annotation: Any,
-    ) -> Any:
-        binding = _bind_any_placeholder(output_template, required_output_annotation, None)
-        if binding is _ANNOTATION_UNBOUND:
-            return Any
-        return _replace_any_placeholder_tree(input_template, binding)
+    ) -> Any | None:
+        try:
+            input_template = boundary.collapsed_dynamic_input_annotation
+            output_template = boundary.dynamic_boundary.output_type
+            placeholder_bindings = _collect_any_placeholder_bindings(output_template, required_output_annotation)
+            projected_input_annotation = _replace_any_placeholders_in_order(input_template, placeholder_bindings)
+
+            if cls._confirm_contract_projection(boundary, projected_input_annotation, required_output_annotation):
+                return projected_input_annotation
+        except (TypeError, ValueError) as exc:
+            return None
 
     @classmethod
     def _confirm_contract_projection(
@@ -449,30 +446,6 @@ class PipelineValidator:
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
                     f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
                 )
-
-def _are_annotations_equivalent(left_annotation: Any, right_annotation: Any) -> bool:
-    if left_annotation == right_annotation:
-        return True
-
-    left_shape = _annotation_shape(left_annotation)
-    right_shape = _annotation_shape(right_annotation)
-    if left_shape is None or right_shape is None:
-        return False
-
-    left_origin, left_child_annotations = left_shape
-    right_origin, right_child_annotations = right_shape
-    if left_origin != right_origin or len(left_child_annotations) != len(right_child_annotations):
-        return False
-
-    return all(
-        _are_annotations_equivalent(left_child_annotation, right_child_annotation)
-        for left_child_annotation, right_child_annotation in zip(
-            left_child_annotations,
-            right_child_annotations,
-            strict=True,
-        )
-    )
-
 
 def get_signature_target(operator: Callable[..., Any]) -> Any:
     if inspect.isfunction(operator) or inspect.ismethod(operator):
