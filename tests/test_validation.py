@@ -412,6 +412,13 @@ def test_resolved_input_type_skips_contract_passthrough():
     assert contract.input_type is int
 
 
+def test_resolved_input_type_backpropagates_through_store():
+    contract = Pipeline([Store("x"), IntToString()]).validate(inference=True)
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
 def test_resolved_input_type_preserves_strongest_known_boundary_through_vague_ops():
     contract = Pipeline([ContractPassthrough(), VagueListOp(), ListIntToStr()]).validate(inference=True)
 

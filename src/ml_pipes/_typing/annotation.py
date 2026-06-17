@@ -102,56 +102,61 @@ def satisfies_annotation_constraint(constraint_annotation: Any, annotation: Any)
     return try_tighten_annotation(constraint_annotation, annotation) is not _UNBOUND
 
 
-def try_tighten_annotation(left_annotation: Any, right_annotation: Any) -> Any:
-    if left_annotation is None or left_annotation is Any:
-        return right_annotation
-    if right_annotation is None or right_annotation is Any:
-        return left_annotation
-    if isinstance(left_annotation, TypeVar):
-        return _merge_typevar_annotation(left_annotation, right_annotation)
-    if isinstance(right_annotation, TypeVar):
-        return _merge_typevar_annotation(right_annotation, left_annotation)
-    if left_annotation == right_annotation:
-        return left_annotation
-    if left_annotation is object:
-        return right_annotation
-    if right_annotation is object:
-        return left_annotation
-    if isinstance(left_annotation, type) and isinstance(right_annotation, type):
+def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+    if current_annotation is None or current_annotation is Any:
+        return candidate_annotation
+    if candidate_annotation is None or candidate_annotation is Any:
+        return current_annotation
+    if isinstance(current_annotation, TypeVar):
+        return _merge_typevar_annotation(current_annotation, candidate_annotation)
+    if isinstance(candidate_annotation, TypeVar):
+        return _merge_typevar_annotation(candidate_annotation, current_annotation)
+    if current_annotation == candidate_annotation:
+        return current_annotation
+    if current_annotation is object:
+        return candidate_annotation
+    if candidate_annotation is object:
+        return current_annotation
+    if isinstance(current_annotation, type) and isinstance(candidate_annotation, type):
         try:
-            if issubclass(left_annotation, right_annotation):
-                return left_annotation
-            if issubclass(right_annotation, left_annotation):
-                return right_annotation
+            if issubclass(current_annotation, candidate_annotation):
+                return current_annotation
+            if issubclass(candidate_annotation, current_annotation):
+                return candidate_annotation
         except TypeError:
             return _UNBOUND
         return _UNBOUND
 
-    left_shape = _annotation_shape(left_annotation)
-    right_shape = _annotation_shape(right_annotation)
-    if left_shape is None or right_shape is None:
+    current_shape = _annotation_shape(current_annotation)
+    candidate_shape = _annotation_shape(candidate_annotation)
+    if current_shape is None or candidate_shape is None:
         return _UNBOUND
 
-    left_origin, left_args = left_shape
-    right_origin, right_args = right_shape
-    if left_origin != right_origin:
+    current_origin, current_args = current_shape
+    candidate_origin, candidate_args = candidate_shape
+    if current_origin != candidate_origin:
         return _UNBOUND
 
-    arg_pairs = _generic_argument_pairs(left_origin, left_args, left_origin, right_args)
+    arg_pairs = _generic_argument_pairs(
+        current_origin,
+        current_args,
+        current_origin,
+        candidate_args,
+    )
     if arg_pairs is None:
         return _UNBOUND
 
     merged_args = []
-    for left_arg, right_arg, variance in arg_pairs:
+    for current_arg, candidate_arg, variance in arg_pairs:
         if variance == _INVARIANT:
-            merged_arg = _try_tighten_invariant_annotation(left_arg, right_arg)
+            merged_arg = _try_tighten_invariant_annotation(current_arg, candidate_arg)
         else:
-            merged_arg = try_tighten_annotation(left_arg, right_arg)
+            merged_arg = try_tighten_annotation(current_arg, candidate_arg)
         if merged_arg is _UNBOUND:
             return _UNBOUND
         merged_args.append(merged_arg)
 
-    return _rebuild_annotation_like(left_annotation, tuple(merged_args))
+    return _rebuild_annotation_like(current_annotation, tuple(merged_args))
 
 
 def normalize_published_annotation(annotation: Any) -> Any:
@@ -368,17 +373,17 @@ def _merge_typevar_annotation(typevar: TypeVar, candidate: Any) -> Any:
     return _UNBOUND
 
 
-def _try_tighten_invariant_annotation(left: Any, right: Any) -> Any:
-    if left is None or left is Any:
-        return right
-    if right is None or right is Any:
-        return left
-    if left is object:
-        return right
-    if right is object:
-        return left
-    if left == right:
-        return left
+def _try_tighten_invariant_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+    if current_annotation is None or current_annotation is Any:
+        return candidate_annotation
+    if candidate_annotation is None or candidate_annotation is Any:
+        return current_annotation
+    if current_annotation is object:
+        return candidate_annotation
+    if candidate_annotation is object:
+        return current_annotation
+    if current_annotation == candidate_annotation:
+        return current_annotation
     return _UNBOUND
 
 
