@@ -5,11 +5,9 @@ import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
-from ml_pipes._typing.annotation import (
-    is_assignable,
-    specialize_input_from_output_template,
-)
+from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.validation import (
+    PipelineValidator,
     PipelineValidationWarning,
     _resolve_typevar_output,
 )
@@ -732,8 +730,8 @@ def test_resolve_typevar_output_through_generic_subtyping():
     ) == list[int]
 
 
-def test_specialize_input_from_output_template_matches_plain_tuple_template():
-    assert specialize_input_from_output_template(
+def test_guess_input_annotation_from_output_template_matches_plain_tuple_template():
+    assert PipelineValidator._guess_input_annotation_from_output_template(
         Any,
         (Any, str),
         tuple[int, str],

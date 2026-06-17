@@ -5,9 +5,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, TypeVar, get_type_hints
 
 from ._typing.annotation import (
+    _UNBOUND as _ANNOTATION_UNBOUND,
     _annotation_shape,
+    _bind_any_placeholder,
     _generic_argument_pairs,
     _generic_origins_compatible,
+    _replace_any_placeholder_tree,
     _transform_annotation,
     _typevar_constraint_annotation,
     collapse_annotation_parts,
@@ -20,7 +23,6 @@ from ._typing.annotation import (
     materialize_probe_annotation,
     normalize_published_annotation,
     satisfies_annotation_constraint,
-    specialize_input_from_output_template,
     tighten_annotation,
 )
 from ._typing.signatures import validate_operator_signature
@@ -146,7 +148,6 @@ class _OperatorBoundary:
             self.effective_output_type,
             probe_output,
         )
-
 
 class PipelineValidator:
     def __init__(self, operators: list[Any]):
@@ -346,62 +347,87 @@ class PipelineValidator:
 
     @classmethod
     def _run_backward_input_tightening_pass(cls, boundaries: list[_OperatorBoundary]) -> Any:
-        required_upstream_type: Any = Any
+        required_downstream_type: Any = Any
         for boundary in reversed(boundaries):
             # Example: static says `object`, dynamic says `tuple[int, Any]` -> start from `tuple[int, Any]`.
             boundary_input_annotation = boundary.collapsed_input_annotation
             # Example: downstream needs `tuple[int, str]` -> project that shape backward through this operator.
-            projected_input_annotation = cls._project_input_back_through(boundary, required_upstream_type)
+            projected_input_annotation = cls._project_contract_input_back_through(
+                boundary,
+                required_downstream_type,
+            )
             # Example: local says `tuple[int, Any]`, projection says `tuple[int, str]` -> keep `tuple[int, str]`.
-            required_upstream_type = tighten_annotation(
+            required_downstream_type = tighten_annotation(
                 boundary_input_annotation,
                 projected_input_annotation,
             )
-        return required_upstream_type
+        return required_downstream_type
 
     @classmethod
-    def _project_input_back_through(cls, boundary: _OperatorBoundary, inferred: Any) -> Any:
-        contract_input = cls._project_contract_input_back_through(boundary, inferred)
-        boundary_input_annotation = boundary.collapsed_input_annotation
-        if contract_input is not Any:
-            return tighten_annotation(boundary_input_annotation, contract_input)
-        if is_output_annotation_assignable_to_input_annotations(boundary.effective_output_type, (inferred,)):
-            return boundary_input_annotation
-        return Any
-
-    @classmethod
-    def _project_contract_input_back_through(cls, boundary: _OperatorBoundary, inferred: Any) -> Any:
+    def _project_contract_input_back_through(
+        cls,
+        boundary: _OperatorBoundary,
+        required_output_annotation: Any,
+    ) -> Any:
         if boundary.dynamic_boundary is None:
             return Any
 
-        template_input = boundary.collapsed_dynamic_input_annotation
-        specialized_input = specialize_input_from_output_template(
-            template_input,
+        guessed_input_annotation = cls._guess_input_annotation_from_output_template(
+            boundary.collapsed_dynamic_input_annotation,
             boundary.dynamic_boundary.output_type,
-            inferred,
+            required_output_annotation,
         )
-        if specialized_input is not Any and cls._confirm_contract_projection(boundary, specialized_input, inferred):
-            return specialized_input
-
-        contract_probe = boundary.probe_contract(inferred)
-        if contract_probe is None:
-            return Any
-        input_types, output_type = contract_probe
-        collapsed_input = collapse_annotation_parts(input_types)
-        if _are_annotations_equivalent(output_type, inferred) and _are_annotations_equivalent(
-            collapsed_input,
-            inferred,
+        if guessed_input_annotation is not Any and cls._confirm_contract_projection(
+            boundary,
+            guessed_input_annotation,
+            required_output_annotation,
         ):
-            return inferred
+            return guessed_input_annotation
+
+        if cls._does_contract_preserve_annotation(boundary, required_output_annotation):
+            return required_output_annotation
         return Any
 
     @classmethod
-    def _confirm_contract_projection(cls, boundary: _OperatorBoundary, candidate_input: Any, inferred: Any) -> bool:
+    def _guess_input_annotation_from_output_template(
+        cls,
+        input_template: Any,
+        output_template: Any,
+        required_output_annotation: Any,
+    ) -> Any:
+        binding = _bind_any_placeholder(output_template, required_output_annotation, None)
+        if binding is _ANNOTATION_UNBOUND:
+            return Any
+        return _replace_any_placeholder_tree(input_template, binding)
+
+    @classmethod
+    def _confirm_contract_projection(
+        cls,
+        boundary: _OperatorBoundary,
+        candidate_input: Any,
+        expected_output_annotation: Any,
+    ) -> bool:
         contract_probe = boundary.probe_contract(candidate_input)
         if contract_probe is None:
             return False
         _, output_type = contract_probe
-        return _are_annotations_equivalent(output_type, inferred)
+        return _are_annotations_equivalent(output_type, expected_output_annotation)
+
+    @classmethod
+    def _does_contract_preserve_annotation(
+        cls,
+        boundary: _OperatorBoundary,
+        annotation: Any,
+    ) -> bool:
+        contract_probe = boundary.probe_contract(annotation)
+        if contract_probe is None:
+            return False
+        input_types, output_type = contract_probe
+        collapsed_input_annotation = collapse_annotation_parts(input_types)
+        return _are_annotations_equivalent(output_type, annotation) and _are_annotations_equivalent(
+            collapsed_input_annotation,
+            annotation,
+        )
 
     def _validate_contracts_strictly(self, boundaries: list[_OperatorBoundary]) -> None:
         for i, boundary in enumerate(boundaries):

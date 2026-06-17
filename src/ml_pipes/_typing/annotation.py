@@ -162,17 +162,6 @@ def materialize_probe_annotation(annotation: Any) -> Any:
     return _transform_annotation(annotation, _materialize_probe_annotation)
 
 
-def specialize_input_from_output_template(
-    input_template: Any,
-    output_template: Any,
-    inferred_output: Any,
-) -> Any:
-    binding = _bind_any_placeholder(output_template, inferred_output, None)
-    if binding is _UNBOUND:
-        return Any
-    return _replace_any_placeholder_tree(input_template, binding)
-
-
 def is_concrete_assignable(source_annotation: Any, target_annotation: Any) -> bool:
     if not isinstance(source_annotation, type) or not isinstance(target_annotation, type):
         return False
