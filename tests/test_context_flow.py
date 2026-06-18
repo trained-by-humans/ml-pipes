@@ -2,10 +2,13 @@
 Tests for Store/Recall reachability validation — richer error messages,
 extend() re-validation, and Embed attribution.
 """
+from typing import Any
+
 import numpy as np
 import pytest
 
 from ml_pipes import Batch, Pick, Pipeline, PipelineValidationError, Recall, Store, UnBatch, embed
+from ml_pipes._typing.annotation import expand_annotation_parts
 from ml_pipes.context import Recall, Store
 from ml_pipes.types import ImagePayload
 
@@ -97,6 +100,30 @@ def test_store_select_stores_image_payload_property():
 
 def test_store_select_type_flow_passes():
     Pipeline([Store("image_shape", source="spatial_shape"), Recall("image_shape")]).validate()
+
+
+def test_recall_resolve_contract_keeps_variadic_tuple_item_type_when_store_matches_it():
+    input_types, output_type = Recall("x").resolve_contract(
+        tuple[int, ...],
+        {"x": int},
+        expand_annotation_parts,
+        PipelineValidationError,
+    )
+
+    assert input_types == (Any,)
+    assert output_type == tuple[int, ...]
+
+
+def test_recall_resolve_contract_widens_variadic_tuple_item_type_for_inserted_value():
+    input_types, output_type = Recall("x").resolve_contract(
+        tuple[int, ...],
+        {"x": tuple[int, ...]},
+        expand_annotation_parts,
+        PipelineValidationError,
+    )
+
+    assert input_types == (Any,)
+    assert output_type == tuple[int | tuple[int, ...], ...]
 
 
 def test_store_index_out_of_bounds_raises_on_concrete_input():

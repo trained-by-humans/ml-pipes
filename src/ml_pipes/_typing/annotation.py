@@ -43,6 +43,21 @@ def collapse_annotation_parts(annotation_parts: tuple[Any, ...]) -> Any:
     return tuple[annotation_parts]
 
 
+def combine_annotation_options(*annotations: Any) -> Any:
+    if not annotations:
+        return Any
+
+    combined = annotations[0]
+    for annotation in annotations[1:]:
+        if combined == annotation:
+            continue
+        if combined is Any or annotation is Any:
+            combined = Any
+            continue
+        combined = _combine_annotations(combined, annotation)
+    return combined
+
+
 def align_source_annotation_to_target_annotations(
     source_annotation: Any,
     target_annotations: tuple[Any, ...],
@@ -650,6 +665,12 @@ def _is_variadic_tuple_annotation(annotation: Any) -> bool:
         return False
     args = get_args(annotation)
     return len(args) == 2 and args[1] is Ellipsis
+
+
+def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
+    if not _is_variadic_tuple_annotation(annotation):
+        return None
+    return get_args(annotation)[0]
 
 
 def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> Any:
