@@ -6,13 +6,11 @@ import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
-from ml_pipes._typing.annotation import align_source_annotation_to_target_annotations, is_assignable
 from ml_pipes.validation import (
     PipelineValidator,
     PipelineValidationWarning,
     _BoundarySignature,
     _OperatorBoundary,
-    _specialize_output_annotation_from_aligned_input_annotations,
 )
 
 _VariadicT = TypeVar("_VariadicT")
@@ -556,75 +554,23 @@ def test_entry_contract_mismatch_reports_pipeline_input():
         Pipeline([IntToString()]).validate(pipeline_input_type=str)
 
 
-# ---------------------------------------------------------------------------
-# TypeVar compatibility
-# ---------------------------------------------------------------------------
-
 class _Base:
     pass
+
 
 class _Child(_Base):
     pass
 
+
 class _Unrelated:
     pass
 
+
 _T = TypeVar("_T", bound=_Base)
 _U = TypeVar("_U")  # unbound
-_ConstrainedT = TypeVar("_ConstrainedT", int, str)
-
-
-def test_typevar_in_expected_accepts_bound_subclass():
-    # produced=_Child, expected=~_T (bound=_Base) → _Child is subclass of _Base
-    assert is_assignable(_Child, _T)
-
-
-def test_typevar_in_expected_accepts_exact_bound():
-    assert is_assignable(_Base, _T)
-
-
-def test_typevar_in_expected_rejects_unrelated():
-    assert not is_assignable(_Unrelated, _T)
-
-
-def test_typevar_in_produced_accepts_when_bound_subclass_of_expected():
-    # produced=~_T (bound=_Base), expected=_Base → bound is assignable to expected
-    assert is_assignable(_T, _Base)
-
-
-def test_typevar_in_produced_rejects_when_expected_is_subtype_of_bound():
-    # produced=~_T (bound=_Base), expected=_Child → _Child < _Base but _Base is not assignable to _Child
-    assert not is_assignable(_T, _Child)
-
-
-def test_typevar_in_produced_rejects_fully_unrelated():
-    assert not is_assignable(_T, _Unrelated)
-
-
-def test_unbound_typevar_in_expected_accepts_anything():
-    assert is_assignable(int, _U)
-    assert is_assignable(_Base, _U)
-
-
-def test_unbound_typevar_in_produced_accepts_anything():
-    assert is_assignable(_U, int)
-    assert is_assignable(_U, _Base)
-
-
-def test_generic_subtyping_accepts_list_as_iterable():
-    assert is_assignable(list[int], Iterable[int])
-
-
-def test_generic_covariance_accepts_child_list_as_base_iterable():
-    assert is_assignable(list[_Child], Iterable[_Base])
-
-
-def test_generic_invariance_rejects_child_list_as_base_list():
-    assert not is_assignable(list[_Child], list[_Base])
 
 
 def test_typevar_output_resolved_when_same_typevar_flows_through_input():
-    # ~_T in both input and output preserves the concrete subtype.
     class IdentityTypeVar:
         def __call__(self, x: _T) -> _T: ...  # type: ignore[empty-body]
 
@@ -636,7 +582,6 @@ def test_typevar_output_resolved_when_same_typevar_flows_through_input():
 
 
 def test_typevar_output_not_resolved_from_bound_only():
-    # A bound alone (_Base -> ~_T) must not collapse to the concrete input subtype.
     class ProducesTypeVar:
         def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
 
@@ -717,79 +662,63 @@ def test_validate_recursively_publishes_bound_inside_dynamic_tuple_output():
     assert contract.output_type == (list[_Base], list[_Base])
 
 
-def test_specialize_output_annotation_recursively_specializes_nested_output():
-    aligned_candidate_annotations = align_source_annotation_to_target_annotations(_Child, (_T,))
-    assert aligned_candidate_annotations == (_Child,)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
-        aligned_candidate_annotations,
-        (_T,),
-        list[_T],
-    ) == list[_Child]
+def test_typevar_output_resolved_from_multi_parameter_signature():
+    class MultiInputTypeVar:
+        def __call__(self, x: _T, y: int) -> _T: ...  # type: ignore[empty-body]
 
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
 
-def test_specialize_output_annotation_recursively_specializes_plain_tuple_output():
-    aligned_candidate_annotations = align_source_annotation_to_target_annotations(_Child, (_T,))
-    assert aligned_candidate_annotations == (_Child,)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
-        aligned_candidate_annotations,
-        (_T,),
-        (_T, list[_T]),
-    ) == (
-        _Child,
-        list[_Child],
+    Pipeline([MultiInputTypeVar(), ConsumesChild()]).validate(
+        pipeline_input_type=tuple[_Child, int]
     )
 
 
-def test_specialize_output_annotation_merges_repeated_typevar_inputs():
-    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
-        tuple[_Base, _Child],
-        (_T, _T),
+def test_single_tuple_parameter_typevar_pipeline_rejects_mixed_tuple_input():
+    class IterableToList:
+        def __call__(self, x: Iterable[_U]) -> list[_U]: ...  # type: ignore[empty-body]
+
+    class ConsumesChildList:
+        def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([IterableToList(), ConsumesChildList()]).validate(
+            pipeline_input_type=tuple[_Child, int]
+        )
+
+
+def test_nested_typevar_output_is_recursively_specialized():
+    class WrapTypeVarInList:
+        def __call__(self, x: _T) -> list[_T]: ...  # type: ignore[empty-body]
+
+    class ConsumesChildList:
+        def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
+
+    Pipeline([WrapTypeVarInList(), ConsumesChildList()]).validate(
+        pipeline_input_type=_Child
     )
-    assert aligned_candidate_annotations == (_Base, _Child)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
-        aligned_candidate_annotations,
-        (_T, _T),
-        _T,
-    ) is _Base
 
 
-def test_specialize_output_annotation_from_single_tuple_parameter():
-    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
-        tuple[_Child, int],
-        (tuple[_T, int],),
-    )
-    assert aligned_candidate_annotations == (tuple[_Child, int],)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
-        aligned_candidate_annotations,
-        (tuple[_T, int],),
-        _T,
-    ) is _Child
+def test_typevar_pipeline_rejects_narrower_consumer():
+    class ProducesTypeVar:
+        def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
+
+    class ConsumesChild:
+        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([ProducesTypeVar(), ConsumesChild()], auto_validate=True)
 
 
-def test_specialize_output_annotation_through_generic_subtyping():
-    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
-        list[int | None],
-        (Iterable[_U | None],),
-    )
-    assert aligned_candidate_annotations == (list[int | None],)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
-        aligned_candidate_annotations,
-        (Iterable[_U | None],),
-        list[_U],
-    ) == list[int]
+def test_typevar_pipeline_rejects_incompatible_consumer():
+    class ProducesTypeVar:
+        def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
 
+    class ConsumesUnrelated:
+        def __call__(self, x: _Unrelated) -> str: ...  # type: ignore[empty-body]
 
-def test_specialize_output_annotation_does_not_bind_constrained_typevar_from_any_input():
-    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
-        Any,
-        (_ConstrainedT,),
-    )
-    assert aligned_candidate_annotations == (Any,)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
-        aligned_candidate_annotations,
-        (_ConstrainedT,),
-        _ConstrainedT,
-    ) is _ConstrainedT
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([ProducesTypeVar(), ConsumesUnrelated()], auto_validate=True)
 
 
 def _make_projection_boundary(
@@ -968,66 +897,6 @@ def test_project_input_annotation_from_output_template_returns_none_when_placeho
         boundary,
         tuple[int, str],
     ) is None
-
-
-def test_typevar_output_resolved_from_multi_parameter_signature():
-    class MultiInputTypeVar:
-        def __call__(self, x: _T, y: int) -> _T: ...  # type: ignore[empty-body]
-
-    class ConsumesChild:
-        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
-
-    Pipeline([MultiInputTypeVar(), ConsumesChild()]).validate(
-        pipeline_input_type=tuple[_Child, int]
-    )
-
-
-def test_single_tuple_parameter_typevar_pipeline_rejects_mixed_tuple_input():
-    class IterableToList:
-        def __call__(self, x: Iterable[_U]) -> list[_U]: ...  # type: ignore[empty-body]
-
-    class ConsumesChildList:
-        def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
-
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([IterableToList(), ConsumesChildList()]).validate(
-            pipeline_input_type=tuple[_Child, int]
-        )
-
-
-def test_nested_typevar_output_is_recursively_specialized():
-    class WrapTypeVarInList:
-        def __call__(self, x: _T) -> list[_T]: ...  # type: ignore[empty-body]
-
-    class ConsumesChildList:
-        def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
-
-    Pipeline([WrapTypeVarInList(), ConsumesChildList()]).validate(
-        pipeline_input_type=_Child
-    )
-
-
-def test_typevar_pipeline_rejects_narrower_consumer():
-    # ~_T resolved to _Base; _Child is a strict subtype of _Base → _Base not assignable to _Child
-    class ProducesTypeVar:
-        def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
-
-    class ConsumesChild:
-        def __call__(self, x: _Child) -> str: ...  # type: ignore[empty-body]
-
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([ProducesTypeVar(), ConsumesChild()], auto_validate=True)
-
-
-def test_typevar_pipeline_rejects_incompatible_consumer():
-    class ProducesTypeVar:
-        def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
-
-    class ConsumesUnrelated:
-        def __call__(self, x: _Unrelated) -> str: ...  # type: ignore[empty-body]
-
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([ProducesTypeVar(), ConsumesUnrelated()], auto_validate=True)
 
 
 def test_validation_rejects_variadic_tuple_projection_with_pipeline_error():

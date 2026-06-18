@@ -2,17 +2,13 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar, get_type_hints
+from typing import Any, Callable, get_type_hints
 
 from ._typing.annotation import (
-    _annotation_shape,
     _are_annotations_equivalent,
     _collect_any_placeholder_bindings,
-    _generic_argument_pairs,
-    _generic_origins_compatible,
     _replace_any_placeholders_in_order,
-    _transform_annotation,
-    _typevar_constraint_annotation,
+    _specialize_output_annotation_from_aligned_input_annotations,
     align_source_annotation_to_target_annotations,
     collapse_annotation_parts,
     expand_annotation_parts,
@@ -40,10 +36,6 @@ class PipelineValidationWarning(UserWarning):
 
 
 class StaticContractUnavailableError(Exception):
-    pass
-
-
-class _UnboundTypevarBindingError(Exception):
     pass
 
 
@@ -494,120 +486,3 @@ def resolve_operator_contract(
             f"{operator.__class__.__name__} is missing a return type annotation for __call__"
         )
     return tuple(input_types), hints["return"]
-
-
-def _specialize_output_annotation_from_aligned_input_annotations(
-    aligned_candidate_annotations: tuple[Any, ...],
-    input_template_annotations: tuple[Any, ...],
-    output_template_annotation: Any,
-) -> Any:
-    try:
-        bindings = _resolve_typevar_bindings(
-            input_template_annotations,
-            aligned_candidate_annotations,
-        )
-        return _apply_typevar_bindings(output_template_annotation, bindings)
-    except _UnboundTypevarBindingError:
-        return output_template_annotation
-
-
-def _resolve_typevar_bindings(
-    template_annotations: tuple[Any, ...],
-    candidate_annotations: tuple[Any, ...],
-) -> dict[TypeVar, Any]:
-    bindings: dict[TypeVar, Any] = {}
-    for template_annotation, candidate_annotation in zip(template_annotations, candidate_annotations, strict=True):
-        if not is_assignable(candidate_annotation, template_annotation):
-            raise _UnboundTypevarBindingError
-
-        pair_bindings = _resolve_typevar_bindings_from_match(
-            template_annotation,
-            candidate_annotation,
-        )
-        bindings = _merge_typevar_bindings(bindings, pair_bindings)
-    return bindings
-
-
-def _resolve_typevar_bindings_from_match(
-    template_annotation: Any,
-    candidate_annotation: Any,
- ) -> dict[TypeVar, Any]:
-    if isinstance(template_annotation, TypeVar):
-        if candidate_annotation is Any and _typevar_constraint_annotation(template_annotation) is not Any:
-            return {}
-        return {template_annotation: candidate_annotation}
-
-    template_shape = _annotation_shape(template_annotation)
-    if template_shape is None:
-        return {}
-
-    candidate_shape = _annotation_shape(candidate_annotation)
-    if candidate_shape is None:
-        return {}
-
-    template_origin, template_child_annotations = template_shape
-    candidate_origin, candidate_child_annotations = candidate_shape
-    if not _generic_origins_compatible(candidate_origin, template_origin):
-        return {}
-
-    child_annotation_pairs = _generic_argument_pairs(
-        candidate_origin,
-        candidate_child_annotations,
-        template_origin,
-        template_child_annotations,
-    )
-    if child_annotation_pairs is None:
-        return {}
-
-    return _resolve_typevar_bindings(
-        tuple(template_child_annotation for _, template_child_annotation, _ in child_annotation_pairs),
-        tuple(candidate_child_annotation for candidate_child_annotation, _, _ in child_annotation_pairs),
-    )
-
-
-def _merge_typevar_bindings(
-    current_bindings: dict[TypeVar, Any],
-    candidate_bindings: dict[TypeVar, Any],
-) -> dict[TypeVar, Any]:
-    if not candidate_bindings:
-        return current_bindings
-
-    merged_bindings = dict(current_bindings)
-    for typevar, candidate_binding in candidate_bindings.items():
-        if typevar not in merged_bindings:
-            merged_binding = candidate_binding
-        else:
-            merged_binding = _tighten_typevar_binding(
-                merged_bindings[typevar],
-                candidate_binding,
-            )
-        merged_bindings[typevar] = merged_binding
-    return merged_bindings
-
-
-def _tighten_typevar_binding(
-    current_binding: Any,
-    candidate_binding: Any,
-) -> Any:
-    if current_binding == candidate_binding:
-        tightened_binding = current_binding
-    elif is_assignable(candidate_binding, current_binding):
-        tightened_binding = current_binding
-    elif is_assignable(current_binding, candidate_binding):
-        tightened_binding = candidate_binding
-    else:
-        raise _UnboundTypevarBindingError
-
-    return tightened_binding
-
-
-def _apply_typevar_bindings(
-    template_annotation: Any,
-    bindings: dict[TypeVar, Any],
-) -> Any:
-    return _transform_annotation(
-        template_annotation,
-        lambda template_part: bindings.get(template_part, template_part)
-        if isinstance(template_part, TypeVar)
-        else template_part,
-    )
