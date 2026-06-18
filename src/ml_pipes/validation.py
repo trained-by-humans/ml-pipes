@@ -207,30 +207,37 @@ class PipelineValidator:
     def _validate_regions(self) -> None:
         stack: list[tuple[RegionOpener[Any, Any], int]] = []
         for i, op in enumerate(self.operators):
+            label = self._label_for(i, op)
             match op:
                 case RegionOpener() if stack and type(stack[-1][0]) is type(op):
+                    parent_opener, parent_index = stack[-1]
+                    parent_label = self._label_for(parent_index, parent_opener)
                     raise PipelineValidationError(
-                        f"Directly nested {type(op).__name__} regions are not supported — "
-                        f"a {type(op).__name__} region may not open inside another {type(op).__name__} region"
+                        f"Pipeline step {label} opens a {type(op).__name__} region inside "
+                        f"{parent_label}. Opening a {type(op).__name__} region inside another "
+                        f"open {type(op).__name__} region is not supported."
                     )
                 case RegionOpener():
                     stack.append((op, i))
                 case RegionCloser() if not stack:
                     raise PipelineValidationError(
-                        f"{type(op).__name__} at position {i} has no matching opener"
+                        f"Pipeline step {label} has no matching opener"
                     )
                 case RegionCloser() if not isinstance(op, stack[-1][0].closing_type):
                     top_opener, top_pos = stack[-1]
+                    opener_label = self._label_for(top_pos, top_opener)
                     raise PipelineValidationError(
-                        f"{type(op).__name__} at position {i} closes {type(top_opener).__name__} "
-                        f"opened at position {top_pos} — regions cannot interleave"
+                        f"Pipeline step {label} is {type(op).__name__}, but the currently open "
+                        f"region at {opener_label} is {type(top_opener).__name__} and must be "
+                        f"closed with {top_opener.closing_type.__name__}, not {type(op).__name__}."
                     )
                 case RegionCloser():
                     stack.pop()
 
         for opener, pos in stack:
+            label = self._label_for(pos, opener)
             raise PipelineValidationError(
-                f"{type(opener).__name__} at position {pos} has no matching {opener.closing_type.__name__}"
+                f"Pipeline step {label} has no matching {opener.closing_type.__name__}"
             )
 
     def _validate_context_interactions(self) -> None:
@@ -248,9 +255,10 @@ class PipelineValidator:
             elif isinstance(operator, Recall):
                 if operator.name not in stored_keys:
                     available = sorted(stored_keys)
+                    label = self._label_for(i, operator)
                     raise PipelineValidationError(
-                        f"Recall({operator.name!r}) at {self._label_for(i, operator)} "
-                        f"references a key that was not stored. "
+                        f"Pipeline step {label} references a key that was not stored: "
+                        f"{operator.name!r}. "
                         f"Keys available at this point: {available if available else '(none)'}"
                     )
 
@@ -281,7 +289,7 @@ class PipelineValidator:
             error_type=PipelineValidationError,
             warning_type=PipelineValidationWarning,
         )
-        input_types, output_type = require_operator_annotations(operator, parameters)
+        input_types, output_type = require_operator_annotations(operator, parameters, label=label)
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
     def _run_forward_boundary_resolution_pass(self, pipeline_input_type: Any = Any) -> list[_OperatorBoundary]:
@@ -300,8 +308,9 @@ class PipelineValidator:
             dynamic_boundary = self._resolve_dynamic_boundary(operator, previous_output_type, stored_annotations)
             static_boundary = self._resolve_static_boundary(i, operator)
             if dynamic_boundary is None and static_boundary is None:
+                label = self._label_for(i, operator)
                 raise PipelineValidationError(
-                    f"{operator.__class__.__name__} must define resolve_contract"
+                    f"Pipeline step {label} must define resolve_contract"
                 )
 
             current_boundary = _OperatorBoundary(
@@ -451,6 +460,8 @@ class PipelineValidator:
 def require_operator_annotations(
     operator: Any,
     parameters: tuple[inspect.Parameter, ...],
+    *,
+    label: str,
 ) -> tuple[tuple[Any, ...], Any]:
     hints = resolve_callable_hints(operator)
 
@@ -458,11 +469,11 @@ def require_operator_annotations(
     for parameter in parameters:
         if parameter.name not in hints:
             raise PipelineValidationError(
-                f"{operator.__class__.__name__} is missing a type annotation for __call__ input"
+                f"Pipeline step {label} is missing a type annotation for __call__ input"
             )
         input_types.append(hints[parameter.name])
     if "return" not in hints:
         raise PipelineValidationError(
-            f"{operator.__class__.__name__} is missing a return type annotation for __call__"
+            f"Pipeline step {label} is missing a return type annotation for __call__"
         )
     return tuple(input_types), hints["return"]

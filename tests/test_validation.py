@@ -278,7 +278,10 @@ def test_pipeline_validate_requires_operator_annotations():
 
     pipeline = Pipeline([UntypedOp()])
 
-    with pytest.raises(PipelineValidationError, match="missing a type annotation"):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 0:UntypedOp is missing a type annotation",
+    ):
         pipeline.validate()
 
 

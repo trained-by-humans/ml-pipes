@@ -128,12 +128,12 @@ def test_error_message_contains_key_name():
 
 
 def test_error_message_contains_operator_index_zero():
-    with pytest.raises(PipelineValidationError, match="0:Recall"):
+    with pytest.raises(PipelineValidationError, match="Pipeline step 0:Recall"):
         Pipeline([Recall("x")]).validate()
 
 
 def test_error_message_contains_operator_index_two():
-    with pytest.raises(PipelineValidationError, match="2:Recall"):
+    with pytest.raises(PipelineValidationError, match="Pipeline step 2:Recall"):
         Pipeline([IntToString(), StringToFloat(), Recall("x")]).validate()
 
 
