@@ -87,6 +87,10 @@ class PreparedSmsExample:
     token_count: int = 0
 
 
+def _make_prepared_sms_example() -> PreparedSmsExample:
+    return PreparedSmsExample()
+
+
 @dataclass(frozen=True)
 class SmsSpamLineageReport:
     kept_records: list[dict[str, Any]]
@@ -453,7 +457,7 @@ def sms_spam_prepare_pipeline(
     region_close = StreamItems() if lazy else CollectItems()
     operators: list[Any] = [
         region_open,
-        WrapMappingInObject(target="raw", state_factory=PreparedSmsExample),
+        WrapMappingInObject(target="raw", state_factory=_make_prepared_sms_example),
         Filter(_has_known_label, source="raw.label"),
         MapValue(_normalize_label, source="raw.label", target="label"),
         MapValue(_label_name, source="label", target="label_name"),

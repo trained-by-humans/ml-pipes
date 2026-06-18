@@ -473,12 +473,9 @@ def test_wrap_mapping_in_object_validation_returns_factory_output_when_input_is_
     assert contract.output_type == Carrier
 
 
-def test_wrap_mapping_in_object_validation_rejects_factory_with_hidden_parameters() -> None:
-    with pytest.raises(PipelineValidationError, match="state_factory must define no parameters"):
-        Pipeline([WrapMappingInObject(target="payload", state_factory=_make_carrier_with_default_payload)]).validate(
-            pipeline_input_type=dict[str, object],
-            strict=True,
-        )
+def test_wrap_mapping_in_object_rejects_factory_with_hidden_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="state_factory must define no parameters"):
+        WrapMappingInObject(target="payload", state_factory=_make_carrier_with_default_payload)
 
 
 def test_wrap_mapping_in_object_validation_rejects_incompatible_target_annotation() -> None:

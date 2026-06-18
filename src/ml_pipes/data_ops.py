@@ -752,6 +752,12 @@ class WrapMappingInObject(Generic[StateT]):
             value=target,
             required=True,
         )
+        validate_nullary_callable_signature(
+            state_factory,
+            label=f"{type(self).__name__} state_factory",
+            source_label="the operator invokes it without arguments",
+            error_type=TypeError,
+        )
         self.state_factory = state_factory
 
     def __call__(self, value: AnyMapping | None) -> StateT:
