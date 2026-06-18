@@ -23,7 +23,7 @@ def expand_annotation_parts(annotation: Any) -> tuple[Any, ...]:
     Variadic tuples remain atomic because Pipeline does not dispatch them as
     multi-parameter boundaries.
     """
-    if _is_variadic_tuple_annotation(annotation):
+    if _is_variadic_tuple_like(annotation):
         return (annotation,)
     origin = get_origin(annotation)
     if origin is tuple:
@@ -39,22 +39,33 @@ def collapse_annotation_parts(annotation_parts: tuple[Any, ...]) -> Any:
     return tuple[annotation_parts]
 
 
+def align_source_annotation_to_target_annotations(
+    source_annotation: Any,
+    target_annotations: tuple[Any, ...],
+) -> tuple[Any, ...] | None:
+    if len(target_annotations) == 1:
+        return (source_annotation,)
+
+    aligned_source_annotations = expand_annotation_parts(source_annotation)
+    if len(aligned_source_annotations) != len(target_annotations):
+        return None
+    return aligned_source_annotations
+
+
 def is_output_annotation_assignable_to_input_annotations(
     source_output_annotation: Any,
     target_input_annotations: tuple[Any, ...],
 ) -> bool:
-    if len(target_input_annotations) == 1:
-        return is_assignable(
-            source_output_annotation,
-            target_input_annotations[0],
-        )
-    source_annotations = expand_annotation_parts(source_output_annotation)
-    if len(source_annotations) != len(target_input_annotations):
+    aligned_source_annotations = align_source_annotation_to_target_annotations(
+        source_output_annotation,
+        target_input_annotations,
+    )
+    if aligned_source_annotations is None:
         return False
     return all(
         is_assignable(source_annotation, target_annotation)
         for source_annotation, target_annotation in zip(
-            source_annotations,
+            aligned_source_annotations,
             target_input_annotations,
             strict=True,
         )
@@ -489,7 +500,7 @@ def _replace_any_placeholders_in_order_recursive(
 
 def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
     if isinstance(annotation, tuple):
-        if any(part is Ellipsis for part in annotation):
+        if _is_variadic_tuple_shaped(annotation):
             return None
         return tuple, annotation
     origin = get_origin(annotation)
@@ -498,9 +509,17 @@ def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
     return origin, get_args(annotation)
 
 
+def _is_variadic_tuple_like(annotation: Any) -> bool:
+    return _is_variadic_tuple_shaped(annotation) or _is_variadic_tuple_annotation(annotation)
+
+
+def _is_variadic_tuple_shaped(annotation: Any) -> bool:
+    if not isinstance(annotation, tuple):
+        return False
+    return any(part is Ellipsis for part in annotation)
+
+
 def _is_variadic_tuple_annotation(annotation: Any) -> bool:
-    if isinstance(annotation, tuple):
-        return any(part is Ellipsis for part in annotation)
     origin = get_origin(annotation)
     if origin is not tuple:
         return False

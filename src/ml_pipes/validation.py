@@ -13,6 +13,7 @@ from ._typing.annotation import (
     _replace_any_placeholders_in_order,
     _transform_annotation,
     _typevar_constraint_annotation,
+    align_source_annotation_to_target_annotations,
     collapse_annotation_parts,
     expand_annotation_parts,
     format_annotation,
@@ -29,8 +30,6 @@ from ._typing.signatures import validate_operator_signature
 from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
 
-_UNBOUND = object()
-
 
 class PipelineValidationError(ValueError):
     pass
@@ -41,6 +40,10 @@ class PipelineValidationWarning(UserWarning):
 
 
 class StaticContractUnavailableError(Exception):
+    pass
+
+
+class _UnboundTypevarBindingError(Exception):
     pass
 
 
@@ -301,7 +304,6 @@ class PipelineValidator:
             elif isinstance(operator, RegionCloser):
                 stored_annotations = stack.pop()
 
-            input_context = dict(stored_annotations) if isinstance(operator, ContextOp) else None
             dynamic_boundary = self._resolve_dynamic_boundary(operator, previous_output_type, stored_annotations)
             static_boundary = self._resolve_static_boundary(i, operator)
             if dynamic_boundary is None and static_boundary is None:
@@ -309,20 +311,26 @@ class PipelineValidator:
                     f"{operator.__class__.__name__} must define resolve_contract"
                 )
 
-            boundaries.append(
-                _OperatorBoundary(
-                    operator=operator,
-                    previous_output_type=previous_output_type,
-                    context_inputs=input_context,
-                    dynamic_boundary=dynamic_boundary,
-                    static_boundary=static_boundary,
-                )
+            current_boundary = _OperatorBoundary(
+                operator=operator,
+                previous_output_type=previous_output_type,
+                context_inputs=dict(stored_annotations) if isinstance(operator, ContextOp) else None,
+                dynamic_boundary=dynamic_boundary,
+                static_boundary=static_boundary,
             )
-            previous_output_type = _resolve_typevar_output(
-                boundaries[-1].effective_output_type,
+            boundaries.append(current_boundary)
+            aligned_candidate_annotations = align_source_annotation_to_target_annotations(
                 previous_output_type,
-                boundaries[-1].effective_input_types,
+                current_boundary.effective_input_types,
             )
+            if aligned_candidate_annotations is None:
+                previous_output_type = current_boundary.effective_output_type
+            else:
+                previous_output_type = _specialize_output_annotation_from_aligned_input_annotations(
+                    aligned_candidate_annotations,
+                    current_boundary.effective_input_types,
+                    current_boundary.effective_output_type,
+                )
 
         return boundaries
 
@@ -488,152 +496,118 @@ def resolve_operator_contract(
     return tuple(input_types), hints["return"]
 
 
-def _resolve_typevar_output(output_type: Any, input_type: Any, input_types: tuple[Any, ...]) -> Any:
-    inferred_typevar_bindings = _infer_typevar_bindings_from_inputs(input_type, input_types)
-    if not inferred_typevar_bindings:
-        return output_type
-    return _apply_typevar_bindings(output_type, inferred_typevar_bindings)
-
-
-def _infer_typevar_bindings_from_inputs(
-    input_type: Any,
-    input_types: tuple[Any, ...],
-) -> dict[TypeVar, Any] | None:
-    if len(input_types) == 1:
-        input_annotations = (input_type,)
-    else:
-        input_annotations = expand_annotation_parts(input_type)
-        if len(input_annotations) != len(input_types):
-            return None
-
-    inferred_bindings: dict[TypeVar, Any] = {}
-    for template_input_annotation, input_annotation in zip(
-        input_types,
-        input_annotations,
-        strict=True,
-    ):
-        if not is_assignable(
-            input_annotation,
-            template_input_annotation,
-        ):
-            return None
-
-        pair_bindings = _infer_typevar_bindings_from_annotation_pair(
-            template_input_annotation,
-            input_annotation,
+def _specialize_output_annotation_from_aligned_input_annotations(
+    aligned_candidate_annotations: tuple[Any, ...],
+    input_template_annotations: tuple[Any, ...],
+    output_template_annotation: Any,
+) -> Any:
+    try:
+        bindings = _resolve_typevar_bindings(
+            input_template_annotations,
+            aligned_candidate_annotations,
         )
-        if pair_bindings is None:
-            return None
-
-        inferred_bindings = _merge_typevar_bindings(inferred_bindings, pair_bindings)
-        if inferred_bindings is None:
-            return None
-    return inferred_bindings
+        return _apply_typevar_bindings(output_template_annotation, bindings)
+    except _UnboundTypevarBindingError:
+        return output_template_annotation
 
 
-def _infer_typevar_bindings_from_annotation_pair(
+def _resolve_typevar_bindings(
+    template_annotations: tuple[Any, ...],
+    candidate_annotations: tuple[Any, ...],
+) -> dict[TypeVar, Any]:
+    bindings: dict[TypeVar, Any] = {}
+    for template_annotation, candidate_annotation in zip(template_annotations, candidate_annotations, strict=True):
+        if not is_assignable(candidate_annotation, template_annotation):
+            raise _UnboundTypevarBindingError
+
+        pair_bindings = _resolve_typevar_bindings_from_match(
+            template_annotation,
+            candidate_annotation,
+        )
+        bindings = _merge_typevar_bindings(bindings, pair_bindings)
+    return bindings
+
+
+def _resolve_typevar_bindings_from_match(
     template_annotation: Any,
-    input_annotation: Any,
-) -> dict[TypeVar, Any] | None:
+    candidate_annotation: Any,
+ ) -> dict[TypeVar, Any]:
     if isinstance(template_annotation, TypeVar):
-        return _infer_single_typevar_binding(template_annotation, input_annotation)
+        if candidate_annotation is Any and _typevar_constraint_annotation(template_annotation) is not Any:
+            return {}
+        return {template_annotation: candidate_annotation}
 
     template_shape = _annotation_shape(template_annotation)
     if template_shape is None:
         return {}
 
-    input_shape = _annotation_shape(input_annotation)
-    if input_shape is None:
+    candidate_shape = _annotation_shape(candidate_annotation)
+    if candidate_shape is None:
         return {}
 
     template_origin, template_child_annotations = template_shape
-    input_origin, input_child_annotations = input_shape
-    if not _generic_origins_compatible(input_origin, template_origin):
+    candidate_origin, candidate_child_annotations = candidate_shape
+    if not _generic_origins_compatible(candidate_origin, template_origin):
         return {}
 
     child_annotation_pairs = _generic_argument_pairs(
-        input_origin,
-        input_child_annotations,
+        candidate_origin,
+        candidate_child_annotations,
         template_origin,
         template_child_annotations,
     )
     if child_annotation_pairs is None:
         return {}
 
-    inferred_bindings: dict[TypeVar, Any] = {}
-    for actual_child_annotation, template_child_annotation, _ in child_annotation_pairs:
-        child_bindings = _infer_typevar_bindings_from_annotation_pair(
-            template_child_annotation,
-            actual_child_annotation,
-        )
-        if child_bindings is None:
-            return None
-
-        inferred_bindings = _merge_typevar_bindings(inferred_bindings, child_bindings)
-        if inferred_bindings is None:
-            return None
-    return inferred_bindings
-
-
-def _infer_single_typevar_binding(
-    typevar: TypeVar,
-    input_annotation: Any,
-) -> dict[TypeVar, Any] | None:
-    if input_annotation is Any and typevar.__bound__ is not None:
-        return {}
-    if not _annotation_satisfies_typevar_bound(typevar, input_annotation):
-        return None
-    return {typevar: input_annotation}
+    return _resolve_typevar_bindings(
+        tuple(template_child_annotation for _, template_child_annotation, _ in child_annotation_pairs),
+        tuple(candidate_child_annotation for candidate_child_annotation, _, _ in child_annotation_pairs),
+    )
 
 
 def _merge_typevar_bindings(
-    existing_bindings: dict[TypeVar, Any],
-    new_bindings: dict[TypeVar, Any],
-) -> dict[TypeVar, Any] | None:
-    if not new_bindings:
-        return existing_bindings
+    current_bindings: dict[TypeVar, Any],
+    candidate_bindings: dict[TypeVar, Any],
+) -> dict[TypeVar, Any]:
+    if not candidate_bindings:
+        return current_bindings
 
-    merged_bindings = dict(existing_bindings)
-    for typevar, candidate_annotation in new_bindings.items():
+    merged_bindings = dict(current_bindings)
+    for typevar, candidate_binding in candidate_bindings.items():
         if typevar not in merged_bindings:
-            merged_bindings[typevar] = candidate_annotation
-            continue
-
-        merged_annotation = _merge_inferred_typevar_binding(
-            merged_bindings[typevar],
-            candidate_annotation,
-        )
-        if merged_annotation is _UNBOUND or not _annotation_satisfies_typevar_bound(typevar, merged_annotation):
-            return None
-        merged_bindings[typevar] = merged_annotation
+            merged_binding = candidate_binding
+        else:
+            merged_binding = _tighten_typevar_binding(
+                merged_bindings[typevar],
+                candidate_binding,
+            )
+        merged_bindings[typevar] = merged_binding
     return merged_bindings
 
 
-def _annotation_satisfies_typevar_bound(typevar: TypeVar, annotation: Any) -> bool:
-    bound = typevar.__bound__
-    if bound is None:
-        return True
-    return is_assignable(annotation, bound)
+def _tighten_typevar_binding(
+    current_binding: Any,
+    candidate_binding: Any,
+) -> Any:
+    if current_binding == candidate_binding:
+        tightened_binding = current_binding
+    elif is_assignable(candidate_binding, current_binding):
+        tightened_binding = current_binding
+    elif is_assignable(current_binding, candidate_binding):
+        tightened_binding = candidate_binding
+    else:
+        raise _UnboundTypevarBindingError
+
+    return tightened_binding
 
 
-def _merge_inferred_typevar_binding(existing: Any, candidate: Any) -> Any:
-    if existing == candidate:
-        return existing
-    if is_assignable(candidate, existing):
-        return existing
-    if is_assignable(existing, candidate):
-        return candidate
-    return _UNBOUND
-
-
-def _apply_typevar_binding(annotation: Any, bindings: dict[TypeVar, Any]) -> Any:
-    if not isinstance(annotation, TypeVar):
-        return annotation
-    return bindings.get(annotation, annotation)
-
-
-def _apply_typevar_bindings(annotation: Any, bindings: dict[TypeVar, Any]) -> Any:
+def _apply_typevar_bindings(
+    template_annotation: Any,
+    bindings: dict[TypeVar, Any],
+) -> Any:
     return _transform_annotation(
-        annotation,
-        lambda candidate: _apply_typevar_binding(candidate, bindings),
+        template_annotation,
+        lambda template_part: bindings.get(template_part, template_part)
+        if isinstance(template_part, TypeVar)
+        else template_part,
     )

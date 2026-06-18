@@ -6,13 +6,13 @@ import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
-from ml_pipes._typing.annotation import is_assignable
+from ml_pipes._typing.annotation import align_source_annotation_to_target_annotations, is_assignable
 from ml_pipes.validation import (
     PipelineValidator,
     PipelineValidationWarning,
     _BoundarySignature,
     _OperatorBoundary,
-    _resolve_typevar_output,
+    _specialize_output_annotation_from_aligned_input_annotations,
 )
 
 _VariadicT = TypeVar("_VariadicT")
@@ -571,6 +571,7 @@ class _Unrelated:
 
 _T = TypeVar("_T", bound=_Base)
 _U = TypeVar("_U")  # unbound
+_ConstrainedT = TypeVar("_ConstrainedT", int, str)
 
 
 def test_typevar_in_expected_accepts_bound_subclass():
@@ -716,28 +717,79 @@ def test_validate_recursively_publishes_bound_inside_dynamic_tuple_output():
     assert contract.output_type == (list[_Base], list[_Base])
 
 
-def test_resolve_typevar_output_recursively_specializes_nested_output():
-    assert _resolve_typevar_output(list[_T], _Child, (_T,)) == list[_Child]
+def test_specialize_output_annotation_recursively_specializes_nested_output():
+    aligned_candidate_annotations = align_source_annotation_to_target_annotations(_Child, (_T,))
+    assert aligned_candidate_annotations == (_Child,)
+    assert _specialize_output_annotation_from_aligned_input_annotations(
+        aligned_candidate_annotations,
+        (_T,),
+        list[_T],
+    ) == list[_Child]
 
 
-def test_resolve_typevar_output_recursively_specializes_plain_tuple_output():
-    assert _resolve_typevar_output((_T, list[_T]), _Child, (_T,)) == (_Child, list[_Child])
+def test_specialize_output_annotation_recursively_specializes_plain_tuple_output():
+    aligned_candidate_annotations = align_source_annotation_to_target_annotations(_Child, (_T,))
+    assert aligned_candidate_annotations == (_Child,)
+    assert _specialize_output_annotation_from_aligned_input_annotations(
+        aligned_candidate_annotations,
+        (_T,),
+        (_T, list[_T]),
+    ) == (
+        _Child,
+        list[_Child],
+    )
 
 
-def test_resolve_typevar_output_merges_repeated_typevar_inputs():
-    assert _resolve_typevar_output(_T, tuple[_Base, _Child], (_T, _T)) is _Base
+def test_specialize_output_annotation_merges_repeated_typevar_inputs():
+    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
+        tuple[_Base, _Child],
+        (_T, _T),
+    )
+    assert aligned_candidate_annotations == (_Base, _Child)
+    assert _specialize_output_annotation_from_aligned_input_annotations(
+        aligned_candidate_annotations,
+        (_T, _T),
+        _T,
+    ) is _Base
 
 
-def test_resolve_typevar_output_from_single_tuple_parameter():
-    assert _resolve_typevar_output(_T, tuple[_Child, int], (tuple[_T, int],)) is _Child
+def test_specialize_output_annotation_from_single_tuple_parameter():
+    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
+        tuple[_Child, int],
+        (tuple[_T, int],),
+    )
+    assert aligned_candidate_annotations == (tuple[_Child, int],)
+    assert _specialize_output_annotation_from_aligned_input_annotations(
+        aligned_candidate_annotations,
+        (tuple[_T, int],),
+        _T,
+    ) is _Child
 
 
-def test_resolve_typevar_output_through_generic_subtyping():
-    assert _resolve_typevar_output(
-        list[_U],
+def test_specialize_output_annotation_through_generic_subtyping():
+    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
         list[int | None],
         (Iterable[_U | None],),
+    )
+    assert aligned_candidate_annotations == (list[int | None],)
+    assert _specialize_output_annotation_from_aligned_input_annotations(
+        aligned_candidate_annotations,
+        (Iterable[_U | None],),
+        list[_U],
     ) == list[int]
+
+
+def test_specialize_output_annotation_does_not_bind_constrained_typevar_from_any_input():
+    aligned_candidate_annotations = align_source_annotation_to_target_annotations(
+        Any,
+        (_ConstrainedT,),
+    )
+    assert aligned_candidate_annotations == (Any,)
+    assert _specialize_output_annotation_from_aligned_input_annotations(
+        aligned_candidate_annotations,
+        (_ConstrainedT,),
+        _ConstrainedT,
+    ) is _ConstrainedT
 
 
 def _make_projection_boundary(
