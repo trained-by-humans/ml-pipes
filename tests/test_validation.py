@@ -282,6 +282,16 @@ def test_pipeline_validate_requires_operator_annotations():
         pipeline.validate()
 
 
+def test_pipeline_validate_rejects_non_callable_operator_with_explicit_message():
+    pipeline = Pipeline([object()])
+
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 0:object must define __call__",
+    ):
+        pipeline.validate()
+
+
 def test_pipeline_validate_does_not_swallow_non_annotation_static_signature_errors():
     class BrokenStaticButDynamic:
         def __call__(self, value: "MissingType") -> int:

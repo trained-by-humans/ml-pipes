@@ -153,6 +153,16 @@ def test_pipeline_rejects_other_non_positional_operator_parameters(operator, par
         pipeline(7)
 
 
+def test_pipeline_rejects_non_callable_operator_with_explicit_message():
+    pipeline = Pipeline([object()])
+
+    with pytest.raises(
+        TypeError,
+        match=r"Pipeline step 0:object must define __call__",
+    ):
+        pipeline(7)
+
+
 @pytest.mark.parametrize(
     ("current", "current_pattern"),
     [

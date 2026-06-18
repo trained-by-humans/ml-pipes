@@ -5,7 +5,7 @@ import warnings
 
 import inspect
 
-from .inspection import resolve_signature
+from .inspection import InspectionUnavailableError, resolve_signature
 
 
 _POSITIONAL_VALUE_PARAMETER_KINDS = (
@@ -16,13 +16,22 @@ _POSITIONAL_VALUE_PARAMETER_KINDS = (
 
 
 def validate_operator_signature(
-    operator: Callable[..., Any],
+    operator: Any,
     *,
     label: str,
     error_type: type[Exception],
     warning_type: type[Warning] | None = None,
 ) -> tuple[inspect.Parameter, ...]:
-    signature = inspect.signature(operator)
+    try:
+        signature = resolve_signature(operator)
+    except InspectionUnavailableError as exc:
+        if not callable(operator):
+            raise error_type(
+                f"Pipeline step {label} must define __call__"
+            ) from exc
+        raise error_type(
+            f"Pipeline step {label} must expose an inspectable call signature"
+        ) from exc
     parameters = tuple(signature.parameters.values())
     variadic_parameters = tuple(
         parameter

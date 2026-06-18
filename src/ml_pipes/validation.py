@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, get_type_hints
+from typing import Any
 
 from ._typing.annotation import (
     _are_annotations_equivalent,
@@ -22,6 +22,7 @@ from ._typing.annotation import (
     satisfies_annotation_constraint,
     tighten_annotation,
 )
+from ._typing.inspection import resolve_callable_hints
 from ._typing.signatures import validate_operator_signature
 from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
@@ -32,10 +33,6 @@ class PipelineValidationError(ValueError):
 
 
 class PipelineValidationWarning(UserWarning):
-    pass
-
-
-class StaticContractUnavailableError(Exception):
     pass
 
 
@@ -273,14 +270,18 @@ class PipelineValidator:
         )
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
-    def _resolve_static_boundary(self, i: int, operator: Callable[..., Any]) -> _BoundarySignature | None:
-        try:
-            input_types, output_type = resolve_operator_contract(
-                operator,
-                label=self._label_for(i, operator),
-            )
-        except StaticContractUnavailableError:
+    def _resolve_static_boundary(self, i: int, operator: Any) -> _BoundarySignature | None:
+        if _supports_non_call_runtime_entrypoint(operator):
             return None
+
+        label = self._label_for(i, operator)
+        parameters = validate_operator_signature(
+            operator,
+            label=label,
+            error_type=PipelineValidationError,
+            warning_type=PipelineValidationWarning,
+        )
+        input_types, output_type = require_operator_annotations(operator, parameters)
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
     def _run_forward_boundary_resolution_pass(self, pipeline_input_type: Any = Any) -> list[_OperatorBoundary]:
@@ -447,32 +448,11 @@ class PipelineValidator:
                     f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
                 )
 
-def get_signature_target(operator: Callable[..., Any]) -> Any:
-    if inspect.isfunction(operator) or inspect.ismethod(operator):
-        return operator
-    try:
-        return getattr(operator, "__call__")
-    except AttributeError as exc:
-        if _supports_non_call_runtime_entrypoint(operator):
-            raise StaticContractUnavailableError from exc
-        raise PipelineValidationError(
-            f"{operator.__class__.__name__} must define __call__"
-        ) from exc
-
-
-def resolve_operator_contract(
-    operator: Callable[..., Any],
-    *,
-    label: str,
+def require_operator_annotations(
+    operator: Any,
+    parameters: tuple[inspect.Parameter, ...],
 ) -> tuple[tuple[Any, ...], Any]:
-    target = get_signature_target(operator)
-    hints = get_type_hints(target)
-    parameters = validate_operator_signature(
-        target,
-        label=label,
-        error_type=PipelineValidationError,
-        warning_type=PipelineValidationWarning,
-    )
+    hints = resolve_callable_hints(operator)
 
     input_types: list[Any] = []
     for parameter in parameters:

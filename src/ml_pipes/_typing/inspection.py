@@ -28,9 +28,8 @@ def probe_callable(
 def resolve_callable_annotations(
     callable_: Callable[..., Any],
 ) -> tuple[dict[str, Any], Any]:
-    hints_target = _resolve_callable_hints_target(callable_)
     try:
-        hints = get_type_hints(hints_target)
+        hints = resolve_callable_hints(callable_)
     except (TypeError, ValueError, NameError) as exc:
         raise InspectionUnavailableError from exc
 
@@ -38,6 +37,10 @@ def resolve_callable_annotations(
     if output_annotation is None:
         raise InspectionUnavailableError
     return hints, output_annotation
+
+
+def resolve_callable_hints(callable_: Callable[..., Any]) -> dict[str, Any]:
+    return get_type_hints(_resolve_callable_hints_target(callable_))
 
 
 def _resolve_callable_hints_target(callable_: Callable[..., Any]) -> Any:
