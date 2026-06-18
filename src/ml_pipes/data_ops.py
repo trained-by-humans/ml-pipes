@@ -7,7 +7,7 @@ from types import UnionType
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin
 
 from ._typing.annotation import is_assignable
-from ._typing.inspection import InspectionUnavailableError, probe_callable, resolve_callable_annotations
+from ._typing.inspection import probe_callable, resolve_callable_annotations
 from ._typing.signatures import validate_nullary_callable_signature, validate_positional_callable_signature
 from .control import SHORT_CIRCUIT
 from .operator import Operator
@@ -303,22 +303,24 @@ def _resolve_unary_callable_contract(
     validation_error_type: type[Exception],
     operator_name: str,
 ) -> tuple[Any, Any] | None:
+    input_parameter = validate_positional_callable_signature(
+        function,
+        label=f"{operator_name} {callable_label}",
+        source_label=source_label,
+        error_type=validation_error_type,
+    )
     try:
-        input_parameter = validate_positional_callable_signature(
-            function,
-            label=f"{operator_name} {callable_label}",
-            source_label=source_label,
-            error_type=validation_error_type,
-        )
         probe_callable(function, object())
-        hints, output_type = resolve_callable_annotations(function)
-    except InspectionUnavailableError:
-        return None
-    except TypeError as exc:
+    except (TypeError, ValueError) as exc:
         raise validation_error_type(
             f"{operator_name} {callable_label} cannot be called with {source_label}: {exc}"
         ) from exc
-    if input_parameter.name not in hints:
+
+    try:
+        hints, output_type = resolve_callable_annotations(function)
+    except (TypeError, ValueError):
+        return None
+    if output_type is None or input_parameter.name not in hints:
         return None
     return hints[input_parameter.name], output_type
 
@@ -330,17 +332,47 @@ def _resolve_nullary_callable_output(
     source_label: str,
     validation_error_type: type[Exception],
 ) -> Any | None:
+    validate_nullary_callable_signature(
+        function,
+        label=callable_label,
+        source_label=source_label,
+        error_type=validation_error_type,
+    )
     try:
-        validate_nullary_callable_signature(
-            function,
-            label=callable_label,
-            source_label=source_label,
-            error_type=validation_error_type,
-        )
         _, output_type = resolve_callable_annotations(function)
-    except InspectionUnavailableError:
+    except (TypeError, ValueError):
         return None
     return output_type
+
+
+def _require_callable_contract_annotations(
+    contract: tuple[Any, Any] | None,
+    *,
+    operator_name: str,
+    callable_label: str,
+    validation_error_type: type[Exception],
+) -> tuple[Any, Any]:
+    if contract is not None:
+        return contract
+    raise validation_error_type(
+        f"{operator_name} {callable_label} must define usable input and return type annotations "
+        f"because it determines the operator output type"
+    )
+
+
+def _require_callable_output_annotation(
+    output_annotation: Any | None,
+    *,
+    operator_name: str,
+    callable_label: str,
+    validation_error_type: type[Exception],
+) -> Any:
+    if output_annotation is not None:
+        return output_annotation
+    raise validation_error_type(
+        f"{operator_name} {callable_label} must define a usable return type annotation "
+        f"because it determines the operator output type"
+    )
 
 
 def _require_assignment_compatible(
@@ -789,7 +821,12 @@ class WrapMappingInObject(Generic[StateT]):
             validation_error_type=validation_error_type,
         )
         input_type = current_output if _is_mapping_annotation(current_output) else AnyMapping | None
-        base_output = factory_output if factory_output is not None else object
+        base_output = _require_callable_output_annotation(
+            factory_output,
+            operator_name=type(self).__name__,
+            callable_label="state_factory",
+            validation_error_type=validation_error_type,
+        )
         target_annotation = self._target.validate_write(
             base_output,
             validation_error_type=validation_error_type,
@@ -834,11 +871,14 @@ class Map(Generic[ValueT, MappedT]):
             ignore_explicit_none=False,
         )
 
+        fn_input_type, fn_output_type = _require_callable_contract_annotations(
+            fn_contract,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            validation_error_type=validation_error_type,
+        )
         del stored_annotations, expand_output_annotation, validation_error_type
-        if fn_contract is None:
-            return (current_output,), Any
 
-        fn_input_type, fn_output_type = fn_contract
         if current_output is not Any:
             return (current_output,), fn_output_type
         return (fn_input_type,), fn_output_type

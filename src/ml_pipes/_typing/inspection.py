@@ -4,38 +4,20 @@ import inspect
 from typing import Any, Callable, get_type_hints
 
 
-class InspectionUnavailableError(Exception):
-    pass
-
-
-def resolve_signature(callable_: Callable[..., Any]) -> inspect.Signature:
-    try:
-        return inspect.signature(callable_)
-    except (TypeError, ValueError) as exc:
-        raise InspectionUnavailableError from exc
-
-
 def probe_callable(
     callable_: Callable[..., Any],
     /,
     *args: Any,
     **kwargs: Any,
 ) -> inspect.BoundArguments:
-    signature = resolve_signature(callable_)
-    return signature.bind(*args, **kwargs)
+    return inspect.signature(callable_).bind(*args, **kwargs)
 
 
 def resolve_callable_annotations(
     callable_: Callable[..., Any],
-) -> tuple[dict[str, Any], Any]:
-    try:
-        hints = resolve_callable_hints(callable_)
-    except (TypeError, ValueError, NameError) as exc:
-        raise InspectionUnavailableError from exc
-
+) -> tuple[dict[str, Any], Any | None]:
+    hints = resolve_callable_hints(callable_)
     output_annotation = callable_ if inspect.isclass(callable_) else hints.get("return")
-    if output_annotation is None:
-        raise InspectionUnavailableError
     return hints, output_annotation
 
 

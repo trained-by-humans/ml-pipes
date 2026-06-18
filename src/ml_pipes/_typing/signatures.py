@@ -5,8 +5,6 @@ import warnings
 
 import inspect
 
-from .inspection import InspectionUnavailableError, resolve_signature
-
 
 _POSITIONAL_VALUE_PARAMETER_KINDS = (
     inspect.Parameter.POSITIONAL_ONLY,
@@ -23,8 +21,8 @@ def validate_operator_signature(
     warning_type: type[Warning] | None = None,
 ) -> tuple[inspect.Parameter, ...]:
     try:
-        signature = resolve_signature(operator)
-    except InspectionUnavailableError as exc:
+        signature = inspect.signature(operator)
+    except (TypeError, ValueError) as exc:
         if not callable(operator):
             raise error_type(
                 f"Pipeline step {label} must define __call__"
@@ -92,7 +90,12 @@ def validate_positional_callable_signature(
     source_label: str,
     error_type: type[Exception],
 ) -> inspect.Parameter:
-    signature = resolve_signature(callable_)
+    try:
+        signature = inspect.signature(callable_)
+    except (TypeError, ValueError) as exc:
+        raise error_type(
+            f"{label} must expose an inspectable call signature because {source_label} is passed by position"
+        ) from exc
     parameters = tuple(signature.parameters.values())
 
     input_parameter = next(
@@ -130,7 +133,12 @@ def validate_nullary_callable_signature(
     source_label: str,
     error_type: type[Exception],
 ) -> None:
-    signature = resolve_signature(callable_)
+    try:
+        signature = inspect.signature(callable_)
+    except (TypeError, ValueError) as exc:
+        raise error_type(
+            f"{label} must expose an inspectable call signature because {source_label}"
+        ) from exc
     parameters = tuple(signature.parameters.values())
     if parameters:
         raise error_type(

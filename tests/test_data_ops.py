@@ -293,6 +293,16 @@ def test_filter_validation_rejects_predicate_with_non_positional_parameters() ->
         )
 
 
+def test_filter_validation_propagates_name_error_from_predicate_annotations() -> None:
+    def broken(value: "MissingType") -> bool:
+        return True
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([Filter(broken)]).validate(
+            pipeline_input_type=int,
+        )
+
+
 def test_map_validation_requires_optional_aware_mapper_for_optional_input() -> None:
     with pytest.raises(PipelineValidationError, match="fn expects"):
         Pipeline([Map(_text_length)]).validate(
@@ -309,6 +319,29 @@ def test_map_validation_accepts_optional_aware_mapper_for_optional_input() -> No
 
     assert contract.input_type == str | None
     assert contract.output_type == int
+
+
+def test_map_validation_propagates_name_error_from_mapper_annotations() -> None:
+    def broken(value: "MissingType") -> int:
+        return 1
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([Map(broken), AcceptInt()]).validate(
+            pipeline_input_type=int,
+        )
+
+
+def test_map_validation_rejects_mapper_without_usable_output_annotations() -> None:
+    def untyped_length(text: str):
+        return len(text)
+
+    with pytest.raises(
+        PipelineValidationError,
+        match="Map fn must define usable input and return type annotations",
+    ):
+        Pipeline([Map(untyped_length), AcceptString()]).validate(
+            pipeline_input_type=str,
+        )
 
 
 def test_map_validation_rejects_mapper_with_non_positional_parameters() -> None:
@@ -418,6 +451,16 @@ def test_map_value_validation_rejects_mapper_with_non_positional_parameters() ->
         )
 
 
+def test_map_value_validation_propagates_name_error_from_mapper_annotations() -> None:
+    def broken(value: "MissingType") -> int:
+        return 1
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([MapValue(broken, source="cleaned")]).validate(
+            pipeline_input_type=StrictCarrier,
+        )
+
+
 def test_filter_not_null_drops_missing_selector() -> None:
     carrier = Carrier(payload={})
 
@@ -476,6 +519,29 @@ def test_wrap_mapping_in_object_validation_returns_factory_output_when_input_is_
 def test_wrap_mapping_in_object_rejects_factory_with_hidden_parameters_at_construction() -> None:
     with pytest.raises(TypeError, match="state_factory must define no parameters"):
         WrapMappingInObject(target="payload", state_factory=_make_carrier_with_default_payload)
+
+
+def test_wrap_mapping_in_object_validation_propagates_name_error_from_factory_annotations() -> None:
+    def broken_factory() -> "MissingType":
+        return Carrier()
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([WrapMappingInObject(target="payload", state_factory=broken_factory)]).validate(
+            pipeline_input_type=dict[str, object],
+        )
+
+
+def test_wrap_mapping_in_object_validation_rejects_factory_without_usable_output_annotation() -> None:
+    def untyped_factory():
+        return Carrier()
+
+    with pytest.raises(
+        PipelineValidationError,
+        match="WrapMappingInObject state_factory must define a usable return type annotation",
+    ):
+        Pipeline([WrapMappingInObject(target="payload", state_factory=untyped_factory)]).validate(
+            pipeline_input_type=dict[str, object],
+        )
 
 
 def test_wrap_mapping_in_object_validation_rejects_incompatible_target_annotation() -> None:
