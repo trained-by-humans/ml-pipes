@@ -176,6 +176,14 @@ def _is_positive_or_none(value: int | None) -> bool:
     return value is None or value > 0
 
 
+def _is_positive_without_return_annotation(value: int):
+    return value > 0
+
+
+def _is_positive_as_int(value: int) -> int:
+    return value
+
+
 def _hash_text(text: str) -> int:
     return len(text)
 
@@ -282,6 +290,24 @@ def test_filter_validation_requires_optional_aware_predicate_for_optional_input(
 
     assert contract.input_type == int | None
     assert contract.output_type == int | None
+
+
+def test_filter_validation_allows_predicate_without_return_annotation() -> None:
+    contract = Pipeline([Filter(_is_positive_without_return_annotation)]).validate(
+        pipeline_input_type=int,
+        strict=True,
+    )
+
+    assert contract.input_type == int
+    assert contract.output_type == int
+
+
+def test_filter_validation_rejects_non_bool_predicate_return_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="predicate return type expects"):
+        Pipeline([Filter(_is_positive_as_int)]).validate(
+            pipeline_input_type=int,
+            strict=True,
+        )
 
 
 def test_filter_validation_checks_selected_source_type_against_predicate() -> None:
@@ -746,6 +772,22 @@ def test_take_while_validation_checks_predicate_input_type() -> None:
             pipeline_input_type=list[int],
             strict=True,
         )
+
+
+def test_take_while_validation_allows_predicate_without_return_annotation() -> None:
+    Pipeline([TakeWhile(_is_positive_without_return_annotation)]).validate(
+        pipeline_input_type=list[int],
+        strict=True,
+    )
+
+
+def test_take_while_validation_rejects_non_bool_predicate_return_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="predicate return type expects"):
+        Pipeline([TakeWhile(_is_positive_as_int)]).validate(
+            pipeline_input_type=list[int],
+            strict=True,
+        )
+
 
 def test_take_while_rejects_scalar_boundary_during_validation() -> None:
     with pytest.raises(PipelineValidationError, match="iterable boundary"):
