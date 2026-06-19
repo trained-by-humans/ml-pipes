@@ -141,6 +141,11 @@ class WrongPayloadCarrier:
     payload: str = ""
 
 
+@dataclass
+class Box:
+    value: int
+
+
 def _make_carrier() -> Carrier:
     return Carrier()
 
@@ -151,6 +156,16 @@ def _make_carrier_with_default_payload(payload: dict[str, object] | None = None)
 
 def _make_wrong_payload_carrier() -> WrongPayloadCarrier:
     return WrongPayloadCarrier()
+
+
+def _box_int(value) -> Box:
+    return Box(value)
+
+
+def _box_int_or_none(value) -> Box | None:
+    if value < 0:
+        return None
+    return Box(value)
 
 
 def _is_positive(value: int) -> bool:
@@ -337,11 +352,28 @@ def test_map_validation_rejects_mapper_without_usable_output_annotations() -> No
 
     with pytest.raises(
         PipelineValidationError,
-        match="Map fn must define usable input and return type annotations",
+        match="Map fn must define a usable return type annotation",
     ):
         Pipeline([Map(untyped_length), AcceptString()]).validate(
             pipeline_input_type=str,
         )
+
+
+def test_map_validation_accepts_mapper_without_input_annotation_when_upstream_is_concrete() -> None:
+    contract = Pipeline([Map(_box_int)]).validate(
+        pipeline_input_type=int,
+    )
+
+    assert contract.input_type == int
+    assert contract.output_type == Box
+
+
+def test_map_validation_requires_input_annotation_when_upstream_is_unknown() -> None:
+    with pytest.raises(
+        PipelineValidationError,
+        match="Map fn must define a usable input type annotation",
+    ):
+        Pipeline([Map(_box_int)]).validate()
 
 
 def test_map_validation_rejects_mapper_with_non_positional_parameters() -> None:
@@ -391,6 +423,15 @@ def test_map_not_null_validation_returns_surviving_mapped_type() -> None:
         pipeline_input_type=str,
         strict=True,
     )
+
+
+def test_map_not_null_validation_accepts_mapper_without_input_annotation_when_upstream_is_concrete() -> None:
+    contract = Pipeline([MapNotNull(_box_int_or_none)]).validate(
+        pipeline_input_type=int,
+    )
+
+    assert contract.input_type == int
+    assert contract.output_type == Box
 
 
 def test_map_not_null_validation_requires_optional_aware_mapper_for_optional_input() -> None:

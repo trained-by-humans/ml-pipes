@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from itertools import islice, takewhile
 from types import UnionType
 from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin
@@ -28,6 +29,12 @@ Predicate = Callable[[ValueT], bool]
 KeySelector = Callable[[ItemT], Hashable]
 
 _NONE_TYPE = type(None)
+
+
+@dataclass(frozen=True)
+class _CallableAnnotations:
+    input_annotations: tuple[Any | None, ...]
+    output_annotation: Any | None
 
 
 def _close_iterable(iterator: object) -> None:
@@ -269,8 +276,8 @@ def _resolve_callable_contract(
     validation_error_type: type[Exception],
     operator_name: str,
     ignore_explicit_none: bool = True,
-) -> tuple[Any, Any] | None:
-    contract = _resolve_unary_callable_contract(
+) -> _CallableAnnotations:
+    annotations = _resolve_unary_callable_annotations(
         function,
         callable_label=callable_label,
         source_label=source_label,
@@ -278,31 +285,31 @@ def _resolve_callable_contract(
         operator_name=operator_name,
     )
     if source_annotation in {None, Any}:
-        return contract
-    if contract is None:
-        return None
+        return annotations
 
-    input_type, output_type = contract
+    input_annotation = annotations.input_annotations[0]
+    if input_annotation is None:
+        return annotations
     comparable_source = _without_none(source_annotation) if ignore_explicit_none else source_annotation
     if comparable_source is not Any and not is_assignable(
         comparable_source,
-        input_type,
+        input_annotation,
     ):
         raise validation_error_type(
-            f"{operator_name} {callable_label} expects {input_type} "
+            f"{operator_name} {callable_label} expects {input_annotation} "
             f"but {source_label} resolves to {source_annotation}"
         )
-    return input_type, output_type
+    return annotations
 
 
-def _resolve_unary_callable_contract(
+def _resolve_unary_callable_annotations(
     function: Callable[..., Any],
     *,
     callable_label: str,
     source_label: str,
     validation_error_type: type[Exception],
     operator_name: str,
-) -> tuple[Any, Any] | None:
+) -> _CallableAnnotations:
     input_parameter = validate_positional_callable_signature(
         function,
         label=f"{operator_name} {callable_label}",
@@ -319,19 +326,17 @@ def _resolve_unary_callable_contract(
     try:
         hints, output_type = resolve_callable_annotations(function)
     except (TypeError, ValueError):
-        return None
-    if output_type is None or input_parameter.name not in hints:
-        return None
-    return hints[input_parameter.name], output_type
+        return _CallableAnnotations((None,), None)
+    return _CallableAnnotations((hints.get(input_parameter.name),), output_type)
 
 
-def _resolve_nullary_callable_output(
+def _resolve_nullary_callable_annotations(
     function: Callable[..., Any],
     *,
     callable_label: str,
     source_label: str,
     validation_error_type: type[Exception],
-) -> Any | None:
+) -> _CallableAnnotations:
     validate_nullary_callable_signature(
         function,
         label=callable_label,
@@ -341,37 +346,22 @@ def _resolve_nullary_callable_output(
     try:
         _, output_type = resolve_callable_annotations(function)
     except (TypeError, ValueError):
-        return None
-    return output_type
+        return _CallableAnnotations((), None)
+    return _CallableAnnotations((), output_type)
 
 
-def _require_callable_contract_annotations(
-    contract: tuple[Any, Any] | None,
+def _require_callable_annotation(
+    annotation: Any | None,
     *,
     operator_name: str,
     callable_label: str,
-    validation_error_type: type[Exception],
-) -> tuple[Any, Any]:
-    if contract is not None:
-        return contract
-    raise validation_error_type(
-        f"{operator_name} {callable_label} must define usable input and return type annotations "
-        f"because it determines the operator output type"
-    )
-
-
-def _require_callable_output_annotation(
-    output_annotation: Any | None,
-    *,
-    operator_name: str,
-    callable_label: str,
+    annotation_label: str,
     validation_error_type: type[Exception],
 ) -> Any:
-    if output_annotation is not None:
-        return output_annotation
+    if annotation is not None:
+        return annotation
     raise validation_error_type(
-        f"{operator_name} {callable_label} must define a usable return type annotation "
-        f"because it determines the operator output type"
+        f"{operator_name} {callable_label} must define a usable {annotation_label} annotation"
     )
 
 
@@ -814,17 +804,18 @@ class WrapMappingInObject(Generic[StateT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        factory_output = _resolve_nullary_callable_output(
+        factory_annotations = _resolve_nullary_callable_annotations(
             self.state_factory,
             callable_label=f"{type(self).__name__} state_factory",
             source_label="the operator invokes it without arguments",
             validation_error_type=validation_error_type,
         )
         input_type = current_output if _is_mapping_annotation(current_output) else AnyMapping | None
-        base_output = _require_callable_output_annotation(
-            factory_output,
+        base_output = _require_callable_annotation(
+            factory_annotations.output_annotation,
             operator_name=type(self).__name__,
             callable_label="state_factory",
+            annotation_label="return type",
             validation_error_type=validation_error_type,
         )
         target_annotation = self._target.validate_write(
@@ -861,7 +852,7 @@ class Map(Generic[ValueT, MappedT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        fn_contract = _resolve_callable_contract(
+        fn_annotations = _resolve_callable_contract(
             current_output,
             self.fn,
             callable_label="fn",
@@ -871,16 +862,25 @@ class Map(Generic[ValueT, MappedT]):
             ignore_explicit_none=False,
         )
 
-        fn_input_type, fn_output_type = _require_callable_contract_annotations(
-            fn_contract,
+        fn_output_type = _require_callable_annotation(
+            fn_annotations.output_annotation,
             operator_name=type(self).__name__,
             callable_label="fn",
+            annotation_label="return type",
+            validation_error_type=validation_error_type,
+        )
+
+        if current_output is not Any:
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), fn_output_type
+        fn_input_type = _require_callable_annotation(
+            fn_annotations.input_annotations[0],
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            annotation_label="input type",
             validation_error_type=validation_error_type,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-
-        if current_output is not Any:
-            return (current_output,), fn_output_type
         return (fn_input_type,), fn_output_type
 
 
@@ -969,7 +969,7 @@ class MapValue(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
-        fn_contract = _resolve_callable_contract(
+        fn_annotations = _resolve_callable_contract(
             source_annotation,
             self.fn,
             callable_label="fn",
@@ -983,8 +983,8 @@ class MapValue(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(target={self._target!r})",
         )
-        if fn_contract is not None:
-            _, mapped_annotation = fn_contract
+        mapped_annotation = fn_annotations.output_annotation
+        if mapped_annotation is not None:
             _require_assignment_compatible(
                 mapped_annotation,
                 target_annotation,
