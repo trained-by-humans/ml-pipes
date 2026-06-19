@@ -142,6 +142,11 @@ class WrongPayloadCarrier:
 
 
 @dataclass
+class NonHashableKeyCarrier:
+    tags: list[str]
+
+
+@dataclass
 class Box:
     value: int
 
@@ -186,6 +191,10 @@ def _is_positive_as_int(value: int) -> int:
 
 def _hash_text(text: str) -> int:
     return len(text)
+
+
+def _split_text(text: str) -> list[str]:
+    return list(text)
 
 
 def _lower_text(text: str) -> str:
@@ -326,12 +335,9 @@ def test_filter_validation_rejects_missing_selector_even_for_untyped_predicate()
         )
 
 
-def test_filter_validation_rejects_predicate_with_non_positional_parameters() -> None:
-    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
-        Pipeline([Filter(_text_has_min_length_with_floor)]).validate(
-            pipeline_input_type=int,
-            strict=True,
-        )
+def test_filter_rejects_predicate_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        Filter(_text_has_min_length_with_floor)
 
 
 def test_filter_validation_propagates_name_error_from_predicate_annotations() -> None:
@@ -402,28 +408,19 @@ def test_map_validation_requires_input_annotation_when_upstream_is_unknown() -> 
         Pipeline([Map(_box_int)]).validate()
 
 
-def test_map_validation_rejects_mapper_with_non_positional_parameters() -> None:
-    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
-        Pipeline([Map(_scale_int), AcceptString()]).validate(
-            pipeline_input_type=int,
-            strict=True,
-        )
+def test_map_rejects_mapper_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        Map(_scale_int)
 
 
-def test_map_validation_rejects_mapper_with_required_keyword_only_parameter() -> None:
-    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
-        Pipeline([Map(_scale_int_requires_factor)]).validate(
-            pipeline_input_type=int,
-            strict=True,
-        )
+def test_map_rejects_mapper_with_required_keyword_only_parameter_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        Map(_scale_int_requires_factor)
 
 
-def test_map_validation_rejects_mapper_with_required_additional_positional_parameter() -> None:
-    with pytest.raises(PipelineValidationError, match="cannot be called"):
-        Pipeline([Map(_add_two_ints)]).validate(
-            pipeline_input_type=int,
-            strict=True,
-        )
+def test_map_rejects_mapper_with_required_additional_positional_parameter_at_construction() -> None:
+    with pytest.raises(TypeError, match="cannot be called"):
+        Map(_add_two_ints)
 
 
 def test_map_not_null_validation_preserves_concrete_output_for_non_optional_mapper() -> None:
@@ -510,12 +507,9 @@ def test_map_value_validation_rejects_incompatible_target_annotation() -> None:
         )
 
 
-def test_map_value_validation_rejects_mapper_with_non_positional_parameters() -> None:
-    with pytest.raises(PipelineValidationError, match="uses non-positional parameters"):
-        Pipeline([MapValue(_append_suffix, source="cleaned", target="length")]).validate(
-            pipeline_input_type=StrictMappedCarrier,
-            strict=True,
-        )
+def test_map_value_rejects_mapper_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        MapValue(_append_suffix, source="cleaned", target="length")
 
 
 def test_map_value_validation_propagates_name_error_from_mapper_annotations() -> None:
@@ -701,6 +695,19 @@ def test_distinct_by_validation_requires_optional_aware_key_fn_for_optional_item
     )
 
 
+def test_distinct_by_validation_rejects_non_hashable_key_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="fn return type expects"):
+        Pipeline([DistinctBy(_split_text)]).validate(
+            pipeline_input_type=list[str],
+            strict=True,
+        )
+
+
+def test_distinct_by_rejects_key_fn_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        DistinctBy(_append_suffix)
+
+
 def test_take_supports_iterables() -> None:
     items = (value for value in range(5))
 
@@ -774,6 +781,11 @@ def test_take_while_validation_checks_predicate_input_type() -> None:
         )
 
 
+def test_take_while_rejects_predicate_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        TakeWhile(_text_has_min_length_with_floor)
+
+
 def test_take_while_validation_allows_predicate_without_return_annotation() -> None:
     Pipeline([TakeWhile(_is_positive_without_return_annotation)]).validate(
         pipeline_input_type=list[int],
@@ -809,6 +821,14 @@ def test_distinct_by_validation_accepts_string_iterable_boundary() -> None:
 
     assert contract.input_type == str
     assert contract.output_type == list[str]
+
+
+def test_distinct_validation_rejects_non_hashable_selector_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="distinct key type expects"):
+        Pipeline([Distinct(source="tags")]).validate(
+            pipeline_input_type=list[NonHashableKeyCarrier],
+            strict=True,
+        )
 
 
 @pytest.mark.parametrize("annotation", [set[int], frozenset[int], Iterator[int]])

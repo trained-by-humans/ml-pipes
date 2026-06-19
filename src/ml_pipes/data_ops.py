@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import time
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -251,6 +252,28 @@ def _require_item_iterable_boundary_annotation(
         )
 
 
+def _validate_unary_callable(
+    function: Callable[..., Any],
+    *,
+    operator_name: str,
+    callable_label: str,
+    source_label: str,
+    error_type: type[Exception],
+) -> None:
+    validate_positional_callable_signature(
+        function,
+        label=f"{operator_name} {callable_label}",
+        source_label=source_label,
+        error_type=error_type,
+    )
+    try:
+        probe_callable(function, object())
+    except (TypeError, ValueError) as exc:
+        raise error_type(
+            f"{operator_name} {callable_label} cannot be called with {source_label}: {exc}"
+        ) from exc
+
+
 def _resolve_unary_callable_annotations(
     function: Callable[..., Any],
     *,
@@ -259,18 +282,24 @@ def _resolve_unary_callable_annotations(
     source_label: str,
     validation_error_type: type[Exception],
 ) -> _CallableAnnotations:
-    input_parameter = validate_positional_callable_signature(
-        function,
-        label=f"{operator_name} {callable_label}",
-        source_label=source_label,
-        error_type=validation_error_type,
-    )
+    del operator_name, callable_label, source_label, validation_error_type
     try:
-        probe_callable(function, object())
-    except (TypeError, ValueError) as exc:
-        raise validation_error_type(
-            f"{operator_name} {callable_label} cannot be called with {source_label}: {exc}"
-        ) from exc
+        signature = inspect.signature(function)
+    except (TypeError, ValueError):
+        return _CallableAnnotations((None,), None)
+    input_parameter = next(
+        (
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ),
+        None,
+    )
+    if input_parameter is None:
+        return _CallableAnnotations((None,), None)
 
     try:
         hints, output_type = resolve_callable_annotations(function)
@@ -287,12 +316,7 @@ def _resolve_nullary_callable_annotations(
     source_label: str,
     validation_error_type: type[Exception],
 ) -> _CallableAnnotations:
-    validate_nullary_callable_signature(
-        function,
-        label=f"{operator_name} {callable_label}",
-        source_label=source_label,
-        error_type=validation_error_type,
-    )
+    del operator_name, callable_label, source_label, validation_error_type
     try:
         _, output_type = resolve_callable_annotations(function)
     except (TypeError, ValueError):
@@ -727,7 +751,7 @@ class WrapMappingInObject(Generic[StateT]):
         target: SelectorInput,
         state_factory: Callable[[], StateT],
     ):
-        self._target = _resolve_selector(
+        target_selector = _resolve_selector(
             type(self).__name__,
             name="target",
             value=target,
@@ -739,6 +763,7 @@ class WrapMappingInObject(Generic[StateT]):
             source_label="the operator invokes it without arguments",
             error_type=TypeError,
         )
+        self._target = target_selector
         self.state_factory = state_factory
 
     def __call__(self, value: AnyMapping | None) -> StateT:
@@ -800,6 +825,13 @@ class Map(Generic[ValueT, MappedT]):
     """Apply a function to the current value."""
 
     def __init__(self, fn: Mapper[ValueT, MappedT]):
+        _validate_unary_callable(
+            fn,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            source_label="the operator invokes it with the current value",
+            error_type=TypeError,
+        )
         self.fn = fn
 
     def __call__(self, current: ValueT) -> MappedT:
@@ -819,16 +851,25 @@ class Map(Generic[ValueT, MappedT]):
             source_label="current value",
             validation_error_type=validation_error_type,
         )
-        _require_assignment_compatible(
-            current_output,
-            fn_annotations.input_annotations[0],
-            operator_name=type(self).__name__,
-            source_label="current value",
-            target_label="fn",
-            validation_error_type=validation_error_type,
-        )
-
-        fn_output_type = _require_callable_annotation(
+        if current_output is Any:
+            input_type = _require_callable_annotation(
+                fn_annotations.input_annotations[0],
+                operator_name=type(self).__name__,
+                callable_label="fn",
+                annotation_label="input type",
+                validation_error_type=validation_error_type,
+            )
+        else:
+            input_type = current_output
+            _require_assignment_compatible(
+                current_output,
+                fn_annotations.input_annotations[0],
+                operator_name=type(self).__name__,
+                source_label="current value",
+                target_label="fn",
+                validation_error_type=validation_error_type,
+            )
+        output_type = _require_callable_annotation(
             fn_annotations.output_annotation,
             operator_name=type(self).__name__,
             callable_label="fn",
@@ -836,18 +877,8 @@ class Map(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
         )
 
-        if current_output is not Any:
-            del stored_annotations, expand_output_annotation, validation_error_type
-            return (current_output,), fn_output_type
-        fn_input_type = _require_callable_annotation(
-            fn_annotations.input_annotations[0],
-            operator_name=type(self).__name__,
-            callable_label="fn",
-            annotation_label="input type",
-            validation_error_type=validation_error_type,
-        )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (fn_input_type,), fn_output_type
+        return (input_type,), output_type
 
 
 @Operator
@@ -855,8 +886,9 @@ class MapNotNull(Generic[ValueT, MappedT]):
     """Apply a function and short-circuit when the mapped result is None."""
 
     def __init__(self, fn: NullableMapper[ValueT, MappedT]):
+        map_operator = Map(fn)
         self.fn = fn
-        self.map = Map(fn)
+        self.map = map_operator
 
     def __call__(self, current: ValueT) -> MappedT:
         mapped = self.map(current)
@@ -891,22 +923,31 @@ class MapValue(Generic[ValueT, MappedT]):
         source: SelectorInput,
         target: SelectorInput | None = None,
     ):
-        self.fn = fn
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
             required=True,
         )
         if target is None:
-            self._target = self._source
+            target_selector = source_selector
         else:
-            self._target = _resolve_selector(
+            target_selector = _resolve_selector(
                 type(self).__name__,
                 name="target",
                 value=target,
                 required=True,
             )
+        _validate_unary_callable(
+            fn,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            source_label=f"the operator invokes it with source {source_selector!r}",
+            error_type=TypeError,
+        )
+        self.fn = fn
+        self._source = source_selector
+        self._target = target_selector
 
     def __call__(self, current: CurrentT | None) -> CurrentT | None:
         if current is None:
@@ -935,6 +976,11 @@ class MapValue(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
+        target_annotation = self._target.validate_write(
+            current_output,
+            validation_error_type=validation_error_type,
+            error_prefix=f"{type(self).__name__}(target={self._target!r})",
+        )
         fn_annotations = _resolve_unary_callable_annotations(
             self.fn,
             operator_name=type(self).__name__,
@@ -949,11 +995,6 @@ class MapValue(Generic[ValueT, MappedT]):
             source_label=f"source {self._source!r}",
             target_label="fn",
             validation_error_type=validation_error_type,
-        )
-        target_annotation = self._target.validate_write(
-            current_output,
-            validation_error_type=validation_error_type,
-            error_prefix=f"{type(self).__name__}(target={self._target!r})",
         )
         mapped_annotation = fn_annotations.output_annotation
         if mapped_annotation is not None:
@@ -984,12 +1025,25 @@ class Filter(Generic[ValueT]):
         *,
         source: SelectorInput | None = None,
     ):
-        self.predicate = predicate
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
         )
+        source_label = (
+            f"the operator invokes it with source {source_selector!r}"
+            if source_selector
+            else "the operator invokes it with the current value"
+        )
+        _validate_unary_callable(
+            predicate,
+            operator_name=type(self).__name__,
+            callable_label="predicate",
+            source_label=source_label,
+            error_type=TypeError,
+        )
+        self.predicate = predicate
+        self._source = source_selector
 
     def __call__(self, current: CurrentT) -> CurrentT:
         if self._source:
@@ -1050,12 +1104,13 @@ class FilterNotNull:
     """Keep the current value only when the source value exists and is not None."""
 
     def __init__(self, *, source: SelectorInput):
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
             required=True,
         )
+        self._source = source_selector
 
     def __call__(self, current: CurrentT) -> CurrentT:
         value = self._source.select_value_or_missing(current, missing=None)
@@ -1094,6 +1149,13 @@ class DistinctBy(Generic[ItemT]):
     """Keep only the first item for each computed key."""
 
     def __init__(self, fn: KeySelector[ItemT]):
+        _validate_unary_callable(
+            fn,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            source_label="the operator invokes it with the current item",
+            error_type=TypeError,
+        )
         self.fn = fn
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
@@ -1140,6 +1202,14 @@ class DistinctBy(Generic[ItemT]):
             target_label="fn",
             validation_error_type=validation_error_type,
         )
+        _require_assignment_compatible(
+            fn_annotations.output_annotation,
+            Hashable,
+            operator_name=type(self).__name__,
+            source_label="fn return annotation",
+            target_label="fn return type",
+            validation_error_type=validation_error_type,
+        )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (input_type,), _list_alias(item_type)
 
@@ -1149,12 +1219,13 @@ class Distinct(Generic[ItemT]):
     """Keep only the first item for each distinct source value."""
 
     def __init__(self, *, source: SelectorInput):
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
             required=True,
         )
+        self._source = source_selector
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
         source = iter(items)
@@ -1191,10 +1262,18 @@ class Distinct(Generic[ItemT]):
         )
         input_type = current_output
         item_type = _resolve_iterable_item_annotation(current_output)
-        self._source.validate_read(
+        source_annotation = self._source.validate_read(
             item_type,
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
+        )
+        _require_assignment_compatible(
+            source_annotation,
+            Hashable,
+            operator_name=type(self).__name__,
+            source_label=f"source {self._source!r} annotation",
+            target_label="distinct key type",
+            validation_error_type=validation_error_type,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (input_type,), _list_alias(item_type)
@@ -1205,9 +1284,10 @@ class Take:
     """Materialize the first `count` items from an iterable boundary."""
 
     def __init__(self, count: int | str):
-        self.count = int(count)
-        if self.count < 0:
+        resolved_count = int(count)
+        if resolved_count < 0:
             raise ValueError("count must be >= 0.")
+        self.count = resolved_count
 
     def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
         source = iter(current)
@@ -1240,6 +1320,13 @@ class TakeWhile(Generic[ItemT]):
     """Materialize items from an iterable boundary while the predicate remains true."""
 
     def __init__(self, predicate: Predicate[ItemT]):
+        _validate_unary_callable(
+            predicate,
+            operator_name=type(self).__name__,
+            callable_label="predicate",
+            source_label="the operator invokes it with the current item",
+            error_type=TypeError,
+        )
         self.predicate = predicate
 
     def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
