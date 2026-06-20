@@ -289,22 +289,7 @@ def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -
             return _UNBOUND
         return _UNBOUND
 
-    current_shape = _annotation_shape(current_annotation)
-    candidate_shape = _annotation_shape(candidate_annotation)
-    if current_shape is None or candidate_shape is None:
-        return _UNBOUND
-
-    current_origin, current_args = current_shape
-    candidate_origin, candidate_args = candidate_shape
-    if current_origin != candidate_origin:
-        return _UNBOUND
-
-    arg_pairs = _generic_argument_pairs(
-        current_origin,
-        current_args,
-        current_origin,
-        candidate_args,
-    )
+    arg_pairs = _generic_argument_pairs(current_annotation, candidate_annotation)
     if arg_pairs is None:
         return _UNBOUND
 
@@ -410,15 +395,13 @@ def _can_assign_generic_source_to_target_annotation(source_annotation: Any, targ
     source_shape = _annotation_shape(source_annotation)
     if source_shape is None:
         return False
+
     target_shape = _annotation_shape(target_annotation)
-    source_origin, source_args = source_shape
+    source_origin, _ = source_shape
     if target_shape is None:
         return is_concrete_assignable(source_origin, target_annotation)
-    target_origin, target_args = target_shape
-    if source_origin != target_origin and not is_concrete_assignable(source_origin, target_origin):
-        return False
 
-    arg_pairs = _generic_argument_pairs(source_origin, source_args, target_origin, target_args)
+    arg_pairs = _generic_argument_pairs(source_annotation, target_annotation)
     if arg_pairs is None:
         return False
     return all(
@@ -439,16 +422,28 @@ def _is_compatible_under_variance(source_annotation: Any, target_annotation: Any
 
 
 def _generic_argument_pairs(
-    source_origin: Any,
-    source_args: tuple[Any, ...],
-    target_origin: Any,
-    target_args: tuple[Any, ...],
+    template_annotation,
+    candidate_annotation
 ) -> tuple[tuple[Any, Any, str], ...] | None:
-    adapted_source_args = _adapt_generic_args_for_target_origin(
-        source_origin,
-        source_args,
-        target_origin,
-    )
+
+    try:
+        source_origin, source_args = _annotation_shape(template_annotation)
+        target_origin, target_args = _annotation_shape(candidate_annotation)
+    except (TypeError, ValueError) as exc:
+        return None
+
+    if source_origin != target_origin and not is_concrete_assignable(source_origin, target_origin):
+        return None
+
+    adapted_source_args = source_args
+    if source_origin is tuple and target_origin in {Collection, Iterable, Sequence}:
+        if not source_args:
+            adapted_source_args = (Any,)
+        elif _is_variadic_shaped(source_args):
+            adapted_source_args = (variadic_tuple_item_annotation(source_args),)
+        else:
+            adapted_source_args = (_combine_annotations(*source_args),)
+
     if target_origin is tuple and _is_variadic_shaped(target_args):
         target_item = variadic_tuple_item_annotation(target_args)
         if _is_variadic_shaped(adapted_source_args):
@@ -471,20 +466,6 @@ def _generic_argument_pairs(
             strict=True,
         )
     )
-
-
-def _adapt_generic_args_for_target_origin(
-    source_origin: Any,
-    source_args: tuple[Any, ...],
-    target_origin: Any,
-) -> tuple[Any, ...]:
-    if source_origin is tuple and target_origin in {Collection, Iterable, Sequence}:
-        if not source_args:
-            return (Any,)
-        if _is_variadic_shaped(source_args):
-            return (variadic_tuple_item_annotation(source_args),)
-        return (_combine_annotations(*source_args),)
-    return source_args
 
 
 def _generic_variances(origin: Any, args: tuple[Any, ...]) -> tuple[str, ...]:
@@ -533,31 +514,13 @@ def _resolve_typevar_bindings_from_match(
             return {}
         return {template_annotation: candidate_annotation}
 
-    template_shape = _annotation_shape(template_annotation)
-    if template_shape is None:
-        return {}
-
-    candidate_shape = _annotation_shape(candidate_annotation)
-    if candidate_shape is None:
-        return {}
-
-    template_origin, template_child_annotations = template_shape
-    candidate_origin, candidate_child_annotations = candidate_shape
-    if candidate_origin != template_origin and not is_concrete_assignable(candidate_origin, template_origin):
-        return {}
-
-    child_annotation_pairs = _generic_argument_pairs(
-        candidate_origin,
-        candidate_child_annotations,
-        template_origin,
-        template_child_annotations,
-    )
-    if child_annotation_pairs is None:
+    arg_pairs = _generic_argument_pairs(candidate_annotation, template_annotation)
+    if arg_pairs is None:
         return {}
 
     return _resolve_typevar_bindings(
-        tuple(template_child_annotation for _, template_child_annotation, _ in child_annotation_pairs),
-        tuple(candidate_child_annotation for candidate_child_annotation, _, _ in child_annotation_pairs),
+        tuple(template_child_annotation for _, template_child_annotation, _ in arg_pairs),
+        tuple(candidate_child_annotation for candidate_child_annotation, _, _ in arg_pairs),
     )
 
 
