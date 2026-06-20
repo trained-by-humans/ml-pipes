@@ -616,7 +616,6 @@ class WrapMappingInObject(Generic[StateT]):
         validate_nullary_callable_signature(
             state_factory,
             label=f"{type(self).__name__} state_factory",
-            source_label="the operator invokes it without arguments",
             error_type=TypeError,
         )
         self._target = target_selector
@@ -678,7 +677,7 @@ class Map(Generic[ValueT, MappedT]):
         validate_unary_callable_signature(
             fn,
             label=f"{type(self).__name__} fn",
-            source_label="the operator invokes it with the current value",
+            argument_label="the current value",
             error_type=TypeError,
         )
         self.fn = fn
@@ -784,7 +783,7 @@ class MapValue(Generic[ValueT, MappedT]):
         validate_unary_callable_signature(
             fn,
             label=f"{type(self).__name__} fn",
-            source_label=f"the operator invokes it with source {source_selector!r}",
+            argument_label=f"source {source_selector!r}",
             error_type=TypeError,
         )
         self.fn = fn
@@ -866,15 +865,15 @@ class Filter(Generic[ValueT]):
             name="source",
             value=source,
         )
-        source_label = (
-            f"the operator invokes it with source {source_selector!r}"
+        argument_label = (
+            f"source {source_selector!r}"
             if source_selector
-            else "the operator invokes it with the current value"
+            else "the current value"
         )
         validate_unary_callable_signature(
             predicate,
             label=f"{type(self).__name__} predicate",
-            source_label=source_label,
+            argument_label=argument_label,
             error_type=TypeError,
         )
         self.predicate = predicate
@@ -981,7 +980,7 @@ class DistinctBy(Generic[ItemT]):
         validate_unary_callable_signature(
             fn,
             label=f"{type(self).__name__} fn",
-            source_label="the operator invokes it with the current item",
+            argument_label="the current item",
             error_type=TypeError,
         )
         self.fn = fn
@@ -1145,7 +1144,7 @@ class TakeWhile(Generic[ItemT]):
         validate_unary_callable_signature(
             predicate,
             label=f"{type(self).__name__} predicate",
-            source_label="the operator invokes it with the current item",
+            argument_label="the current item",
             error_type=TypeError,
         )
         self.predicate = predicate
