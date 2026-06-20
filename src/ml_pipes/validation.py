@@ -22,7 +22,7 @@ from ._typing.annotation import (
     satisfies_annotation_constraint,
     tighten_annotation,
 )
-from ._typing.inspection import resolve_callable_hints
+from ._typing.inspection import resolve_callable_annotations
 from ._typing.signatures import validate_operator_signature
 from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
@@ -289,7 +289,7 @@ class PipelineValidator:
             error_type=PipelineValidationError,
             warning_type=PipelineValidationWarning,
         )
-        input_types, output_type = require_operator_annotations(operator, parameters, label=label)
+        input_types, output_type = require_operator_annotations(operator, label=label)
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
     def _run_forward_boundary_resolution_pass(self, pipeline_input_type: Any = Any) -> list[_OperatorBoundary]:
@@ -459,21 +459,16 @@ class PipelineValidator:
 
 def require_operator_annotations(
     operator: Any,
-    parameters: tuple[inspect.Parameter, ...],
     *,
     label: str,
 ) -> tuple[tuple[Any, ...], Any]:
-    hints = resolve_callable_hints(operator)
-
-    input_types: list[Any] = []
-    for parameter in parameters:
-        if parameter.name not in hints:
-            raise PipelineValidationError(
-                f"Pipeline step {label} is missing a type annotation for __call__ input"
-            )
-        input_types.append(hints[parameter.name])
-    if "return" not in hints:
+    annotations = resolve_callable_annotations(operator)
+    if any(annotation is None for annotation in annotations.parameter_annotations):
+        raise PipelineValidationError(
+            f"Pipeline step {label} is missing a type annotation for __call__ input"
+        )
+    if annotations.return_annotation is None:
         raise PipelineValidationError(
             f"Pipeline step {label} is missing a return type annotation for __call__"
         )
-    return tuple(input_types), hints["return"]
+    return tuple(annotations.parameter_annotations), annotations.return_annotation

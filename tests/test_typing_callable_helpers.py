@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ml_pipes._typing.inspection import resolve_unary_callable_annotations
+from ml_pipes._typing.inspection import resolve_callable_annotations
 from ml_pipes._typing.signatures import (
     validate_callable_signature,
     validate_nullary_callable_signature,
@@ -21,11 +21,21 @@ def test_callable_signature_helpers_share_variadic_positional_policy() -> None:
         argument_label="the current value",
         error_type=TypeError,
     )
-    annotations = resolve_unary_callable_annotations(stringify)
+    annotations = resolve_callable_annotations(stringify)
 
     assert parameter.kind is inspect.Parameter.VAR_POSITIONAL
     assert annotations.parameter_annotations == (int,)
     assert annotations.return_annotation is str
+
+
+def test_resolve_callable_annotations_orders_positional_annotations() -> None:
+    def predicate(value: int, expected: str = "x") -> bool:
+        return str(value) == expected
+
+    annotations = resolve_callable_annotations(predicate)
+
+    assert annotations.parameter_annotations == (int, str)
+    assert annotations.return_annotation is bool
 
 
 def test_unary_callable_signature_reuses_public_callable_validation() -> None:

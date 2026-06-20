@@ -17,8 +17,7 @@ from ._typing.annotation import (
     variadic_tuple_item_annotation,
 )
 from ._typing.inspection import (
-    resolve_nullary_callable_annotations,
-    resolve_unary_callable_annotations,
+    resolve_callable_annotations,
 )
 from ._typing.signatures import (
     validate_nullary_callable_signature,
@@ -643,7 +642,7 @@ class WrapMappingInObject(Generic[StateT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        factory_annotations = resolve_nullary_callable_annotations(self.state_factory)
+        factory_annotations = resolve_callable_annotations(self.state_factory)
         input_type = current_output if is_mapping_annotation(current_output) else AnyMapping | None
         base_output = _require_callable_annotation(
             factory_annotations.return_annotation,
@@ -692,7 +691,7 @@ class Map(Generic[ValueT, MappedT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        fn_annotations = resolve_unary_callable_annotations(self.fn)
+        fn_annotations = resolve_callable_annotations(self.fn)
         if current_output is Any:
             input_type = _require_callable_annotation(
                 fn_annotations.parameter_annotations[0],
@@ -822,7 +821,7 @@ class MapValue(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(target={self._target!r})",
         )
-        fn_annotations = resolve_unary_callable_annotations(self.fn)
+        fn_annotations = resolve_callable_annotations(self.fn)
         _require_assignment_compatible(
             source_annotation,
             fn_annotations.parameter_annotations[0],
@@ -906,7 +905,7 @@ class Filter(Generic[ValueT]):
                 error_prefix=f"{type(self).__name__}(source={self._source!r})",
             )
             source_label = f"source {self._source!r}"
-        predicate_annotations = resolve_unary_callable_annotations(self.predicate)
+        predicate_annotations = resolve_callable_annotations(self.predicate)
         _require_assignment_compatible(
             source_annotation,
             predicate_annotations.parameter_annotations[0],
@@ -1014,7 +1013,7 @@ class DistinctBy(Generic[ItemT]):
         )
         input_type = current_output
         item_type = _resolve_iterable_item_annotation(current_output)
-        fn_annotations = resolve_unary_callable_annotations(self.fn)
+        fn_annotations = resolve_callable_annotations(self.fn)
         _require_assignment_compatible(
             item_type,
             fn_annotations.parameter_annotations[0],
@@ -1171,7 +1170,7 @@ class TakeWhile(Generic[ItemT]):
         )
         input_type = current_output
         item_type = _resolve_iterable_item_annotation(current_output)
-        predicate_annotations = resolve_unary_callable_annotations(self.predicate)
+        predicate_annotations = resolve_callable_annotations(self.predicate)
         _require_assignment_compatible(
             item_type,
             predicate_annotations.parameter_annotations[0],
