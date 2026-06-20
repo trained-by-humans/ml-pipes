@@ -6,7 +6,6 @@ from itertools import islice, takewhile
 from typing import Any, Generic, TypeVar, cast, get_args, get_origin
 
 from ._typing.annotation import (
-    combine_annotation_options,
     is_assignable,
     is_iterable_annotation,
     is_mapping_annotation,
@@ -14,7 +13,7 @@ from ._typing.annotation import (
     iterable_annotation,
     list_annotation,
     remove_none_annotation_options_or_any,
-    variadic_tuple_item_annotation,
+    resolve_iterable_item_annotation,
 )
 from ._typing.inspection import (
     resolve_callable_annotations,
@@ -76,51 +75,6 @@ def _resolve_selector(
     if required and not selector:
         raise ValueError(f"{operator_name} requires a non-empty {name} selector")
     return selector
-
-
-def _resolve_iterable_item_annotation(annotation: Any) -> Any:
-    annotation = remove_none_annotation_options_or_any(annotation)
-    if annotation in {Any, object}:
-        return Any
-    if is_union_annotation(annotation):
-        item_types = tuple(_resolve_iterable_item_annotation(option) for option in get_args(annotation))
-        if not item_types or any(item_type is Any for item_type in item_types):
-            return Any
-        return combine_annotation_options(*item_types)
-
-    if annotation is str:
-        return str
-    if annotation in {bytes, bytearray}:
-        return int
-
-    variadic_item_type = variadic_tuple_item_annotation(annotation)
-    if variadic_item_type is not None:
-        return variadic_item_type
-
-    origin = get_origin(annotation)
-    if origin is tuple:
-        args = get_args(annotation)
-        if not args:
-            return Any
-        return combine_annotation_options(*args)
-    if origin is not None:
-        args = get_args(annotation)
-        try:
-            if issubclass(origin, Mapping):
-                return args[0] if args else Any
-            if issubclass(origin, Iterable):
-                return args[0] if args else Any
-        except TypeError:
-            return Any
-    if isinstance(annotation, type):
-        try:
-            if issubclass(annotation, Mapping):
-                return Any
-            if issubclass(annotation, Iterable):
-                return Any
-        except TypeError:
-            return Any
-    return Any
 
 
 def _is_value_shaped_iterable_annotation(annotation: Any) -> bool:
@@ -530,7 +484,7 @@ class PerItem(RegionOpener[Iterable[ItemT], ItemT]):
             validation_error_type=validation_error_type,
         )
         input_type = current_output
-        output_type = _resolve_iterable_item_annotation(current_output)
+        output_type = resolve_iterable_item_annotation(current_output)
         return (input_type,), output_type
 
 
@@ -592,7 +546,7 @@ class LazyPerItem(RegionOpener[Iterable[ItemT], ItemT]):
             validation_error_type=validation_error_type,
         )
         input_type = current_output
-        output_type = _resolve_iterable_item_annotation(current_output)
+        output_type = resolve_iterable_item_annotation(current_output)
         return (input_type,), output_type
 
 
@@ -1012,7 +966,7 @@ class DistinctBy(Generic[ItemT]):
             validation_error_type=validation_error_type,
         )
         input_type = current_output
-        item_type = _resolve_iterable_item_annotation(current_output)
+        item_type = resolve_iterable_item_annotation(current_output)
         fn_annotations = resolve_callable_annotations(self.fn)
         _require_assignment_compatible(
             item_type,
@@ -1081,7 +1035,7 @@ class Distinct(Generic[ItemT]):
             validation_error_type=validation_error_type,
         )
         input_type = current_output
-        item_type = _resolve_iterable_item_annotation(current_output)
+        item_type = resolve_iterable_item_annotation(current_output)
         source_annotation = self._source.validate_read(
             item_type,
             validation_error_type=validation_error_type,
@@ -1130,7 +1084,7 @@ class Take:
             validation_error_type=validation_error_type,
         )
         input_type = current_output
-        item_type = _resolve_iterable_item_annotation(current_output)
+        item_type = resolve_iterable_item_annotation(current_output)
         output_type = list_annotation(item_type)
         return (input_type,), output_type
 
@@ -1169,7 +1123,7 @@ class TakeWhile(Generic[ItemT]):
             validation_error_type=validation_error_type,
         )
         input_type = current_output
-        item_type = _resolve_iterable_item_annotation(current_output)
+        item_type = resolve_iterable_item_annotation(current_output)
         predicate_annotations = resolve_callable_annotations(self.predicate)
         _require_assignment_compatible(
             item_type,

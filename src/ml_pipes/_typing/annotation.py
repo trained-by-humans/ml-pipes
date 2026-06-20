@@ -143,6 +143,54 @@ def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
     return get_args(annotation)[0]
 
 
+def resolve_iterable_item_annotation(annotation: Any) -> Any:
+    annotation = remove_none_annotation_options_or_any(annotation)
+    if annotation in {Any, object}:
+        return Any
+    if is_union_annotation(annotation):
+        item_annotations = tuple(
+            resolve_iterable_item_annotation(option)
+            for option in get_args(annotation)
+        )
+        if not item_annotations or any(item_annotation is Any for item_annotation in item_annotations):
+            return Any
+        return combine_annotation_options(*item_annotations)
+
+    if annotation is str:
+        return str
+    if annotation in {bytes, bytearray}:
+        return int
+
+    variadic_item_annotation = variadic_tuple_item_annotation(annotation)
+    if variadic_item_annotation is not None:
+        return variadic_item_annotation
+
+    origin = get_origin(annotation)
+    if origin is tuple:
+        tuple_item_annotations = get_args(annotation)
+        if not tuple_item_annotations:
+            return Any
+        return combine_annotation_options(*tuple_item_annotations)
+    if origin is not None:
+        generic_arguments = get_args(annotation)
+        try:
+            if issubclass(origin, Mapping):
+                return generic_arguments[0] if generic_arguments else Any
+            if issubclass(origin, Iterable):
+                return generic_arguments[0] if generic_arguments else Any
+        except TypeError:
+            return Any
+    if isinstance(annotation, type):
+        try:
+            if issubclass(annotation, Mapping):
+                return Any
+            if issubclass(annotation, Iterable):
+                return Any
+        except TypeError:
+            return Any
+    return Any
+
+
 def align_source_annotation_to_target_annotations(
     source_annotation: Any,
     target_annotations: tuple[Any, ...],
