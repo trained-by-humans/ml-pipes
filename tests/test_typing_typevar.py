@@ -2,9 +2,9 @@ from collections.abc import Iterable
 from typing import Any, TypeVar
 
 from ml_pipes._typing.annotation import (
-    _specialize_output_annotation_from_aligned_input_annotations,
     align_source_annotation_to_target_annotations,
     is_assignable,
+    specialize_output_annotation_from_aligned_input_annotations,
 )
 
 
@@ -74,7 +74,7 @@ def test_generic_invariance_rejects_child_list_as_base_list():
 def test_specialize_output_annotation_recursively_specializes_nested_output():
     aligned_candidate_annotations = align_source_annotation_to_target_annotations(_Child, (_T,))
     assert aligned_candidate_annotations == (_Child,)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
+    assert specialize_output_annotation_from_aligned_input_annotations(
         aligned_candidate_annotations,
         (_T,),
         list[_T],
@@ -84,7 +84,7 @@ def test_specialize_output_annotation_recursively_specializes_nested_output():
 def test_specialize_output_annotation_recursively_specializes_plain_tuple_output():
     aligned_candidate_annotations = align_source_annotation_to_target_annotations(_Child, (_T,))
     assert aligned_candidate_annotations == (_Child,)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
+    assert specialize_output_annotation_from_aligned_input_annotations(
         aligned_candidate_annotations,
         (_T,),
         (_T, list[_T]),
@@ -100,7 +100,7 @@ def test_specialize_output_annotation_merges_repeated_typevar_inputs():
         (_T, _T),
     )
     assert aligned_candidate_annotations == (_Base, _Child)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
+    assert specialize_output_annotation_from_aligned_input_annotations(
         aligned_candidate_annotations,
         (_T, _T),
         _T,
@@ -113,7 +113,7 @@ def test_specialize_output_annotation_from_single_tuple_parameter():
         (tuple[_T, int],),
     )
     assert aligned_candidate_annotations == (tuple[_Child, int],)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
+    assert specialize_output_annotation_from_aligned_input_annotations(
         aligned_candidate_annotations,
         (tuple[_T, int],),
         _T,
@@ -126,7 +126,7 @@ def test_specialize_output_annotation_through_generic_subtyping():
         (Iterable[_U | None],),
     )
     assert aligned_candidate_annotations == (list[int | None],)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
+    assert specialize_output_annotation_from_aligned_input_annotations(
         aligned_candidate_annotations,
         (Iterable[_U | None],),
         list[_U],
@@ -139,7 +139,7 @@ def test_specialize_output_annotation_does_not_bind_constrained_typevar_from_any
         (_ConstrainedT,),
     )
     assert aligned_candidate_annotations == (Any,)
-    assert _specialize_output_annotation_from_aligned_input_annotations(
+    assert specialize_output_annotation_from_aligned_input_annotations(
         aligned_candidate_annotations,
         (_ConstrainedT,),
         _ConstrainedT,

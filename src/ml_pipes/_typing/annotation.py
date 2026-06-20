@@ -231,7 +231,7 @@ def format_parameter_annotations(annotations: tuple[Any, ...]) -> str:
     return "(" + ", ".join(format_annotation(annotation) for annotation in annotations) + ")"
 
 
-def _specialize_output_annotation_from_aligned_input_annotations(
+def specialize_output_annotation_from_aligned_input_annotations(
     aligned_candidate_annotations: tuple[Any, ...],
     input_template_annotations: tuple[Any, ...],
     output_template_annotation: Any,

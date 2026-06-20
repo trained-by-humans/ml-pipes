@@ -8,7 +8,6 @@ from ._typing.annotation import (
     _are_annotations_equivalent,
     _collect_any_placeholder_bindings,
     _replace_any_placeholders_in_order,
-    _specialize_output_annotation_from_aligned_input_annotations,
     align_source_annotation_to_target_annotations,
     collapse_annotation_parts,
     expand_annotation_parts,
@@ -19,6 +18,7 @@ from ._typing.annotation import (
     is_output_annotation_assignable_to_input_annotations,
     materialize_probe_annotation,
     normalize_published_annotation,
+    specialize_output_annotation_from_aligned_input_annotations,
     satisfies_annotation_constraint,
     tighten_annotation,
 )
@@ -328,7 +328,7 @@ class PipelineValidator:
             if aligned_candidate_annotations is None:
                 previous_output_type = current_boundary.effective_output_type
             else:
-                previous_output_type = _specialize_output_annotation_from_aligned_input_annotations(
+                previous_output_type = specialize_output_annotation_from_aligned_input_annotations(
                     aligned_candidate_annotations,
                     current_boundary.effective_input_types,
                     current_boundary.effective_output_type,

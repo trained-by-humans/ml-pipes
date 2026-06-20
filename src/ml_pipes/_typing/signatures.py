@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Callable
-import warnings
-
 import inspect
+import warnings
+from typing import Any, Callable
 
 
-_POSITIONAL_VALUE_PARAMETER_KINDS = (
+_POSITIONAL_PARAMETER_KINDS = (
     inspect.Parameter.POSITIONAL_ONLY,
     inspect.Parameter.POSITIONAL_OR_KEYWORD,
+)
+_POSITIONAL_VALUE_PARAMETER_KINDS = _POSITIONAL_PARAMETER_KINDS + (
     inspect.Parameter.VAR_POSITIONAL,
 )
 
@@ -83,7 +84,7 @@ def validate_operator_signature(
     return parameters
 
 
-def validate_positional_callable_signature(
+def _validate_positional_callable_signature(
     callable_: Callable[..., Any],
     *,
     label: str,
@@ -123,6 +124,28 @@ def validate_positional_callable_signature(
             f"but {source_label} is passed by position. Use only positional parameters."
         )
 
+    return input_parameter
+
+
+def validate_unary_callable_signature(
+    callable_: Callable[..., Any],
+    *,
+    label: str,
+    source_label: str,
+    error_type: type[Exception],
+) -> inspect.Parameter:
+    input_parameter = _validate_positional_callable_signature(
+        callable_,
+        label=label,
+        source_label=source_label,
+        error_type=error_type,
+    )
+    try:
+        inspect.signature(callable_).bind(object())
+    except (TypeError, ValueError) as exc:
+        raise error_type(
+            f"{label} cannot be called with {source_label}: {exc}"
+        ) from exc
     return input_parameter
 
 
