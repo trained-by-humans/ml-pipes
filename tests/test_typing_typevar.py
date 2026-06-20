@@ -1,10 +1,19 @@
 from collections.abc import Iterable
 from typing import Any, TypeVar
 
+import pytest
+
 from ml_pipes._typing.annotation import (
+    _annotation_shape,
+    _contains_ellipsize,
+    _is_variadic,
+    _is_variadic_shaped,
+    _is_variadic_tuple,
     align_source_annotation_to_target_annotations,
+    expand_annotation_parts,
     is_assignable,
     specialize_output_annotation_from_aligned_input_annotations,
+    variadic_tuple_item_annotation,
 )
 
 
@@ -63,12 +72,65 @@ def test_generic_subtyping_accepts_list_as_iterable():
     assert is_assignable(list[int], Iterable[int])
 
 
+def test_generic_subtyping_accepts_variadic_tuple_as_iterable():
+    assert is_assignable(tuple[int, ...], Iterable[int])
+
+
 def test_generic_covariance_accepts_child_list_as_base_iterable():
     assert is_assignable(list[_Child], Iterable[_Base])
 
 
 def test_generic_invariance_rejects_child_list_as_base_list():
     assert not is_assignable(list[_Child], list[_Base])
+
+
+def test_contains_ellipsize_detects_tuple_ellipsis_forms():
+    assert _contains_ellipsize((int, Ellipsis))
+    assert _contains_ellipsize((int, str, Ellipsis))
+    assert _contains_ellipsize(tuple[int, ...])
+    assert _contains_ellipsize(tuple[int, str, ...])
+    assert not _contains_ellipsize((int, str))
+    assert not _contains_ellipsize(tuple[int, str])
+
+
+def test_variadic_shape_requires_single_item_and_ellipsis():
+    assert _is_variadic_shaped((int, Ellipsis))
+    assert not _is_variadic_shaped((int, str, Ellipsis))
+
+
+def test_variadic_tuple_requires_single_item_and_ellipsis():
+    assert _is_variadic_tuple(tuple[int, ...])
+    assert not _is_variadic_tuple(tuple[int, str, ...])
+
+
+def test_variadic_tuple_item_annotation_accepts_tuple_and_shape_forms():
+    assert variadic_tuple_item_annotation(tuple[int, ...]) is int
+    assert variadic_tuple_item_annotation((int, Ellipsis)) is int
+    assert variadic_tuple_item_annotation(tuple[int, str]) is None
+    assert variadic_tuple_item_annotation((int, str)) is None
+
+
+def test_is_variadic_detects_shaped_and_tuple_variadics():
+    assert _is_variadic((int, Ellipsis))
+    assert _is_variadic(tuple[int, ...])
+    assert not _is_variadic((int, str, Ellipsis))
+    assert not _is_variadic(tuple[int, str, ...])
+
+
+def test_annotation_shape_rejects_malformed_ellipsis_tuple_forms():
+    with pytest.raises(ValueError, match="Malformed tuple annotation with ellipsis"):
+        _annotation_shape((int, str, Ellipsis))
+
+    with pytest.raises(ValueError, match="Malformed tuple annotation with ellipsis"):
+        _annotation_shape(tuple[int, str, ...])
+
+
+def test_expand_annotation_parts_rejects_malformed_ellipsis_tuple_forms():
+    with pytest.raises(ValueError, match="Malformed tuple annotation with ellipsis"):
+        expand_annotation_parts((int, str, Ellipsis))
+
+    with pytest.raises(ValueError, match="Malformed tuple annotation with ellipsis"):
+        expand_annotation_parts(tuple[int, str, ...])
 
 
 def test_specialize_output_annotation_recursively_specializes_nested_output():

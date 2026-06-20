@@ -28,8 +28,13 @@ def expand_annotation_parts(annotation: Any) -> tuple[Any, ...]:
     Variadic tuples remain atomic because Pipeline does not dispatch them as
     multi-parameter boundaries.
     """
-    if _is_variadic_tuple_like(annotation):
-        return (annotation,)
+    if _contains_ellipsize(annotation):
+        if _is_variadic(annotation):
+            return (annotation,)
+        raise ValueError(
+            f"Malformed tuple annotation with ellipsis: {annotation}. "
+            "Use tuple[T, ...] for variadic tuples."
+        )
     origin = get_origin(annotation)
     if origin is tuple:
         return get_args(annotation)
@@ -135,12 +140,6 @@ def is_mapping_annotation(annotation: Any) -> bool:
         except TypeError:
             return False
     return False
-
-
-def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
-    if not _is_variadic_tuple_annotation(annotation):
-        return None
-    return get_args(annotation)[0]
 
 
 def resolve_iterable_item_annotation(annotation: Any) -> Any:
@@ -450,12 +449,10 @@ def _generic_argument_pairs(
         source_args,
         target_origin,
     )
-    if target_origin is tuple and _is_variadic_tuple_shaped(target_args):
-        target_item = target_args[0]
-        if _is_variadic_tuple_shaped(adapted_source_args):
-            if len(adapted_source_args) != 2:
-                return None
-            return ((adapted_source_args[0], target_item, _COVARIANT),)
+    if target_origin is tuple and _is_variadic_shaped(target_args):
+        target_item = variadic_tuple_item_annotation(target_args)
+        if _is_variadic_shaped(adapted_source_args):
+            return ((variadic_tuple_item_annotation(adapted_source_args), target_item, _COVARIANT),)
         return tuple(
             (source_arg, target_item, _COVARIANT)
             for source_arg in adapted_source_args
@@ -484,8 +481,8 @@ def _adapt_generic_args_for_target_origin(
     if source_origin is tuple and target_origin in {Collection, Iterable, Sequence}:
         if not source_args:
             return (Any,)
-        if _is_variadic_tuple_shaped(source_args):
-            return (source_args[0],)
+        if _is_variadic_shaped(source_args):
+            return (variadic_tuple_item_annotation(source_args),)
         return (_combine_annotations(*source_args),)
     return source_args
 
@@ -761,31 +758,56 @@ def _replace_any_placeholders_in_order_recursive(
 
 
 def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
+    if _contains_ellipsize(annotation):
+        if not _is_variadic(annotation):
+            raise ValueError(
+                f"Malformed tuple annotation with ellipsis: {annotation}. "
+                "Use tuple[T, ...] for variadic tuples."
+            )
+
     if isinstance(annotation, tuple):
-        if _is_variadic_tuple_shaped(annotation):
-            return None
         return tuple, annotation
+
     origin = get_origin(annotation)
     if origin is None:
         return None
     return origin, get_args(annotation)
 
 
-def _is_variadic_tuple_like(annotation: Any) -> bool:
-    return _is_variadic_tuple_shaped(annotation) or _is_variadic_tuple_annotation(annotation)
+def _contains_ellipsize(annotation: Any) -> bool:
+    if isinstance(annotation, tuple):
+        return any(part is Ellipsis for part in annotation)
+    origin = get_origin(annotation)
+    return origin is tuple and any(part is Ellipsis for part in get_args(annotation))
 
 
-def _is_variadic_tuple_shaped(annotation: Any) -> bool:
+def _is_variadic(annotation: Any) -> bool:
+    if isinstance(annotation, tuple):
+        return _is_variadic_shaped(annotation)
+    return _is_variadic_tuple(annotation)
+
+
+def _is_variadic_shaped(annotation: Any) -> bool:
     if not isinstance(annotation, tuple):
         return False
-    return any(part is Ellipsis for part in annotation)
+    return len(annotation) == 2 and annotation[1] is Ellipsis
 
 
-def _is_variadic_tuple_annotation(annotation: Any) -> bool:
+def _is_variadic_tuple(annotation: Any) -> bool:
     origin = get_origin(annotation)
     if origin is not tuple:
         return False
-    return _is_variadic_tuple_shaped(get_args(annotation))
+    return _is_variadic_shaped(get_args(annotation))
+
+
+def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
+    if isinstance(annotation, tuple):
+        if not _is_variadic_shaped(annotation):
+            return None
+        return annotation[0]
+    if not _is_variadic_tuple(annotation):
+        return None
+    return get_args(annotation)[0]
 
 
 def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> Any:
@@ -813,12 +835,12 @@ def _rebuild_annotation_like(annotation: Any, args: tuple[Any, ...]) -> Any:
 
 
 def _rebuild_variadic_tuple_annotation(annotation: Any, args: tuple[Any, ...]) -> Any | None:
-    if not _is_variadic_tuple_annotation(annotation):
+    if not _is_variadic_tuple(annotation):
         return None
     if len(args) == 1:
         return tuple[args[0], ...]
-    if _is_variadic_tuple_shaped(args):
-        return tuple[args[0], ...]
+    if _is_variadic_shaped(args):
+        return tuple[variadic_tuple_item_annotation(args), ...]
     return tuple[args]
 
 
