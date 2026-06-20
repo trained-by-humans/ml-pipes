@@ -4,14 +4,16 @@ from collections.abc import (
     Collection,
     Iterable,
     Mapping,
+    MutableSequence,
     Sequence,
     Set as AbstractSet,
 )
 from types import UnionType
-from typing import Any, Callable, TypeVar, get_args, get_origin
+from typing import Any, Callable, TypeVar, get_args, get_origin, get_type_hints
 
 _UNBOUND = object()
 _NONE_TYPE = type(None)
+_MISSING_ANNOTATION = object()
 _COVARIANT = "covariant"
 _INVARIANT = "invariant"
 _CONTRAVARIANT = "contravariant"
@@ -50,17 +52,22 @@ def collapse_annotation_parts(annotation_parts: tuple[Any, ...]) -> Any:
 
 
 def combine_annotation_options(*annotations: Any) -> Any:
-    if not annotations:
+    unique_annotations: list[Any] = []
+    for annotation in annotations:
+        if annotation is Any:
+            return Any
+        if annotation not in unique_annotations:
+            unique_annotations.append(annotation)
+
+    if not unique_annotations:
         return Any
 
-    combined = annotations[0]
-    for annotation in annotations[1:]:
-        if combined == annotation:
-            continue
-        if combined is Any or annotation is Any:
-            combined = Any
-            continue
-        combined = _combine_annotations(combined, annotation)
+    combined = unique_annotations[0]
+    for annotation in unique_annotations[1:]:
+        try:
+            combined = _combine_annotations(combined, annotation)
+        except TypeError:
+            return Any
     return combined
 
 
@@ -88,6 +95,18 @@ def iterable_annotation(item_annotation: Any) -> Any:
 def list_annotation(item_annotation: Any) -> Any:
     item_annotation = _NONE_TYPE if item_annotation is None else item_annotation
     return list[item_annotation]
+
+
+def describe_annotation(annotation: Any) -> str:
+    if annotation in {None, _NONE_TYPE}:
+        return "None"
+    if isinstance(annotation, type) and annotation.__module__ == "builtins":
+        return annotation.__name__
+    return repr(annotation)
+
+
+def is_unknown_annotation(annotation: Any) -> bool:
+    return annotation in {Any, object}
 
 
 def is_union_annotation(annotation: Any) -> bool:
@@ -142,6 +161,43 @@ def is_mapping_annotation(annotation: Any) -> bool:
     return False
 
 
+def is_typed_dict_annotation(annotation: Any) -> bool:
+    return (
+        isinstance(annotation, type)
+        and issubclass(annotation, dict)
+        and hasattr(annotation, "__annotations__")
+        and hasattr(annotation, "__total__")
+    )
+
+
+def resolve_mapping_annotation(annotation: Any) -> tuple[Any, Any] | None:
+    if is_typed_dict_annotation(annotation):
+        return str, Any
+
+    origin = get_origin(annotation)
+    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    if not isinstance(owner, type):
+        return None
+    try:
+        if not issubclass(owner, Mapping):
+            return None
+    except TypeError:
+        return None
+
+    args = get_args(annotation)
+    if len(args) == 2:
+        return args
+    return Any, Any
+
+
+def resolve_typed_dict_key_annotation(annotation: Any, key: str) -> Any:
+    try:
+        hints = get_type_hints(annotation)
+    except Exception:
+        hints = getattr(annotation, "__annotations__", {})
+    return hints.get(key, _MISSING_ANNOTATION)
+
+
 def resolve_iterable_item_annotation(annotation: Any) -> Any:
     annotation = remove_none_annotation_options_or_any(annotation)
     if annotation in {Any, object}:
@@ -185,6 +241,56 @@ def resolve_iterable_item_annotation(annotation: Any) -> Any:
         except TypeError:
             return Any
     return Any
+
+
+def resolve_sequence_item_annotation(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in {list, Sequence, MutableSequence}:
+        return resolve_iterable_item_annotation(annotation)
+
+    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    if not isinstance(owner, type):
+        return _MISSING_ANNOTATION
+    try:
+        if issubclass(owner, Sequence) and not issubclass(owner, (str, bytes, bytearray, Mapping)):
+            return Any
+    except TypeError:
+        return _MISSING_ANNOTATION
+    return _MISSING_ANNOTATION
+
+
+def is_mutable_sequence_annotation(annotation: Any) -> bool:
+    origin = get_origin(annotation)
+    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    if not isinstance(owner, type):
+        return False
+
+    try:
+        return issubclass(owner, MutableSequence)
+    except TypeError:
+        return False
+
+
+def is_generic_indexable_annotation(annotation: Any) -> bool:
+    origin = get_origin(annotation)
+    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    if not isinstance(owner, type):
+        return False
+    try:
+        return not issubclass(owner, (str, bytes, bytearray, Mapping)) and hasattr(owner, "__getitem__")
+    except TypeError:
+        return False
+
+
+def is_generic_writable_indexable_annotation(annotation: Any) -> bool:
+    origin = get_origin(annotation)
+    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    if not isinstance(owner, type):
+        return False
+    try:
+        return not issubclass(owner, (str, bytes, bytearray, Mapping)) and hasattr(owner, "__setitem__")
+    except TypeError:
+        return False
 
 
 def align_source_annotation_to_target_annotations(

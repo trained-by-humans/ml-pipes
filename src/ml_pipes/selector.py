@@ -1,16 +1,31 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from types import UnionType
-from typing import Any, NoReturn, TypeAlias, Union, get_args, get_origin, get_type_hints
+from typing import Any, NoReturn, TypeAlias, get_args, get_origin, get_type_hints
+
+from ._typing.annotation import (
+    _MISSING_ANNOTATION,
+    _annotation_shape,
+    combine_annotation_options,
+    describe_annotation,
+    is_generic_indexable_annotation,
+    is_generic_writable_indexable_annotation,
+    is_mutable_sequence_annotation,
+    is_union_annotation,
+    is_unknown_annotation,
+    is_typed_dict_annotation,
+    resolve_mapping_annotation,
+    resolve_sequence_item_annotation,
+    resolve_typed_dict_key_annotation,
+    variadic_tuple_item_annotation,
+)
 
 
 SelectorPart = str | int
 SelectorInput: TypeAlias = SelectorPart | tuple["SelectorInput", ...]
 _NONE_TYPE = type(None)
 _MISSING = object()
-_MISSING_ANNOTATION = object()
 
 
 class SelectorRuntimeError(TypeError):
@@ -671,40 +686,6 @@ def _runtime_write_index(
 # Validation
 
 
-def _is_union_annotation(annotation: Any) -> bool:
-    return get_origin(annotation) in {UnionType, Union}
-
-
-def _annotation_description(annotation: Any) -> str:
-    if annotation is None or annotation is _NONE_TYPE:
-        return "None"
-    if isinstance(annotation, type) and annotation.__module__ == "builtins":
-        return annotation.__name__
-    return repr(annotation)
-
-
-def _combine_annotations(*annotations: Any) -> Any:
-    unique: list[Any] = []
-    for annotation in annotations:
-        if annotation is Any:
-            return Any
-        if annotation not in unique:
-            unique.append(annotation)
-    if not unique:
-        return Any
-    combined = unique[0]
-    for annotation in unique[1:]:
-        try:
-            combined = combined | annotation
-        except TypeError:
-            return Any
-    return combined
-
-
-def _is_unknown_annotation(annotation: Any) -> bool:
-    return annotation in {Any, object}
-
-
 def _raise_validation_error(
     validation_error_type: type[Exception] | None,
     selector: Selector,
@@ -750,41 +731,12 @@ def _attribute_override(annotation: Any, attribute: str) -> Any:
     return _MISSING_ANNOTATION
 
 
-def _is_typed_dict_annotation(annotation: Any) -> bool:
-    return (
-        isinstance(annotation, type)
-        and issubclass(annotation, dict)
-        and hasattr(annotation, "__annotations__")
-        and hasattr(annotation, "__total__")
-    )
-
-
-def _mapping_annotation(annotation: Any) -> tuple[Any, Any] | None:
-    if _is_typed_dict_annotation(annotation):
-        return str, Any
-
-    origin = get_origin(annotation)
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
-    if not isinstance(owner, type):
-        return None
-    try:
-        if not issubclass(owner, Mapping):
-            return None
-    except TypeError:
-        return None
-
-    args = get_args(annotation)
-    if len(args) == 2:
-        return args
-    return Any, Any
-
-
 def _annotation_accepts_value(annotation: Any, value: object) -> bool:
     if annotation in {Any, object}:
         return True
     if annotation in {None, _NONE_TYPE}:
         return value is None
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         return any(_annotation_accepts_value(option, value) for option in get_args(annotation))
     origin = get_origin(annotation)
     if origin is not None:
@@ -799,14 +751,6 @@ def _annotation_accepts_value(annotation: Any, value: object) -> bool:
     return True
 
 
-def _typed_dict_key_annotation(annotation: Any, key: str) -> Any:
-    try:
-        hints = get_type_hints(annotation)
-    except Exception:
-        hints = getattr(annotation, "__annotations__", {})
-    return hints.get(key, _MISSING_ANNOTATION)
-
-
 def _attribute_annotation(
     annotation: Any,
     attribute: str,
@@ -814,7 +758,7 @@ def _attribute_annotation(
     validation_error_type: type[Exception] | None = None,
     owner_label: str | None = None,
 ) -> Any:
-    if _is_unknown_annotation(annotation):
+    if is_unknown_annotation(annotation):
         return Any
 
     if annotation in {None, _NONE_TYPE}:
@@ -823,7 +767,7 @@ def _attribute_annotation(
             raise validation_error_type(f"{label} has no attribute {attribute!r}")
         return Any
 
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         results: list[Any] = []
         errors: list[Exception] = []
         for option in get_args(annotation):
@@ -841,17 +785,17 @@ def _attribute_annotation(
         if errors and results:
             return Any
         if results:
-            return _combine_annotations(*results)
+            return combine_annotation_options(*results)
         if errors and validation_error_type is not None:
             raise errors[0]
         return Any
 
-    if _is_typed_dict_annotation(annotation):
-        result = _typed_dict_key_annotation(annotation, attribute)
+    if is_typed_dict_annotation(annotation):
+        result = resolve_typed_dict_key_annotation(annotation, attribute)
         if result is not _MISSING_ANNOTATION:
             return result
         if validation_error_type is not None:
-            label = owner_label or _annotation_description(annotation)
+            label = owner_label or describe_annotation(annotation)
             raise validation_error_type(f"{label} has no key {attribute!r}")
         return Any
 
@@ -883,79 +827,10 @@ def _attribute_annotation(
     if property_obj is not _MISSING_ANNOTATION:
         return Any
     if validation_error_type is not None:
-        label = owner_label or _annotation_description(owner)
+        label = owner_label or describe_annotation(owner)
         raise validation_error_type(f"{label} has no attribute {attribute!r}")
     return Any
 
-
-def _tuple_elements(annotation: Any) -> tuple[tuple[Any, ...], bool] | None:
-    if isinstance(annotation, tuple):
-        return annotation, False
-    origin = get_origin(annotation)
-    if origin is not tuple:
-        return None
-    args = get_args(annotation)
-    if len(args) == 2 and args[1] is Ellipsis:
-        return (args[0],), True
-    return args, False
-
-
-def _sequence_item_annotation(annotation: Any) -> Any:
-    origin = get_origin(annotation)
-    if origin in {list, Sequence, MutableSequence}:
-        args = get_args(annotation)
-        return args[0] if args else Any
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
-    if not isinstance(owner, type):
-        return _MISSING_ANNOTATION
-    try:
-        if issubclass(owner, MutableSequence):
-            return Any
-        if issubclass(owner, Sequence) and not issubclass(owner, (str, bytes, bytearray, Mapping)):
-            return Any
-    except TypeError:
-        return _MISSING_ANNOTATION
-    return _MISSING_ANNOTATION
-
-
-def _mutable_sequence_item_annotation(annotation: Any) -> Any:
-    origin = get_origin(annotation)
-    if origin in {list, MutableSequence}:
-        args = get_args(annotation)
-        return args[0] if args else Any
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
-    if not isinstance(owner, type):
-        return _MISSING_ANNOTATION
-    try:
-        if issubclass(owner, MutableSequence):
-            return Any
-    except TypeError:
-        return _MISSING_ANNOTATION
-    return _MISSING_ANNOTATION
-
-
-def _generic_indexable_annotation(annotation: Any) -> Any:
-    origin = get_origin(annotation)
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
-    if not isinstance(owner, type):
-        return _MISSING_ANNOTATION
-    if issubclass(owner, (str, bytes, bytearray, Mapping)):
-        return _MISSING_ANNOTATION
-    if hasattr(owner, "__getitem__"):
-        return Any
-    return _MISSING_ANNOTATION
-
-
-def _generic_writable_indexable_annotation(annotation: Any) -> Any:
-    origin = get_origin(annotation)
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
-    if not isinstance(owner, type):
-        return _MISSING_ANNOTATION
-    if issubclass(owner, (str, bytes, bytearray, Mapping)):
-        return _MISSING_ANNOTATION
-    if hasattr(owner, "__setitem__"):
-        return Any
-    return _MISSING_ANNOTATION
 
 def _validate_read_step(
     annotation: Any,
@@ -967,18 +842,18 @@ def _validate_read_step(
     error_prefix: str | None,
     root_label: str,
 ) -> Any:
-    if _is_unknown_annotation(annotation):
+    if is_unknown_annotation(annotation):
         return Any
     if annotation in {None, _NONE_TYPE}:
         _raise_validation_error(
             validation_error_type,
             selector,
             step_index,
-            f"{_annotation_description(annotation)} does not support selector step {part!r}",
+            f"{describe_annotation(annotation)} does not support selector step {part!r}",
             error_prefix=error_prefix,
             root_label=root_label,
         )
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         return _validate_read_union(
             annotation,
             part,
@@ -989,7 +864,7 @@ def _validate_read_step(
             root_label=root_label,
         )
     match part:
-        case str() as key if _is_typed_dict_annotation(annotation):
+        case str() as key if is_typed_dict_annotation(annotation):
             return _validate_typed_dict_key_step(
                 annotation,
                 key,
@@ -999,7 +874,7 @@ def _validate_read_step(
                 error_prefix=error_prefix,
                 root_label=root_label,
             )
-        case str() as key if _mapping_annotation(annotation) is not None:
+        case str() as key if resolve_mapping_annotation(annotation) is not None:
             return _validate_mapping_key_step(
                 annotation,
                 key,
@@ -1019,7 +894,7 @@ def _validate_read_step(
                 error_prefix=error_prefix,
                 root_label=root_label,
             )
-        case int() as key if _mapping_annotation(annotation) is not None:
+        case int() as key if resolve_mapping_annotation(annotation) is not None:
             return _validate_mapping_key_step(
                 annotation,
                 key,
@@ -1052,18 +927,18 @@ def _validate_write_target(
     error_prefix: str | None,
     root_label: str,
 ) -> Any:
-    if _is_unknown_annotation(annotation):
+    if is_unknown_annotation(annotation):
         return Any
     if annotation in {None, _NONE_TYPE}:
         _raise_validation_error(
             validation_error_type,
             selector,
             step_index,
-            f"{_annotation_description(annotation)} does not support writes",
+            f"{describe_annotation(annotation)} does not support writes",
             error_prefix=error_prefix,
             root_label=root_label,
         )
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         return _validate_write_union(
             annotation,
             part,
@@ -1074,7 +949,7 @@ def _validate_write_target(
             root_label=root_label,
         )
     match part:
-        case str() as key if _is_typed_dict_annotation(annotation):
+        case str() as key if is_typed_dict_annotation(annotation):
             return _validate_typed_dict_key_step(
                 annotation,
                 key,
@@ -1084,7 +959,7 @@ def _validate_write_target(
                 error_prefix=error_prefix,
                 root_label=root_label,
             )
-        case str() as key if _mapping_annotation(annotation) is not None:
+        case str() as key if resolve_mapping_annotation(annotation) is not None:
             return _validate_mapping_key_step(
                 annotation,
                 key,
@@ -1104,7 +979,7 @@ def _validate_write_target(
                 error_prefix=error_prefix,
                 root_label=root_label,
             )
-        case int() as key if _mapping_annotation(annotation) is not None:
+        case int() as key if resolve_mapping_annotation(annotation) is not None:
             return _validate_mapping_key_step(
                 annotation,
                 key,
@@ -1158,7 +1033,7 @@ def _validate_read_union(
     if errors and results:
         return Any
     if results:
-        return _combine_annotations(*results)
+        return combine_annotation_options(*results)
     if errors and validation_error_type is not None:
         raise errors[0]
     return Any
@@ -1195,7 +1070,7 @@ def _validate_write_union(
     if errors and results:
         return Any
     if results:
-        return _combine_annotations(*results)
+        return combine_annotation_options(*results)
     if errors and validation_error_type is not None:
         raise errors[0]
     return Any
@@ -1212,14 +1087,14 @@ def _validate_typed_dict_key_step(
     root_label: str,
 ) -> Any:
     current_path = selector.render_path(root_label, upto=step_index)
-    result = _typed_dict_key_annotation(annotation, part)
+    result = resolve_typed_dict_key_annotation(annotation, part)
     if result is not _MISSING_ANNOTATION:
         return result
     _raise_validation_error(
         validation_error_type,
         selector,
         step_index,
-        f"{_annotation_description(annotation)} at {current_path} has no key {part!r}",
+        f"{describe_annotation(annotation)} at {current_path} has no key {part!r}",
         error_prefix=error_prefix,
         root_label=root_label,
     )
@@ -1236,7 +1111,7 @@ def _validate_mapping_key_step(
     root_label: str,
 ) -> Any:
     current_path = selector.render_path(root_label, upto=step_index)
-    mapping_types = _mapping_annotation(annotation)
+    mapping_types = resolve_mapping_annotation(annotation)
     if mapping_types is None:
         raise AssertionError("mapping key validation requires a mapping annotation")
     key_type, value_type = mapping_types
@@ -1245,8 +1120,8 @@ def _validate_mapping_key_step(
             validation_error_type,
             selector,
             step_index,
-            f"{_annotation_description(annotation)} at {current_path} expects a key compatible with "
-            f"{_annotation_description(key_type)}, got {part!r}",
+            f"{describe_annotation(annotation)} at {current_path} expects a key compatible with "
+            f"{describe_annotation(key_type)}, got {part!r}",
             error_prefix=error_prefix,
             root_label=root_label,
         )
@@ -1264,7 +1139,7 @@ def _validate_attribute_step(
     root_label: str,
 ) -> Any:
     current_path = selector.render_path(root_label, upto=step_index)
-    owner_label = f"{_annotation_description(annotation)} at {current_path}"
+    owner_label = f"{describe_annotation(annotation)} at {current_path}"
     return _attribute_annotation(
         annotation,
         part,
@@ -1306,7 +1181,7 @@ def _validate_attribute_write_target(
             validation_error_type,
             selector,
             step_index,
-            f"{_annotation_description(annotation)} at {current_path} has no writable attribute {part!r}",
+            f"{describe_annotation(annotation)} at {current_path} has no writable attribute {part!r}",
             error_prefix=error_prefix,
             root_label=root_label,
         )
@@ -1323,36 +1198,38 @@ def _validate_read_index_step(
     error_prefix: str | None,
     root_label: str,
 ) -> Any:
-    tuple_types = _tuple_elements(annotation)
-    if tuple_types is not None:
-        values, variadic = tuple_types
-        if variadic:
-            return values[0]
-        if not (-len(values) <= part < len(values)):
-            _raise_validation_index_error(
-                validation_error_type,
-                selector,
-                step_index,
-                f"{_annotation_description(annotation)} has length {len(values)}",
-                error_prefix=error_prefix,
-                root_label=root_label,
-            )
-        return values[part]
+    annotation_shape = _annotation_shape(annotation)
+    if annotation_shape is not None:
+        origin, child_annotations = annotation_shape
+        if origin is tuple:
+            variadic_tuple_item = variadic_tuple_item_annotation(child_annotations)
+            if variadic_tuple_item is not None:
+                return variadic_tuple_item
 
-    sequence_item = _sequence_item_annotation(annotation)
+            if not (-len(child_annotations) <= part < len(child_annotations)):
+                _raise_validation_index_error(
+                    validation_error_type,
+                    selector,
+                    step_index,
+                    f"{describe_annotation(annotation)} has length {len(child_annotations)}",
+                    error_prefix=error_prefix,
+                    root_label=root_label,
+                )
+            return child_annotations[part]
+
+    sequence_item = resolve_sequence_item_annotation(annotation)
     if sequence_item is not _MISSING_ANNOTATION:
         return sequence_item
 
-    generic_indexable = _generic_indexable_annotation(annotation)
-    if generic_indexable is not _MISSING_ANNOTATION:
-        return generic_indexable
+    if is_generic_indexable_annotation(annotation):
+        return Any
 
     current_path = selector.render_path(root_label, upto=step_index)
     _raise_validation_error(
         validation_error_type,
         selector,
         step_index,
-        f"{_annotation_description(annotation)} at {current_path} is not indexable",
+        f"{describe_annotation(annotation)} at {current_path} is not indexable",
         error_prefix=error_prefix,
         root_label=root_label,
     )
@@ -1368,32 +1245,33 @@ def _validate_write_index_target(
     error_prefix: str | None,
     root_label: str,
 ) -> Any:
-    tuple_types = _tuple_elements(annotation)
-    if tuple_types is not None:
+    if (
+        variadic_tuple_item_annotation(annotation) is not None
+        or isinstance(annotation, tuple)
+        or get_origin(annotation) is tuple
+    ):
         current_path = selector.render_path(root_label, upto=step_index)
         _raise_validation_error(
             validation_error_type,
             selector,
             step_index,
-            f"{_annotation_description(annotation)} at {current_path} is immutable",
+            f"{describe_annotation(annotation)} at {current_path} is immutable",
             error_prefix=error_prefix,
             root_label=root_label,
         )
 
-    sequence_item = _mutable_sequence_item_annotation(annotation)
-    if sequence_item is not _MISSING_ANNOTATION:
-        return sequence_item
+    if is_mutable_sequence_annotation(annotation):
+        return resolve_sequence_item_annotation(annotation)
 
-    generic_indexable = _generic_writable_indexable_annotation(annotation)
-    if generic_indexable is not _MISSING_ANNOTATION:
-        return generic_indexable
+    if is_generic_writable_indexable_annotation(annotation):
+        return Any
 
     current_path = selector.render_path(root_label, upto=step_index)
     _raise_validation_error(
         validation_error_type,
         selector,
         step_index,
-        f"{_annotation_description(annotation)} at {current_path} does not support item assignment",
+        f"{describe_annotation(annotation)} at {current_path} does not support item assignment",
         error_prefix=error_prefix,
         root_label=root_label,
     )

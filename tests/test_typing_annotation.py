@@ -1,10 +1,13 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, MutableSequence, Sequence
 from typing import Any, Generic, Iterable as TypingIterable, Mapping as TypingMapping, TypeVar
 
 import pytest
 
 from ml_pipes._typing.annotation import (
     _annotation_shape,
+    is_generic_indexable_annotation,
+    is_generic_writable_indexable_annotation,
+    is_mutable_sequence_annotation,
     is_assignable,
     normalize_published_annotation,
     tighten_annotation,
@@ -15,6 +18,16 @@ _T = TypeVar("_T")
 
 class _Box(Generic[_T]):
     pass
+
+
+class _Indexable:
+    def __getitem__(self, index: int) -> object:
+        return index
+
+
+class _WritableIndexable(_Indexable):
+    def __setitem__(self, index: int, value: object) -> None:
+        pass
 
 
 @pytest.mark.parametrize(
@@ -127,3 +140,42 @@ def test_is_assignable_rejects_unsupported_bare_generic(
 def test_normalize_published_annotation_rejects_unsupported_bare_generic() -> None:
     with pytest.raises(ValueError, match="Unsupported bare generic annotation"):
         normalize_published_annotation(_Box)
+
+
+@pytest.mark.parametrize(
+    ("annotation", "expected"),
+    [
+        pytest.param(list[int], True, id="list"),
+        pytest.param(MutableSequence[int], True, id="MutableSequence"),
+        pytest.param(Sequence[int], False, id="Sequence"),
+        pytest.param(tuple[int, ...], False, id="tuple"),
+    ],
+)
+def test_is_mutable_sequence_annotation(annotation: Any, expected: bool) -> None:
+    assert is_mutable_sequence_annotation(annotation) is expected
+
+
+@pytest.mark.parametrize(
+    ("annotation", "expected"),
+    [
+        pytest.param(_Indexable, True, id="custom"),
+        pytest.param(_WritableIndexable, True, id="writable-custom"),
+        pytest.param(str, False, id="str"),
+        pytest.param(dict[str, int], False, id="mapping"),
+    ],
+)
+def test_is_generic_indexable_annotation(annotation: Any, expected: bool) -> None:
+    assert is_generic_indexable_annotation(annotation) is expected
+
+
+@pytest.mark.parametrize(
+    ("annotation", "expected"),
+    [
+        pytest.param(_Indexable, False, id="custom"),
+        pytest.param(_WritableIndexable, True, id="writable-custom"),
+        pytest.param(str, False, id="str"),
+        pytest.param(dict[str, int], False, id="mapping"),
+    ],
+)
+def test_is_generic_writable_indexable_annotation(annotation: Any, expected: bool) -> None:
+    assert is_generic_writable_indexable_annotation(annotation) is expected
