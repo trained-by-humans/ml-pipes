@@ -8,7 +8,12 @@ from typing import Any, Generic, TypeVar, cast, get_args, get_origin
 from ._typing.annotation import (
     combine_annotation_options,
     is_assignable,
+    is_iterable_annotation,
+    is_mapping_annotation,
     is_union_annotation,
+    iterable_annotation,
+    list_annotation,
+    remove_none_annotation_options_or_any,
     variadic_tuple_item_annotation,
 )
 from ._typing.inspection import (
@@ -36,8 +41,6 @@ Mapper = Callable[[ValueT], MappedT]
 NullableMapper = Callable[[ValueT], MappedT | None]
 Predicate = Callable[[ValueT], bool]
 KeySelector = Callable[[ItemT], Hashable]
-
-_NONE_TYPE = type(None)
 
 
 def _close_iterable(iterator: object) -> None:
@@ -76,56 +79,8 @@ def _resolve_selector(
     return selector
 
 
-def _without_none(annotation: Any) -> Any:
-    if annotation in {None, _NONE_TYPE}:
-        return Any
-    if not is_union_annotation(annotation):
-        return annotation
-
-    remaining = tuple(
-        option
-        for option in get_args(annotation)
-        if option not in {None, _NONE_TYPE}
-    )
-    if not remaining:
-        return Any
-    return combine_annotation_options(*remaining)
-
-
-def _is_mapping_annotation(annotation: Any) -> bool:
-    annotation = _without_none(annotation)
-    if annotation in {Any, object}:
-        return False
-    if is_union_annotation(annotation):
-        options = get_args(annotation)
-        return bool(options) and all(_is_mapping_annotation(option) for option in options)
-
-    origin = get_origin(annotation)
-    if origin is not None:
-        try:
-            return issubclass(origin, Mapping)
-        except TypeError:
-            return False
-    if isinstance(annotation, type):
-        try:
-            return issubclass(annotation, Mapping)
-        except TypeError:
-            return False
-    return False
-
-
-def _iterable_alias(item_type: Any) -> Any:
-    item_type = _NONE_TYPE if item_type is None else item_type
-    return cast(Any, Iterable)[item_type]
-
-
-def _list_alias(item_type: Any) -> Any:
-    item_type = _NONE_TYPE if item_type is None else item_type
-    return cast(Any, list)[item_type]
-
-
 def _resolve_iterable_item_annotation(annotation: Any) -> Any:
-    annotation = _without_none(annotation)
+    annotation = remove_none_annotation_options_or_any(annotation)
     if annotation in {Any, object}:
         return Any
     if is_union_annotation(annotation):
@@ -169,33 +124,8 @@ def _resolve_iterable_item_annotation(annotation: Any) -> Any:
     return Any
 
 
-def _is_iterable_annotation(annotation: Any) -> bool:
-    annotation = _without_none(annotation)
-    if annotation in {Any, object}:
-        return False
-    if is_union_annotation(annotation):
-        options = get_args(annotation)
-        return bool(options) and all(_is_iterable_annotation(option) for option in options)
-
-    if annotation in {str, bytes, bytearray}:
-        return True
-
-    origin = get_origin(annotation)
-    if origin is not None:
-        try:
-            return issubclass(origin, Iterable)
-        except TypeError:
-            return False
-    if isinstance(annotation, type):
-        try:
-            return issubclass(annotation, Iterable)
-        except TypeError:
-            return False
-    return False
-
-
 def _is_value_shaped_iterable_annotation(annotation: Any) -> bool:
-    annotation = _without_none(annotation)
+    annotation = remove_none_annotation_options_or_any(annotation)
     if annotation in {Any, object}:
         return False
     if is_union_annotation(annotation):
@@ -227,7 +157,7 @@ def _require_iterable_boundary_annotation(
 ) -> None:
     if annotation in {Any, object}:
         return
-    if not _is_iterable_annotation(annotation):
+    if not is_iterable_annotation(annotation):
         raise validation_error_type(
             f"{operator_name} requires an iterable boundary, got {annotation}"
         )
@@ -300,7 +230,7 @@ class CollectItems(RegionCloser[ItemT, list[ItemT]]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        output_type = _list_alias(current_output)
+        output_type = list_annotation(current_output)
         return (Any,), output_type
 
 
@@ -617,7 +547,7 @@ class StreamItems(RegionCloser[ItemT, Iterable[ItemT]]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation, validation_error_type
-        output_type = _iterable_alias(current_output)
+        output_type = iterable_annotation(current_output)
         return (Any,), output_type
 
 
@@ -715,7 +645,7 @@ class WrapMappingInObject(Generic[StateT]):
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
         factory_annotations = resolve_nullary_callable_annotations(self.state_factory)
-        input_type = current_output if _is_mapping_annotation(current_output) else AnyMapping | None
+        input_type = current_output if is_mapping_annotation(current_output) else AnyMapping | None
         base_output = _require_callable_annotation(
             factory_annotations.return_annotation,
             operator_name=type(self).__name__,
@@ -728,7 +658,7 @@ class WrapMappingInObject(Generic[StateT]):
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(target={self._target!r})",
         )
-        if _is_mapping_annotation(current_output):
+        if is_mapping_annotation(current_output):
             _require_assignment_compatible(
                 current_output,
                 target_annotation,
@@ -822,7 +752,7 @@ class MapNotNull(Generic[ValueT, MappedT]):
             expand_output_annotation,
             validation_error_type,
         )
-        return input_types, _without_none(mapped_output)
+        return input_types, remove_none_annotation_options_or_any(mapped_output)
 
 
 @Operator
@@ -1030,7 +960,7 @@ class FilterNotNull:
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (current_output,), _without_none(current_output)
+        return (current_output,), remove_none_annotation_options_or_any(current_output)
 
 
 @Operator
@@ -1103,7 +1033,7 @@ class DistinctBy(Generic[ItemT]):
             validation_error_type=validation_error_type,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (input_type,), _list_alias(item_type)
+        return (input_type,), list_annotation(item_type)
 
 
 @Operator
@@ -1168,7 +1098,7 @@ class Distinct(Generic[ItemT]):
             validation_error_type=validation_error_type,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (input_type,), _list_alias(item_type)
+        return (input_type,), list_annotation(item_type)
 
 
 @Operator
@@ -1203,7 +1133,7 @@ class Take:
         )
         input_type = current_output
         item_type = _resolve_iterable_item_annotation(current_output)
-        output_type = _list_alias(item_type)
+        output_type = list_annotation(item_type)
         return (input_type,), output_type
 
 
@@ -1259,5 +1189,5 @@ class TakeWhile(Generic[ItemT]):
             target_label="predicate return type",
             validation_error_type=validation_error_type,
         )
-        output_type = _list_alias(item_type)
+        output_type = list_annotation(item_type)
         return (input_type,), output_type

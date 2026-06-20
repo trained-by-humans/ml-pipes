@@ -11,6 +11,7 @@ from types import UnionType
 from typing import Any, Callable, TypeVar, get_args, get_origin
 
 _UNBOUND = object()
+_NONE_TYPE = type(None)
 _COVARIANT = "covariant"
 _INVARIANT = "invariant"
 _CONTRAVARIANT = "contravariant"
@@ -56,6 +57,90 @@ def combine_annotation_options(*annotations: Any) -> Any:
             continue
         combined = _combine_annotations(combined, annotation)
     return combined
+
+
+def remove_none_annotation_options_or_any(annotation: Any) -> Any:
+    if annotation in {None, _NONE_TYPE}:
+        return Any
+    if not is_union_annotation(annotation):
+        return annotation
+
+    remaining_options = tuple(
+        option
+        for option in get_args(annotation)
+        if option not in {None, _NONE_TYPE}
+    )
+    if not remaining_options:
+        return Any
+    return combine_annotation_options(*remaining_options)
+
+
+def iterable_annotation(item_annotation: Any) -> Any:
+    item_annotation = _NONE_TYPE if item_annotation is None else item_annotation
+    return Iterable[item_annotation]
+
+
+def list_annotation(item_annotation: Any) -> Any:
+    item_annotation = _NONE_TYPE if item_annotation is None else item_annotation
+    return list[item_annotation]
+
+
+def is_union_annotation(annotation: Any) -> bool:
+    origin = get_origin(annotation)
+    return origin in (UnionType, getattr(__import__("typing"), "Union"))
+
+
+def is_iterable_annotation(annotation: Any) -> bool:
+    annotation = remove_none_annotation_options_or_any(annotation)
+    if annotation in {Any, object}:
+        return False
+    if is_union_annotation(annotation):
+        options = get_args(annotation)
+        return bool(options) and all(is_iterable_annotation(option) for option in options)
+
+    if annotation in {str, bytes, bytearray}:
+        return True
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        try:
+            return issubclass(origin, Iterable)
+        except TypeError:
+            return False
+    if isinstance(annotation, type):
+        try:
+            return issubclass(annotation, Iterable)
+        except TypeError:
+            return False
+    return False
+
+
+def is_mapping_annotation(annotation: Any) -> bool:
+    annotation = remove_none_annotation_options_or_any(annotation)
+    if annotation in {Any, object}:
+        return False
+    if is_union_annotation(annotation):
+        options = get_args(annotation)
+        return bool(options) and all(is_mapping_annotation(option) for option in options)
+
+    origin = get_origin(annotation)
+    if origin is not None:
+        try:
+            return issubclass(origin, Mapping)
+        except TypeError:
+            return False
+    if isinstance(annotation, type):
+        try:
+            return issubclass(annotation, Mapping)
+        except TypeError:
+            return False
+    return False
+
+
+def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
+    if not _is_variadic_tuple_annotation(annotation):
+        return None
+    return get_args(annotation)[0]
 
 
 def align_source_annotation_to_target_annotations(
@@ -214,11 +299,6 @@ def is_concrete_annotation(annotation: Any) -> bool:
         return True
     _, child_annotations = shape
     return all(is_concrete_annotation(child_annotation) for child_annotation in child_annotations)
-
-
-def is_union_annotation(annotation: Any) -> bool:
-    origin = get_origin(annotation)
-    return origin in (UnionType, getattr(__import__("typing"), "Union"))
 
 
 def format_annotation(annotation: Any) -> str:
@@ -665,12 +745,6 @@ def _is_variadic_tuple_annotation(annotation: Any) -> bool:
         return False
     args = get_args(annotation)
     return len(args) == 2 and args[1] is Ellipsis
-
-
-def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
-    if not _is_variadic_tuple_annotation(annotation):
-        return None
-    return get_args(annotation)[0]
 
 
 def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> Any:
