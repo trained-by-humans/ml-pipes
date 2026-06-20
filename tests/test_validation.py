@@ -41,6 +41,21 @@ class ListIntToStr:
         return "list of ints"
 
 
+class IntToListInt:
+    def __call__(self, value: int) -> list[int]:
+        return [value]
+
+
+class BareListConsumer:
+    def __call__(self, value: list) -> str:
+        return "list"
+
+
+class BareListProducer:
+    def __call__(self, value: int) -> list:
+        return [value]
+
+
 class ObjectConsumer:
     def __call__(self, value: object) -> object:
         return value
@@ -94,6 +109,21 @@ class GenericVariadicTupleConsumer:
 class IntIterableConsumer:
     def __call__(self, value: Iterable[int]) -> str:
         return ",".join(str(item) for item in value)
+
+
+class IntToIterableInt:
+    def __call__(self, value: int) -> Iterable[int]:
+        return [value]
+
+
+class BareIterableConsumer:
+    def __call__(self, value: Iterable) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class BareIterableProducer:
+    def __call__(self, value: int) -> Iterable:
+        return [value]
 
 
 class GenericIterableConsumer:
@@ -320,6 +350,64 @@ def test_pipeline_validate_rejects_tighter_downstream_input_type():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
+
+
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    [
+        pytest.param(IntToListInt(), BareListConsumer(), id="list[int]-to-list"),
+        pytest.param(IntToIterableInt(), BareIterableConsumer(), id="Iterable[int]-to-Iterable"),
+    ],
+)
+def test_pipeline_validate_accepts_parameterized_generic_output_for_bare_consumer(
+    producer,
+    consumer,
+):
+    Pipeline([producer, consumer]).validate(pipeline_input_type=int)
+
+
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    [
+        pytest.param(BareListProducer(), ListIntToStr(), id="list-to-list[int]"),
+        pytest.param(BareIterableProducer(), IntIterableConsumer(), id="Iterable-to-Iterable[int]"),
+    ],
+)
+def test_pipeline_validate_rejects_bare_generic_output_for_parameterized_consumer(
+    producer,
+    consumer,
+):
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([producer, consumer]).validate(pipeline_input_type=int)
+
+
+@pytest.mark.parametrize(
+    ("consumer", "pipeline_input_type"),
+    [
+        pytest.param(BareListConsumer(), list[int], id="list[int]-to-list"),
+        pytest.param(BareIterableConsumer(), Iterable[int], id="Iterable[int]-to-Iterable"),
+    ],
+)
+def test_pipeline_validate_accepts_parameterized_pipeline_input_for_bare_consumer(
+    consumer,
+    pipeline_input_type,
+):
+    Pipeline([consumer]).validate(pipeline_input_type=pipeline_input_type)
+
+
+@pytest.mark.parametrize(
+    ("consumer", "pipeline_input_type"),
+    [
+        pytest.param(ListIntToStr(), list, id="list-to-list[int]"),
+        pytest.param(IntIterableConsumer(), Iterable, id="Iterable-to-Iterable[int]"),
+    ],
+)
+def test_pipeline_validate_rejects_bare_pipeline_input_for_parameterized_consumer(
+    consumer,
+    pipeline_input_type,
+):
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([consumer]).validate(pipeline_input_type=pipeline_input_type)
 
 
 def test_pipeline_validate_accepts_tuple_output_for_multi_arg_operator():
