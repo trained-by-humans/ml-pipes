@@ -416,7 +416,7 @@ def _can_assign_generic_source_to_target_annotation(source_annotation: Any, targ
     if target_shape is None:
         return is_concrete_assignable(source_origin, target_annotation)
     target_origin, target_args = target_shape
-    if not _generic_origins_compatible(source_origin, target_origin):
+    if source_origin != target_origin and not is_concrete_assignable(source_origin, target_origin):
         return False
 
     arg_pairs = _generic_argument_pairs(source_origin, source_args, target_origin, target_args)
@@ -450,12 +450,12 @@ def _generic_argument_pairs(
         source_args,
         target_origin,
     )
-    if target_origin is tuple and len(target_args) == 2 and target_args[1] is Ellipsis:
+    if target_origin is tuple and _is_variadic_tuple_shaped(target_args):
         target_item = target_args[0]
-        if len(adapted_source_args) == 2 and adapted_source_args[1] is Ellipsis:
+        if _is_variadic_tuple_shaped(adapted_source_args):
+            if len(adapted_source_args) != 2:
+                return None
             return ((adapted_source_args[0], target_item, _COVARIANT),)
-        if adapted_source_args and adapted_source_args[-1] is Ellipsis:
-            return None
         return tuple(
             (source_arg, target_item, _COVARIANT)
             for source_arg in adapted_source_args
@@ -484,7 +484,7 @@ def _adapt_generic_args_for_target_origin(
     if source_origin is tuple and target_origin in {Collection, Iterable, Sequence}:
         if not source_args:
             return (Any,)
-        if len(source_args) == 2 and source_args[1] is Ellipsis:
+        if _is_variadic_tuple_shaped(source_args):
             return (source_args[0],)
         return (_combine_annotations(*source_args),)
     return source_args
@@ -496,12 +496,6 @@ def _generic_variances(origin: Any, args: tuple[Any, ...]) -> tuple[str, ...]:
     if origin is Mapping and len(args) == 2:
         return (_INVARIANT, _COVARIANT)
     return (_INVARIANT,) * len(args)
-
-
-def _generic_origins_compatible(source_origin: Any, target_origin: Any) -> bool:
-    if source_origin == target_origin:
-        return True
-    return is_concrete_assignable(source_origin, target_origin)
 
 
 def _typevar_constraint_annotation(typevar: TypeVar) -> Any:
@@ -552,7 +546,7 @@ def _resolve_typevar_bindings_from_match(
 
     template_origin, template_child_annotations = template_shape
     candidate_origin, candidate_child_annotations = candidate_shape
-    if not _generic_origins_compatible(candidate_origin, template_origin):
+    if candidate_origin != template_origin and not is_concrete_assignable(candidate_origin, template_origin):
         return {}
 
     child_annotation_pairs = _generic_argument_pairs(
@@ -791,8 +785,7 @@ def _is_variadic_tuple_annotation(annotation: Any) -> bool:
     origin = get_origin(annotation)
     if origin is not tuple:
         return False
-    args = get_args(annotation)
-    return len(args) == 2 and args[1] is Ellipsis
+    return _is_variadic_tuple_shaped(get_args(annotation))
 
 
 def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> Any:
@@ -824,7 +817,7 @@ def _rebuild_variadic_tuple_annotation(annotation: Any, args: tuple[Any, ...]) -
         return None
     if len(args) == 1:
         return tuple[args[0], ...]
-    if len(args) == 2 and args[1] is Ellipsis:
+    if _is_variadic_tuple_shaped(args):
         return tuple[args[0], ...]
     return tuple[args]
 
