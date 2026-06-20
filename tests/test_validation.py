@@ -3,7 +3,7 @@ import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
 from ml_pipes.validation import (
@@ -14,6 +14,11 @@ from ml_pipes.validation import (
 )
 
 _VariadicT = TypeVar("_VariadicT")
+_BoxT = TypeVar("_BoxT")
+
+
+class _Box(Generic[_BoxT]):
+    pass
 
 
 class IntToString:
@@ -124,6 +129,16 @@ class BareIterableConsumer:
 class BareIterableProducer:
     def __call__(self, value: int) -> Iterable:
         return [value]
+
+
+class BareBoxConsumer:
+    def __call__(self, value: _Box) -> str:
+        return "box"
+
+
+class BareBoxProducer:
+    def __call__(self, value: int) -> _Box:
+        return _Box()
 
 
 class GenericIterableConsumer:
@@ -373,12 +388,11 @@ def test_pipeline_validate_accepts_parameterized_generic_output_for_bare_consume
         pytest.param(BareIterableProducer(), IntIterableConsumer(), id="Iterable-to-Iterable[int]"),
     ],
 )
-def test_pipeline_validate_rejects_bare_generic_output_for_parameterized_consumer(
+def test_pipeline_validate_accepts_bare_generic_output_for_parameterized_consumer(
     producer,
     consumer,
 ):
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([producer, consumer]).validate(pipeline_input_type=int)
+    Pipeline([producer, consumer]).validate(pipeline_input_type=int)
 
 
 @pytest.mark.parametrize(
@@ -402,12 +416,61 @@ def test_pipeline_validate_accepts_parameterized_pipeline_input_for_bare_consume
         pytest.param(IntIterableConsumer(), Iterable, id="Iterable-to-Iterable[int]"),
     ],
 )
-def test_pipeline_validate_rejects_bare_pipeline_input_for_parameterized_consumer(
+def test_pipeline_validate_accepts_bare_pipeline_input_for_parameterized_consumer(
     consumer,
     pipeline_input_type,
 ):
-    with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        Pipeline([consumer]).validate(pipeline_input_type=pipeline_input_type)
+    Pipeline([consumer]).validate(pipeline_input_type=pipeline_input_type)
+
+
+@pytest.mark.parametrize(
+    ("operator", "pipeline_input_type", "expected_input_type"),
+    [
+        pytest.param(BareListConsumer(), list, list[Any], id="list"),
+        pytest.param(BareIterableConsumer(), Iterable, Iterable[Any], id="Iterable"),
+    ],
+)
+def test_pipeline_validate_publishes_bare_generic_input_as_any_parameterized_annotation(
+    operator,
+    pipeline_input_type,
+    expected_input_type,
+):
+    contract = Pipeline([operator]).validate(pipeline_input_type=pipeline_input_type)
+
+    assert contract.input_type == expected_input_type
+    assert contract.output_type is str
+
+
+@pytest.mark.parametrize(
+    ("operator", "expected_output_type"),
+    [
+        pytest.param(BareListProducer(), list[Any], id="list"),
+        pytest.param(BareIterableProducer(), Iterable[Any], id="Iterable"),
+    ],
+)
+def test_pipeline_validate_publishes_bare_generic_output_as_any_parameterized_annotation(
+    operator,
+    expected_output_type,
+):
+    contract = Pipeline([operator]).validate(pipeline_input_type=int)
+
+    assert contract.input_type is int
+    assert contract.output_type == expected_output_type
+
+
+@pytest.mark.parametrize(
+    ("pipeline", "pipeline_input_type"),
+    [
+        pytest.param(Pipeline([BareBoxProducer()]), int, id="output"),
+        pytest.param(Pipeline([BareBoxConsumer()]), _Box, id="input"),
+    ],
+)
+def test_pipeline_validate_rejects_unsupported_bare_generic_annotations(
+    pipeline,
+    pipeline_input_type,
+):
+    with pytest.raises(ValueError, match="Unsupported bare generic annotation"):
+        pipeline.validate(pipeline_input_type=pipeline_input_type)
 
 
 def test_pipeline_validate_accepts_tuple_output_for_multi_arg_operator():

@@ -164,19 +164,16 @@ def resolve_iterable_item_annotation(annotation: Any) -> Any:
     if variadic_item_annotation is not None:
         return variadic_item_annotation
 
-    origin = get_origin(annotation)
-    if origin is tuple:
-        tuple_item_annotations = get_args(annotation)
-        if not tuple_item_annotations:
-            return Any
-        return combine_annotation_options(*tuple_item_annotations)
-    if origin is not None:
-        generic_arguments = get_args(annotation)
+    shape = _annotation_shape(annotation)
+    if shape is not None:
+        origin, child_annotations = shape
+        if origin is tuple:
+            return combine_annotation_options(*child_annotations)
         try:
             if issubclass(origin, Mapping):
-                return generic_arguments[0] if generic_arguments else Any
+                return child_annotations[0] if child_annotations else Any
             if issubclass(origin, Iterable):
-                return generic_arguments[0] if generic_arguments else Any
+                return child_annotations[0] if child_annotations else Any
         except TypeError:
             return Any
     if isinstance(annotation, type):
@@ -250,7 +247,7 @@ def is_assignable(
             is_assignable(option, target_annotation)
             for option in get_args(source_annotation)
         )
-    return _can_assign_generic_source_to_target_annotation(source_annotation, target_annotation)
+    return _is_generic_assignable(source_annotation, target_annotation)
 
 
 def tighten_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
@@ -391,16 +388,7 @@ def _all_annotations_equivalent(annotations: list[Any]) -> bool:
     )
 
 
-def _can_assign_generic_source_to_target_annotation(source_annotation: Any, target_annotation: Any) -> bool:
-    source_shape = _annotation_shape(source_annotation)
-    if source_shape is None:
-        return False
-
-    target_shape = _annotation_shape(target_annotation)
-    source_origin, _ = source_shape
-    if target_shape is None:
-        return is_concrete_assignable(source_origin, target_annotation)
-
+def _is_generic_assignable(source_annotation: Any, target_annotation: Any) -> bool:
     arg_pairs = _generic_argument_pairs(source_annotation, target_annotation)
     if arg_pairs is None:
         return False
@@ -425,11 +413,10 @@ def _generic_argument_pairs(
     template_annotation,
     candidate_annotation
 ) -> tuple[tuple[Any, Any, str], ...] | None:
-
     try:
         source_origin, source_args = _annotation_shape(template_annotation)
         target_origin, target_args = _annotation_shape(candidate_annotation)
-    except (TypeError, ValueError) as exc:
+    except TypeError:
         return None
 
     if source_origin != target_origin and not is_concrete_assignable(source_origin, target_origin):
@@ -732,9 +719,53 @@ def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
         return tuple, annotation
 
     origin = get_origin(annotation)
-    if origin is None:
-        return None
-    return origin, get_args(annotation)
+    if origin is not None:
+        origin_args = get_args(annotation)
+        if origin_args:
+            return origin, origin_args
+
+        bare_generic_args = _bare_generic_args(origin)
+        if bare_generic_args is not None:
+            return origin, bare_generic_args
+
+        raise ValueError(
+            f"Unsupported bare generic annotation {annotation}. "
+            "Use explicit type arguments."
+        )
+
+    bare_generic_args = _bare_generic_args(annotation)
+    if bare_generic_args is not None:
+        return annotation, bare_generic_args
+
+    if _generic_parameters(annotation):
+        raise ValueError(
+            f"Unsupported bare generic annotation {annotation}. "
+            "Use explicit type arguments."
+        )
+
+    return None
+
+
+def _bare_generic_args(annotation: Any) -> tuple[Any, ...] | None:
+    if annotation in {AbstractSet, Collection, Iterable, Sequence, frozenset, list, set, type}:
+        return (Any,)
+    if annotation in {Mapping, dict}:
+        return (Any, Any)
+    if annotation is tuple:
+        return (Any, Ellipsis)
+    return None
+
+
+def _generic_parameters(annotation: Any) -> tuple[Any, ...]:
+    type_parameters = getattr(annotation, "__type_params__", ())
+    if type_parameters:
+        return tuple(type_parameters)
+
+    parameters = getattr(annotation, "__parameters__", ())
+    if parameters:
+        return tuple(parameters)
+
+    return ()
 
 
 def _contains_ellipsize(annotation: Any) -> bool:
@@ -793,7 +824,11 @@ def _rebuild_annotation_like(annotation: Any, args: tuple[Any, ...]) -> Any:
         return rebuilt_variadic_tuple
     origin = get_origin(annotation)
     if origin is None:
-        return annotation
+        if _bare_generic_args(annotation) is None:
+            return annotation
+        if annotation is tuple and len(args) == 1:
+            return tuple[args[0], ...]
+        return _rebuild_annotation(annotation, args)
     return _rebuild_annotation(origin, args)
 
 
