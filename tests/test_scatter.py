@@ -185,17 +185,20 @@ def test_scatter_type_contract_returns_generic_list_if_no_type_constraints():
 # ---------------------------------------------------------------------------
 
 def test_validate_unmatched_scatter():
-    with pytest.raises(PipelineValidationError, match="no matching Gather"):
+    with pytest.raises(PipelineValidationError, match=r"Pipeline step 0:Scatter has no matching Gather"):
         Pipeline([Scatter(max_concurrency=1), _Double()]).validate()
 
 
 def test_validate_unmatched_gather():
-    with pytest.raises(PipelineValidationError, match="no matching opener"):
+    with pytest.raises(PipelineValidationError, match=r"Pipeline step 1:Gather has no matching opener"):
         Pipeline([_Double(), Gather()]).validate()
 
 
 def test_validate_nested_scatter_forbidden():
-    with pytest.raises(PipelineValidationError, match="Directly nested Scatter"):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 1:Scatter opens a Scatter region inside 0:Scatter",
+    ):
         Pipeline([
             Scatter(max_concurrency=1),
             Scatter(max_concurrency=1),
@@ -225,7 +228,10 @@ def test_validate_interleaved_scatter_batch_forbidden():
     """Scatter → Batch → Gather (no UnBatch before Gather) must be rejected."""
     from ml_pipes import Batch
 
-    with pytest.raises(PipelineValidationError, match="interleave"):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 3:Gather.*1:Batch.*must be closed with UnBatch, not Gather",
+    ):
         Pipeline([
             Scatter(max_concurrency=1),
             Batch(size=1),
@@ -238,7 +244,10 @@ def test_validate_interleaved_batch_scatter_forbidden():
     """Batch → Scatter → UnBatch (no Gather before UnBatch) must be rejected."""
     from ml_pipes import Batch, UnBatch
 
-    with pytest.raises(PipelineValidationError, match="interleave"):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 3:UnBatch.*1:Scatter.*must be closed with Gather, not UnBatch",
+    ):
         Pipeline([
             Batch(size=1),
             Scatter(max_concurrency=1),

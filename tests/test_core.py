@@ -1,4 +1,11 @@
+from collections.abc import Iterable
+from typing import TypeVar
+
+import pytest
+
 from ml_pipes import Context, Pipeline, SHORT_CIRCUIT
+
+_T = TypeVar("_T")
 
 
 class IntToString:
@@ -30,6 +37,47 @@ class FailIfCalled:
         del value
         self.called = True
         raise AssertionError("downstream operator should not run after SHORT_CIRCUIT")
+
+
+class VariadicTupleConsumer:
+    def __call__(self, value: tuple[int, ...]) -> tuple[int, ...]:
+        return value
+
+
+class GenericVariadicTupleConsumer:
+    def __call__(self, value: tuple[_T, ...]) -> tuple[_T, ...]:
+        return value
+
+
+class IntIterableConsumer:
+    def __call__(self, value: Iterable[int]) -> tuple[int, ...]:
+        return tuple(value)
+
+
+class GenericIterableConsumer:
+    def __call__(self, value: Iterable[_T]) -> tuple[_T, ...]:
+        return tuple(value)
+
+
+class VariadicCollector:
+    def __call__(self, *values: object) -> tuple[object, ...]:
+        return values
+
+
+class MixedVariadicConsumer:
+    def __call__(self, value: int, *rest: int) -> tuple[int, ...]:
+        return (value, *rest)
+
+
+class KeywordOnlyConsumer:
+    def __call__(self, value: int, *, scale: int) -> int:
+        return value * scale
+
+
+class VarKeywordConsumer:
+    def __call__(self, value: int, **metadata: object) -> int:
+        del metadata
+        return value
 
 
 def test_context_add_returns_new_context():
@@ -69,6 +117,86 @@ def test_pipeline_unpacks_tuple_output_into_next_operator():
     pipeline = Pipeline([IntToPair(), PairToString()])
 
     assert pipeline(7) == "7:7"
+
+
+@pytest.mark.parametrize(
+    ("operator", "parameter_name"),
+    [
+        pytest.param(VariadicCollector(), "values", id="variadic-only"),
+        pytest.param(MixedVariadicConsumer(), "rest", id="mixed-fixed-and-variadic"),
+    ],
+)
+def test_pipeline_rejects_variadic_positional_operator_parameters(operator, parameter_name):
+    pipeline = Pipeline([operator])
+
+    with pytest.raises(
+        TypeError,
+        match=rf"Pipeline step 0:{type(operator).__name__}.*variadic positional parameters.*{parameter_name}",
+    ):
+        pipeline(7)
+
+
+@pytest.mark.parametrize(
+    ("operator", "parameter_name"),
+    [
+        pytest.param(KeywordOnlyConsumer(), "scale", id="keyword-only"),
+        pytest.param(VarKeywordConsumer(), "metadata", id="var-keyword"),
+    ],
+)
+def test_pipeline_rejects_other_non_positional_operator_parameters(operator, parameter_name):
+    pipeline = Pipeline([operator])
+
+    with pytest.raises(
+        TypeError,
+        match=rf"Pipeline step 0:{type(operator).__name__}.*non-positional parameters.*{parameter_name}",
+    ):
+        pipeline(7)
+
+
+def test_pipeline_rejects_non_callable_operator_with_explicit_message():
+    pipeline = Pipeline([object()])
+
+    with pytest.raises(
+        TypeError,
+        match=r"Pipeline step 0:object must define __call__",
+    ):
+        pipeline(7)
+
+
+@pytest.mark.parametrize(
+    ("current", "current_pattern"),
+    [
+        pytest.param((1,), r"current=\(1,\)", id="tuple-arity-mismatch"),
+        pytest.param(1, r"current=1", id="scalar-for-multi-arg"),
+    ],
+)
+def test_pipeline_argument_mismatch_error_includes_current(current, current_pattern):
+    class PairConsumer:
+        def __call__(self, left: int, right: int) -> str:
+            return f"{left}|{right}"
+
+    pipeline = Pipeline([PairConsumer()])
+
+    with pytest.raises(
+        TypeError,
+        match=rf"Pipeline step 0:PairConsumer.*{current_pattern}",
+    ):
+        pipeline(current)
+
+
+@pytest.mark.parametrize(
+    ("operator", "expected"),
+    [
+        pytest.param(VariadicTupleConsumer(), (1, 2, 3), id="tuple[int,...]-to-tuple[int,...]"),
+        pytest.param(GenericVariadicTupleConsumer(), (1, 2, 3), id="tuple[int,...]-to-tuple[T,...]"),
+        pytest.param(IntIterableConsumer(), (1, 2, 3), id="tuple[int,...]-to-Iterable[int]"),
+        pytest.param(GenericIterableConsumer(), (1, 2, 3), id="tuple[int,...]-to-Iterable[T]"),
+    ],
+)
+def test_pipeline_passes_variadic_tuple_as_single_argument(operator, expected):
+    pipeline = Pipeline([operator])
+
+    assert pipeline((1, 2, 3)) == expected
 
 
 def test_pipeline_can_store_select_and_recall_values():

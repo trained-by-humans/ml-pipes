@@ -147,6 +147,19 @@ tuple[int, str] -> (int, str)
 PairToBool(number: int, text: str) -> bool
 ```
 
+This positional unpacking only supports fixed-length tuple boundaries.
+Variadic tuple annotations such as `tuple[int, ...]` remain atomic and are
+not treated as multi-parameter pipeline boundaries. Non-positional
+`__call__` parameters such as `*args`, keyword-only parameters, and
+`**kwargs` are not supported because Pipeline chains operators by argument
+position. Use a single tuple-typed parameter instead if the operator should
+consume a variadic tuple value atomically.
+
+If a multi-parameter operator uses positional defaults, validation emits a
+warning. Pipeline ignores those defaults for dispatch and still treats the
+operator as a fixed-arity positional boundary to avoid ambiguity with
+tuple-valued outputs.
+
 Broader downstream input types are allowed:
 
 ```text

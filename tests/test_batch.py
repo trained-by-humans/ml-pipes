@@ -215,19 +215,22 @@ def test_distribute_mutating_one_sample_does_not_affect_another():
 
 def test_validate_raises_on_unmatched_batch():
     pipeline = Pipeline([Batch(size=2)])
-    with pytest.raises(PipelineValidationError, match="no matching UnBatch"):
+    with pytest.raises(PipelineValidationError, match=r"Pipeline step 0:Batch has no matching UnBatch"):
         pipeline.validate()
 
 
 def test_validate_raises_on_unmatched_unbatch():
     pipeline = Pipeline([UnBatch()])
-    with pytest.raises(PipelineValidationError, match="no matching opener"):
+    with pytest.raises(PipelineValidationError, match=r"Pipeline step 0:UnBatch has no matching opener"):
         pipeline.validate()
 
 
 def test_validate_raises_on_nested_batch():
     pipeline = Pipeline([Batch(size=4), Batch(size=2), UnBatch(), UnBatch()])
-    with pytest.raises(PipelineValidationError, match="Directly nested Batch"):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 1:Batch opens a Batch region inside 0:Batch",
+    ):
         pipeline.validate()
 
 

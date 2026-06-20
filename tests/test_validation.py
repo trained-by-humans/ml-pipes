@@ -1,10 +1,19 @@
 from collections.abc import Iterable
+import ml_pipes.validation as validation_module
+import warnings
 
 import pytest
 from typing import Any, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
-from ml_pipes.validation import _resolve_typevar_output, is_single_annotation_compatible
+from ml_pipes.validation import (
+    PipelineValidator,
+    PipelineValidationWarning,
+    _BoundarySignature,
+    _OperatorBoundary,
+)
+
+_VariadicT = TypeVar("_VariadicT")
 
 
 class IntToString:
@@ -67,6 +76,62 @@ class TripleConsumer:
         return f"{x}-{y}-{z}"
 
 
+class PairConsumer:
+    def __call__(self, left: int, right: int) -> str:
+        return f"{left}-{right}"
+
+
+class VariadicTupleConsumer:
+    def __call__(self, value: tuple[int, ...]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class GenericVariadicTupleConsumer:
+    def __call__(self, value: tuple[_VariadicT, ...]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class IntIterableConsumer:
+    def __call__(self, value: Iterable[int]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class GenericIterableConsumer:
+    def __call__(self, value: Iterable[_VariadicT]) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class VariadicCollector:
+    def __call__(self, *values: object) -> tuple[object, ...]:
+        return values
+
+
+class MixedVariadicConsumer:
+    def __call__(self, value: int, *rest: int) -> tuple[int, ...]:
+        return (value, *rest)
+
+
+class KeywordOnlyConsumer:
+    def __call__(self, value: int, *, scale: int) -> int:
+        return value * scale
+
+
+class VarKeywordConsumer:
+    def __call__(self, value: int, **metadata: object) -> int:
+        del metadata
+        return value
+
+
+class MultiArgDefaultConsumer:
+    def __call__(self, value: tuple[int, int], scale: int = 0) -> int:
+        return sum(value) + scale
+
+
+class SingleArgDefaultConsumer:
+    def __call__(self, value: int = 0) -> int:
+        return value
+
+
 class VagueOp:
     def __call__(self, value: Any) -> Any:
         return value
@@ -110,6 +175,22 @@ class DynamicFixedDictOutput:
 
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
         return (Any,), dict[str, int]
+
+
+class PlainTupleProjection:
+    def __call__(self, value: Any) -> tuple[Any, Any]:
+        return value, value
+
+    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+        return (Any,), (current_output, current_output)
+
+
+class PartiallyResolvedTupleOutput:
+    def __call__(self, value: Any) -> tuple[Any, Any]:
+        return value, value
+
+    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+        return (Any,), (current_output, Any)
 
 
 VALIDATION_MODE_CASES = [
@@ -197,7 +278,20 @@ def test_pipeline_validate_requires_operator_annotations():
 
     pipeline = Pipeline([UntypedOp()])
 
-    with pytest.raises(PipelineValidationError, match="missing a type annotation"):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 0:UntypedOp is missing a type annotation",
+    ):
+        pipeline.validate()
+
+
+def test_pipeline_validate_rejects_non_callable_operator_with_explicit_message():
+    pipeline = Pipeline([object()])
+
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline step 0:object must define __call__",
+    ):
         pipeline.validate()
 
 
@@ -234,6 +328,65 @@ def test_pipeline_validate_accepts_tuple_output_for_multi_arg_operator():
     pipeline.validate()
 
 
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param(VariadicTupleConsumer(), id="tuple[int,...]-to-tuple[int,...]"),
+        pytest.param(GenericVariadicTupleConsumer(), id="tuple[int,...]-to-tuple[T,...]"),
+        pytest.param(IntIterableConsumer(), id="tuple[int,...]-to-Iterable[int]"),
+        pytest.param(GenericIterableConsumer(), id="tuple[int,...]-to-Iterable[T]"),
+    ],
+)
+def test_pipeline_validate_keeps_variadic_tuple_as_single_input_boundary(operator):
+    contract = Pipeline([operator]).validate(pipeline_input_type=tuple[int, ...])
+
+    assert contract.input_type == tuple[int, ...]
+    assert contract.output_type is str
+
+
+@pytest.mark.parametrize(
+    ("operator", "parameter_name"),
+    [
+        pytest.param(VariadicCollector(), "values", id="variadic-only"),
+        pytest.param(MixedVariadicConsumer(), "rest", id="mixed-fixed-and-variadic"),
+    ],
+)
+def test_pipeline_validate_rejects_variadic_positional_operator_parameters(operator, parameter_name):
+    with pytest.raises(
+        PipelineValidationError,
+        match=rf"variadic positional parameters.*{parameter_name}",
+    ):
+        Pipeline([operator]).validate()
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        pytest.param(KeywordOnlyConsumer(), id="keyword-only"),
+        pytest.param(VarKeywordConsumer(), id="var-keyword"),
+    ],
+)
+def test_pipeline_validate_rejects_other_non_positional_operator_parameters(operator):
+    with pytest.raises(PipelineValidationError, match="chains operators by argument position"):
+        Pipeline([operator]).validate()
+
+
+def test_pipeline_validate_warns_when_multi_arg_operator_uses_positional_defaults():
+    with pytest.warns(
+        PipelineValidationWarning,
+        match=r"positional defaults \(scale\).*requiring 2 positional pipeline inputs",
+    ):
+        Pipeline([MultiArgDefaultConsumer()]).validate(
+            pipeline_input_type=tuple[tuple[int, int], int]
+        )
+
+
+def test_pipeline_validate_does_not_warn_for_single_arg_positional_default():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PipelineValidationWarning)
+        Pipeline([SingleArgDefaultConsumer()]).validate()
+
+
 def test_pipeline_validate_rejects_tuple_output_with_wrong_arity():
     pipeline = Pipeline([IntToPair(), TripleConsumer()])
 
@@ -265,6 +418,13 @@ def test_resolved_input_type_defaults_to_any_when_no_constraint_is_known():
 def test_resolved_input_type_skips_contract_passthrough():
     inner = Pipeline([ContractPassthrough(), IntToString()])
     contract = inner.validate(inference=True)
+
+    assert contract is not None
+    assert contract.input_type is int
+
+
+def test_resolved_input_type_backpropagates_through_store():
+    contract = Pipeline([Store("x"), IntToString()]).validate(inference=True)
 
     assert contract is not None
     assert contract.input_type is int
@@ -315,6 +475,26 @@ def test_resolved_input_type_stops_backpropagating_at_vague_operator():
     contract = inner.validate(inference=True)
 
     assert contract.input_type == list[Any]
+
+
+def test_resolved_input_type_backpropagates_through_plain_tuple_contract_projection():
+    contract = Pipeline([
+        ContractPassthrough(),
+        PlainTupleProjection(),
+        PairConsumer(),
+    ]).validate(inference=True)
+
+    assert contract.input_type is int
+
+
+def test_resolved_input_type_does_not_backpropagate_through_partially_unresolved_tuple_output():
+    contract = Pipeline([
+        ContractPassthrough(),
+        PartiallyResolvedTupleOutput(),
+        PairConsumer(),
+    ]).validate(inference=True)
+
+    assert contract.input_type is Any
 
 
 def test_validate_does_not_run_backward_inference_by_default():
@@ -382,74 +562,28 @@ def test_declared_pipeline_input_can_surface_incompatible_entry_type():
         pipeline.validate(pipeline_input_type=str)
 
 
-# ---------------------------------------------------------------------------
-# TypeVar compatibility
-# ---------------------------------------------------------------------------
+def test_entry_contract_mismatch_reports_pipeline_input():
+    with pytest.raises(PipelineValidationError, match="Pipeline input provides"):
+        Pipeline([IntToString()]).validate(pipeline_input_type=str)
+
 
 class _Base:
     pass
 
+
 class _Child(_Base):
     pass
 
+
 class _Unrelated:
     pass
+
 
 _T = TypeVar("_T", bound=_Base)
 _U = TypeVar("_U")  # unbound
 
 
-def test_typevar_in_expected_accepts_bound_subclass():
-    # produced=_Child, expected=~_T (bound=_Base) → _Child is subclass of _Base
-    assert is_single_annotation_compatible(_Child, _T)
-
-
-def test_typevar_in_expected_accepts_exact_bound():
-    assert is_single_annotation_compatible(_Base, _T)
-
-
-def test_typevar_in_expected_rejects_unrelated():
-    assert not is_single_annotation_compatible(_Unrelated, _T)
-
-
-def test_typevar_in_produced_accepts_when_bound_subclass_of_expected():
-    # produced=~_T (bound=_Base), expected=_Base → bound is assignable to expected
-    assert is_single_annotation_compatible(_T, _Base)
-
-
-def test_typevar_in_produced_rejects_when_expected_is_subtype_of_bound():
-    # produced=~_T (bound=_Base), expected=_Child → _Child < _Base but _Base is not assignable to _Child
-    assert not is_single_annotation_compatible(_T, _Child)
-
-
-def test_typevar_in_produced_rejects_fully_unrelated():
-    assert not is_single_annotation_compatible(_T, _Unrelated)
-
-
-def test_unbound_typevar_in_expected_accepts_anything():
-    assert is_single_annotation_compatible(int, _U)
-    assert is_single_annotation_compatible(_Base, _U)
-
-
-def test_unbound_typevar_in_produced_accepts_anything():
-    assert is_single_annotation_compatible(_U, int)
-    assert is_single_annotation_compatible(_U, _Base)
-
-
-def test_generic_subtyping_accepts_list_as_iterable():
-    assert is_single_annotation_compatible(list[int], Iterable[int])
-
-
-def test_generic_covariance_accepts_child_list_as_base_iterable():
-    assert is_single_annotation_compatible(list[_Child], Iterable[_Base])
-
-
-def test_generic_invariance_rejects_child_list_as_base_list():
-    assert not is_single_annotation_compatible(list[_Child], list[_Base])
-
-
 def test_typevar_output_resolved_when_same_typevar_flows_through_input():
-    # ~_T in both input and output preserves the concrete subtype.
     class IdentityTypeVar:
         def __call__(self, x: _T) -> _T: ...  # type: ignore[empty-body]
 
@@ -461,7 +595,6 @@ def test_typevar_output_resolved_when_same_typevar_flows_through_input():
 
 
 def test_typevar_output_not_resolved_from_bound_only():
-    # A bound alone (_Base -> ~_T) must not collapse to the concrete input subtype.
     class ProducesTypeVar:
         def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
 
@@ -542,18 +675,6 @@ def test_validate_recursively_publishes_bound_inside_dynamic_tuple_output():
     assert contract.output_type == (list[_Base], list[_Base])
 
 
-def test_resolve_typevar_output_recursively_specializes_nested_output():
-    assert _resolve_typevar_output(list[_T], _Child, (_T,)) == list[_Child]
-
-
-def test_resolve_typevar_output_through_generic_subtyping():
-    assert _resolve_typevar_output(
-        list[_U],
-        list[int | None],
-        (Iterable[_U | None],),
-    ) == list[int]
-
-
 def test_typevar_output_resolved_from_multi_parameter_signature():
     class MultiInputTypeVar:
         def __call__(self, x: _T, y: int) -> _T: ...  # type: ignore[empty-body]
@@ -564,6 +685,19 @@ def test_typevar_output_resolved_from_multi_parameter_signature():
     Pipeline([MultiInputTypeVar(), ConsumesChild()]).validate(
         pipeline_input_type=tuple[_Child, int]
     )
+
+
+def test_single_tuple_parameter_typevar_pipeline_rejects_mixed_tuple_input():
+    class IterableToList:
+        def __call__(self, x: Iterable[_U]) -> list[_U]: ...  # type: ignore[empty-body]
+
+    class ConsumesChildList:
+        def __call__(self, x: list[_Child]) -> str: ...  # type: ignore[empty-body]
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([IterableToList(), ConsumesChildList()]).validate(
+            pipeline_input_type=tuple[_Child, int]
+        )
 
 
 def test_nested_typevar_output_is_recursively_specialized():
@@ -579,7 +713,6 @@ def test_nested_typevar_output_is_recursively_specialized():
 
 
 def test_typevar_pipeline_rejects_narrower_consumer():
-    # ~_T resolved to _Base; _Child is a strict subtype of _Base → _Base not assignable to _Child
     class ProducesTypeVar:
         def __call__(self, x: _Base) -> _T: ...  # type: ignore[empty-body]
 
@@ -599,3 +732,192 @@ def test_typevar_pipeline_rejects_incompatible_consumer():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         Pipeline([ProducesTypeVar(), ConsumesUnrelated()], auto_validate=True)
+
+
+def _make_projection_boundary(
+    operator: Any,
+    *,
+    input_types: tuple[Any, ...],
+    output_type: Any,
+) -> _OperatorBoundary:
+    return _OperatorBoundary(
+        operator=operator,
+        previous_output_type=Any,
+        context_inputs=None,
+        dynamic_boundary=_BoundarySignature(
+            input_types=input_types,
+            output_type=output_type,
+        ),
+        static_boundary=None,
+    )
+
+
+def test_project_input_annotation_from_output_template_matches_plain_tuple_template():
+    class PlainTupleProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (current_output, str)
+
+    boundary = _make_projection_boundary(
+        PlainTupleProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[int, str],
+    ) is int
+
+
+def test_project_input_annotation_from_output_template_supports_ordered_any_bindings():
+    class OrderedListProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, validation_error_type
+            left_annotation, right_annotation = expand_output_annotation(current_output)
+            return expand_output_annotation(current_output), tuple[list[left_annotation], list[right_annotation]]
+
+    boundary = _make_projection_boundary(
+        OrderedListProjectionContract(),
+        input_types=(Any, Any),
+        output_type=tuple[list[Any], list[Any]],
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[list[int], list[str]],
+    ) == tuple[int, str]
+
+
+def test_project_input_annotation_from_output_template_rejects_placeholder_count_mismatch():
+    class OrderedListProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, validation_error_type
+            left_annotation, right_annotation = expand_output_annotation(current_output)
+            return expand_output_annotation(current_output), tuple[list[left_annotation], list[right_annotation]]
+
+    boundary = _make_projection_boundary(
+        OrderedListProjectionContract(),
+        input_types=(Any,),
+        output_type=tuple[list[Any], list[Any]],
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[list[int], list[str]],
+    ) is None
+
+
+def test_project_input_annotation_from_output_template_returns_none_when_projection_fails_confirmation():
+    class RejectingProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (str, current_output)
+
+    boundary = _make_projection_boundary(
+        RejectingProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[int, str],
+    ) is None
+
+
+def test_project_input_annotation_from_output_template_returns_none_when_binding_collection_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class PlainTupleProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (current_output, str)
+
+    boundary = _make_projection_boundary(
+        PlainTupleProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "_collect_any_placeholder_bindings",
+        lambda *args: None,
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[int, str],
+    ) is None
+
+
+def test_project_input_annotation_from_output_template_returns_none_when_placeholder_replacement_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class PlainTupleProjectionContract:
+        def resolve_contract(
+            self,
+            current_output,
+            stored_annotations,
+            expand_output_annotation,
+            validation_error_type,
+        ):
+            del stored_annotations, expand_output_annotation, validation_error_type
+            return (current_output,), (current_output, str)
+
+    boundary = _make_projection_boundary(
+        PlainTupleProjectionContract(),
+        input_types=(Any,),
+        output_type=(Any, str),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "_replace_any_placeholders_in_order",
+        lambda *args: None,
+    )
+
+    assert PipelineValidator._project_input_annotation_from_output_template(
+        boundary,
+        tuple[int, str],
+    ) is None
+
+
+def test_validation_rejects_variadic_tuple_projection_with_pipeline_error():
+    class IterableConsumer:
+        def __call__(self, value: Iterable[int]) -> str:
+            return "ok"
+
+    with pytest.raises(PipelineValidationError, match="contract mismatch"):
+        Pipeline([Store("saved"), Recall("saved"), IterableConsumer()]).validate(
+            pipeline_input_type=tuple[int, ...]
+        )

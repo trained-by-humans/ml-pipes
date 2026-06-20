@@ -3,16 +3,23 @@ from __future__ import annotations
 import inspect
 import time
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from itertools import islice, takewhile
-from types import UnionType
-from typing import Any, Generic, TypeVar, Union, cast, get_args, get_origin, get_type_hints
+from typing import Any, Generic, TypeVar, cast, get_args, get_origin
 
+from ._typing.annotation import (
+    combine_annotation_options,
+    is_assignable,
+    is_union_annotation,
+    variadic_tuple_item_annotation,
+)
+from ._typing.inspection import probe_callable, resolve_callable_annotations
+from ._typing.signatures import validate_nullary_callable_signature, validate_positional_callable_signature
 from .control import SHORT_CIRCUIT
 from .operator import Operator
 from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
 from .selector import Selector, SelectorInput
 from .tracing import PendingSpan, InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, _extract_shape, capture_value, operator_config
-from .validation import PipelineValidationError, StaticContractUnavailableError, is_annotation_compatible, resolve_operator_contract
 
 
 StateT = TypeVar("StateT")
@@ -27,6 +34,12 @@ Predicate = Callable[[ValueT], bool]
 KeySelector = Callable[[ItemT], Hashable]
 
 _NONE_TYPE = type(None)
+
+
+@dataclass(frozen=True)
+class _CallableAnnotations:
+    input_annotations: tuple[Any | None, ...]
+    output_annotation: Any | None
 
 
 def _close_iterable(iterator: object) -> None:
@@ -65,23 +78,10 @@ def _resolve_selector(
     return selector
 
 
-def _is_union_annotation(annotation: Any) -> bool:
-    return get_origin(annotation) in {UnionType, Union}
-
-
-def _combine_annotations(*annotations: Any) -> Any:
-    if not annotations:
-        return Any
-    combined = annotations[0]
-    for annotation in annotations[1:]:
-        combined = combined | annotation
-    return combined
-
-
 def _without_none(annotation: Any) -> Any:
     if annotation in {None, _NONE_TYPE}:
         return Any
-    if not _is_union_annotation(annotation):
+    if not is_union_annotation(annotation):
         return annotation
 
     remaining = tuple(
@@ -91,14 +91,14 @@ def _without_none(annotation: Any) -> Any:
     )
     if not remaining:
         return Any
-    return _combine_annotations(*remaining)
+    return combine_annotation_options(*remaining)
 
 
 def _is_mapping_annotation(annotation: Any) -> bool:
     annotation = _without_none(annotation)
     if annotation in {Any, object}:
         return False
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         options = get_args(annotation)
         return bool(options) and all(_is_mapping_annotation(option) for option in options)
 
@@ -117,10 +117,12 @@ def _is_mapping_annotation(annotation: Any) -> bool:
 
 
 def _iterable_alias(item_type: Any) -> Any:
+    item_type = _NONE_TYPE if item_type is None else item_type
     return cast(Any, Iterable)[item_type]
 
 
 def _list_alias(item_type: Any) -> Any:
+    item_type = _NONE_TYPE if item_type is None else item_type
     return cast(Any, list)[item_type]
 
 
@@ -128,25 +130,27 @@ def _resolve_iterable_item_annotation(annotation: Any) -> Any:
     annotation = _without_none(annotation)
     if annotation in {Any, object}:
         return Any
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         item_types = tuple(_resolve_iterable_item_annotation(option) for option in get_args(annotation))
         if not item_types or any(item_type is Any for item_type in item_types):
             return Any
-        return _combine_annotations(*item_types)
+        return combine_annotation_options(*item_types)
 
     if annotation is str:
         return str
     if annotation in {bytes, bytearray}:
         return int
 
+    variadic_item_type = variadic_tuple_item_annotation(annotation)
+    if variadic_item_type is not None:
+        return variadic_item_type
+
     origin = get_origin(annotation)
     if origin is tuple:
         args = get_args(annotation)
         if not args:
             return Any
-        if len(args) == 2 and args[1] is Ellipsis:
-            return args[0]
-        return _combine_annotations(*args)
+        return combine_annotation_options(*args)
     if origin is not None:
         args = get_args(annotation)
         try:
@@ -171,7 +175,7 @@ def _is_iterable_annotation(annotation: Any) -> bool:
     annotation = _without_none(annotation)
     if annotation in {Any, object}:
         return False
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         options = get_args(annotation)
         return bool(options) and all(_is_iterable_annotation(option) for option in options)
 
@@ -196,7 +200,7 @@ def _is_value_shaped_iterable_annotation(annotation: Any) -> bool:
     annotation = _without_none(annotation)
     if annotation in {Any, object}:
         return False
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         options = get_args(annotation)
         return any(_is_value_shaped_iterable_annotation(option) for option in options)
 
@@ -217,106 +221,126 @@ def _is_value_shaped_iterable_annotation(annotation: Any) -> bool:
     return False
 
 
-def _resolve_iterable_input_annotation(annotation: Any) -> Any:
-    if _is_iterable_annotation(annotation):
-        return annotation
-
-    item_type = _resolve_iterable_item_annotation(annotation)
-    return _iterable_alias(item_type)
-
-
-def _resolve_iterable_boundary_contract(
-    current_output: Any,
+def _require_iterable_boundary_annotation(
+    annotation: Any,
     *,
     operator_name: str,
     validation_error_type: type[Exception],
-) -> tuple[Any, Any]:
-    if current_output in {Any, object}:
-        return Any, Any
-    if not _is_iterable_annotation(current_output):
+) -> None:
+    if annotation in {Any, object}:
+        return
+    if not _is_iterable_annotation(annotation):
         raise validation_error_type(
-            f"{operator_name} requires an iterable boundary, got {current_output}"
+            f"{operator_name} requires an iterable boundary, got {annotation}"
         )
-    item_type = _resolve_iterable_item_annotation(current_output)
-    input_type = _resolve_iterable_input_annotation(current_output)
-    return input_type, item_type
 
 
-def _resolve_per_item_boundary_contract(
-    current_output: Any,
+def _require_item_iterable_boundary_annotation(
+    annotation: Any,
     *,
     operator_name: str,
     validation_error_type: type[Exception],
-) -> tuple[Any, Any]:
-    if current_output in {Any, object}:
-        return Any, Any
-    if not _is_iterable_annotation(current_output) or _is_value_shaped_iterable_annotation(current_output):
+) -> None:
+    _require_iterable_boundary_annotation(
+        annotation,
+        operator_name=operator_name,
+        validation_error_type=validation_error_type,
+    )
+    if _is_value_shaped_iterable_annotation(annotation):
         raise validation_error_type(
-            f"{operator_name} requires an item iterable boundary, got {current_output}"
+            f"{operator_name} requires an item iterable boundary, got {annotation}"
         )
-    item_type = _resolve_iterable_item_annotation(current_output)
-    input_type = _resolve_iterable_input_annotation(current_output)
-    return input_type, item_type
 
 
-def _resolve_callable_contract(
-    source_annotation: Any,
+def _validate_unary_callable(
     function: Callable[..., Any],
     *,
+    operator_name: str,
+    callable_label: str,
+    source_label: str,
+    error_type: type[Exception],
+) -> None:
+    validate_positional_callable_signature(
+        function,
+        label=f"{operator_name} {callable_label}",
+        source_label=source_label,
+        error_type=error_type,
+    )
+    try:
+        probe_callable(function, object())
+    except (TypeError, ValueError) as exc:
+        raise error_type(
+            f"{operator_name} {callable_label} cannot be called with {source_label}: {exc}"
+        ) from exc
+
+
+def _resolve_unary_callable_annotations(
+    function: Callable[..., Any],
+    *,
+    operator_name: str,
     callable_label: str,
     source_label: str,
     validation_error_type: type[Exception],
+) -> _CallableAnnotations:
+    del operator_name, callable_label, source_label, validation_error_type
+    try:
+        signature = inspect.signature(function)
+    except (TypeError, ValueError):
+        return _CallableAnnotations((None,), None)
+    input_parameter = next(
+        (
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+        ),
+        None,
+    )
+    if input_parameter is None:
+        return _CallableAnnotations((None,), None)
+
+    try:
+        hints, output_type = resolve_callable_annotations(function)
+    except (TypeError, ValueError):
+        return _CallableAnnotations((None,), None)
+    return _CallableAnnotations((hints.get(input_parameter.name),), output_type)
+
+
+def _resolve_nullary_callable_annotations(
+    function: Callable[..., Any],
+    *,
     operator_name: str,
-    ignore_explicit_none: bool = True,
-) -> tuple[Any, Any] | None:
+    callable_label: str,
+    source_label: str,
+    validation_error_type: type[Exception],
+) -> _CallableAnnotations:
+    del operator_name, callable_label, source_label, validation_error_type
     try:
-        input_types, output_type = resolve_operator_contract(function)
-    except (PipelineValidationError, StaticContractUnavailableError):
-        contract = None
-    else:
-        contract = (input_types[0], output_type) if len(input_types) == 1 else None
-    if source_annotation in {None, Any}:
-        return contract
-    if contract is None:
-        return None
-
-    input_type, output_type = contract
-    comparable_source = _without_none(source_annotation) if ignore_explicit_none else source_annotation
-    if comparable_source is not Any and not is_annotation_compatible(comparable_source, (input_type,)):
-        raise validation_error_type(
-            f"{operator_name} {callable_label} expects {input_type} "
-            f"but {source_label} resolves to {source_annotation}"
-        )
-    return input_type, output_type
+        _, output_type = resolve_callable_annotations(function)
+    except (TypeError, ValueError):
+        return _CallableAnnotations((), None)
+    return _CallableAnnotations((), output_type)
 
 
-def _resolve_nullary_callable_output(function: Callable[..., Any]) -> Any | None:
-    if inspect.isclass(function):
-        return function
-
-    try:
-        target = function if inspect.isfunction(function) or inspect.ismethod(function) else getattr(function, "__call__")
-    except AttributeError:
-        return None
-
-    try:
-        hints = get_type_hints(target)
-        signature = inspect.signature(target)
-    except (TypeError, ValueError, NameError):
-        return None
-
-    parameters = [
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
-    if parameters:
-        return None
-    return hints.get("return")
+def _require_callable_annotation(
+    annotation: Any | None,
+    *,
+    operator_name: str,
+    callable_label: str,
+    annotation_label: str,
+    validation_error_type: type[Exception],
+) -> Any:
+    if annotation is not None:
+        return annotation
+    raise validation_error_type(
+        f"{operator_name} {callable_label} must define a usable {annotation_label} annotation"
+    )
 
 
 def _require_assignment_compatible(
-    value_annotation: Any,
+    value_annotation: Any | None,
     target_annotation: Any,
     *,
     operator_name: str,
@@ -324,9 +348,14 @@ def _require_assignment_compatible(
     target_label: str,
     validation_error_type: type[Exception],
 ) -> None:
-    if value_annotation is Any or target_annotation is Any:
+    if (
+        value_annotation is None
+        or target_annotation is None
+        or value_annotation is Any
+        or target_annotation is Any
+    ):
         return
-    if is_annotation_compatible(value_annotation, (target_annotation,)):
+    if is_assignable(value_annotation, target_annotation):
         return
     raise validation_error_type(
         f"{operator_name} {target_label} expects {target_annotation} "
@@ -345,7 +374,7 @@ class CollectItems(RegionCloser[ItemT, list[ItemT]]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        output_type = _list_alias(_NONE_TYPE if current_output is None else current_output)
+        output_type = _list_alias(current_output)
         return (Any,), output_type
 
 
@@ -640,11 +669,13 @@ class PerItem(RegionOpener[Iterable[ItemT], ItemT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        input_type, output_type = _resolve_per_item_boundary_contract(
+        _require_item_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
+        input_type = current_output
+        output_type = _resolve_iterable_item_annotation(current_output)
         return (input_type,), output_type
 
 
@@ -660,7 +691,7 @@ class StreamItems(RegionCloser[ItemT, Iterable[ItemT]]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation, validation_error_type
-        output_type = _iterable_alias(_NONE_TYPE if current_output is None else current_output)
+        output_type = _iterable_alias(current_output)
         return (Any,), output_type
 
 
@@ -700,11 +731,13 @@ class LazyPerItem(RegionOpener[Iterable[ItemT], ItemT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        input_type, output_type = _resolve_per_item_boundary_contract(
+        _require_item_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
+        input_type = current_output
+        output_type = _resolve_iterable_item_annotation(current_output)
         return (input_type,), output_type
 
 
@@ -718,12 +751,19 @@ class WrapMappingInObject(Generic[StateT]):
         target: SelectorInput,
         state_factory: Callable[[], StateT],
     ):
-        self._target = _resolve_selector(
+        target_selector = _resolve_selector(
             type(self).__name__,
             name="target",
             value=target,
             required=True,
         )
+        validate_nullary_callable_signature(
+            state_factory,
+            label=f"{type(self).__name__} state_factory",
+            source_label="the operator invokes it without arguments",
+            error_type=TypeError,
+        )
+        self._target = target_selector
         self.state_factory = state_factory
 
     def __call__(self, value: AnyMapping | None) -> StateT:
@@ -748,9 +788,21 @@ class WrapMappingInObject(Generic[StateT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        factory_output = _resolve_nullary_callable_output(self.state_factory)
+        factory_annotations = _resolve_nullary_callable_annotations(
+            self.state_factory,
+            operator_name=type(self).__name__,
+            callable_label="state_factory",
+            source_label="the operator invokes it without arguments",
+            validation_error_type=validation_error_type,
+        )
         input_type = current_output if _is_mapping_annotation(current_output) else AnyMapping | None
-        base_output = factory_output if factory_output is not None else object
+        base_output = _require_callable_annotation(
+            factory_annotations.output_annotation,
+            operator_name=type(self).__name__,
+            callable_label="state_factory",
+            annotation_label="return type",
+            validation_error_type=validation_error_type,
+        )
         target_annotation = self._target.validate_write(
             base_output,
             validation_error_type=validation_error_type,
@@ -773,6 +825,13 @@ class Map(Generic[ValueT, MappedT]):
     """Apply a function to the current value."""
 
     def __init__(self, fn: Mapper[ValueT, MappedT]):
+        _validate_unary_callable(
+            fn,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            source_label="the operator invokes it with the current value",
+            error_type=TypeError,
+        )
         self.fn = fn
 
     def __call__(self, current: ValueT) -> MappedT:
@@ -785,24 +844,41 @@ class Map(Generic[ValueT, MappedT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        fn_contract = _resolve_callable_contract(
-            current_output,
+        fn_annotations = _resolve_unary_callable_annotations(
             self.fn,
+            operator_name=type(self).__name__,
             callable_label="fn",
             source_label="current value",
             validation_error_type=validation_error_type,
+        )
+        if current_output is Any:
+            input_type = _require_callable_annotation(
+                fn_annotations.input_annotations[0],
+                operator_name=type(self).__name__,
+                callable_label="fn",
+                annotation_label="input type",
+                validation_error_type=validation_error_type,
+            )
+        else:
+            input_type = current_output
+            _require_assignment_compatible(
+                current_output,
+                fn_annotations.input_annotations[0],
+                operator_name=type(self).__name__,
+                source_label="current value",
+                target_label="fn",
+                validation_error_type=validation_error_type,
+            )
+        output_type = _require_callable_annotation(
+            fn_annotations.output_annotation,
             operator_name=type(self).__name__,
-            ignore_explicit_none=False,
+            callable_label="fn",
+            annotation_label="return type",
+            validation_error_type=validation_error_type,
         )
 
         del stored_annotations, expand_output_annotation, validation_error_type
-        if fn_contract is None:
-            return (current_output,), Any
-
-        fn_input_type, fn_output_type = fn_contract
-        if current_output is not Any:
-            return (current_output,), fn_output_type
-        return (fn_input_type,), fn_output_type
+        return (input_type,), output_type
 
 
 @Operator
@@ -810,8 +886,9 @@ class MapNotNull(Generic[ValueT, MappedT]):
     """Apply a function and short-circuit when the mapped result is None."""
 
     def __init__(self, fn: NullableMapper[ValueT, MappedT]):
+        map_operator = Map(fn)
         self.fn = fn
-        self.map = Map(fn)
+        self.map = map_operator
 
     def __call__(self, current: ValueT) -> MappedT:
         mapped = self.map(current)
@@ -846,22 +923,31 @@ class MapValue(Generic[ValueT, MappedT]):
         source: SelectorInput,
         target: SelectorInput | None = None,
     ):
-        self.fn = fn
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
             required=True,
         )
         if target is None:
-            self._target = self._source
+            target_selector = source_selector
         else:
-            self._target = _resolve_selector(
+            target_selector = _resolve_selector(
                 type(self).__name__,
                 name="target",
                 value=target,
                 required=True,
             )
+        _validate_unary_callable(
+            fn,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            source_label=f"the operator invokes it with source {source_selector!r}",
+            error_type=TypeError,
+        )
+        self.fn = fn
+        self._source = source_selector
+        self._target = target_selector
 
     def __call__(self, current: CurrentT | None) -> CurrentT | None:
         if current is None:
@@ -890,22 +976,28 @@ class MapValue(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
-        fn_contract = _resolve_callable_contract(
-            source_annotation,
-            self.fn,
-            callable_label="fn",
-            source_label=f"source {self._source!r}",
-            validation_error_type=validation_error_type,
-            operator_name=type(self).__name__,
-            ignore_explicit_none=False,
-        )
         target_annotation = self._target.validate_write(
             current_output,
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(target={self._target!r})",
         )
-        if fn_contract is not None:
-            _, mapped_annotation = fn_contract
+        fn_annotations = _resolve_unary_callable_annotations(
+            self.fn,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            source_label=f"source {self._source!r}",
+            validation_error_type=validation_error_type,
+        )
+        _require_assignment_compatible(
+            source_annotation,
+            fn_annotations.input_annotations[0],
+            operator_name=type(self).__name__,
+            source_label=f"source {self._source!r}",
+            target_label="fn",
+            validation_error_type=validation_error_type,
+        )
+        mapped_annotation = fn_annotations.output_annotation
+        if mapped_annotation is not None:
             _require_assignment_compatible(
                 mapped_annotation,
                 target_annotation,
@@ -933,12 +1025,25 @@ class Filter(Generic[ValueT]):
         *,
         source: SelectorInput | None = None,
     ):
-        self.predicate = predicate
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
         )
+        source_label = (
+            f"the operator invokes it with source {source_selector!r}"
+            if source_selector
+            else "the operator invokes it with the current value"
+        )
+        _validate_unary_callable(
+            predicate,
+            operator_name=type(self).__name__,
+            callable_label="predicate",
+            source_label=source_label,
+            error_type=TypeError,
+        )
+        self.predicate = predicate
+        self._source = source_selector
 
     def __call__(self, current: CurrentT) -> CurrentT:
         if self._source:
@@ -967,14 +1072,28 @@ class Filter(Generic[ValueT]):
                 error_prefix=f"{type(self).__name__}(source={self._source!r})",
             )
             source_label = f"source {self._source!r}"
-        _resolve_callable_contract(
-            source_annotation,
+        predicate_annotations = _resolve_unary_callable_annotations(
             self.predicate,
+            operator_name=type(self).__name__,
             callable_label="predicate",
             source_label=source_label,
             validation_error_type=validation_error_type,
+        )
+        _require_assignment_compatible(
+            source_annotation,
+            predicate_annotations.input_annotations[0],
             operator_name=type(self).__name__,
-            ignore_explicit_none=False,
+            source_label=source_label,
+            target_label="predicate",
+            validation_error_type=validation_error_type,
+        )
+        _require_assignment_compatible(
+            predicate_annotations.output_annotation,
+            bool,
+            operator_name=type(self).__name__,
+            source_label="predicate return annotation",
+            target_label="predicate return type",
+            validation_error_type=validation_error_type,
         )
 
         return (current_output,), current_output
@@ -985,12 +1104,13 @@ class FilterNotNull:
     """Keep the current value only when the source value exists and is not None."""
 
     def __init__(self, *, source: SelectorInput):
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
             required=True,
         )
+        self._source = source_selector
 
     def __call__(self, current: CurrentT) -> CurrentT:
         value = self._source.select_value_or_missing(current, missing=None)
@@ -1029,6 +1149,13 @@ class DistinctBy(Generic[ItemT]):
     """Keep only the first item for each computed key."""
 
     def __init__(self, fn: KeySelector[ItemT]):
+        _validate_unary_callable(
+            fn,
+            operator_name=type(self).__name__,
+            callable_label="fn",
+            source_label="the operator invokes it with the current item",
+            error_type=TypeError,
+        )
         self.fn = fn
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
@@ -1053,19 +1180,35 @@ class DistinctBy(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        input_type, item_type = _resolve_iterable_boundary_contract(
+        _require_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
-        _resolve_callable_contract(
-            item_type,
+        input_type = current_output
+        item_type = _resolve_iterable_item_annotation(current_output)
+        fn_annotations = _resolve_unary_callable_annotations(
             self.fn,
+            operator_name=type(self).__name__,
             callable_label="fn",
             source_label="current item",
             validation_error_type=validation_error_type,
+        )
+        _require_assignment_compatible(
+            item_type,
+            fn_annotations.input_annotations[0],
             operator_name=type(self).__name__,
-            ignore_explicit_none=False,
+            source_label="current item",
+            target_label="fn",
+            validation_error_type=validation_error_type,
+        )
+        _require_assignment_compatible(
+            fn_annotations.output_annotation,
+            Hashable,
+            operator_name=type(self).__name__,
+            source_label="fn return annotation",
+            target_label="fn return type",
+            validation_error_type=validation_error_type,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (input_type,), _list_alias(item_type)
@@ -1076,12 +1219,13 @@ class Distinct(Generic[ItemT]):
     """Keep only the first item for each distinct source value."""
 
     def __init__(self, *, source: SelectorInput):
-        self._source = _resolve_selector(
+        source_selector = _resolve_selector(
             type(self).__name__,
             name="source",
             value=source,
             required=True,
         )
+        self._source = source_selector
 
     def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
         source = iter(items)
@@ -1111,15 +1255,25 @@ class Distinct(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        input_type, item_type = _resolve_iterable_boundary_contract(
+        _require_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
-        self._source.validate_read(
+        input_type = current_output
+        item_type = _resolve_iterable_item_annotation(current_output)
+        source_annotation = self._source.validate_read(
             item_type,
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
+        )
+        _require_assignment_compatible(
+            source_annotation,
+            Hashable,
+            operator_name=type(self).__name__,
+            source_label=f"source {self._source!r} annotation",
+            target_label="distinct key type",
+            validation_error_type=validation_error_type,
         )
         del stored_annotations, expand_output_annotation, validation_error_type
         return (input_type,), _list_alias(item_type)
@@ -1130,9 +1284,10 @@ class Take:
     """Materialize the first `count` items from an iterable boundary."""
 
     def __init__(self, count: int | str):
-        self.count = int(count)
-        if self.count < 0:
+        resolved_count = int(count)
+        if resolved_count < 0:
             raise ValueError("count must be >= 0.")
+        self.count = resolved_count
 
     def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
         source = iter(current)
@@ -1149,11 +1304,13 @@ class Take:
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        input_type, item_type = _resolve_iterable_boundary_contract(
+        _require_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
+        input_type = current_output
+        item_type = _resolve_iterable_item_annotation(current_output)
         output_type = _list_alias(item_type)
         return (input_type,), output_type
 
@@ -1163,6 +1320,13 @@ class TakeWhile(Generic[ItemT]):
     """Materialize items from an iterable boundary while the predicate remains true."""
 
     def __init__(self, predicate: Predicate[ItemT]):
+        _validate_unary_callable(
+            predicate,
+            operator_name=type(self).__name__,
+            callable_label="predicate",
+            source_label="the operator invokes it with the current item",
+            error_type=TypeError,
+        )
         self.predicate = predicate
 
     def __call__(self, current: Iterable[ItemT]) -> list[ItemT]:
@@ -1179,21 +1343,36 @@ class TakeWhile(Generic[ItemT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        input_type, item_type = _resolve_iterable_boundary_contract(
+        del stored_annotations, expand_output_annotation
+        _require_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
             validation_error_type=validation_error_type,
         )
-        output_type = _list_alias(item_type)
-        predicate_input = Any if current_output in {Any, object} else _resolve_iterable_item_annotation(current_output)
-        _resolve_callable_contract(
-            predicate_input,
+        input_type = current_output
+        item_type = _resolve_iterable_item_annotation(current_output)
+        predicate_annotations = _resolve_unary_callable_annotations(
             self.predicate,
+            operator_name=type(self).__name__,
             callable_label="predicate",
             source_label="current item",
             validation_error_type=validation_error_type,
-            operator_name=type(self).__name__,
-            ignore_explicit_none=False,
         )
-        del stored_annotations, expand_output_annotation, validation_error_type
+        _require_assignment_compatible(
+            item_type,
+            predicate_annotations.input_annotations[0],
+            operator_name=type(self).__name__,
+            source_label="current item",
+            target_label="predicate",
+            validation_error_type=validation_error_type,
+        )
+        _require_assignment_compatible(
+            predicate_annotations.output_annotation,
+            bool,
+            operator_name=type(self).__name__,
+            source_label="predicate return annotation",
+            target_label="predicate return type",
+            validation_error_type=validation_error_type,
+        )
+        output_type = _list_alias(item_type)
         return (input_type,), output_type

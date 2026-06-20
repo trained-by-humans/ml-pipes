@@ -6,6 +6,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Iterable, TypeVar
 
+from ._typing.annotation import (
+    format_annotation,
+    is_assignable,
+)
+from ._typing.signatures import validate_operator_signature
 from .collectors import CaptureCollector
 from .context import Context, ContextOp
 from .control import SHORT_CIRCUIT
@@ -23,7 +28,7 @@ from .tracing import (
     freeze_trace,
     operator_config,
 )
-from .validation import PipelineValidationError, PipelineValidator, TypeContract, format_annotation, is_annotation_compatible
+from .validation import PipelineValidationError, PipelineValidator, TypeContract
 
 _log = logging.getLogger(__name__)
 
@@ -186,6 +191,15 @@ class Pipeline(Generic[InputT, OutputT]):
 
         Strict mode is orthogonal: it validates operator boundaries, not the
         final boundary-tightening mode used to compute the returned input type.
+
+        Validation and runtime dispatch only unpack fixed positional
+        boundaries. Non-positional `__call__` parameters such as `*args`,
+        keyword-only parameters, and `**kwargs` are not supported because
+        Pipeline chains operators by argument position. Variadic tuple
+        annotations such as `tuple[T, ...]` remain atomic instead of being
+        expanded as multi-parameter boundaries. Validation warns when a
+        multi-parameter operator defines positional defaults, because
+        Pipeline ignores those defaults for dispatch.
         """
         if not self.operators:
             return None
@@ -266,7 +280,7 @@ class Pipeline(Generic[InputT, OutputT]):
             if isinstance(operator, ContextOp):
                 result, ctx_out = operator.apply(current, context)
             else:
-                args = self._build_call_args(operator, current)
+                args = self._build_call_args(operator, current, label)
                 result = operator(*args)
                 ctx_out = context
         except Exception:
@@ -314,32 +328,25 @@ class Pipeline(Generic[InputT, OutputT]):
         return flat
 
     @staticmethod
-    def _build_call_args(operator: Callable[..., Any], current: Any) -> tuple[Any, ...]:
-        signature = inspect.signature(Pipeline._get_signature_target(operator))
-        parameters = [
-            parameter
-            for parameter in signature.parameters.values()
-            if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-        ]
-
+    def _build_call_args(operator: Callable[..., Any], current: Any, label: str) -> tuple[Any, ...]:
+        parameters = validate_operator_signature(
+            operator,
+            label=label,
+            error_type=TypeError,
+        )
         if len(parameters) == 1:
             return (current,)
         if isinstance(current, tuple):
             if len(current) != len(parameters):
                 raise TypeError(
-                    f"{operator.__class__.__name__} expects {len(parameters)} positional arguments, "
-                    f"got tuple of length {len(current)}"
+                    f"Pipeline step {label} expects {len(parameters)} positional arguments, "
+                    f"but got current={current!r} (tuple of length {len(current)})"
                 )
             return current
         raise TypeError(
-            f"{operator.__class__.__name__} expects {len(parameters)} positional arguments, got 1"
+            f"Pipeline step {label} expects {len(parameters)} positional arguments, "
+            f"but got current={current!r}"
         )
-
-    @staticmethod
-    def _get_signature_target(operator: Callable[..., Any]) -> Any:
-        if inspect.isfunction(operator) or inspect.ismethod(operator):
-            return operator
-        return getattr(operator, "__call__")
 
 class Inline(Generic[InputT, OutputT]):
     """
@@ -410,8 +417,9 @@ class Embed(Generic[InputT, OutputT]):
         if type_contract is None:
             return (Any,), current_output
 
-        if current_output is not None and not is_annotation_compatible(
-            current_output, (type_contract.input_type,)
+        if current_output is not None and not is_assignable(
+            current_output,
+            type_contract.input_type,
         ):
             raise validation_error_type(
                 f"Pipeline contract mismatch: incoming type "

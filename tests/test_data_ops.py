@@ -65,9 +65,34 @@ def _int_to_text(value: int) -> str:
     return str(value)
 
 
+def _scale_int(value: int, *, factor: int = 1) -> int:
+    return value * factor
+
+
+def _scale_int_requires_factor(value: int, *, factor: int) -> int:
+    return value * factor
+
+
+def _add_two_ints(left: int, right: int) -> int:
+    return left + right
+
+
+def _text_has_min_length_with_floor(text: str, *, floor: int = 0) -> bool:
+    return len(text) > floor
+
+
+def _append_suffix(text: str, *, suffix: str = "") -> str:
+    return text + suffix
+
+
 class AcceptInt:
     def __call__(self, value: int) -> str:
         return str(value)
+
+
+class AcceptString:
+    def __call__(self, value: str) -> str:
+        return value.upper()
 
 
 class AcceptCarrier:
@@ -106,8 +131,46 @@ class StrictCarrier:
 
 
 @dataclass
+class StrictMappedCarrier:
+    cleaned: str
+    length: int
+
+
+@dataclass
 class WrongPayloadCarrier:
     payload: str = ""
+
+
+@dataclass
+class NonHashableKeyCarrier:
+    tags: list[str]
+
+
+@dataclass
+class Box:
+    value: int
+
+
+def _make_carrier() -> Carrier:
+    return Carrier()
+
+
+def _make_carrier_with_default_payload(payload: dict[str, object] | None = None) -> Carrier:
+    return Carrier(payload=payload)
+
+
+def _make_wrong_payload_carrier() -> WrongPayloadCarrier:
+    return WrongPayloadCarrier()
+
+
+def _box_int(value) -> Box:
+    return Box(value)
+
+
+def _box_int_or_none(value) -> Box | None:
+    if value < 0:
+        return None
+    return Box(value)
 
 
 def _is_positive(value: int) -> bool:
@@ -118,8 +181,20 @@ def _is_positive_or_none(value: int | None) -> bool:
     return value is None or value > 0
 
 
+def _is_positive_without_return_annotation(value: int):
+    return value > 0
+
+
+def _is_positive_as_int(value: int) -> int:
+    return value
+
+
 def _hash_text(text: str) -> int:
     return len(text)
+
+
+def _split_text(text: str) -> list[str]:
+    return list(text)
 
 
 def _lower_text(text: str) -> str:
@@ -226,6 +301,24 @@ def test_filter_validation_requires_optional_aware_predicate_for_optional_input(
     assert contract.output_type == int | None
 
 
+def test_filter_validation_allows_predicate_without_return_annotation() -> None:
+    contract = Pipeline([Filter(_is_positive_without_return_annotation)]).validate(
+        pipeline_input_type=int,
+        strict=True,
+    )
+
+    assert contract.input_type == int
+    assert contract.output_type == int
+
+
+def test_filter_validation_rejects_non_bool_predicate_return_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="predicate return type expects"):
+        Pipeline([Filter(_is_positive_as_int)]).validate(
+            pipeline_input_type=int,
+            strict=True,
+        )
+
+
 def test_filter_validation_checks_selected_source_type_against_predicate() -> None:
     with pytest.raises(PipelineValidationError, match="predicate expects"):
         Pipeline([Filter(_is_positive, source="cleaned")]).validate(
@@ -239,6 +332,21 @@ def test_filter_validation_rejects_missing_selector_even_for_untyped_predicate()
         Pipeline([Filter(lambda value: True, source="missing")]).validate(
             pipeline_input_type=StrictCarrier,
             strict=True,
+        )
+
+
+def test_filter_rejects_predicate_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        Filter(_text_has_min_length_with_floor)
+
+
+def test_filter_validation_propagates_name_error_from_predicate_annotations() -> None:
+    def broken(value: "MissingType") -> bool:
+        return True
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([Filter(broken)]).validate(
+            pipeline_input_type=int,
         )
 
 
@@ -258,6 +366,61 @@ def test_map_validation_accepts_optional_aware_mapper_for_optional_input() -> No
 
     assert contract.input_type == str | None
     assert contract.output_type == int
+
+
+def test_map_validation_propagates_name_error_from_mapper_annotations() -> None:
+    def broken(value: "MissingType") -> int:
+        return 1
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([Map(broken), AcceptInt()]).validate(
+            pipeline_input_type=int,
+        )
+
+
+def test_map_validation_rejects_mapper_without_usable_output_annotations() -> None:
+    def untyped_length(text: str):
+        return len(text)
+
+    with pytest.raises(
+        PipelineValidationError,
+        match="Map fn must define a usable return type annotation",
+    ):
+        Pipeline([Map(untyped_length), AcceptString()]).validate(
+            pipeline_input_type=str,
+        )
+
+
+def test_map_validation_accepts_mapper_without_input_annotation_when_upstream_is_concrete() -> None:
+    contract = Pipeline([Map(_box_int)]).validate(
+        pipeline_input_type=int,
+    )
+
+    assert contract.input_type == int
+    assert contract.output_type == Box
+
+
+def test_map_validation_requires_input_annotation_when_upstream_is_unknown() -> None:
+    with pytest.raises(
+        PipelineValidationError,
+        match="Map fn must define a usable input type annotation",
+    ):
+        Pipeline([Map(_box_int)]).validate()
+
+
+def test_map_rejects_mapper_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        Map(_scale_int)
+
+
+def test_map_rejects_mapper_with_required_keyword_only_parameter_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        Map(_scale_int_requires_factor)
+
+
+def test_map_rejects_mapper_with_required_additional_positional_parameter_at_construction() -> None:
+    with pytest.raises(TypeError, match="cannot be called"):
+        Map(_add_two_ints)
 
 
 def test_map_not_null_validation_preserves_concrete_output_for_non_optional_mapper() -> None:
@@ -283,6 +446,15 @@ def test_map_not_null_validation_returns_surviving_mapped_type() -> None:
         pipeline_input_type=str,
         strict=True,
     )
+
+
+def test_map_not_null_validation_accepts_mapper_without_input_annotation_when_upstream_is_concrete() -> None:
+    contract = Pipeline([MapNotNull(_box_int_or_none)]).validate(
+        pipeline_input_type=int,
+    )
+
+    assert contract.input_type == int
+    assert contract.output_type == Box
 
 
 def test_map_not_null_validation_requires_optional_aware_mapper_for_optional_input() -> None:
@@ -335,6 +507,21 @@ def test_map_value_validation_rejects_incompatible_target_annotation() -> None:
         )
 
 
+def test_map_value_rejects_mapper_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        MapValue(_append_suffix, source="cleaned", target="length")
+
+
+def test_map_value_validation_propagates_name_error_from_mapper_annotations() -> None:
+    def broken(value: "MissingType") -> int:
+        return 1
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([MapValue(broken, source="cleaned")]).validate(
+            pipeline_input_type=StrictCarrier,
+        )
+
+
 def test_filter_not_null_drops_missing_selector() -> None:
     carrier = Carrier(payload={})
 
@@ -378,21 +565,49 @@ def test_filter_raises_on_missing_selector() -> None:
 
 
 def test_wrap_mapping_in_object_seeds_object_factory() -> None:
-    result = WrapMappingInObject(target="payload", state_factory=Carrier)(_message("spam", "hello"))
+    result = WrapMappingInObject(target="payload", state_factory=_make_carrier)(_message("spam", "hello"))
 
     assert isinstance(result, Carrier)
     assert result.payload == {"label": "spam", "msg": "hello"}
 
 
 def test_wrap_mapping_in_object_validation_returns_factory_output_when_input_is_unknown() -> None:
-    contract = Pipeline([WrapMappingInObject(target="payload", state_factory=Carrier)]).validate()
+    contract = Pipeline([WrapMappingInObject(target="payload", state_factory=_make_carrier)]).validate()
 
     assert contract.output_type == Carrier
 
 
+def test_wrap_mapping_in_object_rejects_factory_with_hidden_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="state_factory must define no parameters"):
+        WrapMappingInObject(target="payload", state_factory=_make_carrier_with_default_payload)
+
+
+def test_wrap_mapping_in_object_validation_propagates_name_error_from_factory_annotations() -> None:
+    def broken_factory() -> "MissingType":
+        return Carrier()
+
+    with pytest.raises(NameError, match="MissingType"):
+        Pipeline([WrapMappingInObject(target="payload", state_factory=broken_factory)]).validate(
+            pipeline_input_type=dict[str, object],
+        )
+
+
+def test_wrap_mapping_in_object_validation_rejects_factory_without_usable_output_annotation() -> None:
+    def untyped_factory():
+        return Carrier()
+
+    with pytest.raises(
+        PipelineValidationError,
+        match="WrapMappingInObject state_factory must define a usable return type annotation",
+    ):
+        Pipeline([WrapMappingInObject(target="payload", state_factory=untyped_factory)]).validate(
+            pipeline_input_type=dict[str, object],
+        )
+
+
 def test_wrap_mapping_in_object_validation_rejects_incompatible_target_annotation() -> None:
     with pytest.raises(PipelineValidationError, match="target"):
-        Pipeline([WrapMappingInObject(target="payload", state_factory=WrongPayloadCarrier)]).validate(
+        Pipeline([WrapMappingInObject(target="payload", state_factory=_make_wrong_payload_carrier)]).validate(
             pipeline_input_type=dict[str, object],
             strict=True,
         )
@@ -480,6 +695,19 @@ def test_distinct_by_validation_requires_optional_aware_key_fn_for_optional_item
     )
 
 
+def test_distinct_by_validation_rejects_non_hashable_key_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="fn return type expects"):
+        Pipeline([DistinctBy(_split_text)]).validate(
+            pipeline_input_type=list[str],
+            strict=True,
+        )
+
+
+def test_distinct_by_rejects_key_fn_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        DistinctBy(_append_suffix)
+
+
 def test_take_supports_iterables() -> None:
     items = (value for value in range(5))
 
@@ -552,6 +780,27 @@ def test_take_while_validation_checks_predicate_input_type() -> None:
             strict=True,
         )
 
+
+def test_take_while_rejects_predicate_with_non_positional_parameters_at_construction() -> None:
+    with pytest.raises(TypeError, match="uses non-positional parameters"):
+        TakeWhile(_text_has_min_length_with_floor)
+
+
+def test_take_while_validation_allows_predicate_without_return_annotation() -> None:
+    Pipeline([TakeWhile(_is_positive_without_return_annotation)]).validate(
+        pipeline_input_type=list[int],
+        strict=True,
+    )
+
+
+def test_take_while_validation_rejects_non_bool_predicate_return_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="predicate return type expects"):
+        Pipeline([TakeWhile(_is_positive_as_int)]).validate(
+            pipeline_input_type=list[int],
+            strict=True,
+        )
+
+
 def test_take_while_rejects_scalar_boundary_during_validation() -> None:
     with pytest.raises(PipelineValidationError, match="iterable boundary"):
         Pipeline([TakeWhile(_is_positive)]).validate(
@@ -572,6 +821,14 @@ def test_distinct_by_validation_accepts_string_iterable_boundary() -> None:
 
     assert contract.input_type == str
     assert contract.output_type == list[str]
+
+
+def test_distinct_validation_rejects_non_hashable_selector_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="distinct key type expects"):
+        Pipeline([Distinct(source="tags")]).validate(
+            pipeline_input_type=list[NonHashableKeyCarrier],
+            strict=True,
+        )
 
 
 @pytest.mark.parametrize("annotation", [set[int], frozenset[int], Iterator[int]])
@@ -956,7 +1213,7 @@ def test_per_item_pipeline_composes_primitives_for_dataset_processing() -> None:
     pipeline = Pipeline(
         [
             PerItem(),
-            WrapMappingInObject(target="payload", state_factory=Carrier),
+            WrapMappingInObject(target="payload", state_factory=_make_carrier),
             MapValue(str.strip, source="payload.msg", target="cleaned"),
             FilterNotNull(source="cleaned"),
             Filter(lambda text: len(text) >= 5, source="cleaned"),
@@ -992,7 +1249,7 @@ def test_map_validation_threads_annotated_mapper_output() -> None:
 def test_wrap_mapping_in_object_validation_resolves_factory_output() -> None:
     contract = Pipeline(
         [
-            WrapMappingInObject(target="payload", state_factory=Carrier),
+            WrapMappingInObject(target="payload", state_factory=_make_carrier),
             AcceptCarrier(),
         ]
     ).validate(
@@ -1008,7 +1265,7 @@ def test_region_and_sequence_ops_preserve_item_type_for_validation() -> None:
     contract = Pipeline(
         [
             PerItem(),
-            WrapMappingInObject(target="payload", state_factory=Carrier),
+            WrapMappingInObject(target="payload", state_factory=_make_carrier),
             MapValue(str.strip, source="payload.msg", target="cleaned"),
             FilterNotNull(source="cleaned"),
             Filter(_has_min_length_or_none, source="cleaned"),

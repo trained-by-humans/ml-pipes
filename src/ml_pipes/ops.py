@@ -14,6 +14,7 @@ from typing import TextIO
 import numpy as np
 import numpy.typing as npt
 
+from ._typing.annotation import is_assignable
 from .batch import BatchGate, LeaderBatch
 from .control import SHORT_CIRCUIT
 from .operator import Operator
@@ -35,7 +36,7 @@ from .types import (
     TensorRegistry,
 )
 from .types import ResizeTransform
-from .validation import PipelineValidationError, is_annotation_compatible
+from .validation import PipelineValidationError
 
 
 TensorLike: TypeAlias = (
@@ -311,7 +312,10 @@ class AsType(Generic[AsTypeModeT]):
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
         if self.src is not None:
             return (TensorRegistry,), TensorRegistry
-        if current_output is not Any and is_annotation_compatible(current_output, (TensorLike,)):
+        if current_output is not Any and is_assignable(
+            current_output,
+            TensorLike,
+        ):
             return (current_output,), current_output
         return (TensorLike,), TensorLike
 
@@ -1849,7 +1853,10 @@ class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
         if self.at is None:
-            if current_output is not Any and is_annotation_compatible(current_output, (Prediction,)):
+            if current_output is not Any and is_assignable(
+                current_output,
+                Prediction,
+            ):
                 return (current_output,), list[ObjectMapping]
             return (Any,), Any
 
@@ -1873,7 +1880,10 @@ class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
                 f"MapPredictionsToObjects(at={self.at}) is out of bounds for "
                 f"{current_output} (length {len(parts)})"
             )
-        if not is_annotation_compatible(parts[normalized_index], (Prediction,)):
+        if not is_assignable(
+            parts[normalized_index],
+            Prediction,
+        ):
             return (Any,), Any
         updated_parts = parts[:normalized_index] + (list[ObjectMapping],) + parts[normalized_index + 1:]
         return (current_output,), updated_parts
