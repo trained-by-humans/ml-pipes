@@ -12,7 +12,7 @@ from ._typing.annotation import (
     is_union_annotation,
     iterable_annotation,
     list_annotation,
-    remove_none_annotation_options_or_any,
+    remove_none_annotation_options,
     resolve_iterable_item_annotation,
 )
 from ._typing.inspection import (
@@ -78,8 +78,8 @@ def _resolve_selector(
 
 
 def _is_value_shaped_iterable_annotation(annotation: Any) -> bool:
-    annotation = remove_none_annotation_options_or_any(annotation)
-    if annotation in {Any, object}:
+    annotation = remove_none_annotation_options(annotation)
+    if annotation in {Any, object, None}:
         return False
     if is_union_annotation(annotation):
         options = get_args(annotation)
@@ -704,7 +704,11 @@ class MapNotNull(Generic[ValueT, MappedT]):
             expand_output_annotation,
             validation_error_type,
         )
-        return input_types, remove_none_annotation_options_or_any(mapped_output)
+        surviving_output_annotation = remove_none_annotation_options(mapped_output)
+        return (
+            input_types,
+            Any if surviving_output_annotation is None else surviving_output_annotation,
+        )
 
 
 @Operator
@@ -912,7 +916,11 @@ class FilterNotNull:
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
         del stored_annotations, expand_output_annotation, validation_error_type
-        return (current_output,), remove_none_annotation_options_or_any(current_output)
+        surviving_output_annotation = remove_none_annotation_options(current_output)
+        return (
+            (current_output,),
+            Any if surviving_output_annotation is None else surviving_output_annotation,
+        )
 
 
 @Operator

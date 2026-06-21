@@ -173,6 +173,10 @@ def _box_int_or_none(value) -> Box | None:
     return Box(value)
 
 
+def _always_none(value: int) -> None:
+    return None
+
+
 def _is_positive(value: int) -> bool:
     return value > 0
 
@@ -455,6 +459,15 @@ def test_map_not_null_validation_accepts_mapper_without_input_annotation_when_up
 
     assert contract.input_type == int
     assert contract.output_type == Box
+
+
+def test_map_not_null_validation_explicitly_widens_none_only_mapper_output() -> None:
+    contract = Pipeline([MapNotNull(_always_none)]).validate(
+        pipeline_input_type=int,
+    )
+
+    assert contract.input_type == int
+    assert contract.output_type == Any
 
 
 def test_map_not_null_validation_requires_optional_aware_mapper_for_optional_input() -> None:

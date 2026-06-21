@@ -71,9 +71,9 @@ def combine_annotation_options(*annotations: Any) -> Any:
     return combined
 
 
-def remove_none_annotation_options_or_any(annotation: Any) -> Any:
+def remove_none_annotation_options(annotation: Any) -> Any | None:
     if annotation in {None, _NONE_TYPE}:
-        return Any
+        return None
     if not is_union_annotation(annotation):
         return annotation
 
@@ -83,7 +83,7 @@ def remove_none_annotation_options_or_any(annotation: Any) -> Any:
         if option not in {None, _NONE_TYPE}
     )
     if not remaining_options:
-        return Any
+        return None
     return combine_annotation_options(*remaining_options)
 
 
@@ -115,8 +115,8 @@ def is_union_annotation(annotation: Any) -> bool:
 
 
 def is_iterable_annotation(annotation: Any) -> bool:
-    annotation = remove_none_annotation_options_or_any(annotation)
-    if annotation in {Any, object}:
+    annotation = remove_none_annotation_options(annotation)
+    if annotation in {Any, object, None}:
         return False
     if is_union_annotation(annotation):
         options = get_args(annotation)
@@ -140,8 +140,8 @@ def is_iterable_annotation(annotation: Any) -> bool:
 
 
 def is_mapping_annotation(annotation: Any) -> bool:
-    annotation = remove_none_annotation_options_or_any(annotation)
-    if annotation in {Any, object}:
+    annotation = remove_none_annotation_options(annotation)
+    if annotation in {Any, object, None}:
         return False
     if is_union_annotation(annotation):
         options = get_args(annotation)
@@ -207,8 +207,8 @@ def resolve_typed_dict_key_annotation(annotation: Any, key: str) -> Any:
 
 
 def resolve_iterable_item_annotation(annotation: Any) -> Any:
-    annotation = remove_none_annotation_options_or_any(annotation)
-    if annotation in {Any, object}:
+    annotation = remove_none_annotation_options(annotation)
+    if annotation in {Any, object, None}:
         return Any
     if is_union_annotation(annotation):
         item_annotations = tuple(

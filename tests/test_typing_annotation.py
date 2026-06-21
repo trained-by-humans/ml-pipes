@@ -10,6 +10,7 @@ from ml_pipes._typing.annotation import (
     is_mutable_sequence_annotation,
     is_assignable,
     normalize_published_annotation,
+    remove_none_annotation_options,
     tighten_annotation,
 )
 
@@ -28,6 +29,19 @@ class _Indexable:
 class _WritableIndexable(_Indexable):
     def __setitem__(self, index: int, value: object) -> None:
         pass
+
+
+@pytest.mark.parametrize(
+    ("annotation", "expected"),
+    [
+        pytest.param(None, None, id="none"),
+        pytest.param(type(None), None, id="none-type"),
+        pytest.param(int | None, int, id="optional-int"),
+        pytest.param(str | int | None, str | int, id="optional-union"),
+    ],
+)
+def test_remove_none_annotation_options(annotation: Any, expected: Any) -> None:
+    assert remove_none_annotation_options(annotation) == expected
 
 
 @pytest.mark.parametrize(
