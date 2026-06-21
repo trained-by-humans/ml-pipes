@@ -358,6 +358,11 @@ def is_assignable(
             is_assignable(option, target_annotation)
             for option in get_args(source_annotation)
         )
+    if _is_parameterized_source_assignable_to_concrete_target(
+        source_annotation,
+        target_annotation,
+    ):
+        return True
     return _is_generic_assignable(source_annotation, target_annotation)
 
 
@@ -429,6 +434,20 @@ def is_concrete_assignable(source_annotation: Any, target_annotation: Any) -> bo
         return issubclass(source_annotation, target_annotation)
     except TypeError:
         return False
+
+
+def _is_parameterized_source_assignable_to_concrete_target(
+    source_annotation: Any,
+    target_annotation: Any,
+) -> bool:
+    source_shape = _annotation_shape(source_annotation)
+    if source_shape is None:
+        return False
+    if _annotation_shape(target_annotation) is not None:
+        return False
+
+    source_origin, _ = source_shape
+    return is_concrete_assignable(source_origin, target_annotation)
 
 
 def is_concrete_annotation(annotation: Any) -> bool:

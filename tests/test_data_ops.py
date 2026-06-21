@@ -214,6 +214,10 @@ def _hash_optional_text(text: str | None) -> int:
     return 0 if text is None else len(text)
 
 
+def _text_key_pair(text: str) -> tuple[int, str]:
+    return len(text), text
+
+
 def _short_circuit_on_two(value: int) -> int | object:
     if value == 2:
         return SHORT_CIRCUIT
@@ -732,6 +736,13 @@ def test_distinct_by_validation_rejects_non_hashable_key_annotation() -> None:
             pipeline_input_type=list[str],
             strict=True,
         )
+
+
+def test_distinct_by_validation_accepts_tuple_hashable_key_annotation() -> None:
+    Pipeline([DistinctBy(_text_key_pair)]).validate(
+        pipeline_input_type=list[str],
+        strict=True,
+    )
 
 
 def test_distinct_by_rejects_key_fn_with_non_positional_parameters_at_construction() -> None:

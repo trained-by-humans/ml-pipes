@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping, MutableSequence, Sequence
+from collections.abc import Hashable, Iterable, Mapping, MutableSequence, Sequence
 from typing import Any, Generic, Iterable as TypingIterable, Mapping as TypingMapping, TypeVar
 
 import pytest
@@ -96,6 +96,20 @@ def test_is_assignable_accepts_parameterized_generic_for_bare_target(
     ],
 )
 def test_is_assignable_accepts_bare_generic_for_parameterized_target(
+    source_annotation: Any,
+    target_annotation: Any,
+) -> None:
+    assert is_assignable(source_annotation, target_annotation)
+
+
+@pytest.mark.parametrize(
+    ("source_annotation", "target_annotation"),
+    [
+        pytest.param(list[int], object, id="list[int]-to-object"),
+        pytest.param(tuple[int, int], Hashable, id="tuple[int,int]-to-Hashable"),
+    ],
+)
+def test_is_assignable_accepts_parameterized_generic_for_concrete_supertype(
     source_annotation: Any,
     target_annotation: Any,
 ) -> None:

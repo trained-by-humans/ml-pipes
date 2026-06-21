@@ -360,6 +360,12 @@ def test_pipeline_validate_allows_broader_downstream_input_type():
     pipeline.validate()
 
 
+def test_pipeline_validate_allows_parameterized_output_for_object_consumer():
+    pipeline = Pipeline([IntToListInt(), ObjectConsumer()])
+
+    pipeline.validate(pipeline_input_type=int)
+
+
 def test_pipeline_validate_rejects_tighter_downstream_input_type():
     pipeline = Pipeline([ObjectProducer(), StringConsumer()])
 
