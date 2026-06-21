@@ -343,8 +343,6 @@ def is_assignable(
         return True
     if source_annotation == target_annotation:
         return True
-    if is_concrete_assignable(source_annotation, target_annotation):
-        return True
     if is_union_annotation(target_annotation):
         return all(
             any(
@@ -358,12 +356,7 @@ def is_assignable(
             is_assignable(option, target_annotation)
             for option in get_args(source_annotation)
         )
-    if _is_parameterized_source_assignable_to_concrete_target(
-        source_annotation,
-        target_annotation,
-    ):
-        return True
-    return _is_generic_assignable(source_annotation, target_annotation)
+    return _is_non_union_assignable(source_annotation, target_annotation)
 
 
 def tighten_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
@@ -436,14 +429,45 @@ def is_concrete_assignable(source_annotation: Any, target_annotation: Any) -> bo
         return False
 
 
+def _is_non_union_assignable(source_annotation: Any, target_annotation: Any) -> bool:
+    source_shape = _annotation_shape(source_annotation)
+    target_shape = _annotation_shape(target_annotation)
+
+    if source_shape is None:
+        if target_shape is None:
+            return is_concrete_assignable(source_annotation, target_annotation)
+        return False
+
+    if _is_parameterized_source_assignable_to_concrete_target(
+        source_annotation,
+        target_annotation,
+        source_shape=source_shape,
+        target_shape=target_shape,
+    ):
+        return True
+
+    return _is_generic_assignable(
+        source_annotation,
+        target_annotation,
+        source_shape=source_shape,
+        target_shape=target_shape,
+    )
+
+
 def _is_parameterized_source_assignable_to_concrete_target(
     source_annotation: Any,
     target_annotation: Any,
+    *,
+    source_shape: tuple[Any, tuple[Any, ...]] | None = None,
+    target_shape: tuple[Any, tuple[Any, ...]] | None = None,
 ) -> bool:
-    source_shape = _annotation_shape(source_annotation)
+    if source_shape is None:
+        source_shape = _annotation_shape(source_annotation)
     if source_shape is None:
         return False
-    if _annotation_shape(target_annotation) is not None:
+    if target_shape is None:
+        target_shape = _annotation_shape(target_annotation)
+    if target_shape is not None:
         return False
 
     source_origin, _ = source_shape
@@ -518,8 +542,19 @@ def _all_annotations_equivalent(annotations: list[Any]) -> bool:
     )
 
 
-def _is_generic_assignable(source_annotation: Any, target_annotation: Any) -> bool:
-    arg_pairs = _generic_argument_pairs(source_annotation, target_annotation)
+def _is_generic_assignable(
+    source_annotation: Any,
+    target_annotation: Any,
+    *,
+    source_shape: tuple[Any, tuple[Any, ...]] | None = None,
+    target_shape: tuple[Any, tuple[Any, ...]] | None = None,
+) -> bool:
+    arg_pairs = _generic_argument_pairs(
+        source_annotation,
+        target_annotation,
+        source_shape=source_shape,
+        target_shape=target_shape,
+    )
     if arg_pairs is None:
         return False
     return all(
@@ -541,13 +576,27 @@ def _is_compatible_under_variance(source_annotation: Any, target_annotation: Any
 
 def _generic_argument_pairs(
     template_annotation,
-    candidate_annotation
+    candidate_annotation,
+    *,
+    source_shape: tuple[Any, tuple[Any, ...]] | None = None,
+    target_shape: tuple[Any, tuple[Any, ...]] | None = None,
 ) -> tuple[tuple[Any, Any, str], ...] | None:
-    try:
-        source_origin, source_args = _annotation_shape(template_annotation)
-        target_origin, target_args = _annotation_shape(candidate_annotation)
-    except TypeError:
+    if source_shape is None:
+        try:
+            source_shape = _annotation_shape(template_annotation)
+        except TypeError:
+            return None
+    if target_shape is None:
+        try:
+            target_shape = _annotation_shape(candidate_annotation)
+        except TypeError:
+            return None
+
+    if source_shape is None or target_shape is None:
         return None
+
+    source_origin, source_args = source_shape
+    target_origin, target_args = target_shape
 
     if source_origin != target_origin and not is_concrete_assignable(source_origin, target_origin):
         return None
