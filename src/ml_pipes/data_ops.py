@@ -47,21 +47,14 @@ def _close_iterable(iterator: object) -> None:
         close()
 
 
-# "Item iterable" means a boundary that yields logical items; values like
-# mappings and string/bytes-like objects stay value-shaped even though Python
-# can iterate over them.
-def _is_value_shaped_iterable(value: Iterable[Any]) -> bool:
-    return isinstance(value, (str, bytes, bytearray, Mapping))
-
-
-def _require_item_iterable(
-    value: object,
-    *,
-    operator_name: str,
-) -> Iterable[Any]:
-    if not isinstance(value, Iterable) or _is_value_shaped_iterable(cast(Iterable[Any], value)):
-        raise TypeError(f"{operator_name} requires an item iterable boundary, got {type(value).__name__}")
-    return cast(Iterable[Any], value)
+def _is_item_iterable(value: object) -> bool:
+    # "Item iterable" means a boundary that yields logical items; values like
+    # mappings and string/bytes-like objects stay value-shaped even though Python
+    # can iterate over them.
+    return (
+        isinstance(value, Iterable)
+        and not isinstance(value, (str, bytes, bytearray, Mapping))
+    )
 
 
 def _resolve_selector(
@@ -418,7 +411,9 @@ class PerItem(RegionOpener[Iterable[ItemT], ItemT]):
         cfg: TracingConfig | None,
     ) -> list[Any]:
         collecting = isinstance(trace, InvocationTrace)
-        source = iter(cast(Iterable[ItemT], _require_item_iterable(current, operator_name=type(self).__name__)))
+        if not _is_item_iterable(current):
+            raise TypeError(f"{type(self).__name__} requires an item iterable boundary, got {type(current).__name__}")
+        source = iter(current)
         results: list[Any] = []
         child_traces: list[InvocationTrace] = []
         seen = 0
@@ -536,7 +531,8 @@ class LazyPerItem(RegionOpener[Iterable[ItemT], ItemT]):
         trace: RegionTraceLike,
         cfg: TracingConfig | None,
     ) -> _MeasuredIterable:
-        current = cast(Iterable[ItemT], _require_item_iterable(current, operator_name=type(self).__name__))
+        if not _is_item_iterable(current):
+            raise TypeError(f"{type(self).__name__} requires an item iterable boundary, got {type(current).__name__}")
         span = None
         if isinstance(trace, InvocationTrace):
             span = PendingSpan(
