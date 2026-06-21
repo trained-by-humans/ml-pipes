@@ -136,6 +136,11 @@ class StrictMappedCarrier:
     length: int
 
 
+class PartiallyBrokenSelectorCarrier:
+    cleaned: str
+    other: "MissingType"
+
+
 @dataclass
 class NoneOnlyCarrier:
     cleaned: None = None
@@ -678,6 +683,13 @@ def test_distinct_deduplicates_by_selected_value() -> None:
 def test_distinct_validation_accepts_existing_selector() -> None:
     Pipeline([Distinct(source="cleaned")]).validate(
         pipeline_input_type=list[StrictCarrier],
+        strict=True,
+    )
+
+
+def test_distinct_validation_ignores_unrelated_broken_owner_annotation() -> None:
+    Pipeline([Distinct(source="cleaned")]).validate(
+        pipeline_input_type=list[PartiallyBrokenSelectorCarrier],
         strict=True,
     )
 

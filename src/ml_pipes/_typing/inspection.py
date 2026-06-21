@@ -141,12 +141,12 @@ def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
 
     if is_typed_dict_annotation(annotation):
         try:
-            hints = get_type_hints(annotation)
+            hint = _resolve_class_field_annotation(annotation, attribute)
         except (NameError, TypeError, ValueError) as exc:
             raise AttributeInspectionError(annotation, attribute, "typed dict annotations are unavailable") from exc
-        if attribute not in hints:
+        if hint is _MISSING_ANNOTATION:
             raise MissingTypedDictKeyError(annotation, attribute)
-        return hints[attribute]
+        return hint
 
     override = _resolve_attribute_override(annotation, attribute)
     if override is not _MISSING_ANNOTATION:
@@ -167,11 +167,11 @@ def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
         return hints.get("return", _MISSING_ANNOTATION)
 
     try:
-        hints = get_type_hints(owner)
+        hint = _resolve_class_field_annotation(owner, attribute)
     except (NameError, TypeError, ValueError) as exc:
         raise AttributeInspectionError(annotation, attribute, "attribute annotations are unavailable") from exc
-    if attribute in hints:
-        return hints[attribute]
+    if hint is not _MISSING_ANNOTATION:
+        return hint
     if descriptor is not _MISSING_ANNOTATION:
         return _MISSING_ANNOTATION
     raise MissingAttributeError(annotation, attribute)
@@ -184,6 +184,44 @@ def _resolve_annotation_owner(annotation: Any) -> type | None:
     if isinstance(annotation, type):
         return annotation
     return None
+
+
+def _resolve_class_field_annotation(owner: type, attribute: str) -> Any:
+    resolved_owner_annotation = _locate_class_field_annotation(owner, attribute)
+    if resolved_owner_annotation is _MISSING_ANNOTATION:
+        return _MISSING_ANNOTATION
+
+    declaring_owner, raw_annotation = resolved_owner_annotation
+    globalns, localns = _owner_type_hint_namespaces(declaring_owner)
+    proxy = type(
+        "_OwnerAnnotationProxy",
+        (),
+        {
+            "__module__": getattr(declaring_owner, "__module__", __name__),
+            "__annotations__": {attribute: raw_annotation},
+        },
+    )
+    return get_type_hints(proxy, globalns=globalns, localns=localns).get(
+        attribute,
+        _MISSING_ANNOTATION,
+    )
+
+
+def _locate_class_field_annotation(owner: type, attribute: str) -> tuple[type, Any] | object:
+    for candidate in owner.__mro__:
+        candidate_annotations = getattr(candidate, "__annotations__", None)
+        if candidate_annotations is None or attribute not in candidate_annotations:
+            continue
+        return candidate, candidate_annotations[attribute]
+    return _MISSING_ANNOTATION
+
+
+def _owner_type_hint_namespaces(owner: type) -> tuple[dict[str, Any], dict[str, Any]]:
+    module = inspect.getmodule(owner)
+    globalns = vars(module) if module is not None else {}
+    localns = dict(vars(owner))
+    localns.setdefault(owner.__name__, owner)
+    return globalns, localns
 
 
 def _resolve_attribute_override(annotation: Any, attribute: str) -> Any:

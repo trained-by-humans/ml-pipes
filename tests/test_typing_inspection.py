@@ -35,6 +35,11 @@ class _BrokenAttributeOwner:
     value: "MissingType"
 
 
+class _PartiallyBrokenAttributeOwner:
+    value: int
+    other: "MissingType"
+
+
 class _TypedDictAttributeOwner(TypedDict):
     value: int
 
@@ -43,12 +48,29 @@ class _BrokenTypedDictAttributeOwner(TypedDict):
     value: "MissingType"
 
 
+class _PartiallyBrokenTypedDictAttributeOwner(TypedDict):
+    value: int
+    other: "MissingType"
+
+
 @pytest.mark.parametrize(
     ("annotation", "attribute", "expected"),
     [
         pytest.param(_AnnotatedAttributeOwner, "value", int, id="annotated-attribute"),
+        pytest.param(
+            _PartiallyBrokenAttributeOwner,
+            "value",
+            int,
+            id="partially-broken-attribute",
+        ),
         pytest.param(_PropertyAttributeOwner, "value", str, id="annotated-property"),
         pytest.param(_TypedDictAttributeOwner, "value", int, id="typed-dict-key"),
+        pytest.param(
+            _PartiallyBrokenTypedDictAttributeOwner,
+            "value",
+            int,
+            id="partially-broken-typed-dict-key",
+        ),
         pytest.param(_UntypedAttributeOwner, "value", _MISSING_ANNOTATION, id="untyped-attribute"),
         pytest.param(_UntypedPropertyAttributeOwner, "value", _MISSING_ANNOTATION, id="untyped-property"),
         pytest.param(
@@ -70,6 +92,11 @@ def test_resolve_attribute_annotation(annotation: Any, attribute: str, expected:
 def test_resolve_attribute_annotation_raises_for_missing_attribute() -> None:
     with pytest.raises(MissingAttributeError, match="has no attribute"):
         resolve_attribute_annotation(_AnnotatedAttributeOwner, "missing")
+
+
+def test_resolve_attribute_annotation_raises_for_missing_attribute_when_other_annotation_is_broken() -> None:
+    with pytest.raises(MissingAttributeError, match="has no attribute"):
+        resolve_attribute_annotation(_PartiallyBrokenAttributeOwner, "missing")
 
 
 def test_resolve_attribute_annotation_raises_for_missing_typed_dict_key() -> None:
