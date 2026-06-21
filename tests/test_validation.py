@@ -678,6 +678,16 @@ def test_validate_merges_complementary_partial_constraints():
     assert contract.output_type is bool
 
 
+def test_validate_accepts_concrete_iterable_subtype_for_bare_iterable_consumer():
+    contract = Pipeline([IntToString(), BareIterableConsumer()]).validate(
+        pipeline_input_type=int
+    )
+
+    assert contract is not None
+    assert contract.input_type is int
+    assert contract.output_type is str
+
+
 def test_validate_preserves_fixed_tuple_input_shape_against_sequence_supertype():
     class SequenceConsumer:
         def __call__(self, value: Sequence[int | str]) -> str:

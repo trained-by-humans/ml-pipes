@@ -438,7 +438,10 @@ def _is_non_union_assignable(source_annotation: Any, target_annotation: Any) -> 
     if source_shape is None:
         if target_shape is None:
             return is_concrete_assignable(source_annotation, target_annotation)
-        return False
+        return _is_concrete_source_assignable_to_default_generic_target(
+            source_annotation,
+            target_shape=target_shape,
+        )
 
     if _is_parameterized_source_assignable_to_concrete_target(
         source_annotation,
@@ -454,6 +457,22 @@ def _is_non_union_assignable(source_annotation: Any, target_annotation: Any) -> 
         source_shape=source_shape,
         target_shape=target_shape,
     )
+
+
+def _is_concrete_source_assignable_to_default_generic_target(
+    source_annotation: Any,
+    *,
+    target_shape: tuple[Any, tuple[Any, ...]],
+) -> bool:
+    if not isinstance(source_annotation, type):
+        return False
+
+    target_origin, target_args = target_shape
+    bare_target_args = _bare_generic_args(target_origin)
+    if bare_target_args is None or target_args != bare_target_args:
+        return False
+
+    return is_concrete_assignable(source_annotation, target_origin)
 
 
 def _is_parameterized_source_assignable_to_concrete_target(

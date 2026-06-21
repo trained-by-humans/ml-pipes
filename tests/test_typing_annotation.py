@@ -117,6 +117,39 @@ def test_is_assignable_accepts_parameterized_generic_for_concrete_supertype(
 
 
 @pytest.mark.parametrize(
+    ("source_annotation", "target_annotation"),
+    [
+        pytest.param(str, Iterable, id="str-to-Iterable"),
+        pytest.param(bytes, Iterable, id="bytes-to-Iterable"),
+        pytest.param(range, Iterable, id="range-to-Iterable"),
+        pytest.param(str, Sequence, id="str-to-Sequence"),
+        pytest.param(bytes, Sequence, id="bytes-to-Sequence"),
+        pytest.param(range, Collection, id="range-to-Collection"),
+    ],
+)
+def test_is_assignable_accepts_concrete_iterable_subtype_for_default_generic_target(
+    source_annotation: Any,
+    target_annotation: Any,
+) -> None:
+    assert is_assignable(source_annotation, target_annotation)
+
+
+@pytest.mark.parametrize(
+    ("source_annotation", "target_annotation"),
+    [
+        pytest.param(str, Iterable[int], id="str-to-Iterable[int]"),
+        pytest.param(bytes, Sequence[int], id="bytes-to-Sequence[int]"),
+        pytest.param(range, Collection[str], id="range-to-Collection[str]"),
+    ],
+)
+def test_is_assignable_rejects_concrete_iterable_subtype_for_typed_generic_target(
+    source_annotation: Any,
+    target_annotation: Any,
+) -> None:
+    assert not is_assignable(source_annotation, target_annotation)
+
+
+@pytest.mark.parametrize(
     ("annotation", "expected"),
     [
         pytest.param(list, list[Any], id="list"),
