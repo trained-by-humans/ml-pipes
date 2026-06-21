@@ -1,9 +1,9 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
 import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
 from ml_pipes.validation import (
@@ -462,6 +462,34 @@ def test_pipeline_validate_publishes_bare_generic_output_as_any_parameterized_an
 
     assert contract.input_type is int
     assert contract.output_type == expected_output_type
+
+
+def test_pipeline_validate_accepts_bare_mutable_generic_aliases() -> None:
+    class SequenceConsumer:
+        def __call__(self, value: Sequence) -> str:
+            return "ok"
+
+    class MappingConsumer:
+        def __call__(self, value: Mapping) -> str:
+            return "ok"
+
+    typing_sequence_contract = Pipeline([SequenceConsumer()]).validate(
+        pipeline_input_type=TypingMutableSequence
+    )
+    collections_sequence_contract = Pipeline([SequenceConsumer()]).validate(
+        pipeline_input_type=MutableSequence
+    )
+    typing_mapping_contract = Pipeline([MappingConsumer()]).validate(
+        pipeline_input_type=TypingMutableMapping
+    )
+    collections_mapping_contract = Pipeline([MappingConsumer()]).validate(
+        pipeline_input_type=MutableMapping
+    )
+
+    assert typing_sequence_contract.input_type == MutableSequence[Any]
+    assert collections_sequence_contract.input_type == MutableSequence[Any]
+    assert typing_mapping_contract.input_type == MutableMapping[Any, Any]
+    assert collections_mapping_contract.input_type == MutableMapping[Any, Any]
 
 
 @pytest.mark.parametrize(

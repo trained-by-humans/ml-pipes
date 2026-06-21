@@ -4,7 +4,9 @@ from collections.abc import (
     Collection,
     Iterable,
     Mapping,
+    MutableMapping,
     MutableSequence,
+    MutableSet,
     Sequence,
     Set as AbstractSet,
 )
@@ -1013,9 +1015,20 @@ def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
 
 
 def _bare_generic_args(annotation: Any) -> tuple[Any, ...] | None:
-    if annotation in {AbstractSet, Collection, Iterable, Sequence, frozenset, list, set, type}:
+    if annotation in {
+        AbstractSet,
+        Collection,
+        Iterable,
+        MutableSequence,
+        MutableSet,
+        Sequence,
+        frozenset,
+        list,
+        set,
+        type,
+    }:
         return (Any,)
-    if annotation in {Mapping, dict}:
+    if annotation in {Mapping, MutableMapping, dict}:
         return (Any, Any)
     if annotation is tuple:
         return (Any, Ellipsis)

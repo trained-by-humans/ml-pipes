@@ -1,5 +1,24 @@
-from collections.abc import Collection, Hashable, Iterable, Mapping, MutableSequence, Sequence
-from typing import Any, Generic, Iterable as TypingIterable, Mapping as TypingMapping, TypeVar
+from collections.abc import (
+    Collection,
+    Hashable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    MutableSet,
+    Sequence,
+    Set as AbstractSet,
+)
+from typing import (
+    Any,
+    Generic,
+    Iterable as TypingIterable,
+    Mapping as TypingMapping,
+    MutableMapping as TypingMutableMapping,
+    MutableSequence as TypingMutableSequence,
+    MutableSet as TypingMutableSet,
+    TypeVar,
+)
 
 import pytest
 
@@ -55,6 +74,20 @@ def test_remove_none_annotation_options(annotation: Any, expected: Any) -> None:
         pytest.param(Mapping, (Mapping, (Any, Any)), id="Mapping"),
         pytest.param(TypingMapping, (Mapping, (Any, Any)), id="typing.Mapping"),
         pytest.param(Mapping[str, int], (Mapping, (str, int)), id="Mapping[str,int]"),
+        pytest.param(MutableSequence, (MutableSequence, (Any,)), id="MutableSequence"),
+        pytest.param(
+            TypingMutableSequence,
+            (MutableSequence, (Any,)),
+            id="typing.MutableSequence",
+        ),
+        pytest.param(MutableMapping, (MutableMapping, (Any, Any)), id="MutableMapping"),
+        pytest.param(
+            TypingMutableMapping,
+            (MutableMapping, (Any, Any)),
+            id="typing.MutableMapping",
+        ),
+        pytest.param(MutableSet, (MutableSet, (Any,)), id="MutableSet"),
+        pytest.param(TypingMutableSet, (MutableSet, (Any,)), id="typing.MutableSet"),
         pytest.param(tuple, (tuple, (Any, Ellipsis)), id="tuple"),
         pytest.param(tuple[int, ...], (tuple, (int, Ellipsis)), id="tuple[int,...]"),
     ],
@@ -119,6 +152,24 @@ def test_is_assignable_accepts_parameterized_generic_for_concrete_supertype(
 @pytest.mark.parametrize(
     ("source_annotation", "target_annotation"),
     [
+        pytest.param(MutableSequence, Sequence, id="MutableSequence-to-Sequence"),
+        pytest.param(TypingMutableSequence, Sequence, id="typing.MutableSequence-to-Sequence"),
+        pytest.param(MutableMapping, Mapping, id="MutableMapping-to-Mapping"),
+        pytest.param(TypingMutableMapping, Mapping, id="typing.MutableMapping-to-Mapping"),
+        pytest.param(MutableSet, AbstractSet, id="MutableSet-to-Set"),
+        pytest.param(TypingMutableSet, AbstractSet, id="typing.MutableSet-to-Set"),
+    ],
+)
+def test_is_assignable_accepts_bare_mutable_generic_aliases(
+    source_annotation: Any,
+    target_annotation: Any,
+) -> None:
+    assert is_assignable(source_annotation, target_annotation)
+
+
+@pytest.mark.parametrize(
+    ("source_annotation", "target_annotation"),
+    [
         pytest.param(str, Iterable, id="str-to-Iterable"),
         pytest.param(bytes, Iterable, id="bytes-to-Iterable"),
         pytest.param(range, Iterable, id="range-to-Iterable"),
@@ -155,6 +206,12 @@ def test_is_assignable_rejects_concrete_iterable_subtype_for_typed_generic_targe
         pytest.param(list, list[Any], id="list"),
         pytest.param(Iterable, Iterable[Any], id="Iterable"),
         pytest.param(Mapping, Mapping[Any, Any], id="Mapping"),
+        pytest.param(MutableSequence, MutableSequence[Any], id="MutableSequence"),
+        pytest.param(TypingMutableSequence, MutableSequence[Any], id="typing.MutableSequence"),
+        pytest.param(MutableMapping, MutableMapping[Any, Any], id="MutableMapping"),
+        pytest.param(TypingMutableMapping, MutableMapping[Any, Any], id="typing.MutableMapping"),
+        pytest.param(MutableSet, MutableSet[Any], id="MutableSet"),
+        pytest.param(TypingMutableSet, MutableSet[Any], id="typing.MutableSet"),
         pytest.param(tuple, tuple[Any, ...], id="tuple"),
     ],
 )
