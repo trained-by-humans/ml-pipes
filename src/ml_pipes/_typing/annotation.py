@@ -170,12 +170,20 @@ def is_typed_dict_annotation(annotation: Any) -> bool:
     )
 
 
+def _resolve_annotation_owner(annotation: Any) -> type | None:
+    origin = get_origin(annotation)
+    if isinstance(origin, type):
+        return origin
+    if isinstance(annotation, type):
+        return annotation
+    return None
+
+
 def resolve_mapping_annotation(annotation: Any) -> tuple[Any, Any] | None:
     if is_typed_dict_annotation(annotation):
         return str, Any
 
-    origin = get_origin(annotation)
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return None
     try:
@@ -248,7 +256,7 @@ def resolve_sequence_item_annotation(annotation: Any) -> Any:
     if origin in {list, Sequence, MutableSequence}:
         return resolve_iterable_item_annotation(annotation)
 
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return _MISSING_ANNOTATION
     try:
@@ -260,8 +268,7 @@ def resolve_sequence_item_annotation(annotation: Any) -> Any:
 
 
 def is_mutable_sequence_annotation(annotation: Any) -> bool:
-    origin = get_origin(annotation)
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return False
 
@@ -272,8 +279,7 @@ def is_mutable_sequence_annotation(annotation: Any) -> bool:
 
 
 def is_generic_indexable_annotation(annotation: Any) -> bool:
-    origin = get_origin(annotation)
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return False
     try:
@@ -283,8 +289,7 @@ def is_generic_indexable_annotation(annotation: Any) -> bool:
 
 
 def is_generic_writable_indexable_annotation(annotation: Any) -> bool:
-    origin = get_origin(annotation)
-    owner = origin if isinstance(origin, type) else annotation if isinstance(annotation, type) else None
+    owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return False
     try:

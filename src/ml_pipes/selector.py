@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import Any, NoReturn, TypeAlias, get_args, get_origin, get_type_hints
+from typing import Any, NoReturn, TypeAlias, get_args, get_origin
 
 from ._typing.annotation import (
     _MISSING_ANNOTATION,
@@ -19,6 +19,12 @@ from ._typing.annotation import (
     resolve_sequence_item_annotation,
     resolve_typed_dict_key_annotation,
     variadic_tuple_item_annotation,
+)
+from ._typing.inspection import (
+    AttributeInspectionError,
+    MissingAttributeError,
+    MissingTypedDictKeyError,
+    resolve_attribute_annotation,
 )
 
 
@@ -716,21 +722,6 @@ def _raise_validation_index_error(
     raise validation_error_type(_prefixed_message(error_prefix, f"is out of bounds at {path}: {reason}"))
 
 
-def _attribute_override(annotation: Any, attribute: str) -> Any:
-    owner = annotation if isinstance(annotation, type) else get_origin(annotation)
-    if not isinstance(owner, type):
-        return _MISSING_ANNOTATION
-
-    module = getattr(owner, "__module__", "")
-    name = getattr(owner, "__name__", "")
-    if attribute == "shape" and (
-        (module.startswith("numpy") and name == "ndarray")
-        or (module.startswith("torch") and name == "Tensor")
-    ):
-        return tuple[int, ...]
-    return _MISSING_ANNOTATION
-
-
 def _annotation_accepts_value(annotation: Any, value: object) -> bool:
     if annotation in {Any, object}:
         return True
@@ -750,85 +741,33 @@ def _annotation_accepts_value(annotation: Any, value: object) -> bool:
             return True
     return True
 
-
-def _attribute_annotation(
+def _try_resolve_union_attribute_annotation(
     annotation: Any,
     attribute: str,
-    *,
-    validation_error_type: type[Exception] | None = None,
-    owner_label: str | None = None,
 ) -> Any:
-    if is_unknown_annotation(annotation):
-        return Any
-
-    if annotation in {None, _NONE_TYPE}:
-        if validation_error_type is not None:
-            label = owner_label or "None"
-            raise validation_error_type(f"{label} has no attribute {attribute!r}")
-        return Any
-
-    if is_union_annotation(annotation):
-        results: list[Any] = []
-        errors: list[Exception] = []
-        for option in get_args(annotation):
-            try:
-                results.append(
-                    _attribute_annotation(
-                        option,
-                        attribute,
-                        validation_error_type=validation_error_type,
-                        owner_label=owner_label,
-                    )
-                )
-            except Exception as exc:
-                errors.append(exc)
-        if errors and results:
+    resolved_annotations: list[Any] = []
+    missing_error: MissingAttributeError | MissingTypedDictKeyError | None = None
+    for option in get_args(annotation):
+        if is_unknown_annotation(option):
             return Any
-        if results:
-            return combine_annotation_options(*results)
-        if errors and validation_error_type is not None:
-            raise errors[0]
-        return Any
 
-    if is_typed_dict_annotation(annotation):
-        result = resolve_typed_dict_key_annotation(annotation, attribute)
-        if result is not _MISSING_ANNOTATION:
-            return result
-        if validation_error_type is not None:
-            label = owner_label or describe_annotation(annotation)
-            raise validation_error_type(f"{label} has no key {attribute!r}")
-        return Any
-
-    override = _attribute_override(annotation, attribute)
-    if override is not _MISSING_ANNOTATION:
-        return override
-
-    owner = get_origin(annotation)
-    if not isinstance(owner, type):
-        owner = annotation if isinstance(annotation, type) else None
-    if owner is None:
-        return Any
-
-    property_obj = getattr(owner, attribute, _MISSING_ANNOTATION)
-    if isinstance(property_obj, property):
         try:
-            if property_obj.fget is None:
-                return Any
-            return get_type_hints(property_obj.fget).get("return", Any)
-        except Exception:
-            return Any
+            option_annotation = resolve_attribute_annotation(option, attribute)
+        except (MissingAttributeError, MissingTypedDictKeyError) as exc:
+            if missing_error is None:
+                missing_error = exc
+            continue
 
-    try:
-        hints = get_type_hints(owner)
-    except Exception:
-        hints = getattr(owner, "__annotations__", {})
-    if attribute in hints:
-        return hints[attribute]
-    if property_obj is not _MISSING_ANNOTATION:
+        if option_annotation is _MISSING_ANNOTATION:
+            return Any
+        resolved_annotations.append(option_annotation)
+
+    if missing_error is not None and resolved_annotations:
         return Any
-    if validation_error_type is not None:
-        label = owner_label or describe_annotation(owner)
-        raise validation_error_type(f"{label} has no attribute {attribute!r}")
+    if resolved_annotations:
+        return combine_annotation_options(*resolved_annotations)
+    if missing_error is not None:
+        raise missing_error
     return Any
 
 
@@ -1138,14 +1077,28 @@ def _validate_attribute_step(
     error_prefix: str | None,
     root_label: str,
 ) -> Any:
-    current_path = selector.render_path(root_label, upto=step_index)
-    owner_label = f"{describe_annotation(annotation)} at {current_path}"
-    return _attribute_annotation(
-        annotation,
-        part,
-        validation_error_type=validation_error_type,
-        owner_label=owner_label,
-    )
+    try:
+        if is_unknown_annotation(annotation):
+            return Any
+
+        try:
+            result = resolve_attribute_annotation(annotation, part)
+        except (MissingAttributeError, MissingTypedDictKeyError):
+            if not is_union_annotation(annotation):
+                raise
+            return _try_resolve_union_attribute_annotation(annotation, part)
+        if result is _MISSING_ANNOTATION:
+            return Any
+        return result
+    except (MissingAttributeError, MissingTypedDictKeyError, AttributeInspectionError) as exc:
+        _raise_validation_error(
+            validation_error_type,
+            selector,
+            step_index,
+            str(exc),
+            error_prefix=error_prefix,
+            root_label=root_label,
+        )
 
 
 def _validate_attribute_write_target(
