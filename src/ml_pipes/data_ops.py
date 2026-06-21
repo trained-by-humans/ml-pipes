@@ -1047,7 +1047,7 @@ class DistinctBy(Generic[ItemT]):
 
 
 @Operator
-class Distinct(Generic[ItemT]):
+class Distinct(DistinctBy[ItemT]):
     """Keep only the first item for each distinct source value."""
 
     def __init__(self, *, source: SelectorInput):
@@ -1059,26 +1059,13 @@ class Distinct(Generic[ItemT]):
         )
         self._source = source_selector
 
-    def __call__(self, items: Iterable[ItemT]) -> list[ItemT]:
-        source = iter(items)
-        seen: set[Hashable] = set()
-        deduped: list[ItemT] = []
-        try:
-            for item in source:
-                key = cast(
-                    Hashable,
-                    self._source.select_value(
-                        item,
-                        error_prefix=f"{type(self).__name__}(source={self._source!r})",
-                    ),
-                )
-                if key in seen:
-                    continue
-                seen.add(key)
-                deduped.append(item)
-            return deduped
-        finally:
-            _close_iterable(source)
+        def select_key(item: ItemT) -> Hashable:
+            return self._source.select_value(
+                item,
+                error_prefix=f"{type(self).__name__}(source={self._source!r})",
+            )
+
+        super().__init__(select_key)
 
     def resolve_contract(
         self,
