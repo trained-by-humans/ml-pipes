@@ -137,6 +137,11 @@ class StrictMappedCarrier:
 
 
 @dataclass
+class NoneOnlyCarrier:
+    cleaned: None = None
+
+
+@dataclass
 class WrongPayloadCarrier:
     payload: str = ""
 
@@ -461,13 +466,11 @@ def test_map_not_null_validation_accepts_mapper_without_input_annotation_when_up
     assert contract.output_type == Box
 
 
-def test_map_not_null_validation_explicitly_widens_none_only_mapper_output() -> None:
-    contract = Pipeline([MapNotNull(_always_none)]).validate(
-        pipeline_input_type=int,
-    )
-
-    assert contract.input_type == int
-    assert contract.output_type == Any
+def test_map_not_null_validation_rejects_none_only_mapper_output() -> None:
+    with pytest.raises(PipelineValidationError, match="cannot produce a non-None output"):
+        Pipeline([MapNotNull(_always_none)]).validate(
+            pipeline_input_type=int,
+        )
 
 
 def test_map_not_null_validation_requires_optional_aware_mapper_for_optional_input() -> None:
@@ -562,6 +565,14 @@ def test_filter_not_null_validation_keeps_current_object_type() -> None:
     )
 
 
+def test_filter_not_null_validation_rejects_none_only_source_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="cannot produce a non-None output"):
+        Pipeline([FilterNotNull(source="cleaned")]).validate(
+            pipeline_input_type=NoneOnlyCarrier,
+            strict=True,
+        )
+
+
 def test_filter_not_null_validation_rejects_missing_selector() -> None:
     with pytest.raises(PipelineValidationError, match="missing"):
         Pipeline([FilterNotNull(source="missing")]).validate(
@@ -639,6 +650,13 @@ def test_drop_null_validation_uses_static_contract() -> None:
 
     assert contract.input_type == int | None
     assert contract.output_type == str
+
+
+def test_drop_null_validation_rejects_none_only_input() -> None:
+    with pytest.raises(PipelineValidationError, match="cannot produce a non-None output"):
+        Pipeline([DropNull()]).validate(
+            pipeline_input_type=None,
+        )
 
 
 def test_distinct_deduplicates_by_selected_value() -> None:

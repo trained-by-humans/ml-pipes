@@ -172,6 +172,24 @@ def _require_assignment_compatible(
     )
 
 
+def _require_non_none_annotation(
+    annotation: Any,
+    *,
+    operator_name: str,
+    source_label: str,
+    validation_error_type: type[Exception] | None,
+) -> Any:
+    surviving_annotation = remove_none_annotation_options(annotation)
+    if surviving_annotation is not None:
+        return surviving_annotation
+
+    error_type = TypeError if validation_error_type is None else validation_error_type
+    raise error_type(
+        f"{operator_name} cannot produce a non-None output because "
+        f"{source_label} resolves to {annotation}"
+    )
+
+
 @Operator
 class CollectItems(RegionCloser[ItemT, list[ItemT]]):
     """Region boundary that materializes per-item outputs as a list."""
@@ -704,10 +722,14 @@ class MapNotNull(Generic[ValueT, MappedT]):
             expand_output_annotation,
             validation_error_type,
         )
-        surviving_output_annotation = remove_none_annotation_options(mapped_output)
         return (
             input_types,
-            Any if surviving_output_annotation is None else surviving_output_annotation,
+            _require_non_none_annotation(
+                mapped_output,
+                operator_name=type(self).__name__,
+                source_label="fn return type",
+                validation_error_type=validation_error_type,
+            ),
         )
 
 
@@ -910,16 +932,26 @@ class FilterNotNull:
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        self._source.validate_read(
+        source_annotation = self._source.validate_read(
             current_output,
             validation_error_type=validation_error_type,
             error_prefix=f"{type(self).__name__}(source={self._source!r})",
         )
-        del stored_annotations, expand_output_annotation, validation_error_type
-        surviving_output_annotation = remove_none_annotation_options(current_output)
+        _require_non_none_annotation(
+            source_annotation,
+            operator_name=type(self).__name__,
+            source_label=f"source {self._source!r}",
+            validation_error_type=validation_error_type,
+        )
+        del stored_annotations, expand_output_annotation
         return (
             (current_output,),
-            Any if surviving_output_annotation is None else surviving_output_annotation,
+            _require_non_none_annotation(
+                current_output,
+                operator_name=type(self).__name__,
+                source_label="current value",
+                validation_error_type=validation_error_type,
+            ),
         )
 
 
@@ -931,6 +963,24 @@ class DropNull:
         if current is None:
             return SHORT_CIRCUIT
         return current
+
+    def resolve_contract(
+        self,
+        current_output: Any,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[tuple[Any, ...], Any]:
+        del stored_annotations, expand_output_annotation
+        return (
+            (current_output,),
+            _require_non_none_annotation(
+                current_output,
+                operator_name=type(self).__name__,
+                source_label="current value",
+                validation_error_type=validation_error_type,
+            ),
+        )
 
 
 @Operator
