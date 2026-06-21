@@ -8,6 +8,7 @@ import pytest
 from ml_pipes import (
     AsType,
     Batch,
+    Distinct,
     Extract,
     FilterPredictionsByClass,
     FilterPredictionsByScore,
@@ -580,6 +581,16 @@ def test_describe_captures_wrapper_constructor_args():
         "dtype": "float16",
     }
     assert repr(Pipeline([AsType("float16")])) == _pipeline_text("AsType('float16')")
+
+
+def test_distinct_description_preserves_source_argument():
+    operator = Distinct(source="cleaned")
+    description = Pipeline([operator]).describe()
+
+    assert operator.describe().passed_args == {"source": "cleaned"}
+    assert repr(operator) == "Distinct(source='cleaned')"
+    assert description.operators[0].passed_args == {"source": "cleaned"}
+    assert repr(description) == _pipeline_text("Distinct(source='cleaned')")
 
 
 def test_describe_undecorated_custom_operator_shows_no_args():

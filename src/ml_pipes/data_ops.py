@@ -1061,7 +1061,7 @@ class Distinct(DistinctBy[ItemT]):
                 error_prefix=f"{type(self).__name__}(source={self._source!r})",
             )
 
-        super().__init__(select_key)
+        self.fn = select_key
 
     def resolve_contract(
         self,
