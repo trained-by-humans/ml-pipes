@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 import ml_pipes.validation as validation_module
 import warnings
 
@@ -676,6 +676,19 @@ def test_validate_merges_complementary_partial_constraints():
     assert contract is not None
     assert contract.input_type == tuple[int, str]
     assert contract.output_type is bool
+
+
+def test_validate_preserves_fixed_tuple_input_shape_against_sequence_supertype():
+    class SequenceConsumer:
+        def __call__(self, value: Sequence[int | str]) -> str:
+            return ",".join(str(item) for item in value)
+
+    contract = Pipeline([SequenceConsumer()]).validate(
+        pipeline_input_type=tuple[int, str]
+    )
+
+    assert contract is not None
+    assert contract.input_type == tuple[int, str]
 
 
 def test_inference_does_not_narrow_input_through_dynamic_fixed_output():

@@ -395,7 +395,7 @@ def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -
             return _UNBOUND
         return _UNBOUND
 
-    arg_pairs = _generic_argument_pairs(current_annotation, candidate_annotation)
+    arg_pairs = _tighten_generic_argument_pairs(current_annotation, candidate_annotation)
     if arg_pairs is None:
         return _UNBOUND
 
@@ -403,6 +403,8 @@ def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -
     for current_arg, candidate_arg, variance in arg_pairs:
         if variance == _INVARIANT:
             merged_arg = _try_tighten_invariant_annotation(current_arg, candidate_arg)
+        elif variance == _COVARIANT:
+            merged_arg = _try_tighten_covariant_annotation(current_arg, candidate_arg)
         else:
             merged_arg = try_tighten_annotation(current_arg, candidate_arg)
         if merged_arg is _UNBOUND:
@@ -634,6 +636,61 @@ def _generic_argument_pairs(
     )
 
 
+def _tighten_generic_argument_pairs(
+    current_annotation: Any,
+    candidate_annotation: Any,
+) -> tuple[tuple[Any, Any, str], ...] | None:
+    try:
+        current_shape = _annotation_shape(current_annotation)
+        candidate_shape = _annotation_shape(candidate_annotation)
+    except TypeError:
+        return None
+
+    if current_shape is None or candidate_shape is None:
+        return None
+
+    current_origin, current_args = current_shape
+    candidate_origin, candidate_args = candidate_shape
+
+    if (
+        current_origin != candidate_origin
+        and not is_concrete_assignable(current_origin, candidate_origin)
+    ):
+        return None
+
+    if current_origin is tuple and candidate_origin in {Collection, Iterable, Sequence}:
+        candidate_item = candidate_args[0]
+        if _is_variadic_shaped(current_args):
+            return ((variadic_tuple_item_annotation(current_args), candidate_item, _COVARIANT),)
+        return tuple(
+            (current_arg, candidate_item, _COVARIANT)
+            for current_arg in current_args
+        )
+
+    if candidate_origin is tuple and _is_variadic_shaped(candidate_args):
+        candidate_item = variadic_tuple_item_annotation(candidate_args)
+        if _is_variadic_shaped(current_args):
+            return ((variadic_tuple_item_annotation(current_args), candidate_item, _COVARIANT),)
+        return tuple(
+            (current_arg, candidate_item, _COVARIANT)
+            for current_arg in current_args
+        )
+
+    if len(current_args) != len(candidate_args):
+        return None
+
+    variances = _generic_variances(candidate_origin, candidate_args)
+    return tuple(
+        (current_arg, candidate_arg, variance)
+        for current_arg, candidate_arg, variance in zip(
+            current_args,
+            candidate_args,
+            variances,
+            strict=True,
+        )
+    )
+
+
 def _generic_variances(origin: Any, args: tuple[Any, ...]) -> tuple[str, ...]:
     if origin in {AbstractSet, Collection, Iterable, Sequence, frozenset, tuple, type}:
         return (_COVARIANT,) * len(args)
@@ -783,6 +840,17 @@ def _try_tighten_invariant_annotation(current_annotation: Any, candidate_annotat
         return current_annotation
     if current_annotation == candidate_annotation:
         return current_annotation
+    return _UNBOUND
+
+
+def _try_tighten_covariant_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+    tightened = try_tighten_annotation(current_annotation, candidate_annotation)
+    if tightened is not _UNBOUND:
+        return tightened
+    if is_assignable(current_annotation, candidate_annotation):
+        return current_annotation
+    if is_assignable(candidate_annotation, current_annotation):
+        return candidate_annotation
     return _UNBOUND
 
 

@@ -1,4 +1,4 @@
-from collections.abc import Hashable, Iterable, Mapping, MutableSequence, Sequence
+from collections.abc import Collection, Hashable, Iterable, Mapping, MutableSequence, Sequence
 from typing import Any, Generic, Iterable as TypingIterable, Mapping as TypingMapping, TypeVar
 
 import pytest
@@ -148,6 +148,24 @@ def test_tighten_annotation_restores_missing_generic_arguments(
     expected: Any,
 ) -> None:
     assert tighten_annotation(current_annotation, candidate_annotation) == expected
+
+
+@pytest.mark.parametrize(
+    "candidate_annotation",
+    [
+        pytest.param(Sequence[int | str], id="Sequence"),
+        pytest.param(Iterable[int | str], id="Iterable"),
+        pytest.param(Collection[int | str], id="Collection"),
+    ],
+)
+def test_tighten_annotation_preserves_fixed_tuple_shape_against_sequence_supertypes(
+    candidate_annotation: Any,
+) -> None:
+    assert tighten_annotation(tuple[int, str], candidate_annotation) == tuple[int, str]
+
+
+def test_tighten_annotation_applies_sequence_constraint_per_fixed_tuple_item() -> None:
+    assert tighten_annotation(tuple[Any, str], Sequence[int | str]) == tuple[int | str, str]
 
 
 @pytest.mark.parametrize(
