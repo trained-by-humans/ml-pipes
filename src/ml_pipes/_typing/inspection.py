@@ -6,7 +6,7 @@ from typing import Any, Callable, get_args, get_origin, get_type_hints
 
 from .annotation import (
     _MISSING_ANNOTATION,
-    combine_annotation_options,
+    build_union_annotation_from_options,
     describe_annotation,
     is_typed_dict_annotation,
     is_union_annotation,
@@ -137,7 +137,7 @@ def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
             resolved_options.append(option_annotation)
         if not resolved_options or saw_missing_annotation:
             return _MISSING_ANNOTATION
-        return combine_annotation_options(*resolved_options)
+        return build_union_annotation_from_options(*resolved_options)
 
     if is_typed_dict_annotation(annotation):
         try:

@@ -7,7 +7,7 @@ from typing import Any, NoReturn, TypeAlias, get_args, get_origin
 from ._typing.annotation import (
     _MISSING_ANNOTATION,
     _annotation_shape,
-    combine_annotation_options,
+    build_union_annotation_from_options,
     describe_annotation,
     is_generic_indexable_annotation,
     is_generic_writable_indexable_annotation,
@@ -765,7 +765,7 @@ def _try_resolve_union_attribute_annotation(
     if missing_error is not None and resolved_annotations:
         return Any
     if resolved_annotations:
-        return combine_annotation_options(*resolved_annotations)
+        return build_union_annotation_from_options(*resolved_annotations)
     if missing_error is not None:
         raise missing_error
     return Any
@@ -972,7 +972,7 @@ def _validate_read_union(
     if errors and results:
         return Any
     if results:
-        return combine_annotation_options(*results)
+        return build_union_annotation_from_options(*results)
     if errors and validation_error_type is not None:
         raise errors[0]
     return Any
@@ -1009,7 +1009,7 @@ def _validate_write_union(
     if errors and results:
         return Any
     if results:
-        return combine_annotation_options(*results)
+        return build_union_annotation_from_options(*results)
     if errors and validation_error_type is not None:
         raise errors[0]
     return Any

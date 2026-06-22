@@ -53,7 +53,8 @@ def collapse_annotation_parts(annotation_parts: tuple[Any, ...]) -> Any:
     return tuple[annotation_parts]
 
 
-def combine_annotation_options(*annotations: Any) -> Any:
+def build_union_annotation_from_options(*annotations: Any) -> Any:
+    """Build a union annotation for alternative options, falling back to Any."""
     unique_annotations: list[Any] = []
     for annotation in annotations:
         if annotation is Any:
@@ -64,13 +65,10 @@ def combine_annotation_options(*annotations: Any) -> Any:
     if not unique_annotations:
         return Any
 
-    combined = unique_annotations[0]
-    for annotation in unique_annotations[1:]:
-        try:
-            combined = _combine_annotations(combined, annotation)
-        except TypeError:
-            return Any
-    return combined
+    try:
+        return _build_union_annotation(*unique_annotations)
+    except TypeError:
+        return Any
 
 
 def remove_none_annotation_options(annotation: Any) -> Any | None:
@@ -86,7 +84,7 @@ def remove_none_annotation_options(annotation: Any) -> Any | None:
     )
     if not remaining_options:
         return None
-    return combine_annotation_options(*remaining_options)
+    return build_union_annotation_from_options(*remaining_options)
 
 
 def iterable_annotation(item_annotation: Any) -> Any:
@@ -219,7 +217,7 @@ def resolve_iterable_item_annotation(annotation: Any) -> Any:
         )
         if not item_annotations or any(item_annotation is Any for item_annotation in item_annotations):
             return Any
-        return combine_annotation_options(*item_annotations)
+        return build_union_annotation_from_options(*item_annotations)
 
     if annotation is str:
         return str
@@ -234,7 +232,7 @@ def resolve_iterable_item_annotation(annotation: Any) -> Any:
     if shape is not None:
         origin, child_annotations = shape
         if origin is tuple:
-            return combine_annotation_options(*child_annotations)
+            return build_union_annotation_from_options(*child_annotations)
         try:
             if issubclass(origin, Mapping):
                 return child_annotations[0] if child_annotations else Any
@@ -631,7 +629,7 @@ def _generic_argument_pairs(
         elif _is_variadic_shaped(source_args):
             adapted_source_args = (variadic_tuple_item_annotation(source_args),)
         else:
-            adapted_source_args = (_combine_annotations(*source_args),)
+            adapted_source_args = (_build_union_annotation(*source_args),)
 
     if target_origin is tuple and _is_variadic_shaped(target_args):
         target_item = variadic_tuple_item_annotation(target_args)
@@ -724,7 +722,7 @@ def _typevar_constraint_annotation(typevar: TypeVar) -> Any:
     if typevar.__bound__ is not None:
         return typevar.__bound__
     if typevar.__constraints__:
-        return _combine_annotations(*typevar.__constraints__)
+        return _build_union_annotation(*typevar.__constraints__)
     return Any
 
 
@@ -816,7 +814,7 @@ def _apply_typevar_bindings(
     )
 
 
-def _combine_annotations(*annotations: Any) -> Any:
+def _build_union_annotation(*annotations: Any) -> Any:
     if not annotations:
         return Any
     combined = annotations[0]
