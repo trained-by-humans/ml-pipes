@@ -21,7 +21,7 @@ of tokens, the interesting logic lives in the operators:
 In that sense, a pipeline is closer to a harness for
 operators than to the operators themselves.
 
-## What Operators Are In Code
+## How Operators Look In Code
 
 Concretely, an operator is anything the pipeline can execute as one step.
 
@@ -62,7 +62,7 @@ pipeline = Pipeline([strip_text, Prefix("tag: ")])
 assert pipeline("  hello  ") == "tag: hello"
 ```
 
-## Parts Of An Operator
+## What Operators Are Made Of
 
 Most reusable operators have four parts the pipeline cares about:
 
@@ -298,23 +298,96 @@ becomes.
 
 ## Best Practices For Creating Operators
 
+### Scope
+
+- Each operator should do one meaningful transformation or control-flow step.
+  If the behavior is bigger than that, compose multiple operators instead of
+  fusing a whole workflow into one.
 - Start with the simplest form that fits. Use a plain function for short local
   transforms. Move to a class with `@Operator` when the logic needs
   configuration, reuse, or clearer description output.
-- Keep boundaries explicit. Once an operator is small and atomically
-  meaningful, make that boundary visible with precise `__call__` input and
-  return annotations so composition and validation can reason about it without
-  guessing.
-- Keep configuration in the constructor. Treat constructor arguments as the
-  operator's static config, and keep `__call__` focused on transforming the
-  current value.
-- Prefer composition over fused behavior. If two small operators express the
-  logic clearly, that is usually better than one large operator that hides
-  multiple steps behind a broad interface.
-- Use special operator types only when the semantics are real. Reach for
-  `SideEffectOp` for passthrough side effects, `ContextOp` for true context
-  interaction, and `resolve_contract(...)` only when normal annotations cannot
-  express the boundary precisely.
-- Verify the operator inside a pipeline. `validate()` checks its boundary,
-  `inspect()` shows what value flows through it, and tracing or benchmarking
-  can be added once correctness is already established.
+
+### Config
+
+- Operator config is a pipeline-build-time value. Put it in `__init__`, and
+  normalize and validate it once at construction time.
+- Config is static. If the same input under the same config produces different
+  output over time because the operator remembered previous calls, that is
+  hidden state, not config.
+
+### Runtime Boundary
+
+- Use the invocation value for data that can change from one pipeline call to
+  the next without rebuilding the pipeline.
+- Do not pass operator config as per-invocation payload. If a value is really
+  part of how the operator is configured, put it in `__init__`.
+- Declare accurate `__call__` annotations so the operator's runtime boundary
+  is explicit.
+- Use generics and `TypeVar` when the operator preserves or transforms the
+  relationship between input and output types.
+- Avoid `Any` in `__call__` annotations unless the boundary is genuinely
+  impossible to express more precisely.
+
+### Input
+
+- Define an input boundary that makes sense for the operator's actual job.
+- Avoid passing a large payload to an operator when it only needs one small
+  part of it. Use `Pick` or `Select` to pass only what the operator needs,
+  which usually makes the operator more reusable.
+- When an operator truly consumes multiple separate values, prefer multiple
+  positional inputs over wrapping everything into one input object. The
+  pipeline can unpack fixed-length tuple values automatically, which usually
+  makes the operator boundary easier to read.
+
+### Output
+
+- Return a single value when the operator produces one semantic result.
+- For ordinary transforms, treat the input as immutable and return a new value
+  instead of mutating the input in place.
+- Use a fixed-length tuple when the operator returns multiple values. This
+  pairs naturally with the multi-input pattern described in the input rules
+  above.
+- Use a dedicated dataclass when fields have high cohesion, represent one
+  named result, and are usually used together.
+- A useful pattern is the carry-forward tuple: return the original value
+  together with a new derived value when later pipeline steps are expected to
+  keep using both. Rendering is a good example: an operator can return
+  `(rendered_image, detections)` so later steps can save the image while still
+  rendering, filtering, or logging the detections in different ways.
+- In-place mutation is acceptable when the payload is already mutation-oriented
+  and that keeps the pipeline clearer, as with registry-style payloads.
+
+### Static Verification
+
+- Define `resolve_contract(...)` only when normal annotations cannot express
+  the real boundary precisely, such as upstream-type-dependent, context-aware,
+  or tuple-routing operators.
+- Put only boundary logic inside `resolve_contract(...)`. Checks like simple
+  config validation belong in `__init__`; use `resolve_contract(...)` only for
+  checks that depend on boundary information.
+- Use the upstream type effectively to compute an accurate output type. If the
+  operator preserves or transforms part of the incoming shape, reflect that in
+  the returned contract instead of discarding it.
+- Return the narrowest contract you can justify. Do not fall back to `Any`
+  unless the boundary is genuinely impossible to express more precisely.
+- Keep `resolve_contract(...)` aligned with runtime behavior. If `__call__` or
+  `apply()` changes what the operator actually accepts or returns,
+  `resolve_contract(...)` should change with it.
+
+### Effects And Specialized Operators
+
+- Side effects should be explicit. Use `SideEffectOp` when an operator's
+  semantic job is to observe, log, draw, or save while passing the value
+  through unchanged.
+- Use `ContextOp` only when the operator genuinely reads or writes the
+  side-channel context.
+- Region behavior should also be explicit. Opening or closing a special
+  execution region should be visible in the operator type and pipeline shape.
+
+### Errors And Verification
+
+- Error messages should be direct and local to the operator that detects the
+  problem.
+- Verify the operator inside a real pipeline. `validate()` checks its
+  boundary, `inspect()` shows what value flows through it, and tracing or
+  benchmarking can be added once correctness is already established.
