@@ -6,6 +6,7 @@ Shared ml-pipes reference docs live here.
 - [BENCHMARKING.md](BENCHMARKING.md)
 - [COMPOSITION.md](COMPOSITION.md)
 - [OPERATORS.md](OPERATORS.md)
+- [operators/README.md](operators/README.md)
 - [PERFORMANCE.md](PERFORMANCE.md)
 - [TORCH.md](TORCH.md)
 - [TRACING.md](TRACING.md)

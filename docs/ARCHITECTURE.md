@@ -86,10 +86,11 @@ The important point is that regions are not a separate pipeline type. They are e
 
 The operator library supplies the concrete steps that the engine composes: preprocessing, inference, registry transforms, output conversion, context interaction, region coordination, tiling, and side effects.
 
-The full operator catalog and per-operator semantics belong in
-[`OPERATORS.md`](OPERATORS.md). The important architectural point here is that
-the engine does not hard-code model families or tasks; it just executes a list
-of small operators.
+The operator overview and design principles belong in
+[`OPERATORS.md`](OPERATORS.md). The detailed shared operator catalog belongs in
+[`operators/README.md`](operators/README.md). The important architectural point
+here is that the engine does not hard-code model families or tasks; it just
+executes a list of small operators.
 
 ## Execution Flow
 

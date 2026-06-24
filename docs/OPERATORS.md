@@ -1,9 +1,266 @@
 # Operators
 
-Operators are the building blocks of a pipeline. They fall into four families:
-[Transform](#transform-operators) · [Tensor](#tensor-operators) · [Context](#context-operators) · [Side-effect](#side-effect-operators)
+## What Operators Are
 
----
+Semantically, operators are the steps a pipeline takes to turn an input into
+an output.
+
+The pipeline itself does not have any task or workflow specific logic. The pipeline is the
+framework that runs operators in order, threads context, and layers tooling on
+top of those steps. 
+If a pipeline converts an image into detections, or a text string into a list
+of tokens, the interesting logic lives in the operators:
+
+- decode the input
+- normalize it
+- run inference
+- extract tensors
+- project coordinates
+- convert to the final output object
+
+In that sense, a pipeline is closer to a harness for
+operators than to the operators themselves.
+
+## What Operators Are In Code
+
+Concretely, an operator is anything the pipeline can execute as one step.
+
+For simple local logic, a plain function is enough:
+
+```python
+def strip_text(text: str) -> str:
+    return text.strip()
+```
+
+For reusable configured logic, use a class with `__call__`. Decorating it with
+`@Operator` makes it self-describing in `repr()` and `describe()`:
+
+```python
+from ml_pipes import Operator
+
+
+@Operator
+class Prefix:
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
+
+    def __call__(self, text: str) -> str:
+        return f"{self.prefix}{text}"
+```
+
+```python
+repr(Prefix("tag: "))
+# Prefix('tag: ')
+```
+
+Pipelines can mix both forms freely:
+
+```python
+from ml_pipes import Pipeline
+
+pipeline = Pipeline([strip_text, Prefix("tag: ")])
+assert pipeline("  hello  ") == "tag: hello"
+```
+
+## Parts Of An Operator
+
+Most reusable operators have four parts the pipeline cares about:
+
+```python
+@Operator
+class Prefix:
+    def __init__(self, prefix: str) -> None:
+        self.prefix = prefix
+
+    def __call__(self, text: str) -> str:
+        return f"{self.prefix}{text}"
+```
+
+- **Input** is the `__call__` parameter annotation. Here, the operator accepts
+  `str`.
+- **Output** is the `__call__` return annotation. Here, the operator produces
+  `str`.
+- **Config** is the constructor state captured when you build the operator.
+  Here, that is `prefix`.
+- **Static validation rule** is the boundary the validator reads from the
+  operator definition. In the simple case, `__call__` annotations are enough:
+  the validator can see that this operator accepts `str` and returns `str`.
+
+When that static shape is not enough, define `resolve_contract(...)`. Use it
+for operators whose real boundary depends on the current upstream type, stored
+context, or tuple routing. Most normal transform operators do not need it.
+
+## Features Built On Operators
+
+The pipeline's tooling works because operators define explicit boundaries.
+
+The examples below use the same tiny operator chain:
+
+```python
+from ml_pipes import Operator, Pipeline, PrintCollector
+
+
+def strip_text(text: str) -> str:
+    return text.strip()
+
+
+@Operator
+class Lowercase:
+    def __call__(self, text: str) -> str:
+        return text.lower()
+
+
+@Operator
+class SplitWords:
+    def __init__(self, delimiter: str) -> None:
+        self.delimiter = delimiter
+
+    def __call__(self, text: str) -> list[str]:
+        return text.split(self.delimiter)
+```
+
+### Composition
+
+Composition is the core behavior: the output of one operator becomes the input
+to the next operator. The pipeline does not need task-specific logic here; it
+just runs one operator, takes the returned value, and feeds it to the next.
+
+```python
+pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
+pipeline("  Hello World  ")
+# ['hello', 'world']
+```
+
+> [!TIP]
+> That chaining behavior is the foundation the rest of the framework builds on.
+
+### Validation
+
+Validation checks whether one operator's output boundary is compatible with the
+next operator's input boundary.
+
+```python
+pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
+contract = pipeline.validate(strict=True)
+print(f"Input: {contract.input_type}, Output: {contract.output_type}")
+```
+
+```text
+Input: <class 'str'>, Output: list[str]
+```
+
+> [!TIP]
+> This is why reusable operators should carry precise `__call__` annotations:
+> the validator reasons about the pipeline through operator boundaries.
+
+### Description
+
+Because a pipeline is a list of operators, the operator chain is directly
+describable.
+
+```python
+pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
+pipeline.describe()
+```
+
+```text
+Pipeline([
+  strip_text,
+  Lowercase(),
+  SplitWords(delimiter=' '),
+])
+```
+
+> [!TIP]
+> This is why reusable operators should have meaningful names and, when
+> configured, meaningful constructor arguments.
+
+### Inspection
+
+Inspection captures the value flowing through each operator boundary.
+
+```python
+from ml_pipes import PipelineInspector, TextBlock
+
+pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
+result = pipeline.inspect("  Hello World  ")
+inspector = PipelineInspector().register_output_formatter(
+    str,
+    lambda value: [TextBlock("", [("", value)])],
+)
+
+views = inspector.build_views(result)
+label_width = max(len(view.label) for view in views)
+
+for view in views:
+    cell = view.blocks[0]
+    text = " | ".join(f"{key} {value}".strip() for key, value in cell.rows)
+    print(f"{view.label:<{label_width}} : {text}")
+```
+
+```text
+0:strip_text : Hello World
+1:Lowercase  : hello world
+2:SplitWords : [0] hello | [1] world
+```
+
+> [!TIP]
+> This is one reason small single-purpose operators are easier to debug than
+> large fused blocks.
+
+### Tracing
+
+Tracing reports latency per operator step.
+
+```python
+pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
+pipeline.set_tracing(PrintCollector())
+pipeline("  Hello World  ")
+pipeline.set_tracing(None)
+```
+
+```text
+  0:strip_text                      0.01ms  (21.6%)
+  1:Lowercase                       0.01ms  (43.1%)
+  2:SplitWords                      0.01ms  (17.4%)
+  total                             0.03ms
+```
+
+> [!TIP]
+> If an operator is too broad or mixes unrelated work, tracing becomes less
+> useful because the latency is no longer attributed to a meaningful boundary.
+
+### Benchmark
+
+Benchmarking repeats the pipeline over many runs and aggregates latency at the
+same operator boundaries tracing uses.
+
+```python
+from ml_pipes import Benchmark, MeasurementConfig
+
+result = Benchmark(
+    pipeline,
+    input_fn=lambda: ("sample", "  Hello World  ", None, None),
+    measurement=MeasurementConfig(runs=5, warmup=1, percentiles=(0.50,)),
+).run()
+
+print(result.to_table())
+```
+
+```text
+operator            mean        p50     stddev        min        max
+--------------------------------------------------------------------
+total              0.04       0.03       0.00       0.03       0.04
+0:strip_text       0.01       0.01       0.00       0.01       0.01
+1:Lowercase        0.01       0.01       0.00       0.01       0.02
+2:SplitWords       0.01       0.01       0.00       0.01       0.01
+--------------------------------------------------------------------
+runs: 5  (all values in ms)
+```
+
+> [!TIP]
+> Benchmarking is most useful after the pipeline already works: it keeps the
+> same operator boundaries as tracing, but measures them across repeated runs.
 
 ## Design Principles
 
@@ -11,236 +268,53 @@ Every operator in the library is designed to uphold the following properties.
 They are not style guidelines — they are what makes operators safe to compose
 and swap without side effects.
 
-**Stateless.** An operator holds only the configuration given at construction
-time (`name`, `axis`, `threshold`, etc.). It has no mutable state that
-accumulates between calls. Calling it twice on the same input produces the
-same output.
+**Atomically meaningful.** Each operator should represent one meaningful
+boundary in the pipeline: normalize text, store a value in context, open a
+scatter region, draw boxes, or convert one box format to another. Larger
+workflows should be built by composing operators, not by fusing many concerns
+into one broad step.
 
-**Single-responsibility.** Each operator does exactly one thing. `Squeeze`
-removes unit dimensions. `ConvertBoxFormat` converts between coordinate
-formats. `NMS` filters by confidence and IoU. Complexity is built by
-composing simple operators, not by adding parameters to existing ones.
+**Stateless.** An operator should hold only stable configuration given at
+construction time (`name`, `axis`, `threshold`, `prefix`, etc.). It should not
+accumulate hidden runtime state across calls. This is primarily an execution
+safety property: stateless operators are easier to run in parallel or
+distributed pipelines, easier to scale, and easier to debug because the same
+input under the same config produces the same result.
 
-**Model-agnostic.** No operator knows which model produced the tensors it
-processes. `NMS`, `ProjectBoxes`, and `Softmax` are generic. Model-specific
-adaptations live in the pipeline list as individual operators, not inside
-shared infrastructure.
+**Effect-explicit.** If an operator touches context, opens a region, performs
+a side effect, or crosses a runtime boundary, that role should be explicit in
+its type and behavior. Control flow and side effects should be first-class
+operator semantics, not hidden inside an otherwise generic transform.
 
-**Precision-agnostic.** Operators preserve the dtype of their input. A
-pipeline that runs in float32 runs in float16 without modifying any operator.
-`Normalize` is the single fixed-precision boundary: it converts uint8 input
-to float, and its output dtype becomes the working precision for everything
-that follows.
+**Reusable at the right layer.** Shared operators should capture behavior that
+is genuinely reusable across pipelines. Project-specific assumptions, one-off
+workflow glue, and temporary experiments belong in local pipeline code, not in
+the shared operator surface.
 
-**Runtime-agnostic.** Operators use NumPy. They impose no dependency on
-PyTorch, TensorFlow, or any specific hardware. `Infer` is the only step
-that touches a runtime; everything before and after is plain NumPy and
-transfers to any compute environment.
+**Composable.** An operator should be easy to insert, remove, reorder,
+validate, inspect, trace, and benchmark as a standalone boundary. The clearer
+and smaller the operator, the more useful the surrounding pipeline tooling
+becomes.
 
-**Composable.** Every operator has the same contract: receive a value, return
-a value. Any Python callable fits. Pipelines are plain lists — operators can
-be reordered, replaced, or inserted without touching anything else.
+## Best Practices For Creating Operators
 
-## Transform operators
-
-Transform operators convert data from one type to another. The type of the
-flowing value changes at each step.
-
-### Preprocessing
-
-Image file into an inference-ready tensor:
-
-| Operator | Input → Output | Notes |
-|---|---|---|
-| `Decode()` | `Path / str / bytes` → `ImagePayload` | Reads and decodes image file |
-| `Resize(target_size, mode, interpolation, pad_value, center, allow_scale_up)` | `ImagePayload` → `(ImagePayload, ResizeTransform)` | `mode`: `"resize"` (stretch) or `"letterbox"` (aspect-ratio-preserving with padding) |
-| `ConvertColorSpace(output_color_space)` | `ImagePayload` → `ImagePayload` | Converts between BGR and RGB while preserving layout/dtype |
-| `Normalize(scale, mean, std, output_layout, output_color_space, add_batch_dim)` | `ImagePayload` → `TensorPayload` | Scales, normalizes, transposes layout, optionally converts BGR↔RGB |
-| `Cast(dtype)` | `TensorPayload` → `TensorPayload` | Casts dtype, e.g. float32 → float16 |
-
-### Inference
-
-| Operator | Input → Output | Notes |
-|---|---|---|
-| `Infer(model_path, input_layout, dtype)` | `TensorPayload` → `RuntimeOutputs` | Runs ONNX Runtime. Validates layout and dtype contract before inference. |
-
-### Registry creation
-
-| Operator | Input → Output | Notes |
-|---|---|---|
-| `Extract(*names, as_=...)` | `RuntimeOutputs` → `TensorRegistry` | Extracts tensors by their ONNX graph output names. `as_` renames — pass a tuple for multi-output. |
-
-### Output
-
-| Operator | Input → Output | Notes |
-|---|---|---|
-| `ToDetections(boxes, scores, classes)` | `TensorRegistry` → `Detections` | Finalises a detection pipeline |
-| `ToSegmentations(boxes, scores, classes, masks)` | `TensorRegistry` → `Segmentations` | Finalises a segmentation pipeline |
-| `MapPredictionsToObjects(fields)` | `Detections / Segmentations` → `list[dict]` | Converts typed prediction arrays to a list of per-object dicts |
-
----
-
-## Tensor operators
-
-Tensor operators receive a `TensorRegistry` and return a `TensorRegistry`.
-The type does not change — only the values inside the registry are transformed.
-All tensor operators accept an optional `as_` parameter: omit it to overwrite
-the source tensor in-place; provide it to write to a new key.
-
-```python
-Squeeze("preds")                                    # overwrites "preds"
-Slice("preds", slice(None, 4), as_="boxes")         # creates "boxes", "preds" unchanged
-```
-
-### Shape
-
-| Operator | Notes |
-|---|---|
-| `Squeeze(src, axis, as_)` | Removes unit dimensions. Without `axis`, removes all. |
-| `Transpose(src, axes, as_)` | Permutes axes. Default reverses all axes. |
-
-### Indexing
-
-| Operator | Notes |
-|---|---|
-| `Slice(src, at, as_)` | Slices along the last axis: `Slice("preds", slice(None, 4), as_="boxes")` |
-| `GatherRows(src, indices, as_)` | Indexes into a tensor along axis 0 |
-| `FilterBy(src, indices, as_)` | Filters rows using an index array stored in the registry: `FilterBy("mask_coeffs", "kept")` |
-
-### Math
-
-| Operator | Notes |
-|---|---|
-| `ArgMax(src, axis, as_)` | Returns index of max value along axis (default -1) |
-| `GatherScores(scores, classes, as_)` | Gathers `scores[i, classes[i]]` for each detection |
-| `Softmax(src, axis, as_)` | Softmax along axis (default -1) |
-| `Sigmoid(src, as_)` | Element-wise sigmoid |
-| `Scale(src, by, as_)` | Multiplies by a scalar or per-column array. Use `by=(W, H, W, H)` to denormalize `cxcywh` boxes, `by=1/255` to normalize pixel values. |
-
-### Geometry
-
-| Operator | Notes |
-|---|---|
-| `ConvertBoxFormat(src, *, from_, to, as_)` | Converts between `"xyxy"`, `"xywh"`, `"cxcywh"`. `src` defaults to `"boxes"`, `to` defaults to `"xyxy"`. |
-
-### Detection
-
-| Operator | Notes |
-|---|---|
-| `NMS(boxes, scores, classes, conf_threshold, iou_threshold, max_detections, kept_as)` | Non-maximum suppression. Set `kept_as` to store kept indices for downstream `FilterBy` calls. |
-| `NMM(iou_threshold)` | Non-maximum merge. Groups overlapping detections per class and replaces each group with a single score-weighted average box. Unlike `NMS`, no detection is discarded — overlapping boxes are merged into one. |
-
-### Segmentation
-
-| Operator | Notes |
-|---|---|
-| `ReconstructMasks(coefficients, prototypes, as_)` | Matrix multiply: `(N, C) @ (C, H*W)` → `(N, H, W)`. `as_` is required — no default — to keep the output name explicit. |
-
-### Projection
-
-These operators accept `(TensorRegistry, ResizeTransform)`. Use `Recall` before
-them to inject the stored transform.
-
-| Operator | Notes |
-|---|---|
-| `ProjectBoxes(src)` | Inverse-transforms boxes from model input space to original image space, accounting for scale and letterbox padding. |
-| `ProjectMasks(masks, boxes, mask_threshold)` | Zeros prototype masks outside each bounding box (in prototype space, vectorised across all N masks), then upsamples to original image size. Boxes are converted from original image space to prototype space internally. **Must be called after `ProjectBoxes`**. |
-| `ProjectRoIMasks(masks, boxes, mask_threshold)` | Resizes per-instance RoI masks `(N, H, W)` to their bounding boxes and embeds them into a full-image canvas. **Must be called after `ProjectBoxes`** — needs boxes in original image space. For `(N, 1, H, W)` outputs, add `Squeeze("masks", axis=1)` first. |
-
----
-
-## Context operators
-
-Context operators manage the side-channel that lets values computed early in
-the pipeline (e.g. the resize transform) be accessed later without threading
-them through every operator in between. See the root
-[README](../README.md) for broader pipeline context.
-
-| Operator | Notes |
-|---|---|
-| `Store(name, index)` | Saves the current value (or `current[index]`) into context. The flowing value is unchanged. |
-| `Recall(name)` | Appends a stored value to the flowing value, producing a tuple. Idempotent. |
-| `Select(*selector)` | Projects the current value via attribute access and tuple indexing. Example: `Select("spatial_shape", 0)`, `Select("spatial_shape.0")`, or `Select("array")`. |
-| `Pick(index)` | Tuple-only shorthand for selecting one element from a tuple and discarding the rest. |
-
----
-
-## Parallelism operators
-
-Parallelism operators let a single pipeline call fan out work across multiple
-threads and collect the results. They come in matched pairs: `Scatter` marks
-the start of a parallel region; `Gather` marks the end.
-
-The input to `Scatter` must be a `list`. Each item is dispatched to a worker
-thread that runs the enclosed region independently with a fresh `Context`.
-The original thread blocks at `Gather` until all workers finish, then resumes
-with `list[results]` in submission order.
-
-```
-                 ┌─ worker 0: [region ops] ─┐
-list[T] ─ Scatter┼─ worker 1: [region ops] ─┼─ Gather ─ list[U]
-                 └─ worker 2: [region ops] ─┘
-```
-
-| Operator | Notes |
-|---|---|
-| `Scatter(max_concurrency)` | Fans `list[T]` out to worker threads. `max_concurrency` bounds the thread pool size; defaults to `1` (sequential). |
-| `Gather()` | Collects worker results back into `list[U]`. Must follow a matching `Scatter`. |
-
-**Constraints:**
-- Scatter/Gather cannot be nested inside another Scatter region.
-- A Batch/UnBatch region inside a Scatter region is valid.
-- If any worker raises, the exception propagates on the original thread after all workers complete.
-
-**Example — tiled inference:**
-
-```python
-pipeline = Pipeline([
-    Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
-    Store("tile_rects", index=1),
-    Pick(0),
-    Scatter(max_concurrency=4),
-    Decode(),
-    Resize((640, 640)),
-    Normalize(),
-    Infer("model.onnx"),
-    ...
-    ToDetections(),
-    Gather(),
-    Recall("tile_rects"),
-    Stitch(),
-    NMM(iou_threshold=0.5),
-])
-```
-
----
-
-## Tiling operators
-
-Tiling operators split an image into overlapping crops for inference and
-reassemble the per-tile detections back into the original image coordinate
-space. They are designed to work together with `Scatter`/`Gather` to
-run inference on each tile in parallel.
-
-| Operator | Notes |
-|---|---|
-| `Tile(slice_wh, overlap_wh)` | Splits `ImagePayload` into overlapping crops. Returns `(list[ImagePayload], list[TileRect])`. `slice_wh` is `(width, height)` of each tile; `overlap_wh` is the overlap in pixels (default `(0, 0)`). |
-| `Stitch()` | Remaps each tile's `Detections` boxes from tile coordinates to original image coordinates and concatenates all tiles. Returns `Detections`. Accepts `(list[Detections], list[TileRect])`. |
-| `TileRect` | Frozen dataclass `(x1, y1, x2, y2)` describing a crop window in the original image. Produced by `Tile` and consumed by `Stitch`. |
-
-`Stitch` performs pure coordinate remapping and concatenation — it does not
-deduplicate cross-tile detections. Follow it with `NMM` (or `NMS`) to merge
-overlapping boxes that span tile boundaries.
-
----
-
-## Side-effect operators
-
-Side-effect operators tap the pipeline for logging, drawing, or saving. They
-pass the input value through unchanged.
-
-| Operator | Notes |
-|---|---|
-| `DrawBoxes()` | Draws bounding boxes on an `ImagePayload` |
-| `SaveImage(path)` | Saves an `ImagePayload` to disk |
-| `LogDetections(model_path, image_path, annotated_image_path)` | Logs detection results as JSON to stdout |
+- Start with the simplest form that fits. Use a plain function for short local
+  transforms. Move to a class with `@Operator` when the logic needs
+  configuration, reuse, or clearer description output.
+- Keep boundaries explicit. Once an operator is small and atomically
+  meaningful, make that boundary visible with precise `__call__` input and
+  return annotations so composition and validation can reason about it without
+  guessing.
+- Keep configuration in the constructor. Treat constructor arguments as the
+  operator's static config, and keep `__call__` focused on transforming the
+  current value.
+- Prefer composition over fused behavior. If two small operators express the
+  logic clearly, that is usually better than one large operator that hides
+  multiple steps behind a broad interface.
+- Use special operator types only when the semantics are real. Reach for
+  `SideEffectOp` for passthrough side effects, `ContextOp` for true context
+  interaction, and `resolve_contract(...)` only when normal annotations cannot
+  express the boundary precisely.
+- Verify the operator inside a pipeline. `validate()` checks its boundary,
+  `inspect()` shows what value flows through it, and tracing or benchmarking
+  can be added once correctness is already established.

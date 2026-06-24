@@ -18,8 +18,8 @@ and local pipeline glue.
    - local pipeline if the logic is one-off, project-specific, or still
      exploratory
 2. Check for duplicates before adding anything:
-   - search `docs/OPERATORS.md`, `README.md`, `src/ml_pipes/`, tests,
-     examples, and the target package
+   - search `docs/operators/README.md`, `docs/OPERATORS.md`, `README.md`,
+     `src/ml_pipes/`, tests, examples, and the target package
    - prefer an existing operator or pipeline composition if the behavior is
      already expressible
    - do not add a new operator when the need is really a short local callable
@@ -48,6 +48,7 @@ and local pipeline glue.
 ## Read These Docs
 
 - `docs/OPERATORS.md`
+- `docs/operators/README.md`
 - `README.md`
 - `docs/VALIDATION.md`
 - `docs/COMPOSITION.md`
