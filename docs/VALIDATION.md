@@ -48,10 +48,8 @@ All validation failures raise `PipelineValidationError`, which subclasses
 ### 1. Region structure checks
 
 A *region* is a bounded section of the pipeline such as
-`Batch ... UnBatch` or `Scatter ... Gather` (See
-[Regions](ARCHITECTURE.md#regions)). 
-Validation checks that region openers and closers are structurally
-sound. 
+`Batch ... UnBatch` or `Scatter ... Gather` (see [Regions](REGIONS.md)).
+Validation checks that region openers and closers are structurally sound.
 
 It rejects:
 
