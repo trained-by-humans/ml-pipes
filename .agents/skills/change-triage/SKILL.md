@@ -63,11 +63,11 @@ failing operator, boundary, or failure class is still unclear, hand off to
 ## Read These Docs
 
 - `README.md` for entry points, examples, and CLI discovery.
-- `VALIDATION.md` for contract, strict, and inference behavior.
-- `COMPOSITION.md` and `ARCHITECTURE.md` for ownership and composition
+- `docs/VALIDATION.md` for contract, strict, and inference behavior.
+- `docs/COMPOSITION.md` and `docs/ARCHITECTURE.md` for ownership and composition
   questions.
-- `OPERATORS.md` when deciding whether an existing operator already covers the
+- `docs/OPERATORS.md` when deciding whether an existing operator already covers the
   use case.
-- `TRACING.md` for debugging and latency evidence.
-- `BENCHMARKING.md` and `PERFORMANCE.md` for optimization and benchmark
+- `docs/TRACING.md` for debugging and latency evidence.
+- `docs/BENCHMARKING.md` and `docs/PERFORMANCE.md` for optimization and benchmark
   workflows.

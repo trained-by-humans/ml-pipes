@@ -61,14 +61,14 @@ pipeline.describe(show_defaults=True)
 
 For per-operator latency profiling, config sweeps, result diffs, saved
 artifacts, and the `python -m ml_pipes benchmark` CLI, see
-[BENCHMARKING.md](BENCHMARKING.md).
+[docs/BENCHMARKING.md](docs/BENCHMARKING.md).
 
 ## Torch Execution Domain
 
 Torch support is intentionally isolated under `ml_pipes.torch`. Core
 `ml_pipes` stays NumPy/ONNX-oriented, and domain crossings stay explicit.
 
-For the full guide, see [TORCH.md](TORCH.md).
+For the full guide, see [docs/TORCH.md](docs/TORCH.md).
 
 ```python
 import torch
@@ -116,7 +116,7 @@ pipeline = Pipeline([
 
 For fuller Torch examples, see:
 
-- [TORCH.md](TORCH.md) for execution-domain rules, copy semantics, and common patterns
+- [docs/TORCH.md](docs/TORCH.md) for execution-domain rules, copy semantics, and common patterns
 - [examples/torch/run_mask2former_torch_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_torch_postprocess.py:1)
   for a Torch-heavy Mask2Former postprocess pipeline
 - [examples/torch/run_mask2former_numpy_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_numpy_postprocess.py:1)

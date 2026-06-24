@@ -153,8 +153,8 @@ them to inject the stored transform.
 
 Context operators manage the side-channel that lets values computed early in
 the pipeline (e.g. the resize transform) be accessed later without threading
-them through every operator in between. See the
-[Context section in the README](README.md#context) for a full explanation.
+them through every operator in between. See the root
+[README](../README.md) for broader pipeline context.
 
 | Operator | Notes |
 |---|---|

@@ -66,8 +66,8 @@ operators, or a local pipeline.
 ## Read These Docs
 
 - `README.md`
-- `VALIDATION.md`
-- `COMPOSITION.md`
-- `TRACING.md`
+- `docs/VALIDATION.md`
+- `docs/COMPOSITION.md`
+- `docs/TRACING.md`
 - `examples/run_inspect.py`
 - `examples/run_inspect_errors.py`

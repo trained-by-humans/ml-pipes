@@ -23,7 +23,7 @@ Build for correctness first.
 1. Start from the closest existing pipeline, example, or factory instead of
    building from zero when a nearby pattern already exists.
 2. Search available operators before writing new ones:
-   - read `OPERATORS.md`
+   - read `docs/OPERATORS.md`
    - search examples, tests, and `src/ml_pipes/`
    - reuse existing reusable operators when they already cover the need
 3. Compose the pipeline in stages:
@@ -73,9 +73,9 @@ Build for correctness first.
 ## Read These Docs
 
 - `README.md`
-- `OPERATORS.md`
-- `COMPOSITION.md`
-- `VALIDATION.md`
-- `TRACING.md`
-- `BENCHMARKING.md`
-- `PERFORMANCE.md`
+- `docs/OPERATORS.md`
+- `docs/COMPOSITION.md`
+- `docs/VALIDATION.md`
+- `docs/TRACING.md`
+- `docs/BENCHMARKING.md`
+- `docs/PERFORMANCE.md`

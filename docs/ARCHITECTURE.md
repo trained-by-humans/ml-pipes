@@ -86,7 +86,10 @@ The important point is that regions are not a separate pipeline type. They are e
 
 The operator library supplies the concrete steps that the engine composes: preprocessing, inference, registry transforms, output conversion, context interaction, region coordination, tiling, and side effects.
 
-The full operator catalog and per-operator semantics belong in [`OPERATORS.md`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/OPERATORS.md). The important architectural point here is that the engine does not hard-code model families or tasks; it just executes a list of small operators.
+The full operator catalog and per-operator semantics belong in
+[`OPERATORS.md`](OPERATORS.md). The important architectural point here is that
+the engine does not hard-code model families or tasks; it just executes a list
+of small operators.
 
 ## Execution Flow
 
@@ -153,7 +156,8 @@ The engine supports two composition modes:
 
 Architecturally, the distinction matters because it changes whether the engine sees one flat operator list or a boundary represented by `Embed`.
 
-The full composition semantics and user-facing APIs belong in [`COMPOSITION.md`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/COMPOSITION.md).
+The full composition semantics and user-facing APIs belong in
+[`COMPOSITION.md`](COMPOSITION.md).
 
 ## Validation
 
@@ -166,7 +170,8 @@ The full composition semantics and user-facing APIs belong in [`COMPOSITION.md`]
 
 The architectural point is that validation mirrors actual runtime semantics: region nesting, context isolation, and boundary typing are checked the same way the engine will execute them.
 
-The full validation rules, examples, and strict-mode behavior belong in [`VALIDATION.md`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/VALIDATION.md).
+The full validation rules, examples, and strict-mode behavior belong in
+[`VALIDATION.md`](VALIDATION.md).
 
 ## Regions
 
@@ -251,7 +256,8 @@ Tracing is opt-in and decoupled from execution. Each invocation builds its own t
 
 Architecturally, regions can attach child traces, so batch and scatter preserve nested timing structure without changing the main execution loop.
 
-The collector types, output format, and tracing API belong in [`TRACING.md`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/TRACING.md).
+The collector types, output format, and tracing API belong in
+[`TRACING.md`](TRACING.md).
 
 ## Example Pipelines
 

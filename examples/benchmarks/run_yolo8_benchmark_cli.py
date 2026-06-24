@@ -10,7 +10,7 @@ Run from the repo root:
     python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
         --arg slice_wh=480x480 --runs 20 --warmup 3
 
-See `BENCHMARKING.md` for sweep variants, shared CLI options, and factory
+See `docs/BENCHMARKING.md` for sweep variants, shared CLI options, and factory
 rules.
 """
 from __future__ import annotations

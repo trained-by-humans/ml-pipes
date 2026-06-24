@@ -12,7 +12,7 @@ pipelines, examples, or reusable operator workflows.
 
 - `src/ml_pipes/`
 - `tests/`
-- top-level docs that define shared behavior
+- shared docs under `docs/`
 
 Do not absorb example-specific or package-specific fixes into core.
 
@@ -21,10 +21,10 @@ Do not absorb example-specific or package-specific fixes into core.
 1. Reproduce the problem with an existing failing test, a focused new test, or
    the exact user repro.
 2. Read the matching shared docs before changing behavior:
-   - `VALIDATION.md` for contract, strict, and inference semantics
-   - `COMPOSITION.md` and `ARCHITECTURE.md` for composition, context, and
+   - `docs/VALIDATION.md` for contract, strict, and inference semantics
+   - `docs/COMPOSITION.md` and `docs/ARCHITECTURE.md` for composition, context, and
      runtime ownership
-   - `TRACING.md`, `BENCHMARKING.md`, and `src/ml_pipes/__main__.py` for
+   - `docs/TRACING.md`, `docs/BENCHMARKING.md`, and `src/ml_pipes/__main__.py` for
      tracing, benchmarking, and CLI changes
 3. Change the smallest shared surface that fixes the generic behavior.
 4. Preserve the core design:
@@ -48,9 +48,9 @@ Do not absorb example-specific or package-specific fixes into core.
 
 ## Read These Docs
 
-- `ARCHITECTURE.md`
-- `COMPOSITION.md`
-- `VALIDATION.md`
-- `TRACING.md`
-- `BENCHMARKING.md`
+- `docs/ARCHITECTURE.md`
+- `docs/COMPOSITION.md`
+- `docs/VALIDATION.md`
+- `docs/TRACING.md`
+- `docs/BENCHMARKING.md`
 - `README.md`

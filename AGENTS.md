@@ -49,10 +49,10 @@ clear.
 - Validate after every pipeline mutation or composition change.
 - Use `Pipeline(..., auto_validate=True)` when fail-fast construction behavior
   is appropriate.
-- When validation behavior is the subject, read `VALIDATION.md` before changing
+- When validation behavior is the subject, read `docs/VALIDATION.md` before changing
   code.
-- When composition or context behavior is the subject, read `COMPOSITION.md`
-  and `ARCHITECTURE.md`.
+- When composition or context behavior is the subject, read
+  `docs/COMPOSITION.md` and `docs/ARCHITECTURE.md`.
 - When optimization work is proposed, do not stop at “it should be faster”;
   gather before/after evidence with tracing or benchmarking.
 
