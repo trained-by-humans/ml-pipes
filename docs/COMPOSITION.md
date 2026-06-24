@@ -1,23 +1,166 @@
 # Pipeline Composition
 
-ml-pipes provides two fundamental ways to compose pipelines — **merge** and
-**join** — each available in two syntactic forms depending on where the
-composition happens (inside or outside a pipeline definition).
+ml-pipes follows a bring-your-own-code model. A pipeline can be built from
+plain Python callables, your own operators, or operator packages.
+The point is not to force everything through a package surface. The point is
+to give your steps explicit execution boundaries so they can be composed,
+validated, inspected, traced, and benchmarked.
 
-## Concepts
+## What A Pipeline Is
+
+Semantically, a pipeline is a sequence of explicit steps that turns one input
+boundary into one output boundary.
+
+Concretely, you create one by passing an ordered list of steps to
+`Pipeline([...])`. Each step receives the current value and returns the next
+one.
+
+The pipeline itself is the execution harness around those steps. The
+task-specific behavior still lives in your operators and callables.
+
+The goal of composition is not to hide a whole workflow inside one operator.
+The goal is to choose boundaries that make the workflow understandable,
+correct, and observable.
+
+## Composing Pipelines From Code
+
+### Start From The Goal
+
+When building a pipeline from code, start from the outcome you want:
+
+1. define the pipeline input
+2. define the pipeline output
+3. identify the intermediate values that matter
+4. turn each meaningful transformation into a separate step
+
+Those steps often line up with places where:
+
+- the value changes shape or type
+- you want to inspect the intermediate result
+- you want to isolate a side effect or runtime boundary
+- you want to measure latency separately
+
+If one step is hard to name, inspect, or measure, it is often too large.
+
+### Use Validation, Inspection, Tracing, And Benchmarking
+
+The pipeline tooling helps you shape the composition itself:
+
+- `validate()` checks whether the boundaries between steps are compatible
+- `inspect()` shows what value each step actually produced
+- tracing shows per-step latency for one run
+- benchmarking repeats the same pipeline across many runs to measure steady
+  performance
+
+That means composition is not just about execution order. It is also about
+choosing steps that are easy to validate, debug, and profile.
+
+### Build In Observable Steps
+
+In practice, a good composition loop looks like this:
+
+1. start with the smallest pipeline that proves the end-to-end path
+2. validate the boundary contract
+3. inspect a representative input
+4. split broad steps into smaller ones where you need more visibility
+5. trace or benchmark only after the pipeline already works
+
+Example: starting from a script like `prepare_dataset.py`, the goal might be
+to take raw rows in and get cleaned unique records out.
+
+You do not need to implement every step up front. Start by naming the
+boundaries you want to observe, then fill them in:
+
+```python
+from ml_pipes import Operator, Pipeline
+
+
+@Operator
+class NormalizeWhitespace:
+    def __call__(self, text: str) -> str:
+        return " ".join(text.split())
+
+
+pipeline = Pipeline([
+    LoadRows(),
+    ExtractMessageText(),
+    NormalizeWhitespace(),
+    DropRowsWithUrl(),
+    DeduplicateMessages(),
+    WriteDataset("clean.jsonl"),
+])
+```
+
+> [!TIP]
+> The important point is not the specific operators. It is that the pipeline is
+> broken into steps where correctness and execution can be observed directly.
+
+## Composing With Existing Operators
+
+When existing operators already cover part of the problem, use them first.
+
+That usually gives you:
+
+- clearer boundaries
+- better validation
+- better inspection and tracing output
+- less one-off code to maintain
+
+### Start From The Closest Package
+
+In this repo, common starting points are:
+
+- `ml_pipes.ops` for image, inference, tensor-registry, context, region, and
+  side-effect operators
+- `ml_pipes.data_ops` for iterable and data-preparation workflows such as
+  filtering, mapping, deduplication, and shaping
+- `ml_pipes.torch.ops` for torch-specific operator boundaries
+
+The operator overview lives in [OPERATORS.md](OPERATORS.md). The concrete
+catalog lives in [operators/README.md](operators/README.md).
+
+### Reuse First, Then Add New Operators
+
+The normal composition order is:
+
+1. start from the closest existing operators
+2. compose as much of the pipeline as possible from them
+3. add new operators only where the existing operator surface does not cover
+   the need
+
+That is usually better than writing a large custom operator up front.
+
+When you do need a new operator, keep it narrow and follow
+[OPERATORS.md](OPERATORS.md).
+
+Examples in this repo:
+
+- [../examples/run_yolo8_onnx.py](../examples/run_yolo8_onnx.py) starts from
+  existing vision and inference operators
+- [../examples/run_sms_spam_prepare.py](../examples/run_sms_spam_prepare.py)
+  shows composition around data preparation and cleanup
+
+## Composing Pipelines
+
+When you already have named pipelines, ml-pipes gives you two ways to compose
+them: **join** and **merge**.
+
+Use this section when the question is no longer "how do I build one pipeline
+from steps?" but "how do I compose pipelines that already exist?"
 
 ### Join
 
-Joining two pipelines keeps the original pipelines as distinct, self-contained
-blocks. The joined pipeline treats each block as an opaque step. Two
-consequences follow directly:
+Joining two pipelines keeps the original pipelines as distinct,
+self-contained blocks. The joined pipeline treats each block as one step.
 
-- **Isolated context** — each block runs with a fresh `Context`. Internal
+Two consequences follow directly:
+
+- **Isolated context**: each block runs with a fresh `Context`. Internal
   `Store`/`Recall` keys are invisible outside the block, and outer keys are
   invisible inside.
-- **Live reference** — the joined pipeline holds a reference to the original
+- **Live reference**: the joined pipeline holds a reference to the original
   pipeline object. Mutating the source after composition is reflected at
-  runtime — the block evolves with its source.
+  runtime.
 
 ```
 Before
@@ -37,16 +180,21 @@ After
 └───────────────────────────────────────────────┘
 ```
 
+Join is the right choice when you want to keep boundaries between whole
+pipeline blocks.
+
 ### Merge
 
-Merging two pipelines produces a single uniform pipeline. The original
-pipelines lose their individual identity — there is no boundary between them
-at runtime. Two consequences follow directly:
+Merging two pipelines produces a single flat pipeline. The original pipelines
+lose their individual runtime identity inside the composed result.
 
-- **Shared context** — operators across the merged boundary share the same
+Two consequences follow directly:
+
+- **Shared context**: operators across the merged boundary share the same
   `Context`, so `Store`/`Recall` keys are visible on both sides.
-- **Snapshot** — the source pipeline's operators are copied into the new flat
-  list at build time. Mutating the source afterwards has no effect.
+- **Flattened operator list**: the source pipeline's current operators are
+  placed into a new flat list at build time. Extending the source pipeline
+  afterwards has no effect on the merged result.
 
 ```
 Before
@@ -64,113 +212,97 @@ After
 └────────────────────────────────────┘
 ```
 
-## API reference
+Merge is the right choice when the composed result should behave like one
+uniform pipeline.
 
-### Inside a pipeline definition
+### API Forms
+
+You can compose existing pipelines both inside and outside a pipeline
+definition.
+
+#### Inside a pipeline definition
 
 Use these inside the operator list passed to `Pipeline([...])`.
 
-#### Join `embed(p)` / `Embed(p)`
+##### Join `embed(p)` / `Embed(p)`
 
 Joins `p` as a self-contained block. Isolated context, live reference.
 
 ```python
-preprocess = Pipeline([Resize(), Normalize()])
-infer      = Pipeline([Infer("model.onnx"), Extract("output0")])
+preprocess = Pipeline([Resize((640, 640)), Normalize()])
+infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
 
 detection = Pipeline([
     Decode(),
     embed(preprocess),
     embed(infer),
-    NMS(...),
+    NMS(),
+    ToDetections(),
 ])
-
-result = detection("image.jpg")
 ```
 
-#### Merge `inline(p)` / `Inline(p)`
+##### Merge `inline(p)` / `Inline(p)`
 
-Merges `p`'s operators into the parent list at construction time. After
-`__init__` returns, no `Inline` marker exists in `self.operators` — it is
-always a plain flat list.
+Merges `p` into the parent list at construction time.
 
 ```python
-preprocess = Pipeline([Resize(), Normalize()])
+preprocess = Pipeline([Resize((640, 640)), Normalize()])
 
 detection = Pipeline([
     Decode(),
-    inline(preprocess),   # expands to Resize(), Normalize() here
-    Infer(...),
+    inline(preprocess),
+    Infer("model.onnx"),
+    Extract("boxes", "scores", "classes"),
+    NMS(),
+    ToDetections(),
 ])
-# detection.operators == [Decode(), Resize(), Normalize(), Infer(...)]
-
-result = detection("image.jpg")
 ```
 
-Nested `Inline` markers are fully expanded recursively.
+#### Outside a pipeline definition
 
----
+Use these to compose existing named pipelines directly.
 
-### Outside a pipeline definition
+##### Join `a >> b`
 
-Use these to compose existing named pipelines outside a list literal.
-Each mirrors its inside-definition counterpart.
-
-#### Join `a >> b`
-
-Mirrors `embed(p)`. Returns a **new** pipeline where both `a` and `b` are
-isolated blocks held by live reference. Equivalent to
-`Pipeline([Embed(a), Embed(b)])`.
-
-Chaining is flat: `a >> b >> c` produces `[Embed(a), Embed(b), Embed(c)]`,
-not a nested structure.
+Mirrors `embed(p)`. Returns a new pipeline where both `a` and `b` are
+isolated blocks held by live reference.
 
 ```python
-decode     = Pipeline([Decode()])
-preprocess = Pipeline([Resize(), Normalize()])
-infer      = Pipeline([Infer("model.onnx"), Extract("output0"), NMS(...)])
+decode = Pipeline([Decode()])
+preprocess = Pipeline([Resize((640, 640)), Normalize()])
+infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
+postprocess = Pipeline([NMS(), ToDetections()])
 
-detection = decode >> preprocess >> infer
-
-result = detection("image.jpg")
+detection = decode >> preprocess >> infer >> postprocess
 ```
 
-Neither `a` nor `b` is mutated as a result of `>>`. Both are held as live
-references — mutating either after composition is reflected at runtime.
+##### Merge `a + b`
 
-#### Merge `a + b`
-
-Mirrors `inline(p)`. Returns a **new** pipeline with `a`'s and `b`'s operators
-merged into one flat list with shared context. Equivalent to
-`Pipeline([*a.operators, *b.operators])`.
+Mirrors `inline(p)`. Returns a new flat pipeline with shared context.
 
 ```python
-resize_stage   = Pipeline([Resize(), Store("transform", index=1), Pick(0)])
-project_stage  = Pipeline([Recall("transform"), ProjectBoxes()])
+infer_stage = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
+project_stage = Pipeline([Recall("transform"), ProjectBoxes(), NMS(), ToDetections()])
 
-detection = resize_stage + infer_stage + project_stage
-
-result = detection("image.jpg")
+detection = (
+    Pipeline([Resize((640, 640)), Store("transform", index=1), Pick(0), Normalize()])
+    + infer_stage
+    + project_stage
+)
 ```
 
-Neither `a` nor `b` is mutated.
+##### Merge in place `pipeline.extend([...])`
 
-#### Merge in place `pipeline.extend([Op1, Op2, ...])`
-
-No inside-definition equivalent. Mutates `pipeline` by merging operators
-directly into its existing list and returns `self`. Use this when you already
-hold the pipeline handle and want to keep it. `Inline` markers inside the list
-are expanded at this point.
+Mutates an existing pipeline by appending more operators directly into its flat
+list.
 
 ```python
-pipeline = Pipeline([Decode(), Resize()])
+pipeline = Pipeline([Decode(), Resize((640, 640))])
 pipeline.extend([Normalize(), Infer("model.onnx")])
-pipeline.extend([NMS(...), ToDetections()])
-
-result = pipeline("image.jpg")
+pipeline.extend([Extract("boxes", "scores", "classes"), NMS(), ToDetections()])
 ```
 
-## Summary table
+### Summary Table
 
 | Syntax                    | Operation      | Where                    | Result object          |
 |---------------------------|----------------|--------------------------|------------------------|
@@ -180,97 +312,20 @@ result = pipeline("image.jpg")
 | `a + b`                   | merge          | outside definition       | new pipeline           |
 | `p.extend([...])`         | in-place merge | outside definition       | same pipeline (`self`) |
 
-## Use-cases
-
-### Join
-
-**Reusing shared preprocessing across two independent models** — each model
-pipeline stores intermediate values under its own keys. Because join gives
-each block a fresh context, there is no risk of one model's keys leaking into
-the other even if they happen to use the same name.
-
-```python
-# Both detector and classifier cache intermediate tensors under "features".
-# Joining keeps those caches isolated — neither block sees the other's value.
-detector   = Pipeline([Backbone(), Store("features"), DetectionHead()])
-classifier = Pipeline([Backbone(), Store("features"), ClassificationHead()])
-
-inference = detector >> classifier
-result = inference(frame)
-```
-
-**Registering a new model variant at deploy time** — a team ships the base
-pipeline and adds the new model head after the fact. Because both blocks are
-live references, the composed pipeline picks up the change without being
-rebuilt.
-
-```python
-preprocess = Pipeline([Decode(), Resize(640), Normalize()])
-detector   = Pipeline([Infer("yolo_v8.onnx"), Extract("output0")])
-
-detection_pipeline = preprocess >> detector
-
-# Later, the model is swapped for a quantised variant and NMS is added — no
-# need to touch detection_pipeline.
-detector.extend([NMS(iou_threshold=0.5)])
-
-detection_pipeline.validate()  # confirm the contract still holds before running ✅
-result = detection_pipeline("frame.jpg")
-```
-
-**Wrong mutation — output type changes silently break downstream blocks** —
-because blocks are live references, extending a pipeline with an operator that
-changes its output type will corrupt the contract for everything that follows.
-`validate()` catches this before it reaches production.
-
-```python
-preprocess  = Pipeline([Decode(), Resize(640), Normalize()])  # -> np.ndarray
-detector    = Pipeline([Infer("yolo.onnx"), Extract("output0")])  # -> Detections
-postprocess = Pipeline([NMS(), ScaleBoxes(), ToJSON()])  # expects Detections
-
-detection_pipeline = preprocess >> detector >> postprocess
-
-# A developer serialises detections inside the detector block for debugging,
-# changing its output type from Detections to dict.
-detector.extend([SerializeToDict()])  # output is now dict, not Detections ❌
-
-detection_pipeline.validate()  # raises PipelineValidationError: contract mismatch
-```
-
-### Merge
-
-**Projecting bounding boxes back to the original image space** — the resize
-transform is computed once during preprocessing and needs to be available
-several steps later to map model output coordinates back to the source frame.
-Merging keeps a single shared context across all three stages.
-
-```python
-# Resize stores the scale/offset transform so ProjectBoxes can undo it later.
-preprocess  = Pipeline([Decode(), Resize(640), Store("transform", index=1), Pick(0), Normalize()])
-infer       = Pipeline([Infer("yolo.onnx"), Extract("output0"), NMS()])
-postprocess = Pipeline([Recall("transform"), ProjectBoxes(), DrawAnnotations()])
-
-detection_pipeline = preprocess + infer + postprocess
-# "transform" written in preprocess is visible to postprocess ✅
-
-result = detection_pipeline("frame.jpg")
-```
-
-## Validation
+### Validation After Composition
 
 All composition forms are compatible with `validate()`.
 
-- `inline` and `+` expand to flat operator lists — the validator sees a single
-  unbroken chain with no special handling needed.
-- `embed` and `>>` produce an `Embed` operator that validates the boundary type
-  against the inner pipeline's contract during the outer pipeline's validation.
+- `inline` and `+` expand to a flat operator list, so validation sees one
+  continuous chain
+- `embed` and `>>` validate the outer boundary against the inner pipeline's
+  contract
 
-Because `>>` and `embed` hold live references, mutating a joined pipeline
-after composition changes the contract of the composed pipeline. Always call
-`validate()` after any such mutation and before the next execution.
+Because `>>` and `embed` hold live references, mutating a joined source
+pipeline changes the contract of the composed pipeline. Re-run `validate()`
+after such changes and before the next execution.
 
 ```python
-# Type contract is validated end-to-end across all composition forms
-detection = decode_pipeline >> preprocess_pipeline + infer_pipeline
+detection = decode_pipeline >> infer_pipeline
 detection.validate()
 ```
