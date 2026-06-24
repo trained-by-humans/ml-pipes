@@ -8,125 +8,270 @@ They are still part of the same pipeline. `ml-pipes` does not introduce a
 separate pipeline type for batched or parallel execution. Instead, the main
 engine delegates the enclosed slice to a region opener when it reaches one.
 
-## What A Region Is
+## What Regions Are
 
-Architecturally, a region is defined by:
+A region is a bounded section of one pipeline. Architecturally, a region has
+three parts:
 
-- a `RegionOpener`
+- a `RegionOpener` marking the start of the region
 - a matching `RegionCloser`
-- a bounded slice of operators between them
+- a body: the operators between the opener and closer
 
-The built-in region pairs are:
+Minimal example:
 
-- `Batch ... UnBatch`
-- `Scatter ... Gather`
+```python
+from ml_pipes import Batch, Collate, Distribute, Infer, Pipeline, UnBatch
 
-At runtime, the main execution loop does not interpret the enclosed operators
-one step at a time. It finds the matching closer, builds a bounded
-`execute_region(...)` closure for that slice, and calls
-`operator.run_region(...)`.
 
-That gives regions two useful properties:
-
-- the outer pipeline still reads as one linear operator list
-- each region can own its own execution policy without complicating the main
-  engine
-
-From outside the region, the boundary is still treated as a normal `In -> Out`
-step in the pipeline.
-
-## Region Isolation
-
-Each region body executes as its own bounded sub-run.
-
-That matters for context scope:
-
-- values stored inside a region stay inside that region
-- outer stored keys are not automatically shared into isolated sub-runs
-- validation uses the same boundaries when checking `Store` and `Recall`
-
-This is why region structure and region-local context scope can be checked
-statically before the pipeline runs.
-
-## Batch / UnBatch
-
-`Batch` owns a `BatchGate`, which coordinates multiple concurrent callers
-reaching the same pipeline instance.
-
-Runtime behavior:
-
-1. Each caller entering `Batch` calls `gate.enter(current)`.
-2. Threads accumulate until either:
-   - `size` samples arrive, or
-   - `timeout` expires for the current batch.
-3. One thread becomes the leader and receives all pending inputs as a list.
-4. Followers block waiting for the leader’s result distribution.
-5. The leader executes the enclosed region once on the batch.
-6. At `UnBatch`, results are distributed back to individual waiting callers.
-
-The typical batched region is:
-
-```text
-sample
-  -> Batch
-  -> list[sample]
-  -> Collate
-  -> Infer
-  -> Distribute
-  -> UnBatch
-  -> sample_result
+pipeline = Pipeline([
+    Decode(),
+    Batch(size=8, timeout=0.05),
+    Collate(),
+    Infer("model.onnx"),
+    Distribute(),
+    UnBatch(),
+    ToDetections(),
+])
 ```
 
-The engine does not have a special case for `UnBatch`. `Batch.run_region()`
-executes the bounded slice, then uses `BatchGate.distribute()` to hand each
-caller its own post-region value.
+Here, the region is:
 
-Key design points:
+- opener: `Batch(...)`
+- body: `Collate()`, `Infer(...)`, `Distribute()`
+- closer: `UnBatch()`
 
-- batching happens across concurrent invocations of the same pipeline object
-- only the leader runs the region body
-- followers do not re-execute the region
-- exceptions are propagated to all waiting followers through
-  `distribute_exception()`
+From outside, a region still behaves like one linear boundary in the pipeline.
+The opener describes the boundary before the region and the first value seen by
+the region body. The closer describes the boundary at the end of the body and
+the value after leaving the region.
 
-## Scatter / Gather
+## How Regions Work
 
-`Scatter` owns a `ScatterGate`, backed by a `ThreadPoolExecutor`.
+At runtime, the main execution loop does not interpret the region body one
+operator at a time. It:
 
-Runtime behavior:
+1. reaches a `RegionOpener`
+2. finds the matching `RegionCloser`
+3. builds a bounded `execute_region(...)` closure for the enclosed slice
+4. calls `opener.run_region(...)`
+5. resumes after the closer with the value returned by the opener
 
-1. The current value must be `list[T]`.
-2. `Scatter.run_region()` submits one worker task per item.
-3. Each worker runs the enclosed region independently through the bounded
-   `execute_region()` closure.
-4. Each worker gets a fresh `Context` because each sub-execution calls
-   `_execute()`.
-5. `Gather` waits for all worker entries to complete, preserving submission
-   order.
-6. The result after the region is `list[U]`.
+Each region body runs as its own bounded sub-execution. That is why context
+scope, child traces, and validation stay aligned with the region boundary.
 
-The typical scatter region is:
+## Why Regions Exist
 
-```text
-list[item]
-  -> Scatter
-  -> item
-  -> per-item region
-  -> Gather
-  -> list[result]
+Regions exist because sometimes "call the next operator" is not the right
+execution model.
+
+The design pressure comes from both sides:
+
+- operators should stay focused on their local transform instead of owning
+  coordination or execution policy
+- `Pipeline` should stay generic instead of hard-coding special logic for
+  batching, scatter, streaming, or other reusable execution patterns
+
+Regions sit in the middle. They let the framework support recurring execution
+quirks without making ordinary operators or the main engine more complex than
+they need to be.
+
+The important design point is that this does not require another pipeline
+abstraction. Regions let the framework keep one operator-list model while still
+supporting specialized execution.
+
+That gives the system a few useful properties:
+
+- pipelines still read top-to-bottom as one operator list
+- execution policy stays local to the region opener instead of spreading into
+  the main engine
+- validation can reason about the same boundaries the runtime will execute
+- tracing can attach child traces to the region span
+- higher-level patterns such as tiling can be built by composition instead of
+  special engine modes
+
+## Examples
+
+### Batch / UnBatch
+
+`Batch` / `UnBatch` is the cross-invocation case. Multiple callers reach the
+same pipeline instance one sample at a time, but the region body runs once on a
+list of samples.
+
+Example:
+
+```python
+from ml_pipes import Batch, Collate, Distribute, Extract, Infer, NMS
+from ml_pipes import Normalize, Pipeline, Resize, ToDetections, UnBatch
+
+
+pipeline = Pipeline([
+    Resize((640, 640)),
+    Normalize(),
+    Batch(size=8, timeout=0.05),
+    Collate(),
+    Infer("model.onnx"),
+    Distribute(),
+    UnBatch(),
+    Extract("boxes", "scores", "classes"),
+    NMS(),
+    ToDetections(),
+])
 ```
 
-Unlike `Batch`, scatter is fan-out within one invocation rather than
-coordination across multiple invocations.
+What happens at runtime:
 
-## Why Regions Matter
+- each caller entering `Batch` waits at the same `BatchGate`
+- once the gate fills or times out, one leader thread receives the whole batch
+- only that leader executes the region body
+- `UnBatch` routes one post-region result back to each waiting caller
 
-The region abstraction keeps the engine small:
+This pattern is useful for cases such as GPU inference, where the pipeline can
+benefit from executing the region body on formed batches instead of one item at
+a time.
 
-- `Pipeline` only needs to detect openers and delegate
-- concurrency policies live in operator-specific code
-- validation still uses one uniform nesting model
+### Scatter / Gather
 
-Tiling is a good example of this design style: it is built from ordinary
-composition (`Tile`, `Scatter`, `Gather`, `Stitch`, `NMM`) rather than a
-special engine mode.
+`Scatter` / `Gather` is the fan-out case. One pipeline invocation reaches the
+region with `list[T]`, and the region body runs once per item.
+
+Example:
+
+```python
+from ml_pipes import Extract, Gather, Infer, NMS, Normalize, Pick
+from ml_pipes import Pipeline, Recall, Resize, Scatter, Stitch, Store, Tile
+from ml_pipes import ToDetections
+
+
+pipeline = Pipeline([
+    Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
+    Store("tile_rects", index=1),
+    Pick(0),
+    Scatter(max_concurrency=4),
+    Resize((640, 640)),
+    Normalize(),
+    Infer("model.onnx"),
+    Extract("boxes", "scores", "classes"),
+    NMS(),
+    ToDetections(),
+    Gather(),
+    Recall("tile_rects"),
+    Stitch(),
+])
+```
+
+What happens at runtime:
+
+- `Scatter` submits one worker task per item
+- each worker runs the same enclosed operator slice independently
+- each sub-execution gets a fresh `Context`
+- `Gather` waits for all workers and resumes with `list[U]` in submission order
+
+This pattern is useful when one input naturally expands into many independent
+pieces of work, such as tiles, frames, or per-item transforms.
+
+## How To Define A Region
+
+A custom region is another opener / closer pair in the same pipeline model.
+
+### 1. Define the closer
+
+Subclass `RegionCloser[BodyOutputT, OutputT]`.
+
+The closer is usually a stateless marker. Its job is to mark where the region
+ends and, when necessary, describe the boundary after the region.
+
+If the closer needs to make the post-region boundary explicit for validation,
+implement `resolve_contract(...)`. Simple closers may not need that once the
+region boundary can be inferred directly from their generic parameters.
+
+### 2. Define the opener
+
+Subclass `RegionOpener[InputT, BodyInputT]` and set `closing_type` to the
+matching closer class.
+
+The opener owns the execution strategy and any coordination state. For example,
+`Batch` owns a `BatchGate`, and `Scatter` owns a `ScatterGate`.
+
+Decorate the opener with `@Operator` if you want it to show up in
+`repr()` and `describe()` like other configured operators.
+
+### 3. Implement `run_region(...)`
+
+`run_region(...)` is where the region decides how the enclosed body runs.
+
+It receives:
+
+- `current`: the value just before the region
+- `label`: the operator label used in traces
+- `execute_region`: a bounded callable for the enclosed operator slice
+- `trace`: the parent trace object
+- `cfg`: tracing configuration
+
+The opener can call `execute_region(...)` once, many times, on different
+threads, or after some coordination step. That is the core extension point.
+
+### 4. Return the post-region value
+
+`run_region(...)` returns the value that should appear after the closer. The
+engine then resumes at the operator after that closer.
+
+That means the opener controls both:
+
+- how the body executes
+- what value the surrounding pipeline sees after the region
+
+### 5. Teach validation the real boundary
+
+Use the opener and closer generics to describe the local boundary first.
+
+- `RegionOpener[InputT, BodyInputT]` means:
+  `InputT` before the region, `BodyInputT` for the first operator inside it
+- `RegionCloser[BodyOutputT, OutputT]` means:
+  `BodyOutputT` for the last operator inside it, `OutputT` after the region
+
+If that is still not precise enough, implement `resolve_contract(...)` on the
+opener, the closer, or both. This is how built-in regions express boundaries
+such as:
+
+- `Batch`: `T -> list[T]`
+- `UnBatch`: `list[T] -> T`
+- `Scatter`: `list[T] -> T`
+- `Gather`: `T -> list[T]`
+
+Minimal skeleton:
+
+```python
+from typing import Any
+
+from ml_pipes import Operator, RegionCloser, RegionOpener
+
+
+class MyRegionEnd(RegionCloser[str, list[str]]):
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        out = list[current_output] if current_output is not None else list[Any]
+        return (Any,), out
+
+
+@Operator
+class MyRegionStart(RegionOpener[list[str], str]):
+    closing_type = MyRegionEnd
+
+    def run_region(self, current, label, execute_region, trace, cfg):
+        results = []
+        for value in current:
+            child_trace = ...
+            result, child_trace = execute_region(value, child_trace)
+            results.append(result)
+        return results
+```
+
+> [!TIP]
+> Read `Batch`, `Scatter`, and `PerItem` for three concrete region styles:
+> cross-invocation coordination, fan-out parallelism, and repeated per-item
+> execution.
