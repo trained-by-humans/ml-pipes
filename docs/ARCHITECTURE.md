@@ -1,285 +1,317 @@
 # Architecture
 
-This document explains how `ml-pipes` works internally: how a pipeline is represented, how values move through it at runtime, how region execution is delegated, and how validation and tracing are layered on top.
+This document is a map of how `ml-pipes` is split internally. It
+focuses on ownership boundaries: what each layer owns, how one invocation moves
+through the system, and where a change should usually land.
 
-## Overview
+It is not a guide to using `ml-pipes` features. The detailed user-facing
+semantics live in the linked docs.
 
-At the highest level, the project is a small execution engine for composable inference pipelines.
+## What ml-pipes Is
 
-The core idea is:
+`ml-pipes` is a generic execution harness around explicit operator boundaries.
 
-1. A pipeline is just an ordered list of operators.
-2. Data moves through that list as a flowing value plus side-channel context.
-3. Each operator transforms the flowing value, interacts with context, or both.
+The design stays split on purpose:
 
-Every pipeline invocation carries two main kinds of runtime data:
+- `Pipeline` owns generic execution, composition boundaries, and lifecycle
+  hooks.
+- Operators own task and domain logic.
+- `Context` carries side-channel state that should not stay in the flowing
+  value.
+- Regions own bounded execution strategies such as batching and fan-out.
+- Tooling works by reading or validating the same boundaries rather than
+  inventing a separate model.
 
-- flowing value: the value currently moving through the pipeline
-- side-channel context: an immutable key/value store used by context-aware operators
+The design goal is to provide useful pipeline features while keeping ordinary
+operators as simple as possible. In the normal case, an operator should only
+need to define its boundary and its task logic; composition, validation,
+inspection, tracing, benchmarking, and other cross-cutting behavior should be
+handled by the surrounding system.
 
-The engine itself is deliberately small:
+That keeps the core engine small:
 
 ```text
-input + context
-  -> operator 0: output
-  -> operator 1: output
-  -> operator 2: ...
-  -> ...
-  -> output
+input value + fresh context
+  -> operator boundary
+  -> operator boundary
+  -> bounded region (optional)
+  -> operator boundary
+  -> output value
 ```
 
-## Main Building Blocks
+The pipeline engine itself is payload-agnostic. Image payloads, tensor
+payloads, registries, detections, and data-preparation values are ordinary
+operator inputs and outputs, not special pipeline modes.
 
-### 1. Execution engine
+## Main Components
 
-`Pipeline` in `core.py` is the runtime and validation engine. It is responsible for:
+### Pipeline
 
-- storing the operator list
-- flattening `Inline(...)` markers at construction time
-- executing operators in order
-- stepping into bounded regions
-- validating structure, context scope, and type contracts
-- attaching traces to a collector
+The pipeline engine owns:
 
-`Embed`, `Inline`, `embed()`, and `inline()` also live here because composition changes how the engine sees the operator list.
+- the ordered operator list
+- top-level invocation lifecycle
+- dispatch of normal operators, `ContextOp` steps, and region openers
+- composition boundaries between merged and embedded pipelines
+- trace delivery after a call completes or fails
 
-### 2. Runtime data model
+It does not own:
 
-`types.py` defines the small set of domain payloads:
+- model-specific preprocessing or postprocessing
+- domain payload semantics
+- use-case-specific execution logic beyond generic region delegation
 
-- `ImagePayload`: image array plus color space and layout metadata
-- `TensorPayload`: tensor array plus layout and dtype metadata
-- `RuntimeOutputs`: named model outputs exactly as returned by ONNX Runtime
-- `TensorRegistry`: mutable named store used during postprocessing
-- `ResizeTransform`: enough information to map model-space coordinates back to the source image
-- `Detections` and `Segmentations`: final structured outputs
+### Operators
 
-This split is intentional:
+Operators are the unit the engine composes and the unit the tooling sees.
 
-- immutable dataclasses represent coarse pipeline stages cleanly
-- `TensorRegistry` is the mutable named workspace used for tensor-heavy postprocessing
+Architecturally, that means:
 
-### 3. Context system
+- one operator should own one meaningful input-to-output boundary
+- task logic belongs in operators, not in the pipeline engine
+- fixed-length tuples are the multi-value routing mechanism between steps
+- annotations, labels, and config descriptions give validation, inspection,
+  tracing, and description something concrete to work with
 
-`context.py` provides:
+For operator boundaries and creation guidelines, see [OPERATORS.md](OPERATORS.md).
+For the shared operator catalog, see [operators/README.md](operators/README.md).
 
-- `Context`: immutable mapping with `store()`/`load()`/`merge()`
-- `ContextOp`: operator protocol for steps that need access to the side-channel state
-- `Store`: saves part or all of the current value under a key
-- `Recall`: injects a stored value back into the current stream
+### Context
 
-The engine treats `ContextOp` differently from normal callables: it calls `apply(current, context)` and receives both a new value and a new `Context`.
+`Context` is the side-channel state model. It exists so a pipeline can keep one
+clear flowing value while still storing values that need to be recovered later.
 
-### 4. Region system
+The important properties are:
 
-Regions are the mechanism that lets a pipeline temporarily switch from plain sequential execution to a bounded sub-execution strategy.
+- only `ContextOp` steps read or write the `Context`
+- each top-level pipeline call starts with a fresh `Context`
+- embedded pipelines and region sub-executions are isolated because they run
+  through separate bounded execution calls
 
-The architectural pieces are:
+### Regions
 
-- `RegionOpener` / `RegionCloser`: markers that define a bounded region in the operator list
-- `Batch` / `UnBatch`: coordinate multiple concurrent callers into one batched region execution
-- `Scatter` / `Gather`: fan a `list[T]` out to worker threads and join the results back into `list[U]`
+Regions sit between operators and the pipeline engine. They handle execution
+strategies that are still generic enough to reuse, but too structural to bury
+inside ordinary operators and too use-case-specific to hard-code into
+`Pipeline`.
 
-The important point is that regions are not a separate pipeline type. They are embedded directly in the same operator list and delegated by the main execution loop.
+A region:
 
-The detailed runtime behavior of `Batch`/`UnBatch` and `Scatter`/`Gather`
-belongs in [`REGIONS.md`](REGIONS.md).
+- is defined by an opener/closer pair inside the same operator list
+- owns how the enclosed slice executes
+- still presents a normal input/output boundary to the rest of the pipeline
 
-### 5. Standard operators
+Regions are embedded in the same operator list; they do not create a separate
+pipeline type. `Batch`/`UnBatch` and `Scatter`/`Gather` are the main built-in
+examples.
 
-The operator library supplies the concrete steps that the engine composes: preprocessing, inference, registry transforms, output conversion, context interaction, region coordination, tiling, and side effects.
+For region semantics and examples, see [REGIONS.md](REGIONS.md).
 
-The operator overview and design principles belong in
-[`OPERATORS.md`](OPERATORS.md). The detailed shared operator catalog belongs in
-[`operators/README.md`](operators/README.md). The important architectural point
-here is that the engine does not hard-code model families or tasks; it just
-executes a list of small operators.
+### Composition
+
+Composition is essentially arranging operators into one larger pipeline.
+`ml-pipes` supports two ways to do that, and they imply different runtime
+boundaries:
+
+- merge (`+`) flattens pipelines into one operator list with one shared
+  `Context`
+- join (`>>`) preserves a child pipeline boundary through `Embed`, so the child
+  runs as an isolated step with its own `Context`
+
+This distinction matters architecturally because it changes both runtime
+isolation and what the tooling can see as one step.
+
+For the user-facing composition model, see [COMPOSITION.md](COMPOSITION.md).
 
 ## Execution Flow
 
+One pipeline invocation follows the same path whether or not extra tooling is
+attached:
 
-`Pipeline.__call__` does three things:
+1. A top-level call starts with an input value, a fresh `Context`, and
+   optionally a trace object.
+2. The engine walks the operator list left to right.
+3. Normal operators receive the current value. If one step returns a
+   fixed-length tuple and the next step expects multiple positional inputs,
+   that tuple is routed by position.
+4. `ContextOp` steps receive both the current value and the current `Context`,
+   and return updated versions of them.
+5. When the pipeline reaches a region, it delegates execution of the enclosed
+   operators to that region as one bounded unit.
+6. If tracing is enabled, spans are recorded for the same operator and region
+   boundaries the engine executes.
+7. After the call completes or fails, the finished trace is delivered to the
+   collector.
 
-1. Initializes per-call tracing state when tracing is enabled.
-2. Calls `_execute(value, trace=trace)`.
-3. In a `finally`, delivers the trace to the configured collector if tracing is enabled.
+That is why validation, inspection, tracing, and benchmarking all line up with
+operator boundaries rather than a separate internal graph.
 
-That `finally` matters: a failing operator still produces a trace containing completed spans and the error span.
+## Tooling
 
-### `_execute()`
+Tooling in `ml-pipes` is layered on top of the same execution and boundary
+model. Most tools do not introduce a new executor. They reuse pipeline
+execution, operator descriptions, or trace data. Tracing is the exception: it
+is built into pipeline execution itself and then supports tools such as
+inspection and benchmarking.
 
-`_execute()` is the core loop. For a given operator range it:
+### Validation
 
-1. creates a fresh `Context`
-2. starts from the supplied input value
-3. walks operators from `start` to `end`
-4. dispatches normal operators through `_step()`
-5. dispatches region-opening operators through `_step_into_region()`
+Validation is the static safety layer over the runtime model. It checks
+whether a pipeline is structurally and type-wise coherent before runtime,
+without executing the pipeline.
 
-The fresh-context behavior is important:
+Built on top of:
 
-- every top-level pipeline call gets a fresh context, which is why embedded pipelines are isolated when `Embed.__call__` invokes a separate `Pipeline.__call__`
-- every region sub-execution also gets a fresh context for that sub-run, which is why region bodies such as scatter workers are naturally isolated
+- the pipeline execution model, so validation checks the same left-to-right
+  boundaries the runtime will use
+- operator boundaries, especially annotations and `resolve_contract(...)`
+- region semantics
+- context semantics
 
-### `_step()`
+Main components:
 
-For each non-region operator:
+- `Pipeline.validate()` as the public entry point
+- `PipelineValidator`
+- typing and signature inspection helpers
 
-1. if it is a `ContextOp`, call `apply(current, context)`
-2. otherwise, inspect the callable signature and build positional arguments from `current`
-3. record a `StepSpan`
-4. if the operator raises, record an error span and re-raise
+For the concrete validation rules and contract-resolution model, see
+[VALIDATION.md](VALIDATION.md).
 
-Argument routing is intentionally simple:
+### Tracing
 
-- if the next operator takes one positional parameter, the whole `current` value is passed as-is
-- if it takes multiple positional parameters, `current` must be a tuple of matching arity
+Tracing is the runtime observation layer. It observes runtime behavior without
+changing the pipeline structure. It is built into pipeline execution rather
+than layered on top of it, and other tools, especially inspection and
+benchmarking, build on top of it.
 
-That gives the library its tuple-unpacking composition model without extra wrappers.
+Built into:
 
-### `_step_into_region()`
+- the pipeline execution loop, which emits spans at operator and region
+  boundaries
+- operator and region boundaries themselves
 
-For `RegionOpener` subclasses, the engine:
+Main components:
 
-1. Finds the matching closing operator.
-2. Builds a bounded `execute_region(value, child_trace)` closure that can only run that subrange.
-3. Calls `operator.run_region(...)`.
-4. Skips the operator index forward to the matching closer.
+- `InvocationTrace` as the invocation/call trace
+- `StepSpan` as step / region trace span
+- `TraceCollector`s such as `CaptureCollector`, `PrintCollector`, and
+  `AggregateCollector`
 
-So regions are not interpreted by the main loop one operator at a time. The
-opener takes control and decides how the enclosed slice executes. This is a
-runtime detail only; static typing can still treat the region boundaries as
-linear `In -> Out` steps in the operator list.
+For trace lifecycle, built-in collectors, and custom collector patterns, see
+[TRACING.md](TRACING.md).
 
-## Composition
+### Inspection
 
-The engine supports two composition modes:
+Inspection is built directly on top of tracing. `Pipeline.inspect()` runs the
+pipeline once with captured outputs and returns an `InspectionResult`.
+`PipelineInspector` then turns that artifact into terminal, HTML, or plot
+output through formatters and renderers.
 
-- merge: flatten operators into one runtime list with shared `Context`
-- join: keep a child pipeline as an isolated step with its own `Context`
+Built on top of:
 
-Architecturally, the distinction matters because it changes whether the engine sees one flat operator list or a boundary represented by `Embed`.
+- tracing, especially the captured span tree and `CaptureCollector`
+- normal pipeline execution
 
-The full composition semantics and user-facing APIs belong in
-[`COMPOSITION.md`](COMPOSITION.md).
+Main components:
 
-## Validation
+- `Pipeline.inspect()` as the public entry point
+- `InspectionResult` as the captured inspection artifact
+- `PipelineInspector` as the display-oriented inspection layer
+- span formatters, output formatters, and renderers
 
-`Pipeline.validate()` is the static safety layer on top of the runtime engine. Internally it checks:
+### Benchmarking
 
-- region structure
-- context scope
-- left-to-right type contract compatibility
-- optional strict-mode rejection of unresolved `Any`
+Benchmarking is built on top of tracing. It measures repeated-run behavior and
+compares variants or configurations without introducing a different runtime.
 
-The architectural point is that validation mirrors actual runtime semantics: region nesting, context isolation, and boundary typing are checked the same way the engine will execute them.
+Built on top of:
 
-The full validation rules, examples, and strict-mode behavior belong in
-[`VALIDATION.md`](VALIDATION.md).
+- tracing, whose per-run timing data benchmarking aggregates into
+  repeated-run measurements
+- normal pipeline execution
+- factories, which support config-driven sweeps and builder workflows
 
-## Tracing
+Main components:
 
-Tracing is opt-in and decoupled from execution. Each invocation builds its own trace, operators append spans as they run, and the finished trace is delivered to a collector after the call completes or fails.
+- `Benchmark` as the single-pipeline measurement loop
+- `BenchmarkSweep` as the config-sweep execution layer
+- `BenchmarkBuilder` as the fluent benchmark setup layer
 
-Architecturally, regions can attach child traces, so batch and scatter preserve nested timing structure without changing the main execution loop.
+For benchmarking workflows, sweeps, and CLI usage, see
+[BENCHMARKING.md](BENCHMARKING.md). For tuning guidance, see
+[PERFORMANCE.md](PERFORMANCE.md).
 
-The collector types, output format, and tracing API belong in
-[`TRACING.md`](TRACING.md).
+### Pipeline Description
 
-## Example Pipelines
+Pipeline description is a standalone structural tool. It surfaces pipeline
+structure without executing the pipeline. `Pipeline.describe()` and
+`repr(pipeline)` are the public entry points; both are thin surfaces over the
+same structural description model.
 
-The examples are not just demos; they also show the intended assembly patterns:
+Built on top of:
 
-- [`examples/run_yolo8_onnx.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/run_yolo8_onnx.py): standard single-image detection
-- [`examples/run_batch_yolo8_onnx.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/run_batch_yolo8_onnx.py): cross-invocation batching with `Batch`/`UnBatch`
-- [`examples/streaming/run_yolo8_webcam.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/streaming/run_yolo8_webcam.py): embedding a reusable inference sub-pipeline into a live stream loop
-- [`examples/streaming/run_shibuya_counter.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/streaming/run_shibuya_counter.py): threaded streaming, optional tiling, and throughput tracing
-- [`examples/run_yolo8_tracing.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/run_yolo8_tracing.py): tracing API usage
+- pipeline objects and composition structure
+- operator boundaries, especially operator descriptions
 
-### Typical Detection Flow
+Main components:
 
-A standard image detection example, such as [`examples/run_yolo8_onnx.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/run_yolo8_onnx.py), looks like this:
+- `Pipeline.describe()` / `repr(pipeline)` as the public entry points
+- `PipelineDescription` as the structural description artifact
+- `OperatorDescription` as the per-operator description model
 
-```text
-Path
-  --LoadFile--> bytes
-  --Decode--> ImagePayload
-  --Resize--> (ImagePayload, ResizeTransform)
-  --Store("resize_transform", index=1)--> (ImagePayload, ResizeTransform)
-  --Pick(0)--> ImagePayload
-  --Normalize--> TensorPayload
-  --Infer--> RuntimeOutputs
-  --Extract--> TensorRegistry
-  --tensor ops / score ops / box ops--> TensorRegistry
-  --NMS--> TensorRegistry
-  --Recall("resize_transform")--> (TensorRegistry, ResizeTransform)
-  --ProjectBoxes--> TensorRegistry
-  --ToDetections--> Detections
-```
+### Factories
 
-Two patterns show up repeatedly across examples:
+Factories adapt configuration into concrete pipelines or input builders. They
+package construction logic without changing how pipeline execution works.
 
-- use `Store` before a destructive transform, then `Recall` later
-- keep model-specific logic localized to the operators between `Infer` and the final output conversion
+Built on top of:
 
-That is why the project can reuse large parts of the pipeline across YOLO, RF-DETR, Mask R-CNN, and tiled/streaming examples.
+- pipeline objects and input builders
+- config-driven construction of callables
 
-## Extending The System
+Main components:
 
-The main ways to extend the system are:
+- `Factory` as the core concept
+- `PipelineFactory` (and its decorator `@pipeline_factory`)
+- `DataFactory` (and its decorator `@data_factory`)
 
-### Add a new plain operator
+### CLI
 
-Implement `__call__` with type annotations.
+The CLI is a thin interface layer that exposes `ml-pipes` features as commands.
+It does not introduce a separate execution model. It mainly loads references,
+resolves factories, parses config, and invokes existing pipeline and
+benchmarking surfaces.
 
-Use this when the operator is just a transformation of the current value.
+Built on top of:
 
-### Add a new context-aware operator
+- pipeline execution
+- factories, which provide discoverable pipeline and data builders
+- standalone tools such as benchmarking
 
-Implement `ContextOp`.
+Main components:
 
-Use this when the operator must read or write the side-channel `Context`.
+- `python -m ml_pipes` as the public entry point
+- Commands like `run` and `benchmark`
+- module loading, factory discovery, config parsing, and result-saving helpers
 
-### Add a generic operator with precise validation
+## Where Changes Belong
 
-Implement `resolve_contract(...)`.
+When deciding where a change belongs, prefer the narrowest layer that can own
+it:
 
-Use this when the real output type depends on upstream types or tuple routing.
+- a new transformation or conversion of the flowing value: operator
+- a step that must read or write side-channel state: `ContextOp`
+- a reusable way to execute a bounded slice differently: region
+- a new structural or boundary safety rule: validation layer
+- a new trace export, monitor, or aggregate: collector
+- a new inspection view, formatter, renderer, or artifact: inspection layer
+- a new structural representation of a pipeline without execution: description
+  layer
+- a new repeated-run measurement, sweep, or benchmark workflow: benchmarking,
+  factory, or CLI layer
+- a change to how every pipeline invocation executes or how pipelines compose:
+  pipeline engine
 
-### Add a new side-effect operator
-
-Subclass `SideEffectOp`.
-
-Use this when the operator performs an effect but should pass the value through unchanged and still work under strict validation.
-
-### Add a new execution strategy
-
-Implement a new `RegionOpener`/`RegionCloser` pair plus its coordination primitive.
-
-This is the architectural pattern used by both batching and scatter/gather.
-
-## Design Tradeoffs
-
-The project makes a few deliberate tradeoffs:
-
-- It prefers explicit dataflow over hidden object state.
-- It uses Python type annotations as lightweight contracts rather than a full static type system.
-- It keeps the engine small and pushes specialized behavior into operators.
-- It accepts a mutable `TensorRegistry` in postprocessing for ergonomic tensor manipulation, while keeping higher-level payloads immutable.
-- It uses composition (`inline`, `embed`, `+`, `>>`) rather than deep model-specific inheritance.
-
-The result is a system that is easy to read from top to bottom: most behavior is visible directly in the operator list, while the engine underneath remains compact.
-
-## Reading Guide
-
-If you want to understand the project quickly, read the code in this order:
-
-1. [`src/ml_pipes/core.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/src/ml_pipes/core.py)
-2. [`src/ml_pipes/context.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/src/ml_pipes/context.py)
-3. [`src/ml_pipes/ops.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/src/ml_pipes/ops.py)
-4. [`src/ml_pipes/batch.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/src/ml_pipes/batch.py)
-5. [`src/ml_pipes/scatter.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/src/ml_pipes/scatter.py)
-6. [`src/ml_pipes/tracing.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/src/ml_pipes/tracing.py)
-7. [`tests/test_core.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/tests/test_core.py), [`tests/test_batch.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/tests/test_batch.py), [`tests/test_scatter.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/tests/test_scatter.py), [`tests/test_tracing.py`](/Users/esbati.keivan/PycharmProjects/InferencePipeline/tests/test_tracing.py)
-
-That path takes you from the engine, to its state model, to the operators built on top of it, to the tests that define the intended behavior.
+> [!TIP]
+> Default to operators before touching `Pipeline`. Move behavior into the core
+> engine only when it must be generic across all pipelines.
