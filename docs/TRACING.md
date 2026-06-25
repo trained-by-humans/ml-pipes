@@ -1,308 +1,160 @@
 # Tracing
 
-ml-pipes includes a built-in tracing system that records per-operator latency
-for every pipeline call. It is **opt-in** — pipelines without a collector
-skip all collector calls, I/O, and synchronization.
+## What Traces Are
 
-## Primitives
+A trace is the recorded execution of one pipeline call.
 
-| Name | What it is |
-|---|---|
-| `StepSpan` | One operator step: label, start time, duration, error flag, and optional captured data (shapes, output value, operator config) |
-| `InvocationTrace` | One complete pipeline call: ordered list of `StepSpan`s, total duration, optional `batch_size` and `workers` annotations |
-| `TraceCollector` | Interface with a single `on_trace(trace)` method — implement this to consume traces |
-| `TracingConfig` | Groups collector + operator labels + capture flags (`capture_shapes`, `capture_outputs`, `capture_config`) |
-| `merge_traces(traces)` | Averages a list of `InvocationTrace` objects into one, computing mean per-span duration. Recurses into child traces. Used internally to produce an average worker trace for Scatter regions. |
+It captures the operator-by-operator view of that call, including:
 
-## How it works
+- which operators ran
+- how long each step took
+- where a failure happened
+- how time was distributed across a region such as `Batch` or `Scatter`
 
-Each `pipeline(value)` call builds an `InvocationTrace` entirely on the
-calling thread — each operator step appends a `StepSpan` with its wall-time
-duration to that thread's own trace object. After the pipeline returns its
-result to the caller, it hands the finished trace to the collector via
-`on_trace(trace)`.
-
-Because tracing is confined to the calling thread:
-
-- **No locking needed in the pipeline.** The trace is never shared between
-  threads during execution, so there is nothing to protect. If the collector
-  writes to shared state (a file, a metrics sink, a list), that is the only
-  place a lock is needed — and it runs after the result is already returned.
-- **One complete trace per invocation.** The collector receives a fully-formed
-  `InvocationTrace` covering the entire call, so every invocation can be
-  attributed, correlated, and measured in isolation.
-- **Errors are traced too.** If an operator raises, its `StepSpan` has
-  `error=True` and the trace is still delivered to the collector via the
-  `on_trace` callback.
-
-## Quick start
+## Quick Example
 
 ```python
-from ml_pipes import Pipeline, PrintCollector, TracingConfig
-from ml_pipes import Resize, Normalize, Infer, NMS, ToDetections  # ...
+from ml_pipes import Decode, Infer, NMS, Normalize, Pipeline, PrintCollector
+from ml_pipes import Resize, ToDetections
 
-pipeline = Pipeline(
-    [Resize((640, 640)), Normalize(), Infer("model.onnx"), NMS(), ToDetections()],
-    tracing=TracingConfig(collector=PrintCollector()),
-)
+
+pipeline = Pipeline([
+    Decode(),
+    Resize((640, 640)),
+    Normalize(),
+    Infer("model.onnx"),
+    NMS(),
+    ToDetections(),
+])
+pipeline.set_tracing(PrintCollector())
 
 pipeline("image.jpg")
+
+pipeline.set_tracing(None)
 ```
 
 Output:
 
+```text
+  0:Decode                       2.10ms  (  4.3%)
+  1:Resize                       0.28ms  (  0.6%)
+  2:Normalize                    2.22ms  (  4.6%)
+  3:Infer                       43.90ms  ( 90.0%)
+  4:NMS                          0.21ms  (  0.4%)
+  5:ToDetections                 0.02ms  (  0.0%)
+  total                         48.73ms
 ```
-  0:Resize                          0.28ms  (  0.5%)
-  1:Normalize                       2.22ms  (  4.6%)
-  2:Infer                          39.19ms  (81.4%)
-  3:NMS                             0.21ms  (  0.4%)
-  4:ToDetections                    0.02ms  (  0.0%)
-  total                            48.12ms
-```
 
-> [!CAUTION]
-> The first run is always slower and will skew measurements — ONNX Runtime
-> JIT-compiles the graph on first use and the OS cold-starts file I/O. Run a
-> dedicated warm-up call before starting the measurement window.
+## How Tracing Works
 
-> [!TIP]
-> Use `AggregateCollector` over several runs to get stable average latency
-> per operator rather than relying on a single invocation.
+Tracing is opt-in. If no collector is attached, the pipeline runs without
+producing traces.
 
-## Configuration
+When tracing is enabled:
 
-`TracingConfig` groups all tracing options in one place:
+1. each `pipeline(value)` call creates one `InvocationTrace`
+2. each operator appends a `StepSpan`
+3. region operators can attach a child trace for the enclosed execution
+4. if an operator raises, the error span is still recorded
+5. the completed trace is delivered to the collector
+
+That means a collector always receives one whole-call trace, not partial step
+events.
+
+You can enable or reconfigure tracing either at construction time with
+`TracingConfig(...)` or at runtime with `set_tracing(...)`.
 
 ```python
-from ml_pipes import TracingConfig, PrintCollector
+from ml_pipes import PrintCollector
 
-TracingConfig(
-    collector=PrintCollector(),       # required — any TraceCollector implementation
-    operator_labels=["resize", "infer", "nms"],  # override default "{i}:ClassName" labels
-    capture_config=True,    # record StepSpan.operator_config (constructor args)
-    capture_shapes=True,    # record StepSpan.input_shape / output_shape
-)
-```
 
-All options are also available directly on `set_tracing()`:
-
-```python
 pipeline.set_tracing(
     PrintCollector(),
-    operator_labels=["resize", "infer", "nms"],
+    operator_labels=["strip", "lower", "split"],
     capture_config=True,
     capture_shapes=True,
 )
 ```
 
-`capture_config` and `capture_shapes` are intended for debugging — they give
-collectors access to how each operator is configured and what shapes it handles,
-without modifying the pipeline itself.
+`capture_config` and `capture_shapes` are mainly debugging aids. They make the
+trace richer without changing the pipeline itself.
 
-`StepSpan.output_value` is also available on spans, populated by
-`Pipeline.inspect()`. It is not exposed via `set_tracing()` because
-deep-copying every step output on every call would be prohibitively expensive
-in production; inspection is a one-shot debugging tool.
+> [!NOTE]
+> The trace delivered to the collector is a frozen snapshot, so collectors can
+> store it safely without later pipeline mutations changing the recorded data.
+> If a collector raises, the pipeline call still completes; the tracing error
+> is logged and that trace is dropped.
 
-## Attaching and detaching at runtime
+## When Traces Are Useful
 
-`set_tracing()` lets you enable, reconfigure, or disable tracing on an existing
-pipeline without rebuilding it. This is useful for profiling a specific window
-of calls without instrumenting the whole program.
+Tracing is useful when you want to:
 
-```python
-pipeline = Pipeline([...])
+- understand an individual call, such as seeing which operator dominates one
+  slow call or confirming where a failure happened
+- monitor a running system through collectors, such as watching live latency or
+  throughput summaries or exporting execution data
+- support performance tuning by seeing how time is distributed within calls
 
-# enable — just pass the collector
-pipeline.set_tracing(PrintCollector())
-pipeline("image.jpg")
+> [!TIP]
+> Use `Benchmark` when you want to measure repeated-run behavior or compare
+> configuration changes.
 
-# disable
-pipeline.set_tracing(None)
-pipeline("image.jpg")   # no overhead, no trace produced
-```
+## Built-in Collectors
 
+Use the table below to choose a collector based on how traces are delivered and
+what each collector exposes.
 
-## Tracing Output
+| Collector | Delivery | Best for | Provides |
+|---|---|---|---|
+| `PrintCollector` | sync | local debugging | `stdout`, `last_trace`, `print_trace()` |
+| `CaptureCollector` | sync | one-shot programmatic inspection | `last_trace` |
+| `AggregateCollector` | async | rolling summaries | `avg_trace`, `total_calls`, `avg_pipeline_latency_ms`, `print_summary()`, `reset()` |
+| `ThroughputCollector` | async | live service monitoring | `fps`, `window_fps`, live status line, `print_summary()`, optional resource stats |
+| `OtelCollector` | async | external observability | exported spans |
 
-Each span shows the operator label, wall-time duration, and share of total. Error spans are marked with `!`:
+## Creating Custom Collectors
 
-```
-  0:Resize                            0.28ms  (  0.5%)
-  1:Normalize                         2.22ms  (  4.6%)
-  2:Infer                            39.19ms  ( 81.4%) !
-  3:NMS                               0.21ms  (  0.4%)
-  total                              48.12ms
-```
+All collectors receive an `InvocationTrace`.
 
-Batch regions produce a nested child trace:
+- `trace.total_duration_s` is the whole-call duration
+- `trace.spans` is the ordered list of `StepSpan`
+- a region span may contain `span.child_trace`
+- the trace is already frozen before delivery
 
-```
-  0:Resize                            0.20ms  (  0.5%)
-  1:Batch[wait]                       0.50ms  (  1.3%)
-  1:Batch                            34.70ms  ( 90.1%)
-    ↳ child trace [batch_size=8]:
-        2:_collate                    0.10ms  (  0.3%)
-        3:Infer                      34.50ms  ( 99.4%)
-        4:_distribute                 0.10ms  (  0.3%)
-        total                        34.70ms
-  5:NMS                               2.00ms  (  5.2%)
-  total                              38.50ms
-```
+### Choose A Base
 
-`Batch[wait]` captures each thread's lobby accumulation time — how long it waited
-for enough samples to form a batch. Both leader and follower record only this
-window; the batch region execution time is accounted for separately in the `Batch`
-span. `batch_size` on the child trace lets an aggregator normalize region latency
-per sample.
+- `TraceCollector` is the lowest-level interface. Implement `on_trace(trace)`
+  directly when you want full control.
+- `SerialCollector` is the best default for in-memory state. It serializes
+  access with a lock and calls your `_collect(trace)` method.
+- `ConcurrentCollector` moves trace processing onto a background thread. Use it
+  when collection may block, write files, send telemetry, or do heavier work.
+  Call `flush()` before reading results and `stop()` when done, or use it as a
+  context manager.
 
-Scatter regions also produce a nested child trace, averaged across all workers:
+### Useful Starting Points
 
-```
-  0:Tile                              0.80ms  (  1.2%)
-  1:Scatter                          61.30ms  ( 95.1%)
-    ↳ child trace [n_items=9, concurrency=4]:
-        2:Resize                      0.30ms  (  0.5%)
-        3:Normalize                   2.10ms  (  3.4%)
-        4:Infer                      58.50ms  ( 95.4%)
-        5:ToDetections                0.12ms  (  0.2%)
-        total                        61.02ms
-  6:Stitch                            0.40ms  (  0.6%)
-  total                              64.50ms
-```
+- `CaptureCollector` is a good base when you want `last_trace`.
+- `AggregateCollector` is a good base when you want rolling averages or
+  summaries.
 
-`n_items` is the number of items dispatched; `concurrency` is the `max_concurrency`
-value. The child trace is the mean latency across all workers, so it represents an
-average worker rather than the slowest or fastest.
-
-## Built-in collectors
-
-### `PrintCollector`
-
-Prints each trace to stdout. Good for development and one-off debugging.
+### Minimal Example
 
 ```python
-from ml_pipes import PrintCollector
-pipeline.set_tracing(PrintCollector())
+from ml_pipes import InvocationTrace, SerialCollector
+
+
+class SlowTraceCollector(SerialCollector):
+    def __init__(self, threshold_ms: float = 50.0) -> None:
+        super().__init__()
+        self.threshold_s = threshold_ms / 1000.0
+        self.slow_traces: list[InvocationTrace] = []
+
+    def _collect(self, trace: InvocationTrace) -> None:
+        if trace.total_duration_s >= self.threshold_s:
+            self.slow_traces.append(trace)
 ```
 
-Output:
-
-```
-  0:Resize                            0.28ms  (  0.5%)
-  1:Normalize                         2.22ms  (  4.6%)
-  2:Infer                            39.19ms  ( 81.4%)
-  3:NMS                               0.21ms  (  0.4%)
-  4:ToDetections                      0.02ms  (  0.0%)
-  total                              48.12ms
-```
-
-`PrintCollector` also exposes the most recently received trace and lets you
-reprint it at any time:
-
-```python
-collector = PrintCollector()
-pipeline.set_tracing(collector)
-pipeline("image.jpg")
-
-collector.last_trace        # InvocationTrace | None — the last received trace
-collector.print_trace()     # reprint last_trace
-collector.print_trace(some_trace)  # print an arbitrary trace
-```
-
-### `AggregateCollector`
-
-Accumulates stats across multiple invocations — average latency and percentage
-of total per operator. Useful for benchmarking steady-state throughput.
-
-```python
-from ml_pipes import AggregateCollector
-
-agg = AggregateCollector()
-pipeline.set_tracing(agg)
-
-for image in image_batch:
-    pipeline(image)
-
-pipeline.set_tracing(None)
-agg.print_summary()
-```
-
-Output:
-
-```
-  Calls                : 100
-  Latency Avg.         : 46.53ms
-
-  0:Resize                           0.18ms  (  0.4%)
-  1:Normalize                        2.22ms  (  4.8%)
-  2:Infer                           37.71ms  ( 81.0%)
-  3:NMS                              0.21ms  (  0.5%)
-  4:ToDetections                     0.01ms  (  0.0%)
-  total                             46.33ms
-```
-
-`AggregateCollector` also exposes the data programmatically:
-
-```python
-agg.total_calls                  # int
-agg.avg_pipeline_latency_ms      # float
-agg.avg_trace                    # InvocationTrace — live averaged trace (mirrors full trace structure including child traces)
-agg.reset()                      # clear all accumulated state
-```
-
-## OpenTelemetry export
-
-An optional bridge to OpenTelemetry is available in
-`ml_pipes.collectors.otel_collector`. It requires the `otel` extra:
-
-```bash
-pip install ml-pipes[otel]
-```
-
-```python
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
-from opentelemetry import trace
-
-provider = TracerProvider()
-provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-trace.set_tracer_provider(provider)
-
-from ml_pipes.collectors.otel_collector import OtelCollector
-pipeline.set_tracing(OtelCollector())
-pipeline("image.jpg")
-```
-
-Each pipeline call becomes a root OTel span with one child span per operator.
-Batch regions produce nested child spans. The bridge is not imported by
-`ml_pipes` itself — there is no implicit dependency on the OTel SDK.
-
-> New to OpenTelemetry? See the [Getting started guide](https://opentelemetry.io/docs/getting-started/).
-
-## Writing a custom collector
-
-Subclass `TraceCollector` and implement `on_trace`. The collector receives a
-complete `InvocationTrace` after every pipeline call.
-
-```python
-from ml_pipes import TraceCollector, InvocationTrace
-
-class SlowCallAlert(TraceCollector):
-    def __init__(self, threshold_ms: float) -> None:
-        self._threshold_s = threshold_ms / 1000
-
-    def on_trace(self, trace: InvocationTrace) -> None:
-        slow = [s for s in trace.spans if s.duration_s > self._threshold_s]
-        if slow:
-            labels = ", ".join(s.label for s in slow)
-            print(f"[SLOW] {trace.total_duration_s*1000:.1f}ms total — slow steps: {labels}")
-
-pipeline.set_tracing(SlowCallAlert(threshold_ms=50.0))
-```
-
-## See also
-
-- `examples/run_yolo8_tracing.py` — full end-to-end tracing example with
-  both `PrintCollector` and `AggregateCollector` on the YOLOv8 pipeline
-- `PERFORMANCE.md` — throughput and batching guidance
+If the collector is going to do file I/O, telemetry export, or any other work
+you do not want on the call path, switch the base to `ConcurrentCollector`
+instead.
