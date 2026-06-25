@@ -1,6 +1,21 @@
 # Performance Guide
 
-This document covers the levers for scaling inference throughput.
+This guide is about performance tuning: the execution choices that change
+throughput, latency, tail latency, and hardware utilization.
+
+Performance work in `ml-pipes` usually has three connected parts:
+
+- Use [TRACING.md](TRACING.md) when you want to monitor live pipeline behavior
+  or inspect where time is going within a call.
+- Use this guide when you are ready to tune the pipeline itself through levers
+  such as concurrency, batching, and [regions](REGIONS.md).
+- Use [BENCHMARKING.md](BENCHMARKING.md) when you want repeated-run
+  measurements or to compare configuration changes.
+
+A practical loop is: establish a baseline with
+[`Benchmark`](BENCHMARKING.md), use traces when you need to understand the
+current behavior, change one execution lever at a time, then benchmark again
+to confirm the effect across repeated runs.
 
 ## Key metrics
 
@@ -9,6 +24,10 @@ This is what you optimize when running a service under load.
 
 **Latency** — how long a single request takes end to end. This is what you optimize
 when running a realtime or streaming service.
+
+**Tail latency** — the slower end of the latency distribution, usually `p95` or
+`p99`. This is often the first metric to get worse when batching, queuing, or
+synchronization waits are too aggressive.
 
 **Hardware utilization** — whether the compute units (CPU cores, GPU stream processors)
 are idle between inference calls. The goal is to keep inference running continuously
@@ -29,6 +48,18 @@ Request 2                                      [preprocess]──[infer]──[p
 Request 3                                                                          [preprocess]──[infer]──[postprocess]
 Time       ─────────────────────────────────────────────────────────────────────────────────────────────────────────────▶ 
 ```
+
+## Choosing A Lever
+
+Start with the simplest lever that matches how work already arrives:
+
+- Many independent requests already reach the pipeline separately: start with
+  coarse-grained concurrency.
+- One request contains a `list` of independent items: use
+  [`Scatter/Gather`](REGIONS.md).
+- The caller already produces batches: use coarse-grained batching.
+- Separate threads need to meet at one inference stage: use
+  [`Batch/UnBatch`](REGIONS.md).
 
 ## Concurrency
 
@@ -80,9 +111,10 @@ with ThreadPoolExecutor(max_workers=8) as pool:
 ### Fine-grained concurrency (Scatter/Gather)
 
 A single request fans out a `list[T]` to N worker threads at a specific point inside
-the pipeline. Only the enclosed region runs concurrently — steps before and after
-remain sequential. Each worker runs the region independently with its own `Context`;
-the original thread resumes with `list[results]` after `Gather`.
+the pipeline. This is a [region-based](REGIONS.md) pattern: only the enclosed
+steps run concurrently, while steps before and after remain sequential. Each
+worker runs the region independently with its own `Context`; the original thread
+resumes with `list[results]` after `Gather`.
 
 ```
                     ┌─ [worker 0: region ops] ─┐
@@ -96,7 +128,11 @@ multi-task processing (a list of independent jobs), or multi-model fan-out (same
 sent to N models simultaneously).
 
 `max_concurrency` caps the thread pool size. Set it based on available CPU cores and
-the expected number of items. The thread pool is persistent across invocations.
+the expected number of items.
+
+> [!TIP]
+> Put only independent per-item work inside the `Scatter` region. Shared setup,
+> cross-item coordination, and final aggregation usually belong outside it.
 
 ```python
 pipeline = Pipeline([
@@ -119,13 +155,17 @@ pipeline = Pipeline([
 The wall-clock time of the `Scatter` span equals the slowest worker. The child trace
 shows the average worker latency, making it easy to spot imbalance.
 
-**Caveat:** ONNX Runtime uses multiple threads per inference call internally. When
-combined with `Scatter`, this can cause contention — if throughput degrades at higher
-`max_concurrency`, reduce either the ONNX inter-op thread count or `max_concurrency`.
+> [!CAUTION]
+> Some inference runtimes already use internal threading or stream
+> scheduling. Combined with pipeline-level concurrency or `Scatter`, this can
+> cause oversubscription. If throughput degrades at higher `max_concurrency`,
+> tune the runtime's own parallelism settings and the pipeline worker count
+> together.
 
 ## Batching
 
-Multiple inputs are stacked into a single tensor and sent through the model in one call:
+Multiple inputs are grouped into one batched value and sent through the model
+in one call. Often that batched value is a tensor produced by `Collate`:
 
 ```
 [preprocess] ─┐                                                                ┌─ [postprocess] ──▶
@@ -171,10 +211,12 @@ results = pipeline(batch)
 ### Fine-grained batching (Batch/UnBatch)
 
 Concurrent requests rendezvous at a specific point *inside* the pipeline at the `Batch`
-operator. Steps before and after the batch region run independently per thread — only the
-enclosed region is batched. The first thread to fill the batch becomes the *leader* and
-runs the batch region for the whole group. All other threads wait and resume with their
-individual result after `UnBatch`.
+operator. This is a [region-based](REGIONS.md) pattern: steps before and after
+the batch region run independently per thread, and only the enclosed region is
+batched. `Batch/UnBatch` does not create concurrency by itself; it coordinates
+callers that are already in flight. The first thread to fill the batch becomes
+the *leader* and runs the batch region for the whole group. All other threads
+wait and resume with their individual result after `UnBatch`.
 
 For this to be effective, enough concurrent requests must be in flight to keep the
 inference stage continuously fed:
@@ -187,6 +229,11 @@ workers > batch_size  -> better overlap and more consistent full batches
 
 `Batch`/`UnBatch` handle synchronization (control flow); `Collate`/`Distribute` handle
 data transformation.
+
+> [!TIP]
+> Put only work that benefits from a batch inside the `Batch` region. Keep
+> independent per-item preprocessing before it when you still want thread-level
+> overlap.
 
 ```python
 pipeline = Pipeline([
@@ -248,11 +295,17 @@ Concurrency and batching pull in opposite directions:
 - **Concurrency** increases parallelism — more requests in flight at once, each independent.
 - **Batching** reduces parallelism but increases work per call — N requests share one inference call.
 
-On **GPU**, the two complement each other: concurrency keeps preprocessing busy while the GPU runs the batch; batching amortizes kernel launch overhead and keeps tensor cores fed.
+That trade-off plays out differently by hardware:
 
-On **CPU**, concurrency alone is usually sufficient. Batching collapses the cross-core parallelism that makes concurrency effective and may increase memory pressure without a compensating gain.
+- On **GPU**, the two complement each other: concurrency keeps preprocessing
+  busy while the GPU runs the batch; batching amortizes kernel launch overhead
+  and keeps tensor cores fed.
+- On **CPU**, concurrency alone is usually sufficient. Batching collapses the
+  cross-core parallelism that makes concurrency effective and may increase
+  memory pressure without a compensating gain.
 
-Serialization is orthogonal to both — it is a contention-management tool that only matters once concurrency is already in place.
+Serialization is orthogonal to both — it is a contention-management tool that 
+only matters once concurrency is already in place.
 
 ## Combining Techniques
 
@@ -282,56 +335,17 @@ larger than the model's optimal batch size:
 
 ```
                                        ┌─  item1  ─┐
-[item1, item2, ..., item16] → Scatter ─┼─  item2  ─┼─ Batch(size=4) → Infer → UnBatch → Gather -> results[16]
+[item1, item2, ..., item16] → Scatter ─┼─  item2  ─┼─ Batch(size=4) → Infer → UnBatch → Gather → results[16]
                                        ├─  ...    ─┤
                                        └─  item16 ─┘
 ```
 
-**Merge small non-uniform batches into larger uniform ones.** Independent small batches from concurrent threads
-converge at a `Batch` operator, forming an optimal larger batch:
+**Align incoming batches before inference.** Separate threads may arrive with
+small or uneven batches. A `Batch` operator can align those arrivals at one
+inference stage so the model still runs on a consistent target batch size:
 
 ```
-Thread 1: [item1, item2, item3]       ─┐                                      ┌─ [result1, result2, result3]     
-Thread 2: [item4, item5, ..., item8 ] ─┼─ Batch(size=8) → Infer → UnBatch →  ─┼─ [result4, result5, ..., result8 ]
-Thread 3: [...]                       ─┘                                      └─ [...]                      
+Thread 1: [item1, item2, item3]       ─┐                                      ┌─ [result1, result2, result3]
+Thread 2: [item4, item5, ..., item8]  ─┼─ Batch(size=8) → Infer → UnBatch ───┼─ [result4, result5, ..., result8]
+Thread 3: [...]                       ─┘                                      └─ [...]
 ```
-
-## How it all works internally
-
-**Coarse-grained concurrency is available by design** because `Pipeline.__call__` creates
-a fresh `Context` on every invocation. There is no shared mutable state between calls.
-
-**Fine-grained concurrency** uses a scatter primitive (`ScatterGate`). The original thread
-submits one task per item to a `ThreadPoolExecutor`, then blocks until all workers have
-deposited their results. Workers run the region operators via the same `_execute` path
-as the top-level pipeline, with an isolated `Context` per worker.
-
-**Coarse-grained batching** requires no pipeline changes beyond adding `Collate` and
-`Distribute`. Most operators work on the batch dimension transparently — `Resize`,
-`Normalize`, `Infer`, and the tensor operators all accept N-dimensional arrays, so a
-collated batch flows through the same operators as a single input without modification.
-
-**Fine-grained batching** uses a gate primitive (`BatchGate`). The first thread to fill the
-batch becomes the leader and runs the batch region. All other threads block and skip
-the region. The leader distributes results via the gate before continuing.
-
-**Serialization** is a context manager swap inside `Infer`. The call site is identical
-in both modes — only the behavior of the lock differs.
-
-The gate mechanics map directly:
-
-|           | BatchGate                                            | ScatterGate                                                          |
-|-----------|------------------------------------------------------|----------------------------------------------------------------------|
-| Entry     | N threads call `enter(item)` → one elected leader    | 1 thread calls `scatter(items)` → N workers spawned                  |
-| Region    | Leader runs operators on `list[items]`               | Each worker runs operators on its own item                           |
-| Exit      | Leader calls `distribute(results)` → wakes followers | Workers call `deposit(result)` → wakes original when count reaches N |
-| Continues | Each of N threads with its result                    | Original thread with `list[results]`                                 |
-
-## Additional note on runtimes
-
-Some inference runtimes use internal parallelism (e.g., multiple threads per inference
-call). When combined with pipeline-level concurrency or `Scatter`, this can lead to
-resource contention or diminishing returns at higher worker counts.
-
-If you observe scaling limits, consider that performance is influenced not only by the
-pipeline but also by how the underlying runtime schedules work internally.

@@ -96,8 +96,8 @@ Tracing is useful when you want to:
 - support performance tuning by seeing how time is distributed within calls
 
 > [!TIP]
-> Use `Benchmark` when you want to measure repeated-run behavior or compare
-> configuration changes.
+> Use [`Benchmark`](BENCHMARKING.md) when you want to measure repeated-run
+> behavior or compare configuration changes.
 
 ## Built-in Collectors
 
