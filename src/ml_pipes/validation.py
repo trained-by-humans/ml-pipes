@@ -152,19 +152,21 @@ class PipelineValidator:
         inference: bool = False,
     ) -> TypeContract:
         """
-        Validate the pipeline under one of three boundary-tightening modes.
+        Validate the pipeline under one of three pipeline-input boundary modes.
 
         Mode 1: no declared pipeline input and no backward inference.
-            The pipeline starts at `Any` and can only tighten from the first
-            concrete entry boundary discovered by the forward pass.
+            The pipeline starts at `Any` and can only tighten from the entry
+            boundary resolved by the forward pass. It does not back-propagate
+            constraints from later steps.
 
         Mode 2: declared pipeline input.
             The caller provides `pipeline_input_type`, which seeds the forward
-            pass and can tighten the pipeline boundary without a backward pass.
+            pass, participates in compatibility checking, and can tighten the
+            pipeline boundary without a backward pass.
 
         Mode 3: backward inference.
-            When `inference=True`, a backward pass may tighten the pipeline
-            boundary further if the chain remains transitive enough.
+            When `inference=True`, a backward pass may tighten the returned
+            pipeline boundary further if the chain remains transitive enough.
 
         Strict mode validates operator boundaries, not the final boundary
         tightening strategy. It therefore runs independently of whether the
