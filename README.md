@@ -82,6 +82,7 @@ pipeline.describe(show_defaults=True)
 
 - [docs/OPERATORS.md](docs/OPERATORS.md) — what operators are and how to write them
 - [docs/COMPOSITION.md](docs/COMPOSITION.md) — building pipelines and composing pipelines together
+- [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — tutorial for bringing a new NumPy/ONNX model into a pipeline scaffold
 - [docs/VALIDATION.md](docs/VALIDATION.md) — contract validation, strict mode, and boundary tightening
 - [docs/TRACING.md](docs/TRACING.md) — traces, collectors, and the runtime observation model inspection builds on
 - [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — repeated-run measurement, sweeps, saved artifacts, and CLI benchmarking
@@ -362,149 +363,16 @@ and want the smallest possible surface area.
 > - ml-pipes sits in between: the explicit control of raw ONNX with a reusable operator library that eliminates the repeated boilerplate.  
 
 
-## Building a pipeline for a custom model
+## Model Scaffolding
 
-This is the general process for adding support for a new model in the
-NumPy/ONNX execution domain.
+If you are bringing up a new NumPy/ONNX model, start from a scaffold instead
+of hiding the whole integration inside one large operator. The goal is to map
+raw outputs into a sequence of explicit steps: extract tensors, adapt layout,
+slice semantic values, normalize coordinates, run NMS, and project back to the
+source image.
 
-### Step 1 — Inspect the model outputs
-
-Load the model in Netron or run a quick inspection with ONNX Runtime to find
-the output tensor names and shapes:
-
-```python
-import onnxruntime as ort
-session = ort.InferenceSession("model.onnx")
-for o in session.get_outputs():
-    print(o.name, o.shape)
-```
-
-### Step 2 — Map outputs to the TensorRegistry
-
-Use `Extract` to pull tensors by their graph output names into the registry, renaming to
-semantic names:
-
-```python
-# Single output
-Extract("output0", as_="preds")
-
-# Multiple outputs
-Extract("output0", "output1", as_=("preds", "protos"))
-
-# Already semantically named (e.g. some Mask R-CNN exports)
-Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks"))
-```
-
-### Step 3 — Adapt the raw tensor layout
-
-Different model families export predictions in different layouts:
-
-```python
-# YOLO8/11: (1, features, N) — squeeze batch dim, then transpose
-Squeeze("preds"),          # (1, 116, N) → (116, N)
-Transpose("preds"),        # (116, N) → (N, 116)
-
-# YOLOv5: (1, N, features) — no transpose needed
-Squeeze("preds"),          # (1, 25200, 117) → (25200, 117)
-```
-
-### Step 4 — Slice out semantic tensors
-
-```python
-Slice("preds", slice(None, 4), as_="boxes"),          # (N, 4)
-Slice("preds", slice(4, -32), as_="class_scores"),    # (N, 80)
-Slice("preds", slice(-32, None), as_="mask_coeffs"),  # (N, 32)
-```
-
-### Step 5 — Handle model-specific coordinate formats
-
-Some models output normalized coordinates that need scaling to pixel space
-before NMS:
-
-```python
-# DETR-style model: normalized cxcywh -> pixel cxcywh
-Scale("boxes", by=(input_w, input_h, input_w, input_h)),
-ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
-```
-
-For truly model-specific logic that doesn't fit any operator, use a plain
-callable:
-
-```python
-def _my_model_quirk(registry: TensorRegistry) -> TensorRegistry:
-    # handle whatever the model does unusually
-    registry["boxes"] = ...
-    return registry
-
-pipeline = Pipeline([
-    ...,
-    _my_model_quirk,
-    ...
-])
-```
-
-### Step 6 — NMS and projection
-
-Store the resize transform before inference so it can be recalled for
-projection:
-
-```python
-Resize((640, 640)),
-Store("resize_transform", index=1),
-Pick(0),
-...                                     # inference and postprocessing
-NMS(),
-Recall("resize_transform"),
-ProjectBoxes(),
-ToDetections(),
-```
-
-For segmentation, project boxes first, then masks:
-
-```python
-NMS(kept_as="kept"),
-FilterBy("mask_coeffs", "kept"),
-ReconstructMasks("mask_coeffs", "protos", as_="masks"),
-Recall("resize_transform"),
-ProjectBoxes(),
-Recall("resize_transform"),
-ProjectMasks("masks", mask_threshold=0.5),
-ToSegmentations(),
-```
-
-### Finally: the pipeline
-
-```python
-from ml_pipes import (
-    ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
-    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
-    Resize, Extract, Slice, Squeeze, Store, ToDetections, Transpose,
-)
-
-pipeline = Pipeline([
-    Decode(),
-    Resize((640, 640)),
-    Store("resize_transform", index=1),
-    Pick(0),
-    Normalize(),
-    Infer("model.onnx"),
-    Extract("output0", as_="preds"),
-    Squeeze("preds"),
-    Transpose("preds"),
-    Slice("preds", slice(None, 4), as_="boxes"),
-    Slice("preds", slice(4, None), as_="scores"),
-    ArgMax("scores", as_="classes"),
-    GatherScores("scores", "classes"),
-    ConvertBoxFormat(from_="cxcywh"),
-    NMS(),
-    Recall("resize_transform"),
-    ProjectBoxes(),
-    ToDetections(),
-])
-
-detections = pipeline("image.jpg")
-print(detections.boxes, detections.scores, detections.classes)
-```
+For the full walkthrough, see
+[docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
 
 ## Defining an Operator
 

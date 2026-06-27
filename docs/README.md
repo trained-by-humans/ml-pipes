@@ -1,10 +1,11 @@
 # Documentation
 
-Shared ml-pipes reference docs live here.
+Shared ml-pipes reference docs and tutorials live here.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 - [BENCHMARKING.md](BENCHMARKING.md)
 - [COMPOSITION.md](COMPOSITION.md)
+- [SCAFFOLDING.md](SCAFFOLDING.md)
 - [OPERATORS.md](OPERATORS.md)
 - [operators/README.md](operators/README.md)
 - [PERFORMANCE.md](PERFORMANCE.md)
