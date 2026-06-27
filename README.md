@@ -1,19 +1,40 @@
 # ml-pipes
 
-Composable ONNX inference pipelines. Build detection, segmentation, and
-classification pipelines by chaining small reusable operators — explicit,
-individually testable, and model-agnostic.
+Composable ML pipelines built from explicit operator boundaries.
+
+`ml-pipes` is a compute-composition framework built around data flow. A
+pipeline is a sequence of operator boundaries that push data forward: one step
+receives a value, transforms it, and hands the result to the next step. The
+value might be an image, a tensor registry, a batch, a record, or any other
+payload, but the main thing the framework cares about is how that data moves
+and changes.
+
+Once data becomes the first-class concern, the tooling naturally follows it.
+Validation checks that operator boundaries connect, Inspection gives you a
+built-in lineage view of what each step produced in one run, Tracing records
+how a call moved through the pipeline, and Benchmark measures the same flow
+across repeated runs.
+
+That model fits ML systems better than an app design centered on objects or
+services. In many ordinary applications, most of the code is side effects with
+a little data mutation around them. In ML applications, the ratio is usually
+reversed: most of the work is data mutation, with side effects mostly at the
+edges when you load inputs, call runtimes, or save outputs.
+
+Even models are not first-class in that sense. A model call is just one
+operator in a larger data path; weights and biases matter because they affect
+how data is transformed, not because the framework treats the model itself as
+the center of the system.
 
 ## Install
 
+`ml-pipes` requires Python 3.10+.
+
 ```bash
 pip install -e .
-```
-
-Torch operators live in an optional subpackage:
-
-```bash
-pip install -e .[torch]
+pip install -e .[torch]  # optional Torch operators
+pip install -e .[otel]   # optional OpenTelemetry collector support
+pip install -e .[dev]    # tests and type checking
 ```
 
 ## Quick start
@@ -57,152 +78,71 @@ repr(pipeline)
 pipeline.describe(show_defaults=True)
 ```
 
-## Benchmarking
+## Documentation
 
-For per-operator latency profiling, config sweeps, result diffs, saved
-artifacts, and the `python -m ml_pipes benchmark` CLI, see
-[docs/BENCHMARKING.md](docs/BENCHMARKING.md).
+- [docs/OPERATORS.md](docs/OPERATORS.md) — what operators are and how to write them
+- [docs/COMPOSITION.md](docs/COMPOSITION.md) — building pipelines and composing pipelines together
+- [docs/VALIDATION.md](docs/VALIDATION.md) — contract validation, strict mode, and boundary tightening
+- [docs/TRACING.md](docs/TRACING.md) — traces, collectors, and the runtime observation model inspection builds on
+- [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — repeated-run measurement, sweeps, saved artifacts, and CLI benchmarking
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — tuning concurrency, batching, and serialization
+- [docs/TORCH.md](docs/TORCH.md) — Torch operators, boundaries, and examples
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the internal ownership map of the framework
 
-## Torch Execution Domain
+## Operator Packages
 
-Torch support is intentionally isolated under `ml_pipes.torch`. Core
-`ml_pipes` stays NumPy/ONNX-oriented, and domain crossings stay explicit.
+`ml-pipes` is designed to work with your own code. A pipeline can be built from packaged
+operators, local operators, or ordinary callables as long as their boundaries
+compose. When you do need a new operator, follow
+[docs/OPERATORS.md](docs/OPERATORS.md).
 
-For the full guide, see [docs/TORCH.md](docs/TORCH.md).
+In practice, start from the closest existing operator package or module and
+reuse as much as possible before adding new code. That gives you clearer
+validation, inspection, tracing, and less one-off logic to maintain.
 
-```python
-import torch
+| Package | Focus | References |
+|---|---|---|
+| `ml_pipes` / `ml_pipes.ops` | Built-in operators for image decoding, inference, tensor registries, regions, context, and postprocessing | [docs/OPERATORS.md](docs/OPERATORS.md) |
+| `ml_pipes.data_ops` | Iterable and data-preparation operators for filtering, mapping, deduplication, and shaping | [run_sms_spam_prepare.py](examples/run_sms_spam_prepare.py) |
+| `ml_pipes.torch` | Optional Torch operators for explicit NumPy-to-Torch handoffs, device movement, and Torch-native postprocessing | [docs/TORCH.md](docs/TORCH.md), [run_mask2former_torch_postprocess.py](examples/torch/run_mask2former_torch_postprocess.py), [run_mask2former_numpy_postprocess.py](examples/torch/run_mask2former_numpy_postprocess.py) |
 
-from ml_pipes import Pipeline
-from ml_pipes.torch import (
-    ToNumpyRegistry,
-    ToTorch,
-    TorchAsType,
-    TorchCollate,
-    TorchDistribute,
-    TorchExtract,
-    TorchInfer,
-    TorchNMS,
-)
+All of these surfaces use the same `Pipeline`, validation, tracing,
+inspection, and benchmarking APIs. The Torch examples also require
+`transformers` and `safetensors` in the environment.
 
-model = torch.nn.Conv2d(3, 4, kernel_size=1).eval().to("cpu")
+## Design Principles
 
-pipeline = Pipeline([
-    ...,
-    ToTorch(device="cpu"),
-    TorchAsType("float32"),
-    TorchInfer(model, input_layout="NCHW", output_names=("logits",), output_layouts=("NCHW",)),
-    TorchDistribute(),
-    TorchExtract("logits", as_="scores"),
-    ToNumpyRegistry(),
-])
-```
-
-You can also cross domains around a postprocess handoff:
+Many inference SDKs are built around inheritance. That feels natural at
+first, but in a mature codebase the prediction path often ends up spread across
+several layers of base classes:
 
 ```python
-from ml_pipes import Extract, Infer, Pipeline
-from ml_pipes.torch import ToNumpyRegistry, ToTorchRegistry, TorchNMS
-
-pipeline = Pipeline([
-    Infer("detector.onnx"),
-    Extract("boxes", "scores", "classes"),
-    ToTorchRegistry(device="cpu"),
-    TorchNMS(),
-    ToNumpyRegistry(),
-    ...,
-])
-```
-
-For fuller Torch examples, see:
-
-- [docs/TORCH.md](docs/TORCH.md) for execution-domain rules, copy semantics, and common patterns
-- [examples/torch/run_mask2former_torch_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_torch_postprocess.py:1)
-  for a Torch-heavy Mask2Former postprocess pipeline
-- [examples/torch/run_mask2former_numpy_postprocess.py](/Users/esbati.keivan/PycharmProjects/InferencePipeline/examples/torch/run_mask2former_numpy_postprocess.py:1)
-  for the matching NumPy handoff version
-
-The Torch Mask2Former example keeps mask upsampling, query filtering, pixel
-ownership, stuff merging, and mask-to-box conversion in Torch before handing
-the result back to NumPy. These example scripts also require `transformers`
-and `safetensors` in the environment.
-
-Switching to a different model family (RF-DETR, Mask R-CNN, YOLO11) means
-changing the operators between `Infer` and `ToDetections` — preprocessing and
-projection operators are shared and unchanged. See
-[Building a pipeline for a custom model](#building-a-pipeline-for-a-custom-model).
-
-## Sample Usage
-
-### Annotating an Image
-
-You can easily extend the pipeline to implement a use-case like annotating an image:
-
-```python
-from ml_pipes import (
-    ArgMax, ConvertBoxFormat, Decode, DrawBoxes, GatherScores, Infer,
-    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
-    Resize, Extract, SaveImage, Slice, Squeeze, Store, ToDetections, Transpose,
-)
-
-pipeline = Pipeline([
-    Decode(),
-    Store("source_image"),              # save original image
-    Resize((640, 640)),
-    ...                                 # usual inference pipeline
-    ToDetections(),
-    Recall("source_image"),             # pair detections with saved image
-    DrawBoxes(),
-    SaveImage("annotated.jpg"),
-])
-
-pipeline("image.jpg")
-```
-
-`Store("source_image")` saves the `ImagePayload` into the pipeline's side-channel
-context before `Resize` changes the frame dimensions. `Recall("source_image")`
-injects it back as a second argument once detection is complete, so `DrawBoxes`
-receives `(Detections, ImagePayload)` and returns the annotated image for
-`SaveImage` to write.
-
-## Design principle
-
-Most inference SDKs are built around inheritance: a `Detector` base class with
-a `YoloDetector` subclass, a `Segmentor` base class with a `MaskRCNNSegmentor`
-subclass. 
-```python
-# inference/models/yolov8_object_detection.py
-from inference.core.models.object_detection_base import ObjectDetectionBaseOnnxRoboflowInferenceModel
-
-class YOLOv8ObjectDetection(ObjectDetectionBaseOnnxRoboflowInferenceModel): 
-    ... # Yolov8 specific logic
-```
-
-This feels natural at first, but it couples the pipeline logic to a
-specific model family. Adding a new model means subclassing; changing
-postprocessing means overriding methods; Eventually you end up with a
-class hierarchy that is too complex to reason about.
-
-```python
-class ObjectDetectionBaseOnnxRoboflowInferenceModel(OnnxRoboflowInferenceModel):
-    ... # object Detection via onnx runtime logic
-    
-class OnnxRoboflowInferenceModel(RoboflowInferenceModel):
-    ... # common onnx runtime logic
-    
-class RoboflowInferenceModel(Model):
-    ... # common inference logic
-    
-class Model(BaseInference):
-    ... # ??
-
 class BaseInference:
-    ... # ???
+    def predict(self, image): ...
+
+class Model(BaseInference):
+    def preprocess(self, image): ...
+
+class RuntimeModel(Model):
+    def infer(self, tensor): ...
+
+class OnnxModel(RuntimeModel):
+    def session(self): ...
+
+class DetectionModel(OnnxModel):
+    def postprocess(self, outputs): ...
+
+class YoloDetector(DetectionModel):
+    def postprocess(self, outputs): ...
+
+class DetrDetector(DetectionModel):
+    def postprocess(self, outputs): ...
 ```
 
-To understand what happens to the data you trace through
-multiple layers of the class hierarchy. The interesting computation — what
-actually happens to the tensors — is scattered.
+Nothing is wrong with any one layer in isolation. The problem is that to
+understand one prediction you now have to jump through multiple base classes to
+find preprocessing, runtime invocation, output decoding, and task-specific
+postprocessing.
 
 **ml-pipes takes the opposite approach: composition.**
 
@@ -211,6 +151,7 @@ does one thing and knows nothing about the model, task, or runtime. Different
 models produce different outputs — but at some level of abstraction they all
 produce boxes, scores, class indices, and optionally masks. The right operators
 applied in the right order produce the right result regardless of model family.
+Most of the pipeline stays the same; only the model-specific decoding changes.
 
 ```python
 # YOLOv8n
@@ -226,7 +167,7 @@ Pipeline([
     ConvertBoxFormat(from_="cxcywh"), NMS(), Recall("resize_transform"), ProjectBoxes(), ToDetections(),
 ])
 
-# RF-DETR Nano — only the section between Infer and NMS changes
+# DETR-style detector — only the section between Infer and NMS changes
 Pipeline([
     Decode(), ...                                               # same preprocessing pipeline as above
     Infer("detr_nano.onnx"),                                    # different postprocessing
@@ -241,14 +182,20 @@ Pipeline([
 ])
 ```
 
-The same operators appear in every detection pipeline. Switching from YOLOv8
-to RF-DETR changes few lines (a `Scale` for normalized boxes and different
-softmax/argmax handling) — the rest is identical.
+Switching from YOLOv8 to a DETR-style detector changes a few lines
+(`Scale` for normalized boxes and different softmax/argmax handling); the rest
+stays explicit, reusable, and testable.
 
-### Why function-style coding is natural for inference
+### Why Function-Style Coding Fits ML Workflows
 
-A neural network is, fundamentally, a function: it maps an input tensor to
-output tensors: 
+Once you treat ML as transformation over data and artifacts, function-style
+code becomes the natural fit. Loading maps files to records. Cleaning maps
+records to cleaner records. Feature builders map records to tensors. Batchers
+map examples to batches. Models map tensors to tensors. Evaluators map
+predictions and labels to metrics. Export steps map internal results to files,
+tables, or API responses.
+
+A neural network is just one compact example:
 ```python
 import torch.nn as nn
 
@@ -263,24 +210,30 @@ model = nn.Sequential(
 )
 ```
 
-The entire inference pipeline — decode, resize, normalize, infer, postprocess — is also a function: it maps an image to a structured
-prediction. Every step in between is a function too. The problem is shaped like
-function composition from top to bottom, so the code should be too.
+The same idea applies to the larger workflow around the model. An ML pipeline
+maps one value or artifact set into another: raw files to validated records,
+records to features, features to predictions, predictions to metrics, or
+results to downstream actions. Even when a step has side effects, the useful
+abstraction is still an explicit boundary with clear inputs, outputs, and
+effects.
 
 A pipeline makes the data transformation the primary artifact. Reading the
 pipeline top to bottom tells you exactly what happens to the data, in order,
 without indirection. There is no hidden state between steps: each operator
-receives a value, returns a value, and has no memory of previous calls. This
-mirrors how you reason about inference — "resize the image, normalize it, run
-the model, ..." — and it means
-that reasoning is directly visible in the code rather than distributed across a
-class hierarchy.
+receives a value, returns a value, and has no memory of previous calls unless
+its effect is made explicit. That matches how you reason about ML workflows:
+ingest, validate, enrich, batch, score, evaluate, persist. The reasoning stays
+directly visible in the code rather than being distributed across a class
+hierarchy.
 
 > [!IMPORTANT]
 > This also means the pipeline is inspectable and debuggable at every boundary.
 > Inserting a `print` function or a logging step at any position in the list
 > shows you the exact value flowing through at that point. There are no private
 > fields to dig into, no method override chain to follow.
+
+For the operator model and composition semantics behind this style, see
+[docs/OPERATORS.md](docs/OPERATORS.md) and [docs/COMPOSITION.md](docs/COMPOSITION.md).
 
 ## Comparison with other approaches
 
@@ -359,10 +312,10 @@ boxes_xyxy[:, [0, 2]] *= orig_w / 640
 boxes_xyxy[:, [1, 3]] *= orig_h / 640
 ```
 
-Maximum control, but every part is hand-written. Switching to RF-DETR means
-rewriting the entire preprocessing and postprocessing block from scratch — the
-confidence filter, box conversion, NMS, and projection are all repeated. Nothing
-here is reusable across model families.
+Maximum control, but every part is hand-written. Switching to a DETR-style
+model means rewriting the entire preprocessing and postprocessing block from
+scratch: confidence filtering, box conversion, NMS, and projection all get
+repeated. Nothing here is reusable across model families.
 
 ### ml-pipes
 
@@ -398,22 +351,9 @@ detections = pipeline("image.jpg")
 ```
 
 More explicit than Ultralytics and more structured than raw ONNX. Every step is
-named and individually testable. Switching to RF-DETR changes three operators
-(`Scale` for normalised boxes, `Softmax` before `ArgMax`) — all preprocessing
-and projection operators are identical and unchanged.
-
-### Summary
-
-|                       | Ultralytics                         | Raw ONNX Runtime            | ml-pipes                                        |
-|-----------------------|-------------------------------------|-----------------------------|-------------------------------------------------|
-| Model scope           | YOLO family                         | Any (ONNX) Model            | **Any Model/Runtime**                           |
-| Runtime compatibility | **Yes** (Export required)           | N/A                         | **Yes**                                         |
-| Pipeline visibility   | Opaque                              | **Fully explicit**          | **Fully explicit**                              |
-| Custom processing     | Subclass or post-hoc                | **Full freedom**            | **Any Callable with minimal to no boilerplate** |
-| Reusability           | **Reusable within the same family** | Manual copy-paste           | **Shared operator library**                     |
-| Testability           | Integration tests only              | Unit tests with boilerplate | **Unit + Integration with minimal boilerplate** |
-| Validation            | N/A                                 | No                          | **Build time** (`auto_validate=True`)        |
-| Brevity               | **High**                            | Low                         | **Medium**                                      | |
+named and individually testable. Switching to a DETR-style model changes three
+operators (`Scale` for normalised boxes, `Softmax` before `ArgMax`); all
+preprocessing and projection operators stay identical.
 
 > [!TIP]
 > - Ultralytics is the right tool when you are building exclusively with YOLO models
@@ -424,7 +364,8 @@ and want the smallest possible surface area.
 
 ## Building a pipeline for a custom model
 
-This is the general process for adding support for a new ONNX model.
+This is the general process for adding support for a new model in the
+NumPy/ONNX execution domain.
 
 ### Step 1 — Inspect the model outputs
 
@@ -481,7 +422,7 @@ Some models output normalized coordinates that need scaling to pixel space
 before NMS:
 
 ```python
-# RF-DETR: normalized cxcywh → pixel cxcywh
+# DETR-style model: normalized cxcywh -> pixel cxcywh
 Scale("boxes", by=(input_w, input_h, input_w, input_h)),
 ConvertBoxFormat("boxes", from_="cxcywh", to="xyxy"),
 ```
@@ -565,88 +506,42 @@ detections = pipeline("image.jpg")
 print(detections.boxes, detections.scores, detections.classes)
 ```
 
-## Writing a custom operator
+## Defining an Operator
 
-An operator is any Python callable. For stateless, single-use logic, a plain
-function is enough:
+An operator can be as simple as a plain callable for one-off logic or a class
+with `__call__` for reusable configuration.
 
-```python
-def drop_background_class(registry: TensorRegistry) -> TensorRegistry:
-    # remove class 0 (background) detections
-    kept = registry["classes"] != 0
-    for key in ("boxes", "scores", "classes"):
-        registry[key] = registry[key][kept]
-    return registry
-```
-
-For reusable, parameterised operators, use a class with `__call__`:
+For example:
 
 ```python
-from ml_pipes import TensorRegistry
+from ml_pipes import Pipeline
 
-class DropClass:
-    """Removes all detections whose class index equals `class_id`."""
 
-    def __init__(self, class_id: int):
-        self.class_id = class_id
+class StripText:
+    def __call__(self, text: str) -> str:
+        return text.strip()
 
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        kept = registry["classes"] != self.class_id
-        for key in ("boxes", "scores", "classes"):
-            registry[key] = registry[key][kept]
-        return registry
+
+class SplitWords:
+    def __init__(self, delimiter: str = " "):
+        self.delimiter = delimiter
+
+    def __call__(self, text: str) -> list[str]:
+        return [part for part in text.split(self.delimiter) if part]
+
+
+pipeline = Pipeline([StripText(), SplitWords()])
+print(pipeline("  red blue green  "))
 ```
 
-Used in a pipeline:
+> [!TIP]
+> Add accurate `__call__` annotations so validation can reason about the boundary.
 
-```python
-Pipeline([
-    ...,
-    NMS(),
-    DropClass(class_id=0),    # remove background before projecting
-    Recall("resize_transform"),
-    ProjectBoxes(),
-    ToDetections(),
-])
-```
+For more advanced forms such as context operators, region operators, or custom
+`resolve_contract(...)`, see [docs/OPERATORS.md](docs/OPERATORS.md). For validation
+rules, see [docs/VALIDATION.md](docs/VALIDATION.md).
 
-### Accessing the context from a custom operator
-
-If your operator needs a value stored via `Store`, annotate the second
-positional parameter with its type. After a matching `Recall`, the pipeline
-will pass the stored value automatically:
-
-```python
-from ml_pipes import TensorRegistry, ResizeTransform
-
-def my_projection(registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
-    orig_h, orig_w = transform.original_shape
-    # ... custom projection logic
-    return registry
-```
-
-```python
-Pipeline([
-    ...,
-    Recall("resize_transform"),
-    my_projection,              # receives (registry, transform)
-    ToDetections(),
-])
-```
-
-### Contract validation
-
-Add type annotations to `__call__` and `Pipeline(auto_validate=True)` will
-verify that each operator's input type is compatible with the previous
-operator's output type at construction time:
-
-```python
-class DropClass:
-    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
-        ...
-```
-
-## Extending the pipeline
+## Using Pipelines
 
 ### Wrapping a pipeline
 
@@ -686,12 +581,32 @@ detections = detector("image.jpg")
 
 ### Chaining pipelines
 
-TBA.
+Use `a + b` to merge pipelines into one flat operator list with shared
+context. Use `a >> b` to connect one pipeline to another while keeping each
+child pipeline as its own boundary.
+
+For example:
+
+```python
+preprocess = Pipeline([Decode(), Resize((640, 640)), Normalize()])
+detect = Pipeline([Infer("detector.onnx")])
+postprocess = Pipeline([Extract("output0", as_="preds"), ToDetections()])
+
+vision = preprocess + detect + postprocess
+
+embed = Pipeline([Decode(), Normalize(), Infer("embedder.onnx")])
+classify = Pipeline([Infer("classifier.onnx"), ArgMax()])
+
+service = embed >> classify
+```
+
+For composition semantics, API forms, and validation after composition, see
+[docs/COMPOSITION.md](docs/COMPOSITION.md).
 
 ## Examples
 
 All examples auto-download their model and sample assets into
-`.example_assets/` on first run.
+`examples/.example_assets/` on first run.
 
 ### Inference on files
 
@@ -699,33 +614,62 @@ All examples auto-download their model and sample assets into
 |---|---|---|---|
 | `run_detection.py` | any YOLOv8-compatible | detection | generic, bring your own model |
 | `run_yolo8_onnx.py` | YOLOv8 | detection | baseline YOLO pipeline |
-| `run_yolo11n_onnx_fp16.py` | YOLO11n FP16 | detection | `Cast` for FP16, letterbox resize |
-| `run_rfdetr_nano_onnx.py` | RF-DETR nano | detection | `Scale` for normalized boxes, softmax logits |
-| `run_yolo11n_seg_onnx.py` | YOLO11n-seg | instance segmentation | prototype masks, `ReconstructMasks` + `FilterBy` |
-| `run_maskrcnn_onnx.py` | Mask R-CNN int8 | instance segmentation | CNN family, NMS baked in, 28×28 RoI masks, BGR mean subtraction |
+| `run_yolo11n_fp16.py` | YOLO11n FP16 | detection | `Cast` for FP16, letterbox resize |
+| `run_rfdetr_nano.py` | DETR-style detector | detection | `Scale` for normalized boxes, softmax logits |
+| `run_yolo11n_seg.py` | YOLO11n-seg | instance segmentation | prototype masks, `ReconstructMasks` + `FilterBy` |
+| `run_maskrcnn.py` | Mask R-CNN int8 | instance segmentation | CNN family, NMS baked in, 28×28 RoI masks, BGR mean subtraction |
+| `run_yolo8_batch.py` | YOLOv8 | batch detection | simple batch region usage |
+| `run_yolo8_tile.py` | YOLOv8 | tiled detection | tile and merge style pipeline |
 
 ```bash
 python examples/run_yolo8_onnx.py
-python examples/run_yolo11n_seg_onnx.py
-python examples/run_rfdetr_nano_onnx.py
-python examples/run_maskrcnn_onnx.py
+python examples/run_yolo11n_seg.py
+python examples/run_rfdetr_nano.py
+python examples/run_maskrcnn.py
+python examples/run_yolo8_tile.py
 ```
 
-### Live and video inference
+### Inspection, tracing, and benchmarking
+
+| Example | Focus | Notes |
+|---|---|---|
+| `run_inspect.py` | step-by-step inspection | renders a successful pipeline run |
+| `run_inspect_errors.py` | failed-run inspection | shows how inspection captures errors |
+| `run_yolo8_tracing.py` | tracing | prints or captures per-step trace data |
+| `run_yolo8_batch_benchmark.py` | single benchmark | benchmarks batch throughput on one pipeline |
+| `examples/benchmarks/` | benchmark workflows | single runs, sweeps, axis sweeps, CLI benchmarking |
+
+### Data preparation
+
+| Example | Domain | Notes |
+|---|---|---|
+| `run_sms_spam_prepare.py` | tabular / text preparation | non-vision example built from data operators |
+
+### Streaming and live inference
 
 | Example | Model | Task | Notes |
 |---|---|---|---|
-| `run_yolo8_webcam.py` | YOLOv8 | live detection | reads from the default camera; press Q to quit |
+| `streaming/run_yolo8_webcam.py` | YOLOv8 | live detection | reads from the default camera; press Q to quit |
 | `run_yolo8_video.py` | YOLOv8 | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
+| `streaming/run_shibuya_counter.py` | CSRNet + detector | crowd counting pipeline |
+| `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation |
+| `streaming/run_shibuya_rf.py` | DETR-style detector | streaming detector variant |
 
 ```bash
 # Live webcam — press Q to quit
-python examples/run_yolo8_webcam.py
+python examples/streaming/run_yolo8_webcam.py
 
 # Video file — uses bundled sample, or pass --input clip.mp4
 python examples/run_yolo8_video.py
 python examples/run_yolo8_video.py --input clip.mp4 --output annotated.mp4
 ```
+
+### Torch and domain handoff
+
+| Example | Focus | Notes |
+|---|---|---|
+| `torch/run_mask2former_torch_postprocess.py` | Torch-heavy postprocess | keeps mask postprocessing in Torch |
+| `torch/run_mask2former_numpy_postprocess.py` | NumPy handoff | converts back earlier and finishes in NumPy |
 
 ### Inference endpoint
 
@@ -737,12 +681,12 @@ python examples/run_yolo8_video.py --input clip.mp4 --output annotated.mp4
 # Terminal 1 — start the server
 python examples/run_yolo8_endpoint.py
 
-# Terminal 2 — send a test request (uses bundled sample, or pass --input clip.mp4)
+# Terminal 2 — send a test request (uses bundled sample, or pass --input photo.jpg)
 python examples/run_yolo8_endpoint.py --call
 python examples/run_yolo8_endpoint.py --call --input photo.jpg
 
 # Or with curl
 curl -s -X POST http://localhost:5000/detect \
      -H "Content-Type: application/octet-stream" \
-     --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
+     --data-binary @examples/.example_assets/coco_000000039769.jpg | python -m json.tool
 ```

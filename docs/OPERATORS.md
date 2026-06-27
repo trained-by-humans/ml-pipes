@@ -264,37 +264,23 @@ runs: 5  (all values in ms)
 
 ## Design Principles
 
-Every operator in the library is designed to uphold the following properties.
-They are not style guidelines — they are what makes operators safe to compose
-and swap without side effects.
+Operators should satisfy a few hard constraints so they stay safe to compose,
+swap, and reason about.
 
-**Atomically meaningful.** Each operator should represent one meaningful
-boundary in the pipeline: normalize text, store a value in context, open a
-scatter region, draw boxes, or convert one box format to another. Larger
-workflows should be built by composing operators, not by fusing many concerns
-into one broad step.
+**Atomic.** One meaningful pipeline boundary, not a whole workflow.
 
-**Stateless.** An operator should hold only stable configuration given at
-construction time (`name`, `axis`, `threshold`, `prefix`, etc.). It should not
-accumulate hidden runtime state across calls. This is primarily an execution
-safety property: stateless operators are easier to run in parallel or
-distributed pipelines, easier to scale, and easier to debug because the same
-input under the same config produces the same result.
+**Stateless.** Keep only construction-time config (`name`, `axis`,
+`threshold`, `prefix`, etc.), never hidden runtime memory.
 
-**Effect-explicit.** If an operator touches context, opens a region, performs
-a side effect, or crosses a runtime boundary, that role should be explicit in
-its type and behavior. Control flow and side effects should be first-class
-operator semantics, not hidden inside an otherwise generic transform.
+**Effect-explicit.** If an operator touches context, opens a region, performs a
+side effect, or crosses a runtime boundary, that should be obvious in its type
+and behavior.
 
-**Reusable at the right layer.** Shared operators should capture behavior that
-is genuinely reusable across pipelines. Project-specific assumptions, one-off
-workflow glue, and temporary experiments belong in local pipeline code, not in
-the shared operator surface.
+**Reusable at the right layer.** Put broadly reusable behavior in shared
+operators; keep project glue and experiments in local pipeline code.
 
-**Composable.** An operator should be easy to insert, remove, reorder,
-validate, inspect, trace, and benchmark as a standalone boundary. The clearer
-and smaller the operator, the more useful the surrounding pipeline tooling
-becomes.
+**Composable.** Operators should be easy to insert, remove, reorder, validate,
+inspect, trace, and benchmark as standalone boundaries.
 
 ## Best Practices For Creating Operators
 
