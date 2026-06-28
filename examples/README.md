@@ -34,7 +34,11 @@ python examples/run_yolo8_tile.py
 | `run_inspect_errors.py` | failed-run inspection | shows how inspection captures errors |
 | `run_yolo8_tracing.py` | tracing | prints or captures per-step trace data |
 | `run_yolo8_batch_benchmark.py` | single benchmark | benchmarks batch throughput on one pipeline |
-| `examples/benchmarks/` | benchmark workflows | single runs, sweeps, axis sweeps, CLI benchmarking |
+| `benchmarks/run_yolo8_benchmark.py` | benchmark workflow | direct `Benchmark` usage for one pipeline |
+| `benchmarks/run_yolo8_benchmark_sweep.py` | benchmark sweep | compares plain and tiled pipelines side by side |
+| `benchmarks/run_yolo8_benchmark_sweep_axis.py` | axis sweep | sweeps `slice_wh x overlap_wh` combinations |
+| `benchmarks/run_yolo8_benchmark_variants.py` | variant sweep | compares multiple YOLOv8 model sizes |
+| `benchmarks/run_yolo8_benchmark_cli.py` | CLI benchmark target | target for `python -m ml_pipes benchmark` |
 
 ## Data Preparation
 
