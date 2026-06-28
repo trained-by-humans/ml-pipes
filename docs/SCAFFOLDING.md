@@ -1,28 +1,38 @@
 # Model Scaffolding Tutorial
 
-This guide shows how to create a model scaffold with `ml-pipes`.
+This guide shows how to scaffold a model integration with `ml-pipes`. Before you start, read [README.md](../README.md) and
+[COMPOSITION.md](COMPOSITION.md).
 
-A scaffold is the smallest useful pipeline around model execution. Instead of
-treating the model call as one opaque block, you turn the integration into
-named steps that are easier to validate, inspect, debug, benchmark, adapt,
-and reuse inside a larger workflow or application.
+A scaffold is the smallest useful pipeline around model execution. In ML
+terms, it is the explicit path from raw input to final predictions:
+preprocessing, model execution, output decoding, filtering, and projection.
 
-`ml-pipes` does not require a specific runtime. You can use the core
-`ml-pipes` steps with `Infer(...)` for ONNX Runtime, the `ml_pipes.torch`
-package for Torch-native steps, or your own callable/operator around any
-library that can load weights and run the model.
+At a high level, scaffolding usually follows this flow:
+
+- inspect the model interface
+- choose the boundary around the model step
+- prepare inputs
+- run the model
+- rename and decode outputs
+- filter and finalize predictions
+
+`ml-pipes` fits this naturally because each part of that flow can stay as one
+or more explicit pipeline steps. It also does not require a specific runtime:
+use `Infer(...)` for ONNX Runtime, `ml_pipes.torch` for Torch-native steps, or
+your own callable/operator around another library.
 
 The walkthrough below uses a simple detection-style scaffold so the main
-pattern stays easy to see, but the same scaffolding approach applies to any
-model you can load and run from Python.
+pattern stays easy to see, but the same approach applies to any model you can
+load and run from Python.
 
-## Step 0 — Check The Model Outputs
+## Step 0 — Inspect The Model Interface
 
-Before you design the scaffold, check what the model actually returns. Do not
-guess this from another export or from a model-family blog post.
+Before you design the scaffold, check what the model actually expects and what
+it returns. Do not guess this from another export or from a model-family blog
+post.
 
-Inspect the real values your runtime exposes: names, keys, shapes, dtypes, and
-layout.
+Inspect the real input names, shapes, dtypes, layouts, and output names,
+shapes, dtypes, and layouts.
 
 For ONNX Runtime, a quick inspection looks like this:
 
@@ -30,18 +40,20 @@ For ONNX Runtime, a quick inspection looks like this:
 import onnxruntime as ort
 
 session = ort.InferenceSession("model.onnx")
-for output in session.get_outputs():
-    print(output.name, output.shape)
+for node in session.get_inputs():
+    print("input", node.name, node.shape, node.type)
+for node in session.get_outputs():
+    print("output", node.name, node.shape, node.type)
 ```
 
-For other runtimes, inspect whatever the model actually returns: tuple
-position, dict key, tensor shape, and dtype. The scaffold should be built from
-the concrete outputs in your runtime, not from an assumed interface.
+For other runtimes, inspect whatever the model actually consumes and returns:
+tuple position, dict key, tensor shape, dtype, and layout. This is the ground
+truth for the scaffold.
 
 ## Step 1 — Clarify The Model Boundary
 
-Once you know what the model actually returns, decide what the model step
-should own and what should stay outside it.
+Once you know the model interface, decide what belongs in preprocessing, what
+belongs in the model step itself, and what belongs in postprocessing.
 
 In most cases, the ideal model boundary is narrow:
 
@@ -59,31 +71,28 @@ Different models may need different runtimes or different postprocessing, but
 that overall structure stays the same. Keep the model call as one explicit step
 inside a larger flow.
 
-For example:
+In `ml-pipes`, that model step can be as small as:
 
 ```python
-from ml_pipes import Infer
-from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchInfer
-
 # ONNX Runtime
 Infer("model.onnx")
 
 # Torch-native model
-ToTorch(device="cpu")
 TorchInfer(model, input_layout="NCHW")
-ToNumpyRegistry()
 
-# Any other library
+# Any other runtime
 RunMyModel()
 ```
 
 Use the built-in runtime operators when they fit. If your model runs through a
-different library, wrap that call in a plain callable or operator so the model
-itself is still one visible step in the pipeline.
+different library, wrap that call in a small callable or operator so the model
+itself is still one visible step in the pipeline. For Torch-specific
+boundaries, see [TORCH.md](TORCH.md).
 
 ## Step 2 — Prepare The Model Inputs
 
-Before the model step, most scaffolds need a small preprocessing block.
+Before the model step, build the smallest preprocessing block that gets the
+raw input into the form the model expects.
 
 Typical input preparation includes:
 
@@ -107,19 +116,16 @@ Normalize(),
 Keep this separate from the model call. It defines the model input boundary
 and makes input mistakes much easier to inspect and fix.
 
-## Step 3 — Map Outputs Into A TensorRegistry
+## Step 3 — Map Raw Outputs To Named Tensors
 
-If you use `Infer(...)`, the raw result is `RuntimeOutputs`: the model outputs
-exactly as exposed by the runtime, together with their names.
+After inference, the first postprocessing step is usually to give the raw
+outputs semantic names.
 
-In `ml-pipes`, a `TensorRegistry` is just a named store of tensors that moves
-from step to step through the pipeline.
-
-The rest of the scaffold is easier to reason about once that flowing value
-uses meaningful names like `boxes`, `scores`, or `logits`.
+This is the bridge from runtime-specific output ids to task-specific tensors
+like `boxes`, `scores`, or `logits`.
 
 With ONNX Runtime outputs, use `Extract` to pull tensors by graph output name
-into the registry:
+into named tensors:
 
 ```python
 # Single output
@@ -129,30 +135,23 @@ Extract("output0", as_="preds")
 Extract("pred_boxes", "logits", as_=("boxes", "logits"))
 ```
 
-With another runtime, do the same mapping in a small callable or operator:
+In `ml-pipes`, the named tensor collection that flows through later steps is a
+`TensorRegistry`. If you use `Infer(...)`, the raw runtime return is
+`RuntimeOutputs`, and `Extract(...)` is the normal adapter from that runtime
+shape into named tensors.
 
-```python
-from ml_pipes import TensorRegistry
+If you run the model through your own callable, return the same named tensors
+directly or build a small adapter around that runtime. The important part is
+that after this step, the rest of the scaffold can talk about semantic values
+instead of raw graph ids. For more operator patterns, see
+[OPERATORS.md](OPERATORS.md).
 
+## Step 4 — Adapt The Raw Output Layout
 
-def outputs_to_registry(outputs) -> TensorRegistry:
-    return TensorRegistry({
-        "boxes": outputs["boxes"],
-        "logits": outputs["logits"],
-    })
-```
+Many models still need some small tensor-shape fixes such as squeeze or
+transpose before the main postprocessing starts.
 
-If you write your own model step, you can either return something equivalent
-to `RuntimeOutputs` and reuse `Extract(...)`, or skip that shape entirely and
-return a `TensorRegistry` directly.
-
-The important part is that after this mapping step, the rest of the pipeline
-can talk about values like `boxes`, `scores`, or `logits` instead of raw graph
-output ids.
-
-## Step 4 — Adapt The Raw Tensor Layout
-
-Different model families export predictions in different layouts:
+For example:
 
 ```python
 # YOLO8/11: (1, features, N) -> squeeze batch dim, then transpose
@@ -167,7 +166,7 @@ Keep this as its own explicit step. Layout fixes are one of the most common
 places where a new model scaffold goes wrong, and they are much easier to
 debug when they are visible in the pipeline.
 
-## Step 5 — Slice Out The Parts You Need
+## Step 5 — Split Predictions Into Semantic Tensors
 
 Once the raw prediction tensor is in the right layout, split it into the
 pieces the rest of the pipeline expects:
@@ -177,15 +176,14 @@ Slice("preds", slice(None, 4), as_="boxes"),         # (N, 4)
 Slice("preds", slice(4, None), as_="class_scores"),  # (N, C)
 ```
 
-If the model emits extra tensors, split them out here the same way.
-
 From here on, the pipeline should read like the problem domain: boxes, class
-scores, labels, keypoints, or whatever the later steps need.
+scores, labels, keypoints, or whatever the later steps need. This is where the
+scaffold starts to look like your task instead of your runtime export.
 
 ## Optional Step — Handle Model Quirks
 
-Most model quirks still fit the generic tensor/registry steps that already
-exist in `ml-pipes`, so try those first.
+Most model quirks still fit the generic tensor operations that already exist
+in `ml-pipes`, so try those first.
 
 For example, Mask R-CNN exports 1-indexed labels, so the fix is just:
 
@@ -193,36 +191,15 @@ For example, Mask R-CNN exports 1-indexed labels, so the fix is just:
 MapTensor("labels", fn=lambda t: t.astype("int32") - 1, as_="classes")
 ```
 
-For a more involved example built from generic steps, see the examples at the
-end of this guide.
-
-If the quirk still does not fit the existing steps, use a small local
-callable instead of forcing the whole scaffold into one custom class:
-
-```python
-from ml_pipes import Pipeline, TensorRegistry
-
-
-def _my_model_quirk(registry: TensorRegistry) -> TensorRegistry:
-    # Handle whatever the model does unusually.
-    registry["boxes"] = ...
-    return registry
-
-
-pipeline = Pipeline([
-    ...,
-    _my_model_quirk,
-    ...,
-])
-```
-
-Keep that callable small and specific. The scaffold should stay mostly built
-from ordinary `ml-pipes` steps. If that logic stops being local and becomes
-reusable, turn it into a real operator; see [OPERATORS.md](OPERATORS.md).
+If the quirk still does not fit the existing steps, keep it in a small local
+callable or operator instead of folding it into the entire scaffold. If that
+logic becomes reusable, turn it into a real operator; see
+[OPERATORS.md](OPERATORS.md). For more involved postprocessing examples, see
+the examples at the end of this guide.
 
 Some models will not need this step at all. Keep it optional and local.
 
-## Step 6 — Handle Model-Specific Coordinate Formats
+## Step 6 — Standardize Model-Specific Coordinates
 
 Some models emit coordinates that still need cleanup in model space before you
 filter candidates or project anything back to the source image.
@@ -240,35 +217,44 @@ model space. Projection back to the source image happens later.
 
 ## Step 7 — Filter And Reduce Candidates
 
-Before you project anything back to the source image or do heavier downstream
-work, reduce the number of candidates.
+Before you project anything back to the source image, reduce the number of
+candidates.
 
 As a rule of thumb, go from least expensive to most expensive:
 
-- apply simple per-candidate filters first, such as score thresholds, class
-  filters, or simple top-k reduction
+- apply simple per-candidate filters first, such as class filters, area
+  filters, simple top-k reduction, or other task-specific pruning
 - then apply pairwise suppression or merge, such as `NMS()` or `NMM()`
-- if later tensors need to stay aligned, apply the same kept indices to them
-- leave heavier postprocessing and projection for later
+- when aligned tensors must follow the same reduction, use either boolean-mask
+  filtering or index slicing
 
-For a simple detection scaffold, that might look like this:
+For a simple detection scaffold, that might look like this when you want to
+drop very small objects before `NMS()`:
 
 ```python
-FilterTensorsByScore("boxes", "classes", score="scores", min_score=0.25),
+FilterTensors(
+    "boxes",
+    "scores",
+    "classes",
+    by="boxes",
+    predicate=lambda boxes: ((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])) >= 16 * 16,
+),
 NMS(),
 ```
 
-In a very small pipeline, `NMS(conf_threshold=...)` may already be enough by
-itself. Add explicit early filters when you want that reduction to happen
-before later steps.
+If score thresholding is all you need, `NMS(conf_threshold=...)` may already
+be enough by itself.
+
+For more filtering and selection operators, see
+[operators/README.md](operators/README.md).
 
 The exact operators can change by model family. The important point is the
 ordering: cheap filters first, heavier work later.
 
 ## Step 8 — Project Back To The Source Image
 
-Store the resize transform before inference so you can use it later to map the
-results back to the original image:
+Reuse the resize or pad metadata from preprocessing when you map predictions
+back to the original image:
 
 ```python
 Resize((640, 640)),
@@ -281,35 +267,32 @@ ProjectBoxes(),
 ToDetections(),
 ```
 
-Here `Store(...)` saves the resize metadata, and `Recall(...)` brings it back
-later when `ProjectBoxes()` needs to convert coordinates back to the source
-image. `Pick(0)` keeps the resized image flowing forward after `Resize(...)`
-returns both the resized value and the transform metadata.
+In `ml-pipes`, `Store(...)` and `Recall(...)` are the usual way to carry that
+metadata through the pipeline.
 
 This is where the scaffold turns raw model outputs into final values your
 application can use: first back into source-image coordinates, then into
 objects such as `Detections`.
 
-## Final Detection Scaffold
+## Putting The Flow Together
 
-The example below uses ONNX Runtime for the model step. The same overall
-scaffold still works if you replace that step with a Torch-based step or a
-callable that runs another library.
+Read the scaffold from top to bottom as: prepare inputs, run the model, name
+and decode the outputs, filter candidates, then project back to the source
+image.
 
 ```python
-from ml_pipes import (
-    ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
-    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
-    Resize, Extract, Slice, Squeeze, Store, ToDetections, Transpose,
-)
-
 pipeline = Pipeline([
+    # Prepare inputs
     Decode(),
     Resize((640, 640)),
     Store("resize_transform", source=1),
     Pick(0),
     Normalize(),
+
+    # Run model
     Infer("model.onnx"),
+
+    # Name and decode outputs
     Extract("output0", as_="preds"),
     Squeeze("preds"),
     Transpose("preds"),
@@ -318,39 +301,27 @@ pipeline = Pipeline([
     ArgMax("class_scores", as_="classes"),
     GatherScores("class_scores", "classes", as_="scores"),
     ConvertBoxFormat(from_="cxcywh"),
+
+    # Filter and project
     NMS(),
     Recall("resize_transform"),
     ProjectBoxes(),
     ToDetections(),
 ])
-
-detections = pipeline("image.jpg")
-print(detections.boxes, detections.scores, detections.classes)
 ```
+
+The exact operators can change by model family, but the scaffold shape usually
+stays the same.
 
 ## What To Do Next
 
-### Validate The Pipeline
-
-Run `pipeline.validate()` once the scaffold is assembled and again whenever
-you change what a step takes in or returns. That catches step-to-step
-mismatches before they turn into runtime bugs. For validation rules and
-advanced hooks such as `resolve_contract(...)`, see [VALIDATION.md](VALIDATION.md).
-
-### Debug With Inspection
-
-Use `pipeline.inspect(sample_input)` to confirm that each step produces the
-shape and meaning you expect. If the scaffold is wrong, inspection usually
-shows the first bad step immediately. For inspection examples and output
-formatting, see [OPERATORS.md](OPERATORS.md) and
-[run_inspect.py](../examples/run_inspect.py).
-
-### Keep The Scaffold Composable
-
-Keep the actual model step narrow, keep quirks local, and keep the rest of the
-flow explicit. That makes the scaffold easier to swap, extend, and reuse
-across model variants. For composition patterns, see
-[COMPOSITION.md](COMPOSITION.md).
+- Run `pipeline.validate()` as you shape the scaffold. For validation rules and
+  advanced hooks such as `resolve_contract(...)`, see
+  [VALIDATION.md](VALIDATION.md).
+- Use `pipeline.inspect(sample_input)` to look at intermediate tensors and find
+  the first wrong step. For examples, see [run_inspect.py](../examples/run_inspect.py).
+- If local logic grows into reusable pipeline code, see
+  [OPERATORS.md](OPERATORS.md) and [COMPOSITION.md](COMPOSITION.md).
 
 ## More Examples
 
