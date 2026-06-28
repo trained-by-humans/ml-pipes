@@ -1,8 +1,9 @@
 # Architecture
 
-This document is a map of how `ml-pipes` is split internally. It
-focuses on ownership boundaries: what each layer owns, how one invocation moves
-through the system, and where a change should usually land.
+Following up on [DESIGN.md](DESIGN.md), this document is a map of how
+`ml-pipes` is split internally. It focuses on ownership boundaries: what each
+layer owns, how one invocation moves through the system, and where a change
+should usually land.
 
 It is not a guide to using `ml-pipes` features. The detailed user-facing
 semantics live in the linked docs.
@@ -294,3 +295,12 @@ Main components:
 - `python -m ml_pipes` as the public entry point
 - Commands like `run` and `benchmark`
 - module loading, factory discovery, config parsing, and result-saving helpers
+
+## Where To Go Next
+
+This document has mapped how `ml-pipes` is split internally. If you want the
+rationale behind these boundaries, return to [DESIGN.md](DESIGN.md).
+
+If your next step is building with the framework, continue to
+[SCAFFOLDING.md](SCAFFOLDING.md) or the runnable examples in
+[examples/README.md](../examples/README.md).
