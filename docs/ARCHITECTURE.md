@@ -7,11 +7,12 @@ through the system, and where a change should usually land.
 It is not a guide to using `ml-pipes` features. The detailed user-facing
 semantics live in the linked docs.
 
-## What ml-pipes Is
+## Overview
 
-`ml-pipes` is a generic execution harness around explicit operator boundaries.
+Architecturally, `ml-pipes` is a small generic execution harness around
+explicit operator boundaries.
 
-The design stays split on purpose:
+The architecture stays split on purpose:
 
 - `Pipeline` owns generic execution, composition boundaries, and lifecycle
   hooks.
@@ -22,7 +23,7 @@ The design stays split on purpose:
 - Tooling works by reading or validating the same boundaries rather than
   inventing a separate model.
 
-The design goal is to provide useful pipeline features while keeping ordinary
+The architectural goal is to provide useful pipeline features while keeping ordinary
 operators as simple as possible. In the normal case, an operator should only
 need to define its boundary and its task logic; composition, validation,
 inspection, tracing, benchmarking, and other cross-cutting behavior should be

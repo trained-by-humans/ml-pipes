@@ -1,30 +1,7 @@
 # ml-pipes
 
-Composable ML pipelines built from explicit operator boundaries.
-
-`ml-pipes` is a compute-composition framework built around data flow. A
-pipeline is a sequence of operator boundaries that push data forward: one step
-receives a value, transforms it, and hands the result to the next step. The
-value might be an image, a tensor registry, a batch, a record, or any other
-payload, but the main thing the framework cares about is how that data moves
-and changes.
-
-Once data becomes the first-class concern, the tooling naturally follows it.
-Validation checks that operator boundaries connect, Inspection gives you a
-built-in lineage view of what each step produced in one run, Tracing records
-how a call moved through the pipeline, and Benchmark measures the same flow
-across repeated runs.
-
-That model fits ML systems better than an app design centered on objects or
-services. In many ordinary applications, most of the code is side effects with
-a little data mutation around them. In ML applications, the ratio is usually
-reversed: most of the work is data mutation, with side effects mostly at the
-edges when you load inputs, call runtimes, or save outputs.
-
-Even models are not first-class in that sense. A model call is just one
-operator in a larger data path; weights and biases matter because they affect
-how data is transformed, not because the framework treats the model itself as
-the center of the system.
+Compute-composition framework for building ML systems around
+explicit data flow.
 
 ## Install
 
