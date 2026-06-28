@@ -39,6 +39,8 @@ pip install -e .[dev]    # tests and type checking
 
 ## Quick start
 
+A pipeline for running YOLO inference with `ml-pipes` can look like this:
+
 ```python
 from ml_pipes import (
     ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
@@ -49,7 +51,7 @@ from ml_pipes import (
 pipeline = Pipeline([
     Decode(),
     Resize((640, 640)),
-    Store("resize_transform", index=1),
+    Store("resize_transform", source=1),
     Pick(0),
     Normalize(),
     Infer("yolov8n.onnx"),
@@ -363,20 +365,6 @@ and want the smallest possible surface area.
 > - ml-pipes sits in between: the explicit control of raw ONNX with a reusable operator library that eliminates the repeated boilerplate.  
 
 
-## Model Scaffolding
-
-If you need to wrap a model so it composes inside a larger pipeline or app,
-start from a scaffold: an explicit sequence of steps around the model
-boundary. The runtime boundary can be ONNX, Torch, or your own callable
-around another library; the important part is to keep the rest of the flow
-explicit: map raw outputs into semantic tensors, adapt layout, handle quirks,
-normalize coordinates, filter and reduce candidates, and project back to the
-source image. That makes the integration easier to validate, inspect, debug,
-benchmark, adapt, and reuse across model variants.
-
-For the full walkthrough, see
-[docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
-
 ## Defining an Operator
 
 An operator can be as simple as a plain callable for one-off logic or a class
@@ -412,12 +400,13 @@ For more advanced forms such as context operators, region operators, or custom
 `resolve_contract(...)`, see [docs/OPERATORS.md](docs/OPERATORS.md). For validation
 rules, see [docs/VALIDATION.md](docs/VALIDATION.md).
 
-## Using Pipelines
+## How To Use Pipelines
 
-### Wrapping a pipeline
+### Wrap a Pipeline Behind an Interface
 
-If you run the same model repeatedly, wrap the pipeline in a function or class
-that owns the `Pipeline` instance:
+One common pattern is to keep a pipeline behind a small function or class that
+owns the `Pipeline` instance. That works well for local model calls, service
+objects, or API handlers:
 
 ```python
 class YoloDetector:
@@ -425,7 +414,7 @@ class YoloDetector:
         self._pipeline = Pipeline([
             Decode(),
             Resize((640, 640)),
-            Store("resize_transform", index=1),
+            Store("resize_transform", source=1),
             Pick(0),
             Normalize(),
             Infer(model_path),
@@ -450,11 +439,12 @@ detector = YoloDetector("yolov8n.onnx", conf_threshold=0.3)
 detections = detector("image.jpg")
 ```
 
-### Chaining pipelines
+### Compose an Application From Pipelines
 
-Use `a + b` to merge pipelines into one flat operator list with shared
-context. Use `a >> b` to connect one pipeline to another while keeping each
-child pipeline as its own boundary.
+Another common pattern is to build a larger workflow by composing smaller
+pipelines. `a + b` merges pipelines into one flat operator list with shared
+context. `a >> b` connects one pipeline to another while keeping each child
+pipeline as its own boundary.
 
 For example:
 
@@ -473,6 +463,22 @@ service = embed >> classify
 
 For composition semantics, API forms, and validation after composition, see
 [docs/COMPOSITION.md](docs/COMPOSITION.md).
+
+## Common Use Cases
+
+### Model Scaffolding
+
+If you need to wrap a model so it composes inside a larger pipeline or app,
+start from a scaffold: an explicit sequence of steps around the model
+boundary. The runtime boundary can be ONNX, Torch, or your own callable
+around another library; the important part is to keep the rest of the flow
+explicit: map raw outputs into semantic tensors, adapt layout, handle quirks,
+normalize coordinates, filter and reduce candidates, and project back to the
+source image. That makes the integration easier to validate, inspect, debug,
+benchmark, adapt, and reuse across model variants.
+
+For the full walkthrough, see
+[docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
 
 ## Examples
 
