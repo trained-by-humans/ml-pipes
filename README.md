@@ -82,7 +82,7 @@ pipeline.describe(show_defaults=True)
 
 - [docs/OPERATORS.md](docs/OPERATORS.md) — what operators are and how to write them
 - [docs/COMPOSITION.md](docs/COMPOSITION.md) — building pipelines and composing pipelines together
-- [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — tutorial for bringing a new NumPy/ONNX model into a pipeline scaffold
+- [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — tutorial for wrapping a model in a composable pipeline scaffold
 - [docs/VALIDATION.md](docs/VALIDATION.md) — contract validation, strict mode, and boundary tightening
 - [docs/TRACING.md](docs/TRACING.md) — traces, collectors, and the runtime observation model inspection builds on
 - [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — repeated-run measurement, sweeps, saved artifacts, and CLI benchmarking
@@ -365,11 +365,14 @@ and want the smallest possible surface area.
 
 ## Model Scaffolding
 
-If you are bringing up a new NumPy/ONNX model, start from a scaffold instead
-of hiding the whole integration inside one large operator. The goal is to map
-raw outputs into a sequence of explicit steps: extract tensors, adapt layout,
-slice semantic values, normalize coordinates, run NMS, and project back to the
-source image.
+If you need to wrap a model so it composes inside a larger pipeline or app,
+start from a scaffold: an explicit sequence of steps around the model
+boundary. The runtime boundary can be ONNX, Torch, or your own callable
+around another library; the important part is to keep the rest of the flow
+explicit: map raw outputs into semantic tensors, adapt layout, handle quirks,
+normalize coordinates, filter and reduce candidates, and project back to the
+source image. That makes the integration easier to validate, inspect, debug,
+benchmark, adapt, and reuse across model variants.
 
 For the full walkthrough, see
 [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
