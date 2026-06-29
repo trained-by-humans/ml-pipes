@@ -5,69 +5,50 @@ description: Debug broken or unexpected pipelines in ml-pipes. Use when Codex ne
 
 # Pipeline Debugger
 
-Focus on failure localization, not ownership.
+Repository documentation Markdown files define semantics. This file only
+drives failure localization.
 
-- Find where the pipeline breaks.
-- Explain what kind of failure it is.
-- Produce evidence another skill can act on.
+Use this skill when a pipeline already exists but the first bad boundary,
+step, or failure class is not yet known.
 
-Do not decide final ownership by default. Hand off to `change-triage` when the
-main remaining question is whether the fix belongs in core, reusable
-operators, or a local pipeline.
+## Follow this Workflow
 
-## Workflow
+1. Identify the failing pipeline and input.
+   Start from the code, command, test, factory input, or payload the user
+   provided that matches the reported issue.
+   If the failing pipeline code is missing or incomplete, use
+   `examples/README.md` to find the closest runnable example or repro target.
 
-1. Reproduce the exact failing command, example, test, factory invocation, or
-   input first.
-2. Reduce to the smallest failing pipeline, sub-pipeline, or region that still
-   shows the same failure.
-3. Confirm the actual structure before patching:
-   - use `describe(show_defaults=True)` to see the current operator chain
-   - use the exact example, test, or `python -m ml_pipes run` command that
-     reproduces the failure
-4. Validate before deep runtime debugging:
-   - run `validate()` first
-   - use `validate(strict=True)` when missing annotations or unresolved `Any`
-     boundaries may be hiding the problem
-   - use `validate(inference=True)` when backward inference may clarify the
-     expected pipeline input or context contract
-5. Inspect runtime behavior when validation alone is not enough:
-   - run `inspect()` to find the first broken operator, region boundary, or
-     context handoff
-   - compare the last good step with the first bad step
-   - prefer the first failure over downstream symptoms
-6. Use tracing only when runtime order, concurrency, latency, or side effects
-   matter. Do not jump to tracing before validation or inspection.
-7. Classify the failure so the next skill inherits a clear diagnosis:
-   - `composition`
-   - `contract`
-   - `context`
-   - `factory or config`
-   - `runtime data`
-   - `region or concurrency`
-   - `performance or regression`
-8. Hand off based on the result:
-   - `pipeline-builder` when the fix is local pipeline composition or a small
-     local operator
-   - `change-triage` when ownership across layers matters
-   - maintainer skills when the evidence already points to core or reusable
-     operator work
+2. Reproduce and reduce the issue.
+   Reproduce the issue in the provided code path first.
+   If that path is not runnable, reproduce it with the closest example, then
+   reduce the failing case to the smallest pipeline that still shows the same
+   problem. Read `docs/COMPOSITION.md` if the pipeline shape itself is unclear.
 
-## Required Checks
+3. Validate composition first.
+   Run `validate()` before deeper runtime debugging. Read `docs/VALIDATION.md`
+   when boundary mismatch or composition failure is a likely cause.
 
-- Reproduce before patching.
-- Prefer the smallest failing repro over the full original pipeline.
-- Run `validate()` before ad hoc print-debugging.
-- Use `inspect()` to localize the first bad step when the pipeline runs but
-  behaves incorrectly.
-- Keep ownership decisions out of this skill unless the evidence is already
-  obvious.
+4. Inspect the data flow.
+   Use `inspect()` to see how the input is processed through the pipeline. Use
+   `examples/run_inspect.py` and `examples/run_inspect_errors.py` as the first
+   reference for localizing the bad step.
 
-## Read These Docs
+5. Trace only when runtime behavior matters.
+   Use tracing only when inspection is not enough or the problem is about
+   timing, runtime order, concurrency, or slow steps. Read `docs/TRACING.md`
+   only when tracing is actually needed.
 
-- `README.md`
-- `docs/VALIDATION.md`
-- `docs/COMPOSITION.md`
-- `docs/TRACING.md`
-- `examples/run_inspect.py`
-- `examples/run_inspect_errors.py`
+6. Stop at a confirmed localized issue.
+   Finish once the issue is isolated and confirmed to match what the user
+   described. The output of this skill should be a localized issue and root
+   cause, not the final fix.
+
+## Hand Off To
+
+- `pipeline-builder` only when the user wants follow-up changes to the
+  pipeline after the issue is localized
+
+Otherwise, report the localized issue and root cause back to the user.
+If the finding points to shared core or operator-package behavior, report that
+explicitly and wait for the user to request a maintainer-side fix.

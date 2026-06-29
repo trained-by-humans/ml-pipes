@@ -1,53 +1,77 @@
 # Skills Index
 
-Use repo-local skills for bounded workflows that need stronger guidance than
-the repo-wide rules in `AGENTS.md`.
+Repository documentation Markdown files are the source of truth.
+Use `docs/README.md` as the shared doc index.
+Use this file only to pick the right workflow and the right docs for the
+requested change.
 
-## Current Skills
+## Change Surfaces
 
-- `pipeline-builder`: compose a correct pipeline first, reuse existing
-  operators, generate missing local pieces only when composition cannot cover
-  the need, and defer optimization until the pipeline already works.
-- `pipeline-debugger`: localize why an existing pipeline is broken, validate or
-  inspect the failing boundary, reduce the repro, and classify the failure
-  before deciding ownership.
-- `change-triage`: classify a bug, regression, feature, enhancement, or
-  refactor once the requested behavior is understood, decide whether the
-  change belongs in the core library, reusable operators, or a local example
-  or external pipeline, then verify at that same layer.
-- `maintainer-core`: change shared runtime, validation, composition, tracing,
-  and benchmarking behavior.
-- `maintainer-operators`: add or manage reusable operators and keep operator
-  work out of the wrong layer.
+- `ml-pipes` is the framework surface that contains core + operator-packages
+  such as `ml-pipes/ops.py` or `ml-pipes/torch/ops.py`.
+- `examples/` are reference apps and repro targets.
 
-## How They Fit Together
+## Agent Roles
 
-- Start with `pipeline-builder` when the task is to create or repair a concrete
-  pipeline, prefer existing operators, and keep missing logic local until reuse
-  is proven.
-- Use `pipeline-debugger` when a pipeline already exists but the broken step,
-  failing boundary, or failure class is still unclear.
-- Use `change-triage` after debugging when the main question becomes where the
-  change belongs.
-- Use `maintainer-core` when the fix changes shared runtime semantics in
-  `src/ml_pipes/`, shared CLI behavior, or core validation and tracing rules.
-- Use `maintainer-operators` when the work is reusable operator logic that
-  should not live in core and should not stay local to one pipeline.
-- Treat pipeline work as phased:
-  first make it correct and validated, then consider tracing or benchmarking.
-- Do not start optimization during initial pipeline construction unless
-  performance is the blocking issue or the user explicitly asks for
-  optimization work.
-- Keep optimization inside `pipeline-builder` for now, but as a later phase
-  after the pipeline already runs correctly and has a stable repro or baseline.
-- Keep ownership decisions inside `change-triage`; keep failure localization
-  inside `pipeline-debugger`.
+This repo assumes two common agent roles:
 
-## Directory Rules
+- `integrator`: uses `ml-pipes` to build, adapt, or debug pipelines in
+  examples or downstream code
+- `maintainer`: changes `ml-pipes` itself, including shared runtime behavior,
+  operator packages, tests, and framework docs
 
-- Keep repo-wide rules in `AGENTS.md`.
-- Keep each skill in its own folder with a single `SKILL.md` entrypoint.
-- Keep `SKILL.md` short and route to existing repo docs instead of duplicating
-  them.
-- Add `scripts/` only when a workflow needs deterministic execution or the
-  same code would otherwise be rewritten repeatedly.
+Do not switch between `integrator` and `maintainer` roles without explicit
+user approval:
+
+- If local pipeline work appears to require framework changes, ask before
+switching into a maintainer skill.
+- If framework work turns out to be only local example or integration work, ask
+before switching into an integrator skill.
+
+## Route By Change Locality
+
+Start from the outermost scope that can satisfy the request. Keep the change
+local unless the requested behavior clearly belongs in a shared layer.
+
+1. `examples/` scope
+   Read `examples/README.md` and the closest runnable example or repro target.
+   If the request is about one pipeline, local wiring, model quirks, or
+   example docs, stay in `examples/` and use `pipeline-builder`.
+   If the first broken step or boundary is still unclear, use
+   `pipeline-debugger`.
+
+2. operator-package scope
+   Read `docs/OPERATORS.md` and `docs/operators/README.md`.
+   If the requested behavior should be shared across more than one pipeline
+   and belongs in operator composition rather than runtime semantics, use
+   `maintainer-operators`.
+   Work in the operator-facing surfaces under `src/ml_pipes/` and the matching
+   docs/tests.
+
+3. core framework scope
+   Read `docs/DESIGN.md` and `docs/ARCHITECTURE.md`.
+   If the request changes shared runtime, validation, typing, tracing,
+   benchmarking, CLI behavior, or other framework semantics, use
+   `maintainer-core`.
+   Work in `src/ml_pipes/`, shared docs, and shared tests.
+
+Use `maintainer-triage` when the requested outcome is understood but it is
+still unclear whether the change should stay in `examples/`, move into an
+operator package, or belong in core.
+
+## Skills
+
+- `pipeline-builder`: compose, adapt, extend, simplify, or document a
+  concrete pipeline in `examples/` or downstream code
+- `pipeline-debugger`: localize the first failing step, boundary, or failure
+  class in an existing pipeline
+- `maintainer-operators`: add, change, or document shared behavior in
+  operator packages
+- `maintainer-core`: implement shared framework-layer changes in
+  `src/ml_pipes/`
+- `maintainer-triage`: confirm whether a requested change belongs in
+  `examples/`, an operator package, or the core library
+
+Choose the skill that best matches the current task.
+If the chosen skill explicitly redirects to another skill, follow that
+handoff.

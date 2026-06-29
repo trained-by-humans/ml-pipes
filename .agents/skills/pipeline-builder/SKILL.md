@@ -5,78 +5,50 @@ description: Compose or improve concrete pipelines with ml-pipes. Use when Codex
 
 # Pipeline Builder
 
-Stay inside ml-pipes as much as possible. Prefer existing operators and
-composition before generating new code.
+Repository documentation Markdown files define semantics. This file only
+drives pipeline composition decisions.
 
-## Phase Rule
+Use this skill when the task is to compose, adapt, extend, simplify, or
+document a concrete pipeline in an example or downstream integration.
 
-Build for correctness first.
+## Follow this Workflow
 
-- The first goal is a working, understandable, validated pipeline.
-- Do not optimize during initial construction unless performance is the reason
-  the pipeline is failing, unusable, or explicitly requested.
-- Treat optimization as a later phase that begins only after the pipeline runs
-  correctly on a stable repro, example, or factory input.
+1. Understand the pipeline boundary.
+   Define the pipeline input and output first. Start from the boundary you
+   need to turn into the result.
 
-## Workflow
+2. Extract the important transformations.
+   List the meaningful transformations needed to turn the input into the
+   output.
 
-1. Start from the closest existing pipeline, example, or factory instead of
-   building from zero when a nearby pattern already exists.
-2. Search available operators before writing new ones:
-   - read `docs/operators/README.md`
-   - search examples, tests, and `src/ml_pipes/`
-   - reuse existing reusable operators when they already cover the need
-3. Compose the pipeline in stages:
-   - list the required transformations and boundaries
-   - map each stage to existing operators first
-   - use local callables or local operators only for the missing pieces
-   - keep missing logic local until reuse across pipelines is clear
-4. Validate continuously:
-   - call `validate()` after every pipeline mutation or composition change
-   - use `Pipeline(..., auto_validate=True)` while iterating when fail-fast
-     construction is useful
-   - use `describe(show_defaults=True)` to confirm the current structure
-5. Debug for correctness with existing tools:
-   - use `inspect()` when intermediate values or failing steps are unclear
-   - use tracing to understand step timing and runtime behavior
-   - use `python -m ml_pipes run` for reproducible factory-based execution
-   - hand off to `pipeline-debugger` when the first broken boundary or failure
-     class is not obvious
-6. Stop the initial build phase once the pipeline:
-   - runs on the target repro, example, or factory input
-   - validates after the latest composition changes
-   - is understandable through `describe()` and reproducible through a command,
-     example, or test
-7. Only then begin performance work when needed:
-   - capture a baseline first
-   - use tracing to identify hotspots before changing structure
-   - use `Benchmark`, `BenchmarkBuilder`, sweeps, or `python -m ml_pipes benchmark`
-     when comparing alternatives or optimizing
-   - re-validate after every optimization change
-8. Escalate ownership when needed:
-   - route to `pipeline-debugger` first when a broken pipeline needs failure
-     localization more than immediate code changes
-   - route to `maintainer-operators` if a missing operator is reusable
-   - route to `maintainer-core` if the blocker is shared runtime behavior
-   - route to `change-triage` when the pipeline behavior is understood but the
-     owning layer is still unclear
+3. Check existing examples.
+   Identify the task category or domain, then check `examples/README.md` to
+   see whether a similar pipeline already exists and use it as a reference.
 
-## Required Checks
+4. Check existing operator packages.
+   Check `docs/operators/README.md` for existing operators before adding local
+   logic. Read `docs/OPERATORS.md` only when you need a deeper definition of
+   what counts as an operator.
 
-- Prefer composition over inheritance and reuse over regeneration.
-- Validate after every pipeline change.
-- Do not benchmark by default during first-pass pipeline construction.
-- Benchmark after optimization work or when choosing between competing
-  compositions in the later performance phase.
-- Verify new operators in a pipeline, not only as isolated functions.
+5. Compose the pipeline.
+   Follow `docs/COMPOSITION.md` to turn those transformations into an explicit
+   pipeline.
 
-## Read These Docs
+6. Validate the composition.
+   Run `validate()` to make sure the pipeline boundaries connect. Read
+   `docs/VALIDATION.md` when validation fails or boundary contracts changed.
 
-- `README.md`
-- `docs/OPERATORS.md`
-- `docs/operators/README.md`
-- `docs/COMPOSITION.md`
-- `docs/VALIDATION.md`
-- `docs/TRACING.md`
-- `docs/BENCHMARKING.md`
-- `docs/PERFORMANCE.md`
+7. Run the pipeline on a representative input.
+   If an input is provided, execute the pipeline to make sure it runs.
+
+8. Compare against the expected output.
+   If an expected output is provided, compare the result against it.
+
+9. Inspect drift when the result does not match.
+   Use `inspect()` to check which step starts to drift from the expected
+   result.
+
+## Hand Off To
+
+- `pipeline-debugger` when the task is debugging an existing pipeline instead
+  of building one, or when the generated pipeline does not work as expected

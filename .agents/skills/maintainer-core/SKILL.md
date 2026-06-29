@@ -1,56 +1,43 @@
 ---
 name: maintainer-core
-description: Maintain shared ml-pipes behavior in the core library. Use when Codex needs to change `src/ml_pipes/` runtime semantics, composition, validation, typing, tracing, benchmarking, CLI behavior, or shared tests and docs that affect more than one reusable operator workflow, example, or pipeline.
+description: Maintain shared ml-pipes behavior in the core library. Use when Codex needs to change `src/ml_pipes/` runtime semantics, composition, validation, typing, tracing, benchmarking, CLI behavior, or shared tests and docs that affect more than one operator package, example, or pipeline.
 ---
 
 # Maintainer Core
 
-Work in the core layer only when the issue is generic across multiple
-pipelines, examples, or reusable operator workflows.
+Repository documentation Markdown files define semantics. This file only
+drives scope and verification decisions.
 
-## Scope
+Use this skill only when the request belongs in shared framework behavior or
+shared framework-facing docs across more than one pipeline, example, or
+operator package.
 
-- `src/ml_pipes/`
-- `tests/`
-- shared docs under `docs/`
+## Follow this Workflow
 
-Do not absorb example-specific or package-specific fixes into core.
+1. Confirm the framework surface.
+   Use `README.md` to check the top-level framework surface and user-facing
+   entry points.
 
-## Workflow
+2. Confirm the semantic intent.
+   Use `docs/DESIGN.md` before touching shared behavior.
 
-1. Reproduce the problem with an existing failing test, a focused new test, or
-   the exact user repro.
-2. Read the matching shared docs before changing behavior:
-   - `docs/VALIDATION.md` for contract, strict, and inference semantics
-   - `docs/COMPOSITION.md` and `docs/ARCHITECTURE.md` for composition, context, and
-     runtime ownership
-   - `docs/TRACING.md`, `docs/BENCHMARKING.md`, and `src/ml_pipes/__main__.py` for
-     tracing, benchmarking, and CLI changes
-3. Change the smallest shared surface that fixes the generic behavior.
-4. Preserve the core design:
-   - keep execution explicit and operator-list-driven
-   - prefer composition over adding model-specific engine modes
-   - keep model or task quirks out of core
-   - keep reusable logic generic and operator-oriented
-5. Verify in the core layer:
-   - add or update focused tests near the changed behavior
-   - cover both valid and failing paths when validation changes
-   - cover strict or inference validation when those modes are involved
-   - cover `run` or `benchmark` CLI paths when factory or CLI behavior changes
-   - gather before and after tracing or benchmark evidence for performance work
+3. Locate the owning runtime surface.
+   Use `docs/ARCHITECTURE.md` to find the right runtime surface in
+   `src/ml_pipes/`.
 
-## Required Checks
+4. Read subsystem docs only when needed.
+   Read `docs/COMPOSITION.md`, `docs/VALIDATION.md`, `docs/TRACING.md`, or
+   `docs/BENCHMARKING.md` only when that subsystem is part of the change.
 
-- Re-run `validate()` in any pipeline or example used to reproduce the issue.
-- Keep docs in sync when user-facing semantics change.
-- Prefer existing tests and minimal new repros over broad refactors during a
-  fix.
+5. Work only in core-owned surfaces.
+   Keep the change in `src/ml_pipes/`, related tests, and shared docs.
 
-## Read These Docs
+6. Keep non-core behavior out of core.
+   Keep model-specific behavior, example wiring, and one-off glue out of core.
 
-- `docs/ARCHITECTURE.md`
-- `docs/COMPOSITION.md`
-- `docs/VALIDATION.md`
-- `docs/TRACING.md`
-- `docs/BENCHMARKING.md`
-- `README.md`
+## Hand Off When
+
+- the change is really operator-package work -> `maintainer-operators`
+- the change is local to one example or downstream pipeline -> ask the user
+  before switching to `pipeline-builder`
+- ownership is still unclear -> `maintainer-triage`

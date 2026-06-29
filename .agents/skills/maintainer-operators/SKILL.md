@@ -1,56 +1,44 @@
 ---
 name: maintainer-operators
-description: Add or maintain reusable operators in ml-pipes. Use when Codex needs to check whether an operator already exists, decide whether logic belongs in core versus reusable operator code versus a local pipeline, implement a new operator with correct annotations, and verify the operator inside a real pipeline.
+description: Add or maintain operators in ml-pipes operator packages. Use when Codex needs to place a new operator in the right package or file, check that its boundary is truly generic for that package, implement it using the operator rules, and verify it with a small runnable example.
 ---
 
 # Maintainer Operators
 
-Treat reusable operator work as a separate layer from both core runtime changes
-and local pipeline glue.
+Repository documentation Markdown files define semantics. This file only
+drives operator-layer decisions.
 
-## Workflow
+Use this skill when the task is to add, change, simplify, or document an
+operator in a shared operator package.
 
-1. Classify ownership first:
-   - core library if the behavior is generic runtime, validation, composition,
-     tracing, or benchmarking logic
-   - reusable operator layer if the operator is reusable across multiple
-     pipelines in the same domain
-   - local pipeline if the logic is one-off, project-specific, or still
-     exploratory
-2. Check for duplicates before adding anything:
-   - search `docs/operators/README.md`, `docs/OPERATORS.md`, `README.md`,
-     `src/ml_pipes/`, tests, examples, and the target package
-   - prefer an existing operator or pipeline composition if the behavior is
-     already expressible
-   - do not add a new operator when the need is really a short local callable
-     or a pipeline wiring change
-3. When adding a new reusable operator:
-   - keep it stateless and single-purpose
-   - keep it model-agnostic unless the package boundary is intentionally
-     domain-specific
-   - add precise `__call__` type annotations so validation can reason about it
-   - keep precision constraints or runtime quirks localized to true boundaries
-4. Verify at the package layer:
-   - add operator-focused tests
-   - validate the operator inside a pipeline, not only in isolation
-   - use `inspect()` or tracing when the runtime path is unclear
-   - benchmark only when the operator changes performance-sensitive code
-5. Promote or demote ownership when evidence changes:
-   - move to core only when the behavior is truly generic
-   - keep it local if reuse never materializes
+## Follow this Workflow
 
-## Required Checks
+1. Confirm package fit.
+   If the package is already specified, verify the operator belongs there.
+   Otherwise, find the most relevant operator package or file.
 
-- Search for existing operators before creating a new one.
-- Call `validate()` on a pipeline that exercises the new or changed operator.
-- Prefer composition of small operators over large fused operators.
+2. Confirm boundary fit.
+   Check that the operator boundary is truly generic and matches the domain of
+   that package and the other operators already in it.
 
-## Read These Docs
+3. Validate the operator shape.
+   Use `docs/OPERATORS.md` to make sure the operator follows the shared rules:
+   clear boundary, precise `__call__` annotations, meaningful config, and
+   `resolve_contract(...)` only when needed.
 
-- `docs/OPERATORS.md`
-- `docs/operators/README.md`
-- `README.md`
-- `docs/VALIDATION.md`
-- `docs/COMPOSITION.md`
-- `docs/ARCHITECTURE.md`
-- `docs/TRACING.md`
+4. Place or update the operator.
+   Add the operator to the selected package or update the existing one in
+   place.
+
+5. Verify with a small runnable example.
+   Create and run a focused example that checks how the operator composes in a
+   pipeline and how it behaves with the operator tooling from
+   `docs/OPERATORS.md`, such as composition, validation, description,
+   inspection, and tracing when useful.
+
+## Report Back
+
+- report whether the operator belonged in the specified or selected package
+- report whether the operator was added, updated, or rejected as not generic
+  enough for a shared package
+- report the verification result from the small example
