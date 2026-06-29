@@ -1,144 +1,45 @@
 # ml-pipes
 
-Compute-composition framework for building ML systems around
-explicit data flow.
+Build explicit ML pipelines you can run, inspect, validate, trace, and
+benchmark.
 
-## Install
+`ml-pipes` is a compute-composition framework for ML systems built around
+explicit data flow. It keeps preprocessing, runtime calls, postprocessing, and
+application logic visible in one pipeline instead of spreading them across
+wrappers and hidden control flow.
 
-`ml-pipes` requires Python 3.10+.
+The same operator boundaries power validation, inspection, tracing, and
+benchmarking, so the pipeline you write is also the pipeline your tools
+understand.
+
+## Quick Start
+
+`ml-pipes` requires Python 3.10+. Run commands from the repository root.
 
 ```bash
 pip install -e .
-pip install -e .[torch]  # optional Torch operators
-pip install -e .[otel]   # optional OpenTelemetry collector support
+# Optional extras
+pip install -e .[torch]  # Torch operators
+pip install -e .[otel]   # OpenTelemetry collector support
 pip install -e .[dev]    # tests and type checking
 ```
 
-## Quick start
+Run a baseline detection pipeline:
 
-A pipeline for running YOLO inference with `ml-pipes` can look like this:
-
-```python
-from ml_pipes import (
-    ArgMax, ConvertBoxFormat, Decode, GatherScores, Infer,
-    NMS, Normalize, Pick, Pipeline, ProjectBoxes, Recall,
-    Resize, Extract, Slice, Squeeze, Store, ToDetections, Transpose,
-)
-
-pipeline = Pipeline([
-    Decode(),
-    Resize((640, 640)),
-    Store("resize_transform", source=1),
-    Pick(0),
-    Normalize(),
-    Infer("yolov8n.onnx"),
-    Extract("output0", as_="preds"),
-    Squeeze("preds"),
-    Transpose("preds"),
-    Slice("preds", slice(None, 4), as_="boxes"),
-    Slice("preds", slice(4, None), as_="scores"),
-    ArgMax("scores", as_="classes"),
-    GatherScores("scores", "classes"),
-    ConvertBoxFormat(from_="cxcywh"),
-    NMS(),
-    Recall("resize_transform"),
-    ProjectBoxes(),
-    ToDetections(),
-])
-
-detections = pipeline("image.jpg")
-print(detections.boxes, detections.scores, detections.classes)
+```bash
+python examples/run_yolo8_onnx.py
 ```
 
-You can also inspect the static pipeline shape without running it:
+The core inference pipeline in
+[examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py) looks like this:
 
 ```python
-repr(pipeline)
-pipeline.describe(show_defaults=True)
-```
-
-## Documentation
-
-- [docs/OPERATORS.md](docs/OPERATORS.md) — what operators are and how to write them
-- [docs/COMPOSITION.md](docs/COMPOSITION.md) — building pipelines and composing pipelines together
-- [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — tutorial for wrapping a model in a composable pipeline scaffold
-- [docs/DESIGN.md](docs/DESIGN.md) — design rationale and comparison with other approaches
-- [docs/VALIDATION.md](docs/VALIDATION.md) — contract validation, strict mode, and boundary tightening
-- [docs/TRACING.md](docs/TRACING.md) — traces, collectors, and the runtime observation model inspection builds on
-- [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — repeated-run measurement, sweeps, saved artifacts, and CLI benchmarking
-- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — tuning concurrency, batching, and serialization
-- [docs/TORCH.md](docs/TORCH.md) — Torch operators, boundaries, and examples
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the internal ownership map of the framework
-
-## Operator Packages
-
-`ml-pipes` is designed to work with your own code. A pipeline can be built from packaged
-operators, local operators, or ordinary callables as long as their boundaries
-compose. When you do need a new operator, follow
-[docs/OPERATORS.md](docs/OPERATORS.md).
-
-In practice, start from the closest existing operator package or module and
-reuse as much as possible before adding new code. That gives you clearer
-validation, inspection, tracing, and less one-off logic to maintain.
-
-| Package | Focus | References |
-|---|---|---|
-| `ml_pipes` / `ml_pipes.ops` | Built-in operators for image decoding, inference, tensor registries, regions, context, and postprocessing | [docs/OPERATORS.md](docs/OPERATORS.md) |
-| `ml_pipes.data_ops` | Iterable and data-preparation operators for filtering, mapping, deduplication, and shaping | [run_sms_spam_prepare.py](examples/run_sms_spam_prepare.py) |
-| `ml_pipes.torch` | Optional Torch operators for explicit NumPy-to-Torch handoffs, device movement, and Torch-native postprocessing | [docs/TORCH.md](docs/TORCH.md), [run_mask2former_torch_postprocess.py](examples/torch/run_mask2former_torch_postprocess.py), [run_mask2former_numpy_postprocess.py](examples/torch/run_mask2former_numpy_postprocess.py) |
-
-All of these surfaces use the same `Pipeline`, validation, tracing,
-inspection, and benchmarking APIs. The Torch examples also require
-`transformers` and `safetensors` in the environment.
-
-## Defining an Operator
-
-An operator can be as simple as a plain callable for one-off logic or a class
-with `__call__` for reusable configuration.
-
-For example:
-
-```python
-from ml_pipes import Pipeline
-
-
-class StripText:
-    def __call__(self, text: str) -> str:
-        return text.strip()
-
-
-class SplitWords:
-    def __init__(self, delimiter: str = " "):
-        self.delimiter = delimiter
-
-    def __call__(self, text: str) -> list[str]:
-        return [part for part in text.split(self.delimiter) if part]
-
-
-pipeline = Pipeline([StripText(), SplitWords()])
-print(pipeline("  red blue green  "))
-```
-
-> [!TIP]
-> Add accurate `__call__` annotations so validation can reason about the boundary.
-
-For more advanced forms such as context operators, region operators, or custom
-`resolve_contract(...)`, see [docs/OPERATORS.md](docs/OPERATORS.md). For validation
-rules, see [docs/VALIDATION.md](docs/VALIDATION.md).
-
-## How To Use Pipelines
-
-### Wrap a Pipeline Behind an Interface
-
-One common pattern is to keep a pipeline behind a small function or class that
-owns the `Pipeline` instance. That works well for local model calls, service
-objects, or API handlers:
-
-```python
-class YoloDetector:
-    def __init__(self, model_path: str, conf_threshold: float = 0.25):
-        self._pipeline = Pipeline([
-            Decode(),
+def yolo8_inference_pipeline(
+    model_path: Path,
+    conf_threshold: float = 0.25,
+) -> Pipeline[ImagePayload, Detections]:
+    return Pipeline(
+        [
             Resize((640, 640)),
             Store("resize_transform", source=1),
             Pick(0),
@@ -156,64 +57,153 @@ class YoloDetector:
             Recall("resize_transform"),
             ProjectBoxes(),
             ToDetections(),
-        ])
-
-    def __call__(self, image_path: str) -> Detections:
-        return self._pipeline(image_path)
-
-detector = YoloDetector("yolov8n.onnx", conf_threshold=0.3)
-detections = detector("image.jpg")
+        ],
+        auto_validate=True,
+    )
 ```
 
-### Compose an Application From Pipelines
+Examples auto-download model and sample assets into
+`examples/.example_assets/` on first run. For more runnable entry points, see
+[examples/README.md](examples/README.md).
 
-Another common pattern is to build a larger workflow by composing smaller
-pipelines. `a + b` merges pipelines into one flat operator list with shared
-context. `a >> b` connects one pipeline to another while keeping each child
-pipeline as its own boundary.
+## Why ml-pipes
 
-For example:
+- **Keep the whole flow visible.** Preprocessing, model calls, postprocessing,
+  and downstream application logic stay in one explicit pipeline.
+- **Use one tooling model everywhere.** Validation, inspection, tracing, and
+  benchmarking all read the same operator boundaries.
+- **Adapt different model families.** Wrap ONNX, Torch, or your own runtime
+  without changing the surrounding scaffolding pattern.
+- **Compose larger systems.** Merge or embed pipelines to build services,
+  endpoints, data-preparation flows, and larger ML applications.
+
+## Key Features
+
+Your part is to define operators and compose them into a pipeline. For
+example, you can define one small operator and drop it into a pipeline that
+already has a few steps:
 
 ```python
-preprocess = Pipeline([Decode(), Resize((640, 640)), Normalize()])
-detect = Pipeline([Infer("detector.onnx")])
-postprocess = Pipeline([Extract("output0", as_="preds"), ToDetections()])
+from ml_pipes import Operator, Pipeline
 
-vision = preprocess + detect + postprocess
 
-embed = Pipeline([Decode(), Normalize(), Infer("embedder.onnx")])
-classify = Pipeline([Infer("classifier.onnx"), ArgMax()])
+def strip_text(text: str) -> str:
+    return text.strip()
 
-service = embed >> classify
+
+def split_words(text: str) -> list[str]:
+    return text.split()
+
+
+@Operator
+class Lowercase:
+    def __call__(self, text: str) -> str:
+        return text.lower()
+
+
+pipeline = Pipeline([strip_text, Lowercase(), split_words])
+sample = "  Hello World  "
 ```
 
-For composition semantics, API forms, and validation after composition, see
-[docs/COMPOSITION.md](docs/COMPOSITION.md).
+### Validation
 
-## Common Use Cases
+Validation checks the operator boundaries in the pipeline and returns the
+contract the whole pipeline exposes.
 
-### Model Scaffolding
+```python
+contract = pipeline.validate()
+print(contract)
+```
 
-If you need to wrap a model so it composes inside a larger pipeline or app,
-start from a scaffold: an explicit sequence of steps around the model
-boundary. The runtime boundary can be ONNX, Torch, or your own callable
-around another library; the important part is to keep the rest of the flow
-explicit: map raw outputs into semantic tensors, adapt layout, handle quirks,
-normalize coordinates, filter and reduce candidates, and project back to the
-source image. That makes the integration easier to validate, inspect, debug,
-benchmark, adapt, and reuse across model variants.
+```text
+TypeContract(input_type=<class 'str'>, output_type=list[str])
+```
 
-For the full walkthrough, see
-[docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
+### Inspection
 
-## Examples
+Inspection runs the pipeline once and gives you a step-by-step view of what
+each operator produced.
 
-See [examples/README.md](examples/README.md) for the full index.
+```python
+result = pipeline.inspect(sample)
+print(result)
+```
 
-Highlighted entry points:
+```text
+InspectionResult:
+  0:strip_text                         str
+  1:Lowercase                          str
+  2:split_words                        list [2]
+```
 
-- [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py) — baseline YOLO ONNX detection pipeline
-- [examples/run_rfdetr_nano.py](examples/run_rfdetr_nano.py) — DETR-style detector with normalized-box postprocessing
-- [examples/run_inspect.py](examples/run_inspect.py) — step-by-step inspection of one pipeline run
-- [examples/run_sms_spam_prepare.py](examples/run_sms_spam_prepare.py) — non-vision data preparation example
-- [examples/benchmarks/](examples/benchmarks) and [examples/streaming/](examples/streaming) — benchmark and live-inference workflows
+### Tracing
+
+Tracing records one call through the same pipeline and shows the per-step
+runtime breakdown.
+
+```python
+from ml_pipes import PrintCollector
+
+pipeline.set_tracing(PrintCollector())
+pipeline(sample)
+pipeline.set_tracing(None)
+```
+
+```text
+  0:strip_text                      0.01ms  (23.4%)
+  1:Lowercase                       0.02ms  (42.6%)
+  2:split_words                     0.01ms  (17.1%)
+  total                             0.04ms
+```
+
+### Benchmarking
+
+Benchmarking repeats that same pipeline over many runs and returns a summary
+table you can print, diff, or save.
+
+```python
+from ml_pipes.benchmark import Benchmark, MeasurementConfig
+
+result = Benchmark(
+    pipeline=pipeline,
+    input_fn=lambda: ("sample", sample, None, None),
+    measurement=MeasurementConfig(runs=5, warmup=1, percentiles=(0.50,)),
+    label="text-pipeline",
+).run()
+print(result.to_table())
+```
+
+```text
+operator             mean        p50     stddev        min        max
+---------------------------------------------------------------------
+total               0.03       0.03       0.00       0.03       0.03
+0:strip_text        0.01       0.01       0.00       0.01       0.01
+1:Lowercase         0.01       0.01       0.00       0.01       0.02
+2:split_words       0.01       0.01       0.00       0.01       0.01
+```
+
+## Start From A Concrete Goal
+
+- **Run a baseline vision pipeline** with
+  [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py).
+- **Inspect and debug one run** with
+  [examples/run_inspect.py](examples/run_inspect.py).
+- **Wrap your own model** with
+  [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
+- **Build a service or larger app** with
+  [examples/run_yolo8_endpoint.py](examples/run_yolo8_endpoint.py) and
+  [docs/COMPOSITION.md](docs/COMPOSITION.md).
+- **See a non-vision pipeline** with
+  [examples/run_sms_spam_prepare.py](examples/run_sms_spam_prepare.py).
+
+## Where To Go Next
+
+- [examples/README.md](examples/README.md) — full runnable example index
+- [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — wrap a new model in a pipeline
+- [docs/OPERATORS.md](docs/OPERATORS.md) — reuse or define operators
+- [docs/COMPOSITION.md](docs/COMPOSITION.md) — compose pipelines into larger
+  applications
+- [docs/DESIGN.md](docs/DESIGN.md) and
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — understand the rationale and
+  internal structure
+- [docs/README.md](docs/README.md) — full documentation index
