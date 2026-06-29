@@ -27,6 +27,8 @@ user approval:
 switching into a maintainer skill.
 - If framework work turns out to be only local example or integration work, ask
 before switching into an integrator skill.
+- Exception: a maintainer may update examples when those changes are required
+to verify or reflect an approved maintainer-side change.
 
 ## Route By Change Locality
 

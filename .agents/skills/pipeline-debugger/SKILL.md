@@ -11,6 +11,12 @@ drives failure localization.
 Use this skill when a pipeline already exists but the first bad boundary,
 step, or failure class is not yet known.
 
+## Goal
+
+The goal of this skill is localization, not repair.
+Stop once the first confirmed failing boundary or root cause is identified and
+the finding matches the user's report.
+
 ## Follow this Workflow
 
 1. Identify the failing pipeline and input.

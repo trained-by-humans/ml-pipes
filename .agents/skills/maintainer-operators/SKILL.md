@@ -11,6 +11,13 @@ drives operator-layer decisions.
 Use this skill when the task is to add, change, simplify, or document an
 operator in a shared operator package.
 
+## Goal
+
+The goal of this skill is to place or update a truly generic operator in the
+right shared package, not to push one-off pipeline logic into shared code.
+Stop once package fit, operator shape, and small-example verification are
+confirmed.
+
 ## Follow this Workflow
 
 1. Confirm package fit.

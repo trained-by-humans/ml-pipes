@@ -12,6 +12,12 @@ Use this skill only when the request belongs in shared framework behavior or
 shared framework-facing docs across more than one pipeline, example, or
 operator package.
 
+## Goal
+
+The goal of this skill is to change shared framework behavior in core-owned
+surfaces, not to absorb package-specific or example-specific logic.
+Stop once the core change is implemented and verified in core-owned surfaces.
+
 ## Follow this Workflow
 
 1. Confirm the framework surface.
