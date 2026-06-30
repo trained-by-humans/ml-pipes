@@ -90,6 +90,27 @@ When that static shape is not enough, define `resolve_contract(...)`. Use it
 for operators whose real boundary depends on the current upstream type, stored
 context, or tuple routing. Most normal transform operators do not need it.
 
+## Special Operator Shapes
+
+Most operators are plain functions or `@Operator` classes with a normal
+`__call__` boundary. A few superclass patterns exist because some operators
+participate in framework mechanisms beyond a normal transform:
+
+- Reach for the `ContextOp[In, Out]` superclass when the operator needs to
+  read or write pipeline context while still presenting one explicit pipeline
+  boundary.
+- When the behavior cannot be expressed as one operator's transform and
+  instead defines how a bounded group of operators should execute together,
+  read [REGIONS.md](REGIONS.md). Region operators are implemented through the
+  `RegionOpener[In, BodyIn]` and `RegionCloser[BodyOut, Out]` superclasses.
+- Reach for the `SideEffectOp[T]` superclass when an operator should pass the
+  value through unchanged while observing, logging, drawing, or saving.
+
+These are still operators, but they participate in extra execution mechanics.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for how context and regions fit into
+pipeline execution, and [REGIONS.md](REGIONS.md) for region semantics and
+examples.
+
 ## Features Built On Operators
 
 The pipeline's tooling works because operators define explicit boundaries.
@@ -289,6 +310,9 @@ inspect, trace, and benchmark as standalone boundaries.
 - Each operator should do one meaningful transformation or control-flow step.
   If the behavior is bigger than that, compose multiple operators instead of
   fusing a whole workflow into one.
+- Break operators where you want the pipeline boundary to be. If you want
+  validation, inspection, tracing, or failures to stop at a specific point,
+  make that point its own operator instead of fusing past it.
 - Start with the simplest form that fits. Use a plain function for short local
   transforms. Move to a class with `@Operator` when the logic needs
   configuration, reuse, or clearer description output.
@@ -360,15 +384,19 @@ inspect, trace, and benchmark as standalone boundaries.
   `apply()` changes what the operator actually accepts or returns,
   `resolve_contract(...)` should change with it.
 
-### Effects And Specialized Operators
+### Special Operators
 
-- Side effects should be explicit. Use `SideEffectOp` when an operator's
-  semantic job is to observe, log, draw, or save while passing the value
-  through unchanged.
-- Use `ContextOp` only when the operator genuinely reads or writes the
-  side-channel context.
-- Region behavior should also be explicit. Opening or closing a special
-  execution region should be visible in the operator type and pipeline shape.
+- Reach for the `SideEffectOp[T]` superclass when the operator should behave
+  like `T -> T` and its semantic job is to observe, log, draw, or save rather
+  than transform the flowing value.
+- Reach for the `ContextOp[In, Out]` superclass when the operator genuinely
+  needs to read from or write to pipeline context as part of its behavior.
+  Do not extend `ContextOp` just to read one specific key from context. If the
+  operator has a specific dependency, define it in the operator signature and
+  let pipeline composition provide it explicitly.
+- Reach for the region mechanism (explained in [REGIONS.md](REGIONS.md)) when
+  the behavior cannot be expressed as one operator's transform and instead
+  defines how a bounded group of operators should execute together.
 
 ### Errors And Verification
 
