@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Mapping, TypeVar, overload
 
-from ._typing.annotation import combine_annotation_options, variadic_tuple_item_annotation
+from ._typing.annotation import build_union_annotation_from_options, variadic_tuple_item_annotation
 from .operator import Operator
 from .selector import Selector, SelectorInput
 
@@ -181,7 +181,7 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
         stored_annotation = stored_annotations.get(self.name, Any)
         current_item_annotation = variadic_tuple_item_annotation(current_output)
         if current_item_annotation is not None:
-            merged_item_annotation = combine_annotation_options(
+            merged_item_annotation = build_union_annotation_from_options(
                 current_item_annotation,
                 stored_annotation,
             )

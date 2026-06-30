@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Callable
-import warnings
-
 import inspect
+import warnings
+from typing import Any, Callable
 
 
-_POSITIONAL_VALUE_PARAMETER_KINDS = (
+_POSITIONAL_PARAMETER_KINDS = (
     inspect.Parameter.POSITIONAL_ONLY,
     inspect.Parameter.POSITIONAL_OR_KEYWORD,
+)
+_POSITIONAL_VALUE_PARAMETER_KINDS = _POSITIONAL_PARAMETER_KINDS + (
     inspect.Parameter.VAR_POSITIONAL,
 )
 
@@ -46,7 +47,7 @@ def validate_operator_signature(
     unsupported_parameters = tuple(
         parameter
         for parameter in parameters
-        if parameter.kind not in _POSITIONAL_VALUE_PARAMETER_KINDS
+        if parameter.kind not in _POSITIONAL_PARAMETER_KINDS
     )
     if unsupported_parameters:
         raise error_type(
@@ -64,7 +65,7 @@ def validate_operator_signature(
         defaulted_parameters = tuple(
             parameter
             for parameter in parameters
-            if parameter.kind in _POSITIONAL_VALUE_PARAMETER_KINDS
+            if parameter.kind in _POSITIONAL_PARAMETER_KINDS
             and parameter.default is not inspect.Parameter.empty
         )
         if defaulted_parameters:
@@ -83,18 +84,19 @@ def validate_operator_signature(
     return parameters
 
 
-def validate_positional_callable_signature(
+def validate_callable_signature(
     callable_: Callable[..., Any],
     *,
     label: str,
-    source_label: str,
+    argument_label: str,
     error_type: type[Exception],
 ) -> inspect.Parameter:
     try:
-        signature = inspect.signature(callable_)
+        signature = _inspect_callable_signature(callable_)
     except (TypeError, ValueError) as exc:
         raise error_type(
-            f"{label} must expose an inspectable call signature because {source_label} is passed by position"
+            f"{label} must expose an inspectable call signature because "
+            f"{argument_label} is passed by position"
         ) from exc
     parameters = tuple(signature.parameters.values())
 
@@ -108,7 +110,8 @@ def validate_positional_callable_signature(
     )
     if input_parameter is None:
         raise error_type(
-            f"{label} must accept at least one positional value from {source_label}"
+            f"{label} must accept at least one positional value because "
+            f"{argument_label} is passed by position"
         )
 
     unsupported_parameters = tuple(
@@ -120,9 +123,31 @@ def validate_positional_callable_signature(
         raise error_type(
             f"{label} uses non-positional parameters "
             f"({_format_parameter_descriptions(unsupported_parameters)}), "
-            f"but {source_label} is passed by position. Use only positional parameters."
+            f"but {argument_label} is passed by position. Use only positional parameters."
         )
 
+    return input_parameter
+
+
+def validate_unary_callable_signature(
+    callable_: Callable[..., Any],
+    *,
+    label: str,
+    argument_label: str,
+    error_type: type[Exception],
+) -> inspect.Parameter:
+    input_parameter = validate_callable_signature(
+        callable_,
+        label=label,
+        argument_label=argument_label,
+        error_type=error_type,
+    )
+    try:
+        inspect.signature(callable_).bind(object())
+    except (TypeError, ValueError) as exc:
+        raise error_type(
+            f"{label} cannot be called with {argument_label}: {exc}"
+        ) from exc
     return input_parameter
 
 
@@ -130,22 +155,27 @@ def validate_nullary_callable_signature(
     callable_: Callable[..., Any],
     *,
     label: str,
-    source_label: str,
     error_type: type[Exception],
 ) -> None:
     try:
-        signature = inspect.signature(callable_)
+        signature = _inspect_callable_signature(callable_)
     except (TypeError, ValueError) as exc:
         raise error_type(
-            f"{label} must expose an inspectable call signature because {source_label}"
+            f"{label} must expose an inspectable call signature because it is invoked without arguments"
         ) from exc
     parameters = tuple(signature.parameters.values())
     if parameters:
         raise error_type(
-            f"{label} must define no parameters because {source_label}, but declares "
+            f"{label} must define no parameters because it is invoked without arguments, but declares "
             f"({_format_parameter_descriptions(parameters)}). "
             f"Use a zero-argument callable with any configuration pre-bound."
         )
+
+
+def _inspect_callable_signature(
+    callable_: Callable[..., Any],
+) -> inspect.Signature:
+    return inspect.signature(callable_)
 
 
 def _format_parameter_descriptions(parameters: tuple[inspect.Parameter, ...]) -> str:

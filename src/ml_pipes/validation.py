@@ -8,7 +8,6 @@ from ._typing.annotation import (
     _are_annotations_equivalent,
     _collect_any_placeholder_bindings,
     _replace_any_placeholders_in_order,
-    _specialize_output_annotation_from_aligned_input_annotations,
     align_source_annotation_to_target_annotations,
     collapse_annotation_parts,
     expand_annotation_parts,
@@ -19,10 +18,11 @@ from ._typing.annotation import (
     is_output_annotation_assignable_to_input_annotations,
     materialize_probe_annotation,
     normalize_published_annotation,
+    specialize_output_annotation_from_aligned_input_annotations,
     satisfies_annotation_constraint,
     tighten_annotation,
 )
-from ._typing.inspection import resolve_callable_hints
+from ._typing.inspection import resolve_callable_annotations
 from ._typing.signatures import validate_operator_signature
 from .context import ContextOp, Recall, Store
 from .region import RegionCloser, RegionOpener
@@ -289,7 +289,7 @@ class PipelineValidator:
             error_type=PipelineValidationError,
             warning_type=PipelineValidationWarning,
         )
-        input_types, output_type = require_operator_annotations(operator, parameters, label=label)
+        input_types, output_type = require_operator_annotations(operator, label=label)
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
     def _run_forward_boundary_resolution_pass(self, pipeline_input_type: Any = Any) -> list[_OperatorBoundary]:
@@ -328,7 +328,7 @@ class PipelineValidator:
             if aligned_candidate_annotations is None:
                 previous_output_type = current_boundary.effective_output_type
             else:
-                previous_output_type = _specialize_output_annotation_from_aligned_input_annotations(
+                previous_output_type = specialize_output_annotation_from_aligned_input_annotations(
                     aligned_candidate_annotations,
                     current_boundary.effective_input_types,
                     current_boundary.effective_output_type,
@@ -459,21 +459,16 @@ class PipelineValidator:
 
 def require_operator_annotations(
     operator: Any,
-    parameters: tuple[inspect.Parameter, ...],
     *,
     label: str,
 ) -> tuple[tuple[Any, ...], Any]:
-    hints = resolve_callable_hints(operator)
-
-    input_types: list[Any] = []
-    for parameter in parameters:
-        if parameter.name not in hints:
-            raise PipelineValidationError(
-                f"Pipeline step {label} is missing a type annotation for __call__ input"
-            )
-        input_types.append(hints[parameter.name])
-    if "return" not in hints:
+    annotations = resolve_callable_annotations(operator)
+    if any(annotation is None for annotation in annotations.parameter_annotations):
+        raise PipelineValidationError(
+            f"Pipeline step {label} is missing a type annotation for __call__ input"
+        )
+    if annotations.return_annotation is None:
         raise PipelineValidationError(
             f"Pipeline step {label} is missing a return type annotation for __call__"
         )
-    return tuple(input_types), hints["return"]
+    return tuple(annotations.parameter_annotations), annotations.return_annotation

@@ -217,6 +217,7 @@ def build_frame_pipeline(
 ) -> Pipeline[ImagePayload, tuple[ImagePayload, float]]:
     pipeline = build_preprocess_pipeline() + Pipeline([infer_op]) + build_postprocess_pipeline()
     pipeline.validate()
+    pipeline.describe()
     return pipeline
 
 

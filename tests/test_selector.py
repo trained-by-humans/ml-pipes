@@ -372,6 +372,7 @@ READ_VALIDATION_CASES = [
     pytest.param(ValidationCarrier, "payload.msg", str, None, id="dataclass_attr_path"),
     pytest.param(SlottedValidationCarrier, "payload.msg", str, None, id="slotted_attr_path"),
     pytest.param(tuple[str, int], 1, int, None, id="tuple_index_path"),
+    pytest.param(tuple[int, ...], 1, int, None, id="variadic_tuple_index_path"),
     pytest.param(list[int], 0, int, None, id="list_index_path"),
     pytest.param(dict[int, str], 1, str, None, id="dict_int_key_path"),
     pytest.param(TypedDictCarrier, "payload.msg", str, None, id="typed_dict_path"),
@@ -410,6 +411,7 @@ WRITE_VALIDATION_CASES = [
     pytest.param(np.ndarray, 1, Any, None, id="ndarray_target"),
     pytest.param(ValidationCarrier, "missing", None, "has no attribute", id="missing_attr_target_fails"),
     pytest.param(tuple[str, int], 1, None, "immutable", id="tuple_target_is_not_writable"),
+    pytest.param(tuple[int, ...], 1, None, "immutable", id="variadic_tuple_target_is_not_writable"),
 ]
 
 

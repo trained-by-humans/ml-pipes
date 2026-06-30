@@ -1,9 +1,9 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
 import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, TypeVar
+from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
 
 from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
 from ml_pipes.validation import (
@@ -14,6 +14,11 @@ from ml_pipes.validation import (
 )
 
 _VariadicT = TypeVar("_VariadicT")
+_BoxT = TypeVar("_BoxT")
+
+
+class _Box(Generic[_BoxT]):
+    pass
 
 
 class IntToString:
@@ -39,6 +44,21 @@ class BoolToBytes:
 class ListIntToStr:
     def __call__(self, value: list[int]) -> str:
         return "list of ints"
+
+
+class IntToListInt:
+    def __call__(self, value: int) -> list[int]:
+        return [value]
+
+
+class BareListConsumer:
+    def __call__(self, value: list) -> str:
+        return "list"
+
+
+class BareListProducer:
+    def __call__(self, value: int) -> list:
+        return [value]
 
 
 class ObjectConsumer:
@@ -94,6 +114,31 @@ class GenericVariadicTupleConsumer:
 class IntIterableConsumer:
     def __call__(self, value: Iterable[int]) -> str:
         return ",".join(str(item) for item in value)
+
+
+class IntToIterableInt:
+    def __call__(self, value: int) -> Iterable[int]:
+        return [value]
+
+
+class BareIterableConsumer:
+    def __call__(self, value: Iterable) -> str:
+        return ",".join(str(item) for item in value)
+
+
+class BareIterableProducer:
+    def __call__(self, value: int) -> Iterable:
+        return [value]
+
+
+class BareBoxConsumer:
+    def __call__(self, value: _Box) -> str:
+        return "box"
+
+
+class BareBoxProducer:
+    def __call__(self, value: int) -> _Box:
+        return _Box()
 
 
 class GenericIterableConsumer:
@@ -315,11 +360,151 @@ def test_pipeline_validate_allows_broader_downstream_input_type():
     pipeline.validate()
 
 
+def test_pipeline_validate_allows_parameterized_output_for_object_consumer():
+    pipeline = Pipeline([IntToListInt(), ObjectConsumer()])
+
+    pipeline.validate(pipeline_input_type=int)
+
+
 def test_pipeline_validate_rejects_tighter_downstream_input_type():
     pipeline = Pipeline([ObjectProducer(), StringConsumer()])
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
+
+
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    [
+        pytest.param(IntToListInt(), BareListConsumer(), id="list[int]-to-list"),
+        pytest.param(IntToIterableInt(), BareIterableConsumer(), id="Iterable[int]-to-Iterable"),
+    ],
+)
+def test_pipeline_validate_accepts_parameterized_generic_output_for_bare_consumer(
+    producer,
+    consumer,
+):
+    Pipeline([producer, consumer]).validate(pipeline_input_type=int)
+
+
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    [
+        pytest.param(BareListProducer(), ListIntToStr(), id="list-to-list[int]"),
+        pytest.param(BareIterableProducer(), IntIterableConsumer(), id="Iterable-to-Iterable[int]"),
+    ],
+)
+def test_pipeline_validate_accepts_bare_generic_output_for_parameterized_consumer(
+    producer,
+    consumer,
+):
+    Pipeline([producer, consumer]).validate(pipeline_input_type=int)
+
+
+@pytest.mark.parametrize(
+    ("consumer", "pipeline_input_type"),
+    [
+        pytest.param(BareListConsumer(), list[int], id="list[int]-to-list"),
+        pytest.param(BareIterableConsumer(), Iterable[int], id="Iterable[int]-to-Iterable"),
+    ],
+)
+def test_pipeline_validate_accepts_parameterized_pipeline_input_for_bare_consumer(
+    consumer,
+    pipeline_input_type,
+):
+    Pipeline([consumer]).validate(pipeline_input_type=pipeline_input_type)
+
+
+@pytest.mark.parametrize(
+    ("consumer", "pipeline_input_type"),
+    [
+        pytest.param(ListIntToStr(), list, id="list-to-list[int]"),
+        pytest.param(IntIterableConsumer(), Iterable, id="Iterable-to-Iterable[int]"),
+    ],
+)
+def test_pipeline_validate_accepts_bare_pipeline_input_for_parameterized_consumer(
+    consumer,
+    pipeline_input_type,
+):
+    Pipeline([consumer]).validate(pipeline_input_type=pipeline_input_type)
+
+
+@pytest.mark.parametrize(
+    ("operator", "pipeline_input_type", "expected_input_type"),
+    [
+        pytest.param(BareListConsumer(), list, list[Any], id="list"),
+        pytest.param(BareIterableConsumer(), Iterable, Iterable[Any], id="Iterable"),
+    ],
+)
+def test_pipeline_validate_publishes_bare_generic_input_as_any_parameterized_annotation(
+    operator,
+    pipeline_input_type,
+    expected_input_type,
+):
+    contract = Pipeline([operator]).validate(pipeline_input_type=pipeline_input_type)
+
+    assert contract.input_type == expected_input_type
+    assert contract.output_type is str
+
+
+@pytest.mark.parametrize(
+    ("operator", "expected_output_type"),
+    [
+        pytest.param(BareListProducer(), list[Any], id="list"),
+        pytest.param(BareIterableProducer(), Iterable[Any], id="Iterable"),
+    ],
+)
+def test_pipeline_validate_publishes_bare_generic_output_as_any_parameterized_annotation(
+    operator,
+    expected_output_type,
+):
+    contract = Pipeline([operator]).validate(pipeline_input_type=int)
+
+    assert contract.input_type is int
+    assert contract.output_type == expected_output_type
+
+
+def test_pipeline_validate_accepts_bare_mutable_generic_aliases() -> None:
+    class SequenceConsumer:
+        def __call__(self, value: Sequence) -> str:
+            return "ok"
+
+    class MappingConsumer:
+        def __call__(self, value: Mapping) -> str:
+            return "ok"
+
+    typing_sequence_contract = Pipeline([SequenceConsumer()]).validate(
+        pipeline_input_type=TypingMutableSequence
+    )
+    collections_sequence_contract = Pipeline([SequenceConsumer()]).validate(
+        pipeline_input_type=MutableSequence
+    )
+    typing_mapping_contract = Pipeline([MappingConsumer()]).validate(
+        pipeline_input_type=TypingMutableMapping
+    )
+    collections_mapping_contract = Pipeline([MappingConsumer()]).validate(
+        pipeline_input_type=MutableMapping
+    )
+
+    assert typing_sequence_contract.input_type == MutableSequence[Any]
+    assert collections_sequence_contract.input_type == MutableSequence[Any]
+    assert typing_mapping_contract.input_type == MutableMapping[Any, Any]
+    assert collections_mapping_contract.input_type == MutableMapping[Any, Any]
+
+
+@pytest.mark.parametrize(
+    ("pipeline", "pipeline_input_type"),
+    [
+        pytest.param(Pipeline([BareBoxProducer()]), int, id="output"),
+        pytest.param(Pipeline([BareBoxConsumer()]), _Box, id="input"),
+    ],
+)
+def test_pipeline_validate_rejects_unsupported_bare_generic_annotations(
+    pipeline,
+    pipeline_input_type,
+):
+    with pytest.raises(ValueError, match="Unsupported bare generic annotation"):
+        pipeline.validate(pipeline_input_type=pipeline_input_type)
 
 
 def test_pipeline_validate_accepts_tuple_output_for_multi_arg_operator():
@@ -519,6 +704,29 @@ def test_validate_merges_complementary_partial_constraints():
     assert contract is not None
     assert contract.input_type == tuple[int, str]
     assert contract.output_type is bool
+
+
+def test_validate_accepts_concrete_iterable_subtype_for_bare_iterable_consumer():
+    contract = Pipeline([IntToString(), BareIterableConsumer()]).validate(
+        pipeline_input_type=int
+    )
+
+    assert contract is not None
+    assert contract.input_type is int
+    assert contract.output_type is str
+
+
+def test_validate_preserves_fixed_tuple_input_shape_against_sequence_supertype():
+    class SequenceConsumer:
+        def __call__(self, value: Sequence[int | str]) -> str:
+            return ",".join(str(item) for item in value)
+
+    contract = Pipeline([SequenceConsumer()]).validate(
+        pipeline_input_type=tuple[int, str]
+    )
+
+    assert contract is not None
+    assert contract.input_type == tuple[int, str]
 
 
 def test_inference_does_not_narrow_input_through_dynamic_fixed_output():

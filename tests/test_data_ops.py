@@ -136,6 +136,16 @@ class StrictMappedCarrier:
     length: int
 
 
+class PartiallyBrokenSelectorCarrier:
+    cleaned: str
+    other: "MissingType"
+
+
+@dataclass
+class NoneOnlyCarrier:
+    cleaned: None = None
+
+
 @dataclass
 class WrongPayloadCarrier:
     payload: str = ""
@@ -173,6 +183,10 @@ def _box_int_or_none(value) -> Box | None:
     return Box(value)
 
 
+def _always_none(value: int) -> None:
+    return None
+
+
 def _is_positive(value: int) -> bool:
     return value > 0
 
@@ -203,6 +217,10 @@ def _lower_text(text: str) -> str:
 
 def _hash_optional_text(text: str | None) -> int:
     return 0 if text is None else len(text)
+
+
+def _text_key_pair(text: str) -> tuple[int, str]:
+    return len(text), text
 
 
 def _short_circuit_on_two(value: int) -> int | object:
@@ -457,6 +475,13 @@ def test_map_not_null_validation_accepts_mapper_without_input_annotation_when_up
     assert contract.output_type == Box
 
 
+def test_map_not_null_validation_rejects_none_only_mapper_output() -> None:
+    with pytest.raises(PipelineValidationError, match="cannot produce a non-None output"):
+        Pipeline([MapNotNull(_always_none)]).validate(
+            pipeline_input_type=int,
+        )
+
+
 def test_map_not_null_validation_requires_optional_aware_mapper_for_optional_input() -> None:
     with pytest.raises(PipelineValidationError, match="fn expects"):
         Pipeline([MapNotNull(_text_length_or_none)]).validate(
@@ -549,6 +574,14 @@ def test_filter_not_null_validation_keeps_current_object_type() -> None:
     )
 
 
+def test_filter_not_null_validation_rejects_none_only_source_annotation() -> None:
+    with pytest.raises(PipelineValidationError, match="cannot produce a non-None output"):
+        Pipeline([FilterNotNull(source="cleaned")]).validate(
+            pipeline_input_type=NoneOnlyCarrier,
+            strict=True,
+        )
+
+
 def test_filter_not_null_validation_rejects_missing_selector() -> None:
     with pytest.raises(PipelineValidationError, match="missing"):
         Pipeline([FilterNotNull(source="missing")]).validate(
@@ -628,6 +661,13 @@ def test_drop_null_validation_uses_static_contract() -> None:
     assert contract.output_type == str
 
 
+def test_drop_null_validation_rejects_none_only_input() -> None:
+    with pytest.raises(PipelineValidationError, match="cannot produce a non-None output"):
+        Pipeline([DropNull()]).validate(
+            pipeline_input_type=None,
+        )
+
+
 def test_distinct_deduplicates_by_selected_value() -> None:
     items = [
         Carrier(payload=_message("spam", "one"), cleaned="dup"),
@@ -643,6 +683,13 @@ def test_distinct_deduplicates_by_selected_value() -> None:
 def test_distinct_validation_accepts_existing_selector() -> None:
     Pipeline([Distinct(source="cleaned")]).validate(
         pipeline_input_type=list[StrictCarrier],
+        strict=True,
+    )
+
+
+def test_distinct_validation_ignores_unrelated_broken_owner_annotation() -> None:
+    Pipeline([Distinct(source="cleaned")]).validate(
+        pipeline_input_type=list[PartiallyBrokenSelectorCarrier],
         strict=True,
     )
 
@@ -701,6 +748,13 @@ def test_distinct_by_validation_rejects_non_hashable_key_annotation() -> None:
             pipeline_input_type=list[str],
             strict=True,
         )
+
+
+def test_distinct_by_validation_accepts_tuple_hashable_key_annotation() -> None:
+    Pipeline([DistinctBy(_text_key_pair)]).validate(
+        pipeline_input_type=list[str],
+        strict=True,
+    )
 
 
 def test_distinct_by_rejects_key_fn_with_non_positional_parameters_at_construction() -> None:
