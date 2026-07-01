@@ -1,7 +1,16 @@
 # Examples
 
-If you only want to explore the runnable examples, you can use this directory
-directly.
+If you only want to explore the runnable examples, install the smallest stack
+that matches the example family you want to run:
+
+```bash
+pip install 'ml-pipes[onnx,vision]'              # most vision + ONNX examples
+pip install 'ml-pipes[inspection,onnx,vision]'   # inspection examples
+pip install 'ml-pipes[torch,vision]'             # torch examples
+pip install flask                                # add for the HTTP endpoint example
+```
+
+Then run the example directly from this directory:
 
 ```bash
 # From the repository root
@@ -21,16 +30,8 @@ into the shared `.example_assets/` cache next to this directory on demand.
 Generic entry points such as `run_detection.py` do not download defaults;
 provide the model path and input path explicitly.
 
-## Install Profiles
-
-Choose the package stack that matches the example family you want to run:
-
-```bash
-pip install 'ml-pipes[onnx,vision]'              # most vision + ONNX examples
-pip install 'ml-pipes[inspection,onnx,vision]'   # inspection examples
-pip install 'ml-pipes[torch,vision]'             # torch examples
-pip install flask                                # HTTP endpoint example
-```
+For the package matrix and the component import model behind these install
+profiles, see [docs/PACKAGES.md](../docs/PACKAGES.md).
 
 ## Inference On Files
 

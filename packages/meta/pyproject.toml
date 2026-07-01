@@ -12,6 +12,12 @@ dependencies = [
     "ml-pipes-core==0.1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/trained-by-humans/ml-pipes"
+Repository = "https://github.com/trained-by-humans/ml-pipes"
+Documentation = "https://github.com/trained-by-humans/ml-pipes/blob/main/README.md"
+"Package Guide" = "https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md"
+
 [project.optional-dependencies]
 inspection = [
     "ml-pipes-core[inspection]==0.1.0",

@@ -1,83 +1,117 @@
 # Packages
 
-`ml-pipes` now ships as a small workspace of distributions that share the
-same `ml_pipes` namespace package.
+In `ml-pipes`, packages are the installable parts of the framework. The
+framework uses a multi-package layout so the core pipeline harness can stay
+small while domain packages carry their own dependency graph, docs, and
+examples. That keeps heavy runtime integrations such as vision, ONNX, or
+Torch optional instead of forcing every install to carry every dependency.
 
-## Public Import Model
+Each package therefore owns one coherent part of the framework surface, such
+as the core harness, tensor operators, vision operators, ONNX integration, or
+Torch integration. Those packages publish modules under the shared
+`ml_pipes` namespace.
 
-The root `ml_pipes` namespace is intentionally empty apart from submodules.
-Import from the owning surface instead:
+If you want to get a runnable example working first, start with
+[examples/README.md](../examples/README.md). This page is the reference for
+the published packages, primary install profiles, and public imports.
 
-- `ml_pipes.core` for `Pipeline`, `Operator`, `Embed`, `Inline`, and context/runtime primitives
-- `ml_pipes.standard` for core routing and region operators such as `Pick`, `Store`, `Recall`, `Batch`, and `Scatter`
-- `ml_pipes.tensor` for tensor registry payloads and tensor operators
-- `ml_pipes.vision` for payloads and operators in the vision domain
-- `ml_pipes.onnx` for ONNX runtime integration
-- `ml_pipes.torch` for Torch-domain operators
-- `ml_pipes.validation`, `ml_pipes.tracing`, `ml_pipes.collectors`, `ml_pipes.factory`, `ml_pipes.benchmark`, and `ml_pipes.inspection` for the shared framework tooling modules
+## Packaging Terms
 
-## Install Profiles
+- **Package**: an installable part of the framework such as `ml-pipes-vision`
+- **Optional installs**: package-specific extras such as `inspection` or
+  `otel` that add optional dependencies without creating new import paths
+- **Depends on**: the direct dependencies a package needs, such as
+  `ml-pipes-tensor`, `numpy`, or `opencv-python`
+- **Public modules**: import surfaces such as `ml_pipes.vision`
+- **Content**: the part of the framework the package carries, such as
+  detection, segmentation, density, tracing, or benchmarking
+- **Install profile**: an install shortcut such as `ml-pipes[vision]` or
+  `ml-pipes-core[otel]`; profiles install packages or optional dependencies,
+  but they do not create new import paths
 
-Published package installs:
+## Install ml-pipes
 
-```bash
-pip install ml-pipes
-pip install 'ml-pipes[vision]'
-pip install 'ml-pipes[onnx,vision]'
-pip install 'ml-pipes[torch,vision]'
-pip install 'ml-pipes[inspection,onnx,vision]'
-pip install 'ml-pipes[otel]'
+`ml-pipes` is the installation entrypoint for the framework.
+
+- `pip install ml-pipes` installs the core framework package, `ml-pipes-core`
+- `pip install 'ml-pipes[vision]'` installs core together with the vision
+  package chain
+- `pip install 'ml-pipes[onnx,vision]'` installs core together with both the
+  ONNX and vision package chains
+
+That makes core the default shape of the framework, while umbrella profiles
+add the extra package chains you want in the same install.
+
+> [!NOTE]
+> `ml-pipes` is the umbrella install package. It installs `ml-pipes-core` by
+> default and exposes composed install profiles. For more on the umbrella
+> package itself, see [`packages/meta/README.md`](../packages/meta/README.md).
+
+## How To Use Packages
+
+Once installed, use packages through their owning public modules.
+
+For example, after installing `ml-pipes[onnx,vision]`:
+
+```python
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import Infer
+from ml_pipes.tensor import ArgMax
+from ml_pipes.vision import Resize
 ```
 
-From a repository checkout, install the workspace members you want to edit:
+The root `ml_pipes` namespace is intentionally only a shared namespace. Import
+from the owning module shown in the package reference below, not from
+top-level `ml_pipes`.
 
-```bash
-python -m pip install \
-  -e packages/core \
-  -e packages/tensor \
-  -e packages/vision \
-  -e packages/onnx \
-  -e packages/torch \
-  -e packages/meta
+Package dependencies do not change ownership. For example, the ONNX package
+depends on the tensor package, so an ONNX pipeline may import from both
+`ml_pipes.onnx` and `ml_pipes.tensor`. The tensor operators still belong to
+the tensor package, while the ONNX package owns only the ONNX runtime
+surface.
+
+## Package Reference
+
+The table below is the package index for the framework packages. For
+package-specific details, open the linked package README.
+
+| Package                                         | Primary profile    | Depends on                                                          | Public modules                                                                                                                                                          | Content                                    |
+|-------------------------------------------------|--------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|
+| [ml-pipes-core](../packages/core/README.md)     | `ml-pipes`         | `numpy`, `typing_extensions`                                        | `ml_pipes.core`, `ml_pipes.standard`, `ml_pipes.validation`, `ml_pipes.tracing`, `ml_pipes.collectors`, `ml_pipes.factory`, `ml_pipes.benchmark`, `ml_pipes.inspection` | core pipeline framework and shared tooling |
+| [ml-pipes-tensor](../packages/tensor/README.md) | `ml-pipes[tensor]` | `ml-pipes-core`, `numpy`                                            | `ml_pipes.tensor`                                                                                                                                                       | tensor data and tensor operators           |
+| [ml-pipes-vision](../packages/vision/README.md) | `ml-pipes[vision]` | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `opencv-python`        | `ml_pipes.vision`                                                                                                                                                       | vision payloads and vision tasks           |
+| [ml-pipes-onnx](../packages/onnx/README.md)     | `ml-pipes[onnx]`   | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `onnxruntime`          | `ml_pipes.onnx`                                                                                                                                                         | ONNX model and runtime integration         |
+| [ml-pipes-torch](../packages/torch/README.md)   | `ml-pipes[torch]`  | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `torch`, `torchvision` | `ml_pipes.torch`                                                                                                                                                        | Torch tensors and Torch integration        |
+
+> [!NOTE]
+> The table lists only primary profiles. For package-specific optional
+> installs and profile details, check the owning package README.
+
+> [!TIP]
+> Profiles compose, so `ml-pipes[onnx,vision]` installs both package
+> chains and supports imports from `ml_pipes.onnx`, `ml_pipes.tensor`,
+> and `ml_pipes.vision`.
+
+## Package Structure
+
+Each workspace package follows the same basic layout:
+
+```text
+packages/<name>/
+  pyproject.toml
+  README.md
+  src/
+    ml_pipes/...
+  LICENSE        # optional; only when this package needs different licensing
+  examples/      # optional; package-local examples when they belong here
 ```
 
-## Distribution Matrix
-
-| Distribution | Public modules | Depends on | Notes |
-|---|---|---|---|
-| `ml-pipes-core` | `ml_pipes.core`, `ml_pipes.standard`, `ml_pipes.validation`, `ml_pipes.tracing`, `ml_pipes.collectors`, `ml_pipes.factory`, `ml_pipes.benchmark`, `ml_pipes.inspection` | `numpy`, `typing_extensions` | ships the framework harness and the standard operator family |
-| `ml-pipes-tensor` | `ml_pipes.tensor` | `ml-pipes-core`, `numpy` | owns `TensorPayload`, `TensorRegistry`, and tensor-domain operators |
-| `ml-pipes-vision` | `ml_pipes.vision` | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `opencv-python` | owns image payloads, vision operators, density helpers, and tiling |
-| `ml-pipes-onnx` | `ml_pipes.onnx` | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `onnxruntime` | owns ONNX runtime invocation and output types |
-| `ml-pipes-torch` | `ml_pipes.torch` | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `torch`, `torchvision` | owns Torch tensors, Torch inference, and Torch tensor operators |
-| `ml-pipes` | umbrella only | `ml-pipes-core` | adds extras so users can install stacks like `ml-pipes[vision]` or `ml-pipes[onnx,vision]` |
-
-Core extras:
-
-- `ml-pipes-core[inspection]` adds the inspection stack and the packages it formats by default
-- `ml-pipes-core[otel]` adds the OpenTelemetry collector dependencies
-
-Umbrella extras:
-
-- `ml-pipes[vision]` installs `ml-pipes-vision` and its dependency chain
-- `ml-pipes[onnx]` installs `ml-pipes-onnx`
-- `ml-pipes[torch]` installs `ml-pipes-torch`
-- `ml-pipes[inspection]` forwards to `ml-pipes-core[inspection]`
-- `ml-pipes[otel]` forwards to `ml-pipes-core[otel]`
-
-## Release Order
-
-The package dependency graph requires this publish order:
-
-1. `ml-pipes-core`
-2. `ml-pipes-tensor`
-3. `ml-pipes-vision`
-4. `ml-pipes-onnx`
-5. `ml-pipes-torch`
-6. `ml-pipes`
-
-Run a release dry-run from the repository root with:
-
-```bash
-python scripts/release_packages.py --dry-run
-```
+- `pyproject.toml` defines the published package metadata and dependencies.
+- `README.md` explains what that package carries in framework terms.
+- `src/ml_pipes/...` contains the code that package publishes into the shared
+  `ml_pipes` namespace.
+- `LICENSE` is only needed when a package must declare licensing different
+  from the main project licensing.
+- `examples/` is optional; use it when examples are truly package-specific
+  rather than general framework examples under the repository-level
+  [examples/README.md](../examples/README.md).

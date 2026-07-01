@@ -1,16 +1,17 @@
 # ml-pipes-torch
 
-Torch tensor payloads and torch-domain operators for `ml-pipes`.
+Torch tensor payloads and torch-domain operators for `ml-pipes`. This package
+owns the Torch-domain surface; vision operators remain in
+`ml_pipes.vision`.
 
-## Public Modules
+## Package Reference
 
-- `ml_pipes.torch`
+| Field          | Value                                                                                                                                                                   |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Package        | `ml-pipes-torch`                                                                                                                                                        |
+| Depends on     | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `torch`, `torchvision`                                                                                                     |
+| Public modules | `ml_pipes.torch`                                                                                                                                                        |
+| Content        | Torch payloads and registries; NumPy and Torch conversion; device and dtype movement; Torch inference; tensor filtering, ranking, and masking; mask postprocess helpers |
 
-## Install
-
-```bash
-pip install ml-pipes-torch
-pip install 'ml-pipes[torch]'
-```
-
-Add `ml-pipes[vision]` when the pipeline also uses vision-domain operators.
+See [`docs/PACKAGES.md`](../../docs/PACKAGES.md) for direct package installs,
+umbrella profiles, and the full package matrix.

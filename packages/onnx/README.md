@@ -1,16 +1,17 @@
 # ml-pipes-onnx
 
-ONNX runtime operators and output types for `ml-pipes`.
+ONNX runtime operators and output types for `ml-pipes`. This package owns only
+the ONNX runtime surface. Tensor operators used in the same pipeline still
+come from `ml_pipes.tensor`.
 
-## Public Modules
+## Package Reference
 
-- `ml_pipes.onnx`
+| Field          | Value                                                                              |
+|----------------|------------------------------------------------------------------------------------|
+| Package        | `ml-pipes-onnx`                                                                    |
+| Depends on     | `ml-pipes-core`, `ml-pipes-tensor`, `numpy`, `onnxruntime`                         |
+| Public modules | `ml_pipes.onnx`                                                                    |
+| Content        | ONNX runtime invocation; runtime outputs; output extraction and batch distribution |
 
-## Install
-
-```bash
-pip install ml-pipes-onnx
-pip install 'ml-pipes[onnx]'
-```
-
-`ml-pipes-onnx` depends on `ml-pipes-core` and `ml-pipes-tensor`.
+See [`docs/PACKAGES.md`](../../docs/PACKAGES.md) for direct package installs,
+umbrella profiles, and the full package matrix.

@@ -1,16 +1,17 @@
 # ml-pipes-tensor
 
-Tensor payloads and tensor registry operators for `ml-pipes`.
+Tensor payloads and tensor registry operators for `ml-pipes`. This package
+owns the tensor operators even when a pipeline also uses ONNX, vision, or
+Torch packages.
 
-## Public Modules
+## Package Reference
 
-- `ml_pipes.tensor`
+| Field          | Value                                                                                                                                                   |
+|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Package        | `ml-pipes-tensor`                                                                                                                                       |
+| Depends on     | `ml-pipes-core`, `numpy`                                                                                                                                |
+| Public modules | `ml_pipes.tensor`                                                                                                                                       |
+| Content        | tensor payloads and registries; dtype casting; shape and layout transforms; tensor selection, filtering, ranking, and masking; collation and arithmetic |
 
-## Install
-
-```bash
-pip install ml-pipes-tensor
-pip install 'ml-pipes[vision]'
-```
-
-`ml-pipes-tensor` depends on `ml-pipes-core`.
+See [`docs/PACKAGES.md`](../../docs/PACKAGES.md) for direct package installs,
+umbrella profiles, and the full package matrix.

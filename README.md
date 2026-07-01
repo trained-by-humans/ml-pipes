@@ -16,42 +16,17 @@ understand.
 
 `ml-pipes` requires Python 3.10+.
 
-Published installs:
-
-```bash
-pip install ml-pipes                    # core + standard operators
-pip install 'ml-pipes[vision]'         # add tensor + vision
-pip install 'ml-pipes[onnx,vision]'    # baseline ONNX inference stack
-pip install 'ml-pipes[torch,vision]'   # Torch + vision stack
-pip install 'ml-pipes[inspection]'     # inspection surface on top of installed components
-pip install 'ml-pipes[otel]'           # OpenTelemetry collector support
-```
-
-From a repository checkout, install the workspace members you need:
-
-```bash
-python -m pip install \
-  -e packages/core \
-  -e packages/tensor \
-  -e packages/vision \
-  -e packages/onnx \
-  -e packages/torch \
-  -e packages/meta
-```
-
-Run a baseline detection pipeline:
+To run one example as fast as possible, install only the stack it needs and
+execute it directly:
 
 ```bash
 pip install 'ml-pipes[onnx,vision]'
 python examples/run_yolo8_onnx.py
 ```
 
-Public imports are component-scoped. Import `Pipeline` from `ml_pipes.core`,
-core routing operators from `ml_pipes.standard`, tensor operators from
-`ml_pipes.tensor`, vision operators from `ml_pipes.vision`, ONNX operators
-from `ml_pipes.onnx`, and Torch operators from `ml_pipes.torch`. The root
-`ml_pipes` namespace is intentionally a namespace package only; it does not
-re-export convenience symbols.
+To pick the matching install for other runnable examples, see
+[examples/README.md](examples/README.md). For the full package matrix and the
+public component import model, see [docs/PACKAGES.md](docs/PACKAGES.md).
 
 The core inference pipeline in
 [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py) looks like this:
@@ -244,7 +219,7 @@ total               0.03       0.03       0.00       0.03       0.03
 
 - [examples/README.md](examples/README.md) — full runnable example index
 - [docs/PACKAGES.md](docs/PACKAGES.md) — package matrix, install profiles,
-  and release order
+  and public imports
 - [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — wrap a new model in a pipeline
 - [docs/OPERATORS.md](docs/OPERATORS.md) — reuse or define operators
 - [docs/COMPOSITION.md](docs/COMPOSITION.md) — compose pipelines into larger
@@ -253,3 +228,4 @@ total               0.03       0.03       0.00       0.03       0.03
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — understand the rationale and
   internal structure
 - [docs/README.md](docs/README.md) — full documentation index
+- [HUMANS.md](HUMANS.md) — maintainer-only workspace and release notes
