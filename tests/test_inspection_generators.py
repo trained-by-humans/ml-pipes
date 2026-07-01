@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 
 class MakeGenerator:

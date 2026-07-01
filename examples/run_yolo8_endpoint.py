@@ -14,11 +14,13 @@ from common import (
     resolve_model_path,
 )
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
-from ml_pipes import (
-    Decode,
+from ml_pipes.core import (
     Embed,
-    MapPredictionsToObjects,
     Pipeline,
+)
+from ml_pipes.vision import (
+    Decode,
+    MapPredictionsToObjects,
 )
 
 # Minimal YOLOv8 inference endpoint.

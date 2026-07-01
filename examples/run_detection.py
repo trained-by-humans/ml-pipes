@@ -3,27 +3,33 @@ from __future__ import annotations
 import json
 import sys
 
-from ml_pipes import (
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
+    Infer,
+    Extract,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
     ArgMax,
+    GatherScores,
+    Slice,
+    Squeeze,
+    Transpose,
+)
+from ml_pipes.vision import (
     ConvertBoxFormat,
     Decode,
     Detections,
     LoadFile,
-    GatherScores,
-    Infer,
     NMS,
     Normalize,
-    Pick,
-    Pipeline,
     ProjectBoxes,
-    Recall,
     Resize,
-    Extract,
-    Slice,
-    Squeeze,
-    Store,
     ToDetections,
-    Transpose,
 )
 
 

@@ -3,14 +3,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ml_pipes import (
+from ml_pipes.tensor import TensorRegistry
+from ml_pipes.vision import (
     BlendImages,
     ClampDensity,
     DensityPrediction,
     DensityToHeatmap,
     ImagePayload,
     SumDensity,
-    TensorRegistry,
     ToDensityPrediction,
 )
 

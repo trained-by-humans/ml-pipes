@@ -11,7 +11,16 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.torch"
 
 from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
-from ml_pipes import LogDetections, MapPredictionsToObjects, Pipeline, Recall, ToSegmentations, inline
+from ml_pipes.core import (
+    Pipeline,
+    inline,
+)
+from ml_pipes.standard import Recall
+from ml_pipes.vision import (
+    LogDetections,
+    MapPredictionsToObjects,
+    ToSegmentations,
+)
 from ml_pipes.torch import (
     ToNumpyRegistry,
     TorchArgMax,

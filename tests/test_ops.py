@@ -6,33 +6,51 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ml_pipes import Pipeline, PipelineValidationError
-from ml_pipes.ops import (
+from ml_pipes.core import Pipeline
+from ml_pipes.validation import PipelineValidationError
+from ml_pipes.onnx import (
+    Extract,
+    Infer,
+)
+from ml_pipes.standard import (
+    Select,
+    Pick,
+)
+from ml_pipes.tensor import (
     ApplyTensorMask,
     AsType,
     ArgMax,
     BinarizeTensor,
     BinarizeTensorByThreshold,
-    ConvertColorSpace,
     CreateTensorMask,
     CreateTensorMaskByThreshold,
+    FilterTensors,
+    GatherScores,
+    MultiplyTensors,
+    SelectTensors,
+    Sigmoid,
+    Slice,
+    Softmax,
+    SortTensorsBy,
+    TopK,
+    TopKIndices2D,
+    Squeeze,
+    Transpose,
+)
+from ml_pipes.vision import (
+    ConvertColorSpace,
     ConvertBoxFormat,
     DrawBoxes,
     DrawMasks,
-    Extract,
     FilterTensorsByClasses,
     FilterTensorsByMasksArea,
     FilterPredictions,
     FilterPredictionsByArea,
     FilterPredictionsByClass,
     FilterPredictionsByScore,
-    FilterTensors,
     FilterTensorsByScore,
-    GatherScores,
-    Infer,
     LogDetections,
     MapPredictionsToObjects,
-    MultiplyTensors,
     MeanMaskScores,
     MasksToBoxes,
     NMS,
@@ -44,30 +62,21 @@ from ml_pipes.ops import (
     Resize,
     ResizeMasks,
     SaveImage,
-    Select,
-    SelectTensors,
-    Sigmoid,
-    Slice,
-    Softmax,
-    SortTensorsBy,
-    TopK,
-    TopKIndices2D,
-    Squeeze,
-    Pick,
     ToDetections,
     ToSegmentations,
-    Transpose,
     WeightMasksByScores,
 )
-from ml_pipes.types import (
+from ml_pipes.onnx import RuntimeOutputs
+from ml_pipes.tensor import (
+    TensorPayload,
+    TensorRegistry,
+)
+from ml_pipes.vision import (
     Detections,
     ImagePayload,
     Prediction,
     ResizeTransform,
-    RuntimeOutputs,
     Segmentations,
-    TensorPayload,
-    TensorRegistry,
 )
 
 

@@ -38,21 +38,23 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples"
 
 from examples.common import ASSETS_DIR, add_assets_dir_arg
-from ml_pipes import (
-    CaptureCollector,
+from ml_pipes.collectors import CaptureCollector
+from ml_pipes.core import Pipeline
+from ml_pipes.factory import (
+    InputFn,
+    data_factory,
+    pipeline_factory,
+)
+from ml_pipes.inspection import PipelineInspector
+from ml_pipes.standard import (
     CollectItems,
     Distinct,
     Filter,
-    InputFn,
     LazyPerItem,
     MapValue,
-    Pipeline,
-    PipelineInspector,
     PerItem,
     StreamItems,
     WrapMappingInObject,
-    data_factory,
-    pipeline_factory,
 )
 
 

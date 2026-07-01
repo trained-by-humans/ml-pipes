@@ -4,7 +4,15 @@ Mutates the pipeline in place and returns self.
 """
 import pytest
 
-from ml_pipes import Pipeline, PipelineValidationError, Inline, Store, Recall
+from ml_pipes.core import (
+    Pipeline,
+    Inline,
+)
+from ml_pipes.standard import (
+    Store,
+    Recall,
+)
+from ml_pipes.validation import PipelineValidationError
 
 
 class IntToString:

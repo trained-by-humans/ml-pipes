@@ -6,7 +6,7 @@ import types
 
 import pytest
 
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 from ml_pipes.factory import (
     PipelineFactory,
     data_factory,
@@ -186,7 +186,7 @@ class _Identity:
 
 
 def _make_identity_pipeline(**kwargs):
-    from ml_pipes import Pipeline
+    from ml_pipes.core import Pipeline
     return Pipeline([_Identity()])
 
 
@@ -222,7 +222,7 @@ def test_cmd_benchmark_missing_required_arg_raises(tmp_path):
     f.write_bytes(b"data")
 
     def _needs_arg(required_param):  # no default → must be in config
-        from ml_pipes import Pipeline
+        from ml_pipes.core import Pipeline
         return Pipeline([_Identity()])
 
     wrapped = pipeline_factory(_needs_arg)

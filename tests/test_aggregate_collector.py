@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import threading
 
-from ml_pipes import AggregateCollector, InvocationTrace, Pipeline, StepSpan, TracingConfig
+from ml_pipes.collectors import AggregateCollector
+from ml_pipes.core import Pipeline
+from ml_pipes.tracing import (
+    InvocationTrace,
+    StepSpan,
+    TracingConfig,
+)
 
 
 def _double(x: int) -> int:

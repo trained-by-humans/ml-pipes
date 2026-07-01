@@ -6,7 +6,11 @@ from typing import Any, TypedDict
 import numpy as np
 import pytest
 
-from ml_pipes import Operator, Pipeline, PipelineValidationError
+from ml_pipes.core import (
+    Operator,
+    Pipeline,
+)
+from ml_pipes.validation import PipelineValidationError
 from ml_pipes.selector import Selector
 
 try:

@@ -11,7 +11,7 @@ benchmarking or deployment checks.
 ## Quick Example
 
 ```python
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 
 class IntToString:
@@ -159,7 +159,13 @@ Scope rules:
 Examples:
 
 ```python
-from ml_pipes import Batch, Pipeline, Recall, Store, UnBatch
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
+    Batch,
+    Recall,
+    Store,
+    UnBatch,
+)
 
 Pipeline([Store("x"), Recall("x")])                             # valid
 Pipeline([Recall("x")])                                         # invalid
@@ -218,7 +224,7 @@ operator boundaries themselves and rejects unresolved ambiguity.
 
 ```python
 from typing import Any
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 
 class VagueOp:
@@ -301,7 +307,7 @@ published pipeline input stays loose:
 
 ```python
 from typing import Any
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 
 class VagueOp:
@@ -331,7 +337,7 @@ what the operators require:
 
 ```python
 from typing import Any
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 
 class ParsePair:
@@ -358,7 +364,7 @@ downstream constraints backward through transitive or contract-driven steps.
 
 ```python
 from typing import Any
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 
 class IntToString:

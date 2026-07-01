@@ -4,16 +4,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ml_pipes import (
-    Detections,
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
     Gather,
-    ImagePayload,
-    NMM,
-    Pipeline,
     Pick,
     Recall,
     Scatter,
     Store,
+)
+from ml_pipes.vision import (
+    Detections,
+    ImagePayload,
+    NMM,
     Stitch,
     Tile,
     TileRect,

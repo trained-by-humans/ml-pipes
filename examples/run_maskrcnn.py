@@ -15,22 +15,28 @@ from common import (
     parse_input_and_output_args,
     visualize_and_store,
 )
-from ml_pipes import (
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
     Infer,
+    Extract,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
     MapTensor,
+    Squeeze,
+)
+from ml_pipes.vision import (
     FilterTensorsByScore,
     ImagePayload,
     Normalize,
-    Pick,
-    Pipeline,
     ProjectBoxes,
     ProjectRoIMasks,
-    Recall,
     Resize,
-    Extract,
     Segmentations,
-    Squeeze,
-    Store,
     ToSegmentations,
 )
 

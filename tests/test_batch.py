@@ -4,16 +4,17 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ml_pipes import (
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import Distribute
+from ml_pipes.standard import (
     Batch,
-    Collate,
-    Distribute,
-    Pipeline,
-    PipelineValidationError,
     UnBatch,
 )
+from ml_pipes.tensor import Collate
+from ml_pipes.validation import PipelineValidationError
 from ml_pipes.context import Recall, Store
-from ml_pipes.types import RuntimeOutputs, TensorPayload
+from ml_pipes.onnx import RuntimeOutputs
+from ml_pipes.tensor import TensorPayload
 
 
 # ---------------------------------------------------------------------------

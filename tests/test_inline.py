@@ -7,7 +7,12 @@ Runtime and context-sharing behaviour are covered in test_composition_scenarios.
 """
 import pytest
 
-from ml_pipes import Pipeline, PipelineValidationError, Inline, inline
+from ml_pipes.core import (
+    Pipeline,
+    Inline,
+    inline,
+)
+from ml_pipes.validation import PipelineValidationError
 
 
 class IntToString:

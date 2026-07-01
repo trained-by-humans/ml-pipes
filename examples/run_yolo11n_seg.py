@@ -13,29 +13,35 @@ from common import (
     parse_input_and_output_args,
     visualize_and_store,
 )
-from ml_pipes import (
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
+    Infer,
+    Extract,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
     ArgMax,
     SelectTensors,
-    ConvertBoxFormat,
     GatherScores,
+    Slice,
+    Squeeze,
+    Transpose,
+)
+from ml_pipes.vision import (
+    ConvertBoxFormat,
     ImagePayload,
-    Infer,
     NMS,
     Normalize,
-    Pick,
-    Pipeline,
     ProjectBoxes,
     ProjectMasks,
     ReconstructMasks,
-    Recall,
     Resize,
-    Extract,
     Segmentations,
-    Slice,
-    Squeeze,
-    Store,
     ToSegmentations,
-    Transpose,
 )
 
 MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx"

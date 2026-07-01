@@ -3,7 +3,11 @@ from typing import TypeVar
 
 import pytest
 
-from ml_pipes import Context, Pipeline, SHORT_CIRCUIT
+from ml_pipes.core import (
+    Context,
+    Pipeline,
+    SHORT_CIRCUIT,
+)
 
 _T = TypeVar("_T")
 
@@ -200,7 +204,11 @@ def test_pipeline_passes_variadic_tuple_as_single_argument(operator, expected):
 
 
 def test_pipeline_can_store_select_and_recall_values():
-    from ml_pipes import Pick, Recall, Store
+    from ml_pipes.standard import (
+        Pick,
+        Recall,
+        Store,
+    )
 
     class IntToPair:
         def __call__(self, value: int) -> tuple[int, str]:

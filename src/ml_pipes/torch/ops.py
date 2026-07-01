@@ -11,7 +11,10 @@ import torch
 
 from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.operator import Operator
-from ml_pipes.types import TensorPayload, TensorRegistry
+from ml_pipes.tensor import (
+    TensorPayload,
+    TensorRegistry,
+)
 from .types import (
     TorchRuntimeOutputs,
     TorchTensorPayload,

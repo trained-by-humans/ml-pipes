@@ -37,7 +37,15 @@ from typing import TypeVar
 
 import numpy as np
 
-from ml_pipes import Gather, Inline, Pipeline, PipelineInspector, Scatter
+from ml_pipes.core import (
+    Inline,
+    Pipeline,
+)
+from ml_pipes.inspection import PipelineInspector
+from ml_pipes.standard import (
+    Gather,
+    Scatter,
+)
 
 
 ValueT = TypeVar("ValueT")

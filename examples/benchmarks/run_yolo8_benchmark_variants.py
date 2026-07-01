@@ -37,7 +37,12 @@ from examples.common import (
 )
 from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 
-from ml_pipes import Detections, ImagePayload, Pipeline, pipeline_factory
+from ml_pipes.core import Pipeline
+from ml_pipes.factory import pipeline_factory
+from ml_pipes.vision import (
+    Detections,
+    ImagePayload,
+)
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 

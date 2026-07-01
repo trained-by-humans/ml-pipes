@@ -6,7 +6,7 @@ import time
 import numpy as np
 import pytest
 
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 from ml_pipes.benchmark import (
     Benchmark,
     BenchmarkBuilder,
@@ -1370,7 +1370,10 @@ def test_data_config_multi_present_in_each_axis_config():
 # Factory signature error feedback
 # ---------------------------------------------------------------------------
 
-from ml_pipes import pipeline_factory, data_factory as data_factory_decorator
+from ml_pipes.factory import (
+    pipeline_factory,
+    data_factory as data_factory_decorator,
+)
 
 
 @pipeline_factory

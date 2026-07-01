@@ -36,7 +36,7 @@ For reusable configured logic, use a class with `__call__`. Decorating it with
 `@Operator` makes it self-describing in `repr()` and `describe()`:
 
 ```python
-from ml_pipes import Operator
+from ml_pipes.core import Operator
 
 
 @Operator
@@ -56,7 +56,7 @@ repr(Prefix("tag: "))
 Pipelines can mix both forms freely:
 
 ```python
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 pipeline = Pipeline([strip_text, Prefix("tag: ")])
 assert pipeline("  hello  ") == "tag: hello"
@@ -118,7 +118,11 @@ The pipeline's tooling works because operators define explicit boundaries.
 The examples below use the same tiny operator chain:
 
 ```python
-from ml_pipes import Operator, Pipeline, PrintCollector
+from ml_pipes.collectors import PrintCollector
+from ml_pipes.core import (
+    Operator,
+    Pipeline,
+)
 
 
 def strip_text(text: str) -> str:
@@ -201,7 +205,10 @@ Pipeline([
 Inspection captures the value flowing through each operator boundary.
 
 ```python
-from ml_pipes import PipelineInspector, TextBlock
+from ml_pipes.inspection import (
+    PipelineInspector,
+    TextBlock,
+)
 
 pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
 result = pipeline.inspect("  Hello World  ")
@@ -257,7 +264,10 @@ Benchmarking repeats the pipeline over many runs and aggregates latency at the
 same operator boundaries tracing uses.
 
 ```python
-from ml_pipes import Benchmark, MeasurementConfig
+from ml_pipes.benchmark import (
+    Benchmark,
+    MeasurementConfig,
+)
 
 result = Benchmark(
     pipeline,

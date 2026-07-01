@@ -7,7 +7,19 @@ from typing import Any
 
 import pytest
 
-from ml_pipes import DropNull, Gather, ImagePayload, Pipeline, PipelineValidationError, Recall, Resize, Scatter, Store
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
+    DropNull,
+    Gather,
+    Recall,
+    Scatter,
+    Store,
+)
+from ml_pipes.validation import PipelineValidationError
+from ml_pipes.vision import (
+    ImagePayload,
+    Resize,
+)
 from ml_pipes.scatter import ScatterGate, _ScatterEntry
 
 
@@ -209,7 +221,10 @@ def test_validate_nested_scatter_forbidden():
 
 
 def test_validate_batch_inside_scatter_allowed():
-    from ml_pipes import Batch, UnBatch
+    from ml_pipes.standard import (
+        Batch,
+        UnBatch,
+    )
 
     class _ListToList:
         def __call__(self, values: list) -> list:
@@ -226,7 +241,7 @@ def test_validate_batch_inside_scatter_allowed():
 
 def test_validate_interleaved_scatter_batch_forbidden():
     """Scatter → Batch → Gather (no UnBatch before Gather) must be rejected."""
-    from ml_pipes import Batch
+    from ml_pipes.standard import Batch
 
     with pytest.raises(
         PipelineValidationError,
@@ -242,7 +257,10 @@ def test_validate_interleaved_scatter_batch_forbidden():
 
 def test_validate_interleaved_batch_scatter_forbidden():
     """Batch → Scatter → UnBatch (no Gather before UnBatch) must be rejected."""
-    from ml_pipes import Batch, UnBatch
+    from ml_pipes.standard import (
+        Batch,
+        UnBatch,
+    )
 
     with pytest.raises(
         PipelineValidationError,

@@ -60,17 +60,11 @@ _TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)
 _HTML_ORIENTATIONS = ("horizontal", "vertical")
 
 from .inspection_artifacts import InspectionResult, InspectionSerializer
+from .onnx import RuntimeOutputs
+from .tensor import TensorPayload, TensorRegistry
 from .tracing import StepSpan, _fmt_batch_size
 from .tiling import TileRect
-from .types import (
-    Detections,
-    ImagePayload,
-    ResizeTransform,
-    RuntimeOutputs,
-    Segmentations,
-    TensorPayload,
-    TensorRegistry,
-)
+from .vision import Detections, ImagePayload, ResizeTransform, Segmentations
 
 try:
     from .torch.types import TorchTensorRegistry

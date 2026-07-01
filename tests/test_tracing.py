@@ -6,22 +6,26 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ml_pipes import (
-    Batch,
-    InspectionSerializer,
-    InvocationTrace,
-    LazyPerItem,
+from ml_pipes.collectors import PrintCollector
+from ml_pipes.core import (
     Pipeline,
-    PrintCollector,
     SHORT_CIRCUIT,
-    StepSpan,
+)
+from ml_pipes.inspection import InspectionSerializer
+from ml_pipes.standard import (
+    Batch,
+    LazyPerItem,
     StreamItems,
-    TraceCollector,
-    TracingConfig,
     UnBatch,
 )
+from ml_pipes.tracing import (
+    InvocationTrace,
+    StepSpan,
+    TraceCollector,
+    TracingConfig,
+)
 from ml_pipes.tracing import PendingSpan, freeze_trace
-from ml_pipes.types import TensorPayload
+from ml_pipes.tensor import TensorPayload
 
 
 # ---------------------------------------------------------------------------
@@ -606,8 +610,9 @@ def test_merge_traces_propagates_error_flag():
 
 def test_inspect_with_lambda_operator_is_serializable():
     import pickle
-    from ml_pipes import FilterPredictions, InspectionSerializer
-    from ml_pipes.types import Detections
+    from ml_pipes.inspection import InspectionSerializer
+    from ml_pipes.vision import FilterPredictions
+    from ml_pipes.vision import Detections
 
     pred = Detections(boxes=[[0,0,1,1],[1,1,2,2]], scores=[0.9, 0.4], classes=[0, 1])
     p = Pipeline([FilterPredictions(predicate=lambda d: [s > 0.5 for s in d.scores])])

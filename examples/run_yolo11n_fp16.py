@@ -13,27 +13,33 @@ from common import (
     parse_input_and_output_args,
     visualize_detections_and_store,
 )
-from ml_pipes import (
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
+    Infer,
+    Extract,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
     AsType,
     ArgMax,
-    ConvertBoxFormat,
-    Detections,
     GatherScores,
-    ImagePayload,
-    Infer,
-    NMS,
-    Normalize,
-    Pick,
-    Pipeline,
-    ProjectBoxes,
-    Recall,
-    Resize,
-    Extract,
     Slice,
     Squeeze,
-    Store,
-    ToDetections,
     Transpose,
+)
+from ml_pipes.vision import (
+    ConvertBoxFormat,
+    Detections,
+    ImagePayload,
+    NMS,
+    Normalize,
+    ProjectBoxes,
+    Resize,
+    ToDetections,
 )
 
 MODEL_URL = "https://huggingface.co/webnn/yolo11n/resolve/main/onnx/yolo11n_fp16.onnx"

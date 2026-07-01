@@ -1,6 +1,14 @@
 import pytest
 
-from ml_pipes import Batch, Pipeline, PipelineValidationError, Recall, SideEffectOp, Store, UnBatch
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
+    Batch,
+    Recall,
+    SideEffectOp,
+    Store,
+    UnBatch,
+)
+from ml_pipes.validation import PipelineValidationError
 from ml_pipes.context import ContextOp, Context
 from typing import Any
 
@@ -254,8 +262,8 @@ def test_side_effect_op_returns_input_unchanged():
 
 
 def test_save_image_passes_strict_validation(tmp_path):
-    from ml_pipes import SaveImage
-    from ml_pipes.types import ImagePayload
+    from ml_pipes.vision import SaveImage
+    from ml_pipes.vision import ImagePayload
     import numpy as np
 
     class MakeImage:
@@ -268,7 +276,7 @@ def test_save_image_passes_strict_validation(tmp_path):
 
 def test_log_detections_passes_strict_validation(tmp_path):
     import io
-    from ml_pipes import LogDetections
+    from ml_pipes.vision import LogDetections
 
     class MakeDetections:
         def __call__(self, value: int) -> list:

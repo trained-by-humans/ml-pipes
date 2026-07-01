@@ -7,10 +7,21 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ml_pipes import Batch, Pick, Pipeline, PipelineValidationError, Recall, Store, UnBatch, embed
+from ml_pipes.core import (
+    Pipeline,
+    embed,
+)
+from ml_pipes.standard import (
+    Batch,
+    Pick,
+    Recall,
+    Store,
+    UnBatch,
+)
+from ml_pipes.validation import PipelineValidationError
 from ml_pipes._typing.annotation import expand_annotation_parts
 from ml_pipes.context import Recall, Store
-from ml_pipes.types import ImagePayload
+from ml_pipes.vision import ImagePayload
 
 
 # ---------------------------------------------------------------------------

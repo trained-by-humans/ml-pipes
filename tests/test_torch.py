@@ -5,10 +5,22 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes import Batch, Gather, Normalize, Pipeline, PipelineValidationError, Scatter, ToSegmentations, TracingConfig, UnBatch
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
+    Batch,
+    Gather,
+    Scatter,
+    UnBatch,
+)
+from ml_pipes.tracing import TracingConfig
+from ml_pipes.validation import PipelineValidationError
+from ml_pipes.vision import (
+    Normalize,
+    ToSegmentations,
+)
 from ml_pipes.inspection import ImageBlock, PipelineInspector, TextBlock
 from ml_pipes.tracing import TraceCollector
-from ml_pipes.types import TensorPayload
+from ml_pipes.tensor import TensorPayload
 from ml_pipes.torch import (
     ToDevice,
     ToNumpy,
@@ -193,7 +205,7 @@ def test_to_numpy_copy_true_isolates_cpu_torch_storage():
 
 
 def test_to_torch_registry_copy_true_isolates_cpu_numpy_storage():
-    from ml_pipes.types import TensorRegistry
+    from ml_pipes.tensor import TensorRegistry
 
     registry = TensorRegistry({"scores": np.array([1.0, 2.0], dtype=np.float32)})
 
@@ -872,7 +884,7 @@ def test_torch_registry_conversion_handoff_back_to_numpy():
         _TorchIncrementRegistry(),
         ToNumpyRegistry(),
     ])
-    from ml_pipes.types import TensorRegistry
+    from ml_pipes.tensor import TensorRegistry
 
     registry = TensorRegistry({"scores": np.array([1.0, 2.0], dtype=np.float32)})
     result = pipeline(registry)
@@ -881,7 +893,7 @@ def test_torch_registry_conversion_handoff_back_to_numpy():
 
 
 def test_to_torch_registry_copy_false_shares_cpu_numpy_storage():
-    from ml_pipes.types import TensorRegistry
+    from ml_pipes.tensor import TensorRegistry
 
     registry = TensorRegistry({"scores": np.array([1.0, 2.0], dtype=np.float32)})
 

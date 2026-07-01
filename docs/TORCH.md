@@ -47,7 +47,7 @@ Use `ToDevice` when you want to move Torch payloads or Torch registries without
 leaving the Torch domain:
 
 ```python
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 from ml_pipes.torch import ToDevice, ToTorch, TorchInfer
 
 pipeline = Pipeline([
@@ -104,7 +104,19 @@ At a high level, mixed pipelines would look like this:
 Example boundary crossing:
 
 ```python
-from ml_pipes import ArgMax, Decode, GatherScores, MapPredictionsToObjects, Normalize, Pipeline, Resize, Slice, ToDetections
+from ml_pipes.core import Pipeline
+from ml_pipes.tensor import (
+    ArgMax,
+    GatherScores,
+    Slice,
+)
+from ml_pipes.vision import (
+    Decode,
+    MapPredictionsToObjects,
+    Normalize,
+    Resize,
+    ToDetections,
+)
 from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
 
 pipeline = Pipeline([
@@ -147,7 +159,7 @@ Use `TorchSynchronizeTensors()` when you want to force synchronization at a
 chosen boundary:
 
 ```python
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 from ml_pipes.torch import TorchArgMax, TorchInfer, TorchSynchronizeTensors
 
 pipeline = Pipeline([
@@ -175,7 +187,12 @@ This is the simplest handoff. Keep image decode / resize / normalize in NumPy,
 run the model in Torch, then hand the outputs back to NumPy.
 
 ```python
-from ml_pipes import Decode, Normalize, Pipeline, Resize
+from ml_pipes.core import Pipeline
+from ml_pipes.vision import (
+    Decode,
+    Normalize,
+    Resize,
+)
 from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
 
 pipeline = Pipeline([
@@ -201,7 +218,8 @@ You can keep postprocess in Torch when it gives you a concrete benefit. The two 
 - Leveraging Torch operators that already map well to the target device
 
 ```python
-from ml_pipes import Pipeline, ToSegmentations
+from ml_pipes.core import Pipeline
+from ml_pipes.vision import ToSegmentations
 from ml_pipes.torch import (
     ToNumpyRegistry,
     TorchMasksToBoxes,
@@ -239,7 +257,8 @@ convert the registry, run the Torch-specific part, and hand the remaining
 computation back to NumPy.
 
 ```python
-from ml_pipes import MasksToBoxes, Pipeline
+from ml_pipes.core import Pipeline
+from ml_pipes.vision import MasksToBoxes
 from ml_pipes.torch import ToNumpyRegistry, TorchResizeMasks, TorchSigmoid, TorchSoftmax
 
 pipeline = Pipeline([

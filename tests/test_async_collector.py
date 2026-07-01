@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import threading
 
-from ml_pipes import (
+from ml_pipes.collectors import (
     ConcurrentCollector,
-    InvocationTrace,
-    Pipeline,
     SerialCollector,
+)
+from ml_pipes.core import Pipeline
+from ml_pipes.tracing import (
+    InvocationTrace,
     TracingConfig,
 )
 

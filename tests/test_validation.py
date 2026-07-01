@@ -5,7 +5,16 @@ import warnings
 import pytest
 from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
 
-from ml_pipes import Batch, Gather, Pipeline, PipelineValidationError, Recall, Scatter, Store, UnBatch
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
+    Batch,
+    Gather,
+    Recall,
+    Scatter,
+    Store,
+    UnBatch,
+)
+from ml_pipes.validation import PipelineValidationError
 from ml_pipes.validation import (
     PipelineValidator,
     PipelineValidationWarning,

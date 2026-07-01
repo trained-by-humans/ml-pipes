@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 from ml_pipes.factory import (
     DataFactory,
     Factory,
@@ -225,7 +225,7 @@ def test_data_factory_validates_return_type_on_direct_call():
 
 
 def test_decorators_exported_from_init():
-    from ml_pipes import (
+    from ml_pipes.factory import (
         DataFactory as data_factory_type,
         Factory as factory_type,
         PipelineFactory as pipeline_factory_type,

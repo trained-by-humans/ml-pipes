@@ -9,8 +9,12 @@ except ImportError:  # pragma: no cover
 
 from typing import Literal
 
-from ml_pipes.ops import MapPredictionsToObjects
-from ml_pipes.types import Detections, ImagePayload, Segmentations
+from ml_pipes.vision import MapPredictionsToObjects
+from ml_pipes.vision import (
+    Detections,
+    ImagePayload,
+    Segmentations,
+)
 
 
 sample_image = ImagePayload(array=np.zeros((8, 8, 3), dtype=np.uint8), color_space="BGR", layout="HWC")

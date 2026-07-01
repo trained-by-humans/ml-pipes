@@ -4,15 +4,15 @@ from dataclasses import dataclass
 
 import pytest
 
-from ml_pipes import (
+from ml_pipes.inspection import (
     GroupBlock,
     HtmlRenderer,
     InspectionResult,
     PipelineInspector,
-    StepSpan,
     StepView,
     TextBlock,
 )
+from ml_pipes.tracing import StepSpan
 
 
 def _inspection_result() -> InspectionResult:

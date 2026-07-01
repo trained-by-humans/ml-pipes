@@ -7,7 +7,13 @@ Context isolation behaviour is covered in test_composition_scenarios.py.
 import pytest
 from typing import Any
 
-from ml_pipes import Pipeline, PipelineValidationError, Embed, Store, embed
+from ml_pipes.core import (
+    Pipeline,
+    Embed,
+    embed,
+)
+from ml_pipes.standard import Store
+from ml_pipes.validation import PipelineValidationError
 
 
 class IntToString:
@@ -123,7 +129,7 @@ def test_outer_strict_accepts_embed_with_concrete_output():
 
 
 def test_embed_validates_batch_pairs_in_inner_pipeline():
-    from ml_pipes import Batch
+    from ml_pipes.standard import Batch
 
     inner = Pipeline([Batch(size=2)])
     outer = Pipeline([IntToString(), embed(inner)])
@@ -133,7 +139,7 @@ def test_embed_validates_batch_pairs_in_inner_pipeline():
 
 
 def test_embed_validates_context_interactions_in_inner_pipeline():
-    from ml_pipes import Recall
+    from ml_pipes.standard import Recall
 
     inner = Pipeline([Recall("x")])
     outer = Pipeline([IntToString(), embed(inner)])

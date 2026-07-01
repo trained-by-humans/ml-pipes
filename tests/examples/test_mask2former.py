@@ -19,10 +19,12 @@ from examples.torch.mask2former_infer import (
 )
 from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFromQueries
 from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries
-from ml_pipes import ArgMax, Pipeline, Recall
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import Recall
+from ml_pipes.tensor import ArgMax
 from ml_pipes.torch import TorchArgMax
 from ml_pipes.torch.types import TorchTensorRegistry
-from ml_pipes.types import TensorRegistry
+from ml_pipes.tensor import TensorRegistry
 
 
 def _write_png(path: Path, image: np.ndarray) -> None:

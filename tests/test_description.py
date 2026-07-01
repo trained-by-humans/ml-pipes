@@ -5,28 +5,36 @@ from typing import Any
 
 import pytest
 
-from ml_pipes import (
-    AsType,
+from ml_pipes.core import (
+    Operator,
+    Pipeline,
+    embed,
+)
+from ml_pipes.onnx import Extract
+from ml_pipes.operator import (
+    OperatorArgument,
+    OperatorDescription,
+)
+from ml_pipes.standard import (
     Batch,
     Distinct,
-    Extract,
+    Gather,
+    Recall,
+    Scatter,
+    Store,
+    UnBatch,
+)
+from ml_pipes.tensor import AsType
+from ml_pipes.tracing import (
+    InvocationTrace,
+    TraceCollector,
+    TracingConfig,
+)
+from ml_pipes.vision import (
     FilterPredictionsByClass,
     FilterPredictionsByScore,
     FilterTensorsByClasses,
     FilterTensorsByScore,
-    Gather,
-    InvocationTrace,
-    Operator,
-    OperatorArgument,
-    OperatorDescription,
-    Pipeline,
-    Recall,
-    Scatter,
-    Store,
-    TraceCollector,
-    TracingConfig,
-    UnBatch,
-    embed,
 )
 from ml_pipes.operator import get_operator_constructor_signature
 

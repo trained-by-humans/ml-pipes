@@ -29,7 +29,7 @@ from common import (
     visualize_detections_and_store,
 )
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
-from ml_pipes import (
+from ml_pipes.collectors import (
     AggregateCollector,
     PrintCollector,
 )

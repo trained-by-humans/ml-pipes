@@ -14,8 +14,18 @@ It captures the operator-by-operator view of that call, including:
 ## Quick Example
 
 ```python
-from ml_pipes import Decode, Infer, NMS, Normalize, Pipeline, PrintCollector
-from ml_pipes import Resize, ToDetections
+from ml_pipes.collectors import PrintCollector
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import Infer
+from ml_pipes.vision import (
+    Decode,
+    NMS,
+    Normalize,
+)
+from ml_pipes.vision import (
+    Resize,
+    ToDetections,
+)
 
 
 pipeline = Pipeline([
@@ -65,7 +75,7 @@ You can enable or reconfigure tracing either at construction time with
 `TracingConfig(...)` or at runtime with `set_tracing(...)`.
 
 ```python
-from ml_pipes import PrintCollector
+from ml_pipes.collectors import PrintCollector
 
 
 pipeline.set_tracing(
@@ -141,7 +151,8 @@ All collectors receive an `InvocationTrace`.
 ### Minimal Example
 
 ```python
-from ml_pipes import InvocationTrace, SerialCollector
+from ml_pipes.collectors import SerialCollector
+from ml_pipes.tracing import InvocationTrace
 
 
 class SlowTraceCollector(SerialCollector):

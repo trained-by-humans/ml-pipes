@@ -8,14 +8,18 @@ import cv2
 
 from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, add_assets_dir_arg, add_model_arg, download_if_missing, resolve_model_path
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
-from ml_pipes import (
-    DrawBoxes,
-    ImagePayload,
-    Pick,
+from ml_pipes.core import (
     Pipeline,
+    Embed,
+)
+from ml_pipes.standard import (
+    Pick,
     Recall,
     Store,
-    Embed,
+)
+from ml_pipes.vision import (
+    DrawBoxes,
+    ImagePayload,
 )
 
 # Sequential frame-by-frame inference on a video file with YOLOv8.

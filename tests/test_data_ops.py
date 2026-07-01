@@ -6,7 +6,11 @@ from typing import Any
 
 import pytest
 
-from ml_pipes import (
+from ml_pipes.core import (
+    Pipeline,
+    SHORT_CIRCUIT,
+)
+from ml_pipes.standard import (
     CollectItems,
     Distinct,
     DistinctBy,
@@ -17,15 +21,13 @@ from ml_pipes import (
     Map,
     MapNotNull,
     MapValue,
-    Pipeline,
     PerItem,
-    SHORT_CIRCUIT,
     StreamItems,
     WrapMappingInObject,
     Take,
     TakeWhile,
-    PipelineValidationError,
 )
+from ml_pipes.validation import PipelineValidationError
 
 
 @dataclass

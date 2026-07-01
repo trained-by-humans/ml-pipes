@@ -12,25 +12,31 @@ from common import (
     parse_input_and_output_args,
     visualize_detections_and_store,
 )
-from ml_pipes import (
-    ArgMax,
-    ConvertBoxFormat,
-    Detections,
-    GatherScores,
-    ImagePayload,
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
     Infer,
-    NMS,
-    Normalize,
-    Pick,
-    Pipeline,
-    ProjectBoxes,
-    Recall,
-    Resize,
-    Scale,
     Extract,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
+    ArgMax,
+    GatherScores,
+    Scale,
     Softmax,
     Squeeze,
-    Store,
+)
+from ml_pipes.vision import (
+    ConvertBoxFormat,
+    Detections,
+    ImagePayload,
+    NMS,
+    Normalize,
+    ProjectBoxes,
+    Resize,
     ToDetections,
 )
 

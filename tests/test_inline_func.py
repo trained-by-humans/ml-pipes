@@ -4,7 +4,11 @@ a + b flattens two pipelines into one with shared context.
 
 Runtime and context-sharing behaviour are covered in test_composition_scenarios.py.
 """
-from ml_pipes import Pipeline, Inline, inline
+from ml_pipes.core import (
+    Pipeline,
+    Inline,
+    inline,
+)
 
 
 class IntToString:

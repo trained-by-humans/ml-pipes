@@ -86,7 +86,10 @@ example, you can define one small operator and drop it into a pipeline that
 already has a few steps:
 
 ```python
-from ml_pipes import Operator, Pipeline
+from ml_pipes.core import (
+    Operator,
+    Pipeline,
+)
 
 
 def strip_text(text: str) -> str:
@@ -144,7 +147,7 @@ Tracing records one call through the same pipeline and shows the per-step
 runtime breakdown.
 
 ```python
-from ml_pipes import PrintCollector
+from ml_pipes.collectors import PrintCollector
 
 pipeline.set_tracing(PrintCollector())
 pipeline(sample)

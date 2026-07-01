@@ -15,25 +15,29 @@ from common import decode, visualize_detections_and_store
 from run_yolo8_batch import build_pipeline
 from run_yolo8_onnx import yolo8_inference_pipeline
 
-from ml_pipes import (
+from ml_pipes.core import Pipeline
+from ml_pipes.factory import pipeline_factory
+from ml_pipes.standard import (
+    Pick,
+    SideEffectOp,
+)
+from ml_pipes.tensor import (
     AsType,
     CreateTensorMask,
+    FilterTensors,
+    MapTensor,
+    TensorPayload,
+    TensorRegistry,
+)
+from ml_pipes.vision import (
     Detections,
     FilterPredictions,
     FilterPredictionsByClass,
-    FilterTensors,
     ImagePayload,
     LogDetections,
     MapPredictionsToObjects,
-    MapTensor,
-    Pipeline,
-    Pick,
     SaveImage,
     Segmentations,
-    SideEffectOp,
-    TensorPayload,
-    TensorRegistry,
-    pipeline_factory,
 )
 
 

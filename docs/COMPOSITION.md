@@ -72,7 +72,10 @@ You do not need to implement every step up front. Start by naming the
 boundaries you want to observe, then fill them in:
 
 ```python
-from ml_pipes import Operator, Pipeline
+from ml_pipes.core import (
+    Operator,
+    Pipeline,
+)
 
 
 @Operator

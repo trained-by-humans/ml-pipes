@@ -4,7 +4,17 @@ across embed() and inline() in realistic multi-stage pipelines.
 """
 import pytest
 
-from ml_pipes import Pipeline, PipelineValidationError, embed, inline, Store, Recall, Pick
+from ml_pipes.core import (
+    Pipeline,
+    embed,
+    inline,
+)
+from ml_pipes.standard import (
+    Store,
+    Recall,
+    Pick,
+)
+from ml_pipes.validation import PipelineValidationError
 from ml_pipes.context import ContextOp
 from typing import Any
 

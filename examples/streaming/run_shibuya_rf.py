@@ -20,7 +20,7 @@ import supervision as sv
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
-from ml_pipes import ImagePayload
+from ml_pipes.vision import ImagePayload
 
 
 def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile: bool, conf_threshold: float = 0.25) -> int:

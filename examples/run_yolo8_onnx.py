@@ -17,26 +17,32 @@ from common import (
     resolve_model_path,
     visualize_detections_and_store,
 )
-from ml_pipes import (
-    ArgMax,
-    ConvertBoxFormat,
-    Detections,
-    GatherScores,
-    ImagePayload,
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
     Infer,
-    NMS,
-    Normalize,
-    Pick,
-    Pipeline,
-    ProjectBoxes,
-    Recall,
-    Resize,
     Extract,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
+    ArgMax,
+    GatherScores,
     Slice,
     Squeeze,
-    Store,
-    ToDetections,
     Transpose,
+)
+from ml_pipes.vision import (
+    ConvertBoxFormat,
+    Detections,
+    ImagePayload,
+    NMS,
+    Normalize,
+    ProjectBoxes,
+    Resize,
+    ToDetections,
 )
 
 # Registry of all supported YOLOv8 variants.
