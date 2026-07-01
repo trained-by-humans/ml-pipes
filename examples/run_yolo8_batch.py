@@ -45,7 +45,9 @@ from ml_pipes import (
 # The model is exported from Ultralytics with dynamic=True so ONNX Runtime
 # accepts any batch size.  Requires: pip install ultralytics
 #
-# Usage (runs the sample COCO image 8 times by default):
+# Usage (shown from `examples/`; from repo root, prefix script paths with
+# `examples/`):
+# Runs the sample COCO image 8 times by default:
 #   python run_yolo8_batch.py
 #
 # Run with explicit images:

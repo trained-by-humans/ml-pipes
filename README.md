@@ -62,9 +62,11 @@ def yolo8_inference_pipeline(
     )
 ```
 
-Examples auto-download model and sample assets into
-`examples/.example_assets/` on first run. For more runnable entry points, see
-[examples/README.md](examples/README.md).
+Most self-contained examples download the models and sample assets they need
+into the shared `examples/.example_assets/` cache on demand. Generic entry points
+such as `examples/run_detection.py` expect explicit inputs instead. For more
+runnable entry points, including the equivalent `examples/`-local commands,
+see [examples/README.md](examples/README.md).
 
 ## Why ml-pipes
 

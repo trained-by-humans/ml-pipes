@@ -1,9 +1,25 @@
 # Examples
 
-Run example commands from the repository root.
+If you only want to explore the runnable examples, you can use this directory
+directly.
 
-All examples auto-download their model and sample assets into
-`examples/.example_assets/` on first run.
+```bash
+# From the repository root
+python examples/run_yolo8_onnx.py
+
+# Or from the examples directory
+cd examples
+python run_yolo8_onnx.py
+```
+
+The commands below are shown from the repository root. If you prefer to work
+from `examples/`, drop the leading `examples/` prefix from script paths and
+use `.example_assets/` instead of `examples/.example_assets/`.
+
+Most self-contained examples download the models and sample assets they need
+into the shared `.example_assets/` cache next to this directory on demand.
+Generic entry points such as `run_detection.py` do not download defaults;
+provide the model path and input path explicitly.
 
 ## Inference On Files
 

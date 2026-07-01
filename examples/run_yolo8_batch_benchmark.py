@@ -17,7 +17,8 @@ from run_yolo8_batch import MODEL_NAME, _export_dynamic_model, build_pipeline
 # Each dimension (batch_size, workers, lock) accepts one or more values;
 # the script runs the full cartesian product and prints one row per config.
 #
-# Usage:
+# Usage (shown from `examples/`; from repo root, prefix script paths with
+# `examples/`):
 #   python run_yolo8_batch_benchmark.py                         # defaults
 #   python run_yolo8_batch_benchmark.py --batch-size 4 8 --workers 8 --lock on off
 #   python run_yolo8_batch_benchmark.py --batch-size 1 2 4 8 --workers 1 4 8 --lock on off
