@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import ast
-import importlib.resources
 from pathlib import Path
 
 import pytest
 
 import ml_pipes
+import ml_pipes.tensor as tensor
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _public_operator_and_alias_names(module_path: Path) -> set[str]:
@@ -27,64 +29,41 @@ def _public_operator_and_alias_names(module_path: Path) -> set[str]:
     return names
 
 
-def _assert_module_exports(module_path: Path) -> None:
+def _assert_module_exports(module: object, module_path: Path) -> None:
     expected = _public_operator_and_alias_names(module_path)
 
-    missing_attrs = sorted(name for name in expected if not hasattr(ml_pipes, name))
-    missing_in_all = sorted(name for name in expected if name not in ml_pipes.__all__)
-    invalid_in_all = sorted(name for name in ml_pipes.__all__ if not hasattr(ml_pipes, name))
+    missing_attrs = sorted(name for name in expected if not hasattr(module, name))
+    missing_in_all = sorted(name for name in expected if name not in module.__all__)
+    invalid_in_all = sorted(name for name in module.__all__ if not hasattr(module, name))
 
     assert missing_attrs == []
     assert missing_in_all == []
     assert invalid_in_all == []
 
 
-def test_ml_pipes_exports_all_public_ops_and_aliases() -> None:
-    root = Path(__file__).resolve().parents[1] / "src" / "ml_pipes"
-    _assert_module_exports(root / "ops.py")
-    _assert_module_exports(root / "data_ops.py")
+def test_root_namespace_exposes_no_legacy_convenience_exports() -> None:
+    assert not hasattr(ml_pipes, "Pipeline")
+    assert not hasattr(ml_pipes, "__all__")
 
 
-def test_ml_pipes_alias_exports_preserve_identity() -> None:
-    assert ml_pipes.GatherScores is ml_pipes.GatherRows
-    assert ml_pipes.BinarizeTensor is ml_pipes.CreateTensorMask
-    assert ml_pipes.BinarizeTensorByThreshold is ml_pipes.CreateTensorMaskByThreshold
+def test_tensor_alias_exports_preserve_identity() -> None:
+    assert tensor.GatherScores is tensor.GatherRows
+    assert tensor.BinarizeTensor is tensor.CreateTensorMask
+    assert tensor.BinarizeTensorByThreshold is tensor.CreateTensorMaskByThreshold
 
 
-def test_ml_pipes_exports_description_types() -> None:
-    assert hasattr(ml_pipes, "OperatorArgument")
-    assert hasattr(ml_pipes, "OperatorDescription")
-    assert hasattr(ml_pipes, "PipelineDescription")
-    assert "OperatorArgument" in ml_pipes.__all__
-    assert "OperatorDescription" in ml_pipes.__all__
-    assert "PipelineDescription" in ml_pipes.__all__
-
-
-def test_ml_pipes_exports_operator_decorator_and_type_alias() -> None:
-    assert callable(ml_pipes.Operator)
-    assert hasattr(ml_pipes, "OperatorLike")
-    assert "Operator" in ml_pipes.__all__
-    assert "OperatorLike" in ml_pipes.__all__
-
-
-def test_ml_pipes_includes_py_typed_marker() -> None:
-    assert importlib.resources.files("ml_pipes").joinpath("py.typed").is_file()
+def test_workspace_packages_ship_py_typed_markers() -> None:
+    for package_name in ("core", "tensor", "vision", "onnx", "torch"):
+        marker = ROOT / "packages" / package_name / "src" / "ml_pipes" / "py.typed"
+        assert marker.is_file(), package_name
 
 
 def test_ml_pipes_torch_exports_all_public_ops_and_aliases() -> None:
     torch = pytest.importorskip("torch")
     del torch
     ml_pipes_torch = pytest.importorskip("ml_pipes.torch")
-    module_path = Path(__file__).resolve().parents[1] / "src" / "ml_pipes" / "torch" / "ops.py"
-    expected = _public_operator_and_alias_names(module_path)
-
-    missing_attrs = sorted(name for name in expected if not hasattr(ml_pipes_torch, name))
-    missing_in_all = sorted(name for name in expected if name not in ml_pipes_torch.__all__)
-    invalid_in_all = sorted(name for name in ml_pipes_torch.__all__ if not hasattr(ml_pipes_torch, name))
-
-    assert missing_attrs == []
-    assert missing_in_all == []
-    assert invalid_in_all == []
+    module_path = ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "ops.py"
+    _assert_module_exports(ml_pipes_torch, module_path)
 
 
 def test_ml_pipes_torch_alias_exports_preserve_identity() -> None:

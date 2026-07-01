@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ml-pipes-vision"
+version = "0.1.0"
+description = "Vision payloads and vision-domain operators for ml-pipes"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ml-pipes-core==0.1.0",
+    "ml-pipes-tensor==0.1.0",
+    "numpy>=1.26",
+    "opencv-python>=4.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ml_pipes"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "README.md",
+    "pyproject.toml",
+    "src/ml_pipes",
+]

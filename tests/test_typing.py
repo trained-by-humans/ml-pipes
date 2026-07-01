@@ -9,12 +9,19 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_SRC_DIRS = [
+    ROOT / "packages" / "core" / "src",
+    ROOT / "packages" / "tensor" / "src",
+    ROOT / "packages" / "vision" / "src",
+    ROOT / "packages" / "onnx" / "src",
+    ROOT / "packages" / "torch" / "src",
+]
 
 
 def test_mypy_pipeline_generics_smoke() -> None:
     pytest.importorskip("mypy")
 
-    search_path = os.pathsep.join((str(ROOT / "src"), str(ROOT / "examples")))
+    search_path = os.pathsep.join([*(str(path) for path in PACKAGE_SRC_DIRS), str(ROOT / "examples")])
     env = os.environ.copy()
     env["MYPYPATH"] = (
         search_path if not env.get("MYPYPATH") else search_path + os.pathsep + env["MYPYPATH"]
@@ -51,8 +58,9 @@ def test_mypy_torch_operator_generics_smoke() -> None:
     pytest.importorskip("torch")
 
     env = os.environ.copy()
-    env["MYPYPATH"] = str(ROOT / "src")
-    env["PYTHONPATH"] = str(ROOT / "src")
+    search_path = os.pathsep.join(str(path) for path in PACKAGE_SRC_DIRS)
+    env["MYPYPATH"] = search_path
+    env["PYTHONPATH"] = search_path
 
     result = subprocess.run(
         [

@@ -1,45 +1,12 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "ml-pipes"
-version = "0.1.0"
-description = "Pipeline framework for explicit ML data flow, validation, tracing, and benchmarking"
-readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-    "numpy>=1.26",
-    "opencv-python>=4.9",
-    "onnxruntime>=1.18",
-    "typing_extensions>=4.9",
+[tool.uv.workspace]
+members = [
+    "packages/core",
+    "packages/tensor",
+    "packages/vision",
+    "packages/onnx",
+    "packages/torch",
+    "packages/meta",
 ]
-
-[project.optional-dependencies]
-dev = [
-    "mypy>=1.10",
-    "pytest>=8.0",
-]
-otel = [
-    "opentelemetry-api>=1.20",
-    "opentelemetry-sdk>=1.20",
-]
-torch = [
-    "torch",
-    "torchvision",
-]
-
-[project.scripts]
-ml-pipes = "ml_pipes.__main__:main"
-
-[tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-ml_pipes = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -9,6 +9,14 @@ import ml_pipes.tensor as tensor
 import ml_pipes.vision as vision
 
 
+def test_root_namespace_has_no_legacy_convenience_exports() -> None:
+    assert not hasattr(ml_pipes, "Pipeline")
+    assert not hasattr(ml_pipes, "Pick")
+    assert not hasattr(ml_pipes, "Decode")
+    assert not hasattr(ml_pipes, "Infer")
+    assert not hasattr(ml_pipes, "InspectionResult")
+
+
 def test_core_component_surface_is_curated() -> None:
     assert core.__all__ == [
         "Context",
@@ -24,8 +32,6 @@ def test_core_component_surface_is_curated() -> None:
         "embed",
         "inline",
     ]
-    assert core.Pipeline is ml_pipes.Pipeline
-    assert core.Operator is ml_pipes.Operator
 
 
 def test_standard_component_surface_is_curated() -> None:
@@ -55,8 +61,6 @@ def test_standard_component_surface_is_curated() -> None:
         "UnBatch",
         "WrapMappingInObject",
     ]
-    assert standard.Pick is ml_pipes.Pick
-    assert standard.Store is ml_pipes.Store
 
 
 def test_tensor_component_surface_is_curated() -> None:
@@ -87,8 +91,6 @@ def test_tensor_component_surface_is_curated() -> None:
         "TopKIndices2D",
         "Transpose",
     ]
-    assert tensor.TensorPayload is ml_pipes.TensorPayload
-    assert tensor.ArgMax is ml_pipes.ArgMax
 
 
 def test_vision_component_surface_is_curated() -> None:
@@ -138,8 +140,6 @@ def test_vision_component_surface_is_curated() -> None:
         "ToSegmentations",
         "WeightMasksByScores",
     ]
-    assert vision.Decode is ml_pipes.Decode
-    assert vision.ImagePayload is ml_pipes.ImagePayload
 
 
 def test_onnx_component_surface_is_curated() -> None:
@@ -149,8 +149,6 @@ def test_onnx_component_surface_is_curated() -> None:
         "Infer",
         "RuntimeOutputs",
     ]
-    assert onnx.Infer is ml_pipes.Infer
-    assert onnx.RuntimeOutputs is ml_pipes.RuntimeOutputs
 
 
 def test_inspection_component_surface_is_curated() -> None:
@@ -167,5 +165,3 @@ def test_inspection_component_surface_is_curated() -> None:
         "StepView",
         "TextBlock",
     ]
-    assert inspection.InspectionResult is ml_pipes.InspectionResult
-    assert inspection.PipelineInspector is ml_pipes.PipelineInspector

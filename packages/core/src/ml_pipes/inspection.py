@@ -49,10 +49,10 @@ import tempfile
 import webbrowser
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-import cv2
 import numpy as np
 
 _IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
@@ -60,11 +60,27 @@ _TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)
 _HTML_ORIENTATIONS = ("horizontal", "vertical")
 
 from .inspection_artifacts import InspectionResult, InspectionSerializer
-from .onnx import RuntimeOutputs
-from .tensor import TensorPayload, TensorRegistry
 from .tracing import StepSpan, _fmt_batch_size
 from .tiling import TileRect
-from .vision import Detections, ImagePayload, ResizeTransform, Segmentations
+
+
+def _import_inspection_dependencies() -> tuple[object, type, type, type, type, type, type, type]:
+    try:
+        cv2 = import_module("cv2")
+        from .onnx import RuntimeOutputs
+        from .tensor import TensorPayload, TensorRegistry
+        from .vision import Detections, ImagePayload, ResizeTransform, Segmentations
+    except ImportError as exc:  # pragma: no cover - exercised when optional packages are absent
+        raise ImportError(
+            "ml_pipes.inspection requires the optional inspection extra. "
+            "Install it with `pip install ml-pipes[inspection]`."
+        ) from exc
+    return cv2, Detections, ImagePayload, ResizeTransform, RuntimeOutputs, Segmentations, TensorPayload, TensorRegistry
+
+
+cv2, Detections, ImagePayload, ResizeTransform, RuntimeOutputs, Segmentations, TensorPayload, TensorRegistry = (
+    _import_inspection_dependencies()
+)
 
 try:
     from .torch.types import TorchTensorRegistry
