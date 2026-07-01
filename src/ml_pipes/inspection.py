@@ -78,6 +78,21 @@ except Exception:  # pragma: no cover - ImportError: torch absent; other: torch 
     TorchTensorRegistry = None
 
 
+__all__ = [
+    "GroupBlock",
+    "HtmlRenderer",
+    "ImageBlock",
+    "InspectionResult",
+    "InspectionSerializer",
+    "OutputBlock",
+    "PipelineInspector",
+    "PlotRenderer",
+    "Renderer",
+    "StepView",
+    "TextBlock",
+]
+
+
 # ---------------------------------------------------------------------------
 # Public IR — display primitives
 # ---------------------------------------------------------------------------

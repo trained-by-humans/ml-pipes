@@ -32,6 +32,21 @@ from .validation import PipelineValidationError, PipelineValidator, TypeContract
 
 _log = logging.getLogger(__name__)
 
+__all__ = [
+    "Context",
+    "Embed",
+    "Inline",
+    "Operator",
+    "OperatorLike",
+    "Pipeline",
+    "PipelineDescription",
+    "RegionCloser",
+    "RegionOpener",
+    "SHORT_CIRCUIT",
+    "embed",
+    "inline",
+]
+
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
 NextOutputT = TypeVar("NextOutputT")
