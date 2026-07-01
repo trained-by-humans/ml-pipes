@@ -8,7 +8,7 @@ Run from the repo root:
     python examples/benchmarks/run_yolo8_benchmark_variants.py --variants n s --runs 20
     python examples/benchmarks/run_yolo8_benchmark_variants.py --variants n s m --save results/
 
-See `BENCHMARKING.md` for shared sweep concepts, measurement options, and
+See `docs/BENCHMARKING.md` for shared sweep concepts, measurement options, and
 factory rules.
 """
 from __future__ import annotations

@@ -37,7 +37,7 @@ from ml_pipes import (
 MODEL_URL = "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model.onnx"
 MODEL_NAME = "rfdetr_nano.onnx"
 
-# RF-DETR exports normalized boxes in (cx, cy, w, h) format.
+# This detector exports normalized boxes in (cx, cy, w, h) format.
 # Multiply by input size to get pixel coordinates.
 INPUT_SIZE = (640, 640)
 
@@ -69,7 +69,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detecti
 
 
 def main() -> int:
-    args = parse_input_and_output_args("Run an RF-DETR ONNX demo on a public COCO image.")
+    args = parse_input_and_output_args("Run a DETR-style ONNX demo on a public COCO image.")
     assets_dir = args.assets_dir
     model_path = assets_dir / MODEL_NAME
     image_path = assets_dir / COCO_IMAGE_NAME

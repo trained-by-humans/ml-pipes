@@ -9,7 +9,7 @@ Run from the repo root:
     python examples/benchmarks/run_yolo8_benchmark.py --model n --runs 30
     python examples/benchmarks/run_yolo8_benchmark.py --model s --save results/
 
-See `BENCHMARKING.md` for shared measurement options, result formats, and the
+See `docs/BENCHMARKING.md` for shared measurement options, result formats, and the
 higher-level sweep / CLI APIs.
 """
 from __future__ import annotations

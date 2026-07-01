@@ -1,6 +1,7 @@
 # macOS / editor noise
 .DS_Store
 .idea/
+/tmp/
 
 # Python caches
 __pycache__/

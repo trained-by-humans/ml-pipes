@@ -24,7 +24,8 @@ from ml_pipes import (
 # output video.  This is the single-frame sequential baseline we will later
 # compare against batched inference.
 #
-# Usage:
+# Usage (shown from `examples/`; from repo root, prefix script paths with
+# `examples/`):
 #   python run_yolo8_video.py --input clip.mp4
 #   python run_yolo8_video.py --input clip.mp4 --output annotated.mp4
 

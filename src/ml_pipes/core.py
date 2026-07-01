@@ -181,16 +181,18 @@ class Pipeline(Generic[InputT, OutputT]):
     ) -> TypeContract | None:
         """Validate the pipeline and return its boundary contract.
 
-        Boundary tightening has three modes:
-        - Default: start at `Any` and tighten only from the first concrete
-          entry boundary found during the forward pass.
-        - Declared input: pass `pipeline_input_type=...` to tighten the
-          boundary explicitly and seed forward validation from that type.
+        Pipeline-input boundary tightening has three modes:
+        - Default: start at `Any` and tighten only from the entry boundary
+          resolved by the forward pass.
+        - Declared input: pass `pipeline_input_type=...` to seed forward
+          validation from that type; it participates in compatibility checking
+          and can tighten the returned boundary.
         - Inference: pass `inference=True` to allow a backward pass to infer a
-          tighter pipeline input when the operator chain remains transitive.
+          more specific returned pipeline input when the operator chain
+          remains transitive.
 
         Strict mode is orthogonal: it validates operator boundaries, not the
-        final boundary-tightening mode used to compute the returned input type.
+        final tightening mode used to compute the returned input type.
 
         Validation and runtime dispatch only unpack fixed positional
         boundaries. Non-positional `__call__` parameters such as `*args`,

@@ -1,45 +1,24 @@
-# Operators
+# Operator Index
 
-Operators are the building blocks of a pipeline. They fall into four families:
-[Transform](#transform-operators) · [Tensor](#tensor-operators) · [Context](#context-operators) · [Side-effect](#side-effect-operators)
+This file catalogs the current shared operators by family.
 
----
+For operator concepts, design constraints, and high-level guidance, see
+[../OPERATORS.md](../OPERATORS.md).
 
-## Design Principles
+## Operator Families
 
-Every operator in the library is designed to uphold the following properties.
-They are not style guidelines — they are what makes operators safe to compose
-and swap without side effects.
+ml-pipes currently uses a few recurring operator families:
 
-**Stateless.** An operator holds only the configuration given at construction
-time (`name`, `axis`, `threshold`, etc.). It has no mutable state that
-accumulates between calls. Calling it twice on the same input produces the
-same output.
-
-**Single-responsibility.** Each operator does exactly one thing. `Squeeze`
-removes unit dimensions. `ConvertBoxFormat` converts between coordinate
-formats. `NMS` filters by confidence and IoU. Complexity is built by
-composing simple operators, not by adding parameters to existing ones.
-
-**Model-agnostic.** No operator knows which model produced the tensors it
-processes. `NMS`, `ProjectBoxes`, and `Softmax` are generic. Model-specific
-adaptations live in the pipeline list as individual operators, not inside
-shared infrastructure.
-
-**Precision-agnostic.** Operators preserve the dtype of their input. A
-pipeline that runs in float32 runs in float16 without modifying any operator.
-`Normalize` is the single fixed-precision boundary: it converts uint8 input
-to float, and its output dtype becomes the working precision for everything
-that follows.
-
-**Runtime-agnostic.** Operators use NumPy. They impose no dependency on
-PyTorch, TensorFlow, or any specific hardware. `Infer` is the only step
-that touches a runtime; everything before and after is plain NumPy and
-transfers to any compute environment.
-
-**Composable.** Every operator has the same contract: receive a value, return
-a value. Any Python callable fits. Pipelines are plain lists — operators can
-be reordered, replaced, or inserted without touching anything else.
+- **Transform operators** change the flowing value from one type to another.
+- **Tensor operators** keep the flowing boundary as `TensorRegistry` and
+  mutate or project values within that registry.
+- **Context operators** use the side-channel context to store or recall values
+  across distant steps.
+- **Region and parallelism operators** open or close bounded sections of the
+  pipeline with special execution semantics.
+- **Tiling operators** split and restitch image workloads for tiled inference.
+- **Side-effect operators** observe, log, draw, or save while returning the
+  input unchanged.
 
 ## Transform operators
 
@@ -153,8 +132,7 @@ them to inject the stored transform.
 
 Context operators manage the side-channel that lets values computed early in
 the pipeline (e.g. the resize transform) be accessed later without threading
-them through every operator in between. See the
-[Context section in the README](README.md#context) for a full explanation.
+them through every operator in between.
 
 | Operator | Notes |
 |---|---|
@@ -204,7 +182,7 @@ pipeline = Pipeline([
     Resize((640, 640)),
     Normalize(),
     Infer("model.onnx"),
-    ...
+    ...,
     ToDetections(),
     Gather(),
     Recall("tile_rects"),

@@ -26,6 +26,9 @@ from ml_pipes import (
 # Requires Flask:
 #   pip install flask
 #
+# Commands below are shown from `examples/`. From the repository root, prefix
+# script paths and asset paths with `examples/`.
+#
 # Start the server:
 #   python run_yolo8_endpoint.py
 #
