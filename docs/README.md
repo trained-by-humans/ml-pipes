@@ -1,6 +1,7 @@
 # Documentation
 
 Shared ml-pipes reference docs, tutorials, and design notes live here.
+Package-specific guides live under their matching package directories.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 - [BENCHMARKING.md](BENCHMARKING.md)
@@ -12,7 +13,6 @@ Shared ml-pipes reference docs, tutorials, and design notes live here.
 - [operators/README.md](operators/README.md)
 - [PERFORMANCE.md](PERFORMANCE.md)
 - [REGIONS.md](REGIONS.md)
-- [TORCH.md](TORCH.md)
 - [TRACING.md](TRACING.md)
 - [VALIDATION.md](VALIDATION.md)
 

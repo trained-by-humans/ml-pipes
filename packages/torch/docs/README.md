@@ -247,7 +247,7 @@ pipeline = Pipeline([
 > filtering, or large reductions to stay on-device.
 >
 > The canonical example is
-[`examples/torch/run_mask2former_torch_postprocess.py`](../examples/torch/run_mask2former_torch_postprocess.py),
+[`examples/torch/run_mask2former_torch_postprocess.py`](../../../examples/torch/run_mask2former_torch_postprocess.py),
 which keeps mask resizing, query scoring, filtering, winner assignment, and
 mask-to-box conversion in Torch before converting back to NumPy segmentations.
 
@@ -298,8 +298,8 @@ Run a stage in NumPy when NumPy is the better fit:
 
 The paired Mask2Former examples are the best concrete reference:
 
-- [`examples/torch/run_mask2former_torch_postprocess.py`](../examples/torch/run_mask2former_torch_postprocess.py)
-- [`examples/torch/run_mask2former_numpy_postprocess.py`](../examples/torch/run_mask2former_numpy_postprocess.py)
+- [`examples/torch/run_mask2former_torch_postprocess.py`](../../../examples/torch/run_mask2former_torch_postprocess.py)
+- [`examples/torch/run_mask2former_numpy_postprocess.py`](../../../examples/torch/run_mask2former_numpy_postprocess.py)
 
 ## Quick Reference
 
@@ -323,12 +323,12 @@ Torch operator groups:
 
 Implementation and exports live in:
 
-- [`packages/torch/src/ml_pipes/torch/__init__.py`](../packages/torch/src/ml_pipes/torch/__init__.py)
-- [`packages/torch/src/ml_pipes/torch/ops.py`](../packages/torch/src/ml_pipes/torch/ops.py)
+- [`packages/torch/src/ml_pipes/torch/__init__.py`](../src/ml_pipes/torch/__init__.py)
+- [`packages/torch/src/ml_pipes/torch/ops.py`](../src/ml_pipes/torch/ops.py)
 
 Behavioral examples live in:
 
-- [`tests/test_torch.py`](../tests/test_torch.py)
+- [`tests/test_torch.py`](../../../tests/test_torch.py)
 
 ## Why Torch Is A Separate Domain
 

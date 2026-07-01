@@ -100,6 +100,7 @@ Each workspace package follows the same basic layout:
 packages/<name>/
   pyproject.toml
   README.md
+  docs/           # package-owned guides and deep dives
   src/
     ml_pipes/...
   LICENSE        # optional; only when this package needs different licensing
@@ -108,6 +109,8 @@ packages/<name>/
 
 - `pyproject.toml` defines the published package metadata and dependencies.
 - `README.md` explains what that package carries in framework terms.
+- `docs/` holds package-specific guides that do not belong in the shared
+  framework docs under the repository-level `docs/`.
 - `src/ml_pipes/...` contains the code that package publishes into the shared
   `ml_pipes` namespace.
 - `LICENSE` is only needed when a package must declare licensing different

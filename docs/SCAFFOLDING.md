@@ -87,7 +87,7 @@ RunMyModel()
 Use the built-in runtime operators when they fit. If your model runs through a
 different library, wrap that call in a small callable or operator so the model
 itself is still one visible step in the pipeline. For Torch-specific
-boundaries, see [TORCH.md](TORCH.md).
+boundaries, see [packages/torch/docs/README.md](../packages/torch/docs/README.md).
 
 ## Step 2 — Prepare The Model Inputs
 
