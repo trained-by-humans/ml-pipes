@@ -1,146 +1,7 @@
-from .benchmark import (
-    Benchmark,
-    BenchmarkBuilder,
-    BenchmarkCollector,
-    BenchmarkDiff,
-    BenchmarkSweep,
-    BenchmarkResult,
-    InvocationStat,
-    InvocationStatDiff,
-    MeasurementConfig,
-)
-from .collectors import (
-    AggregateCollector,
-    CaptureCollector,
-    ConcurrentCollector,
-    PrintCollector,
-    SerialCollector,
-    ThroughputCollector,
-)
-from .context import Context, Recall, Store
-from .control import SHORT_CIRCUIT
-from .core import (
-    Pipeline,
-    PipelineDescription,
-    Embed,
-    embed,
-    Inline,
-    inline,
-    Operator,
-    OperatorLike,
-)
-from .data_ops import (
-    CollectItems,
-    Distinct,
-    DistinctBy,
-    DropNull,
-    FilterNotNull,
-    Filter,
-    LazyPerItem,
-    Map,
-    MapNotNull,
-    MapValue,
-    PerItem,
-    StreamItems,
-    WrapMappingInObject,
-    Take,
-    TakeWhile,
-)
-from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
-from .factory import DataFactory, Factory, PipelineFactory, data_factory, pipeline_factory, InputFn
-from .inspection import (
-    GroupBlock,
-    HtmlRenderer,
-    ImageBlock,
-    InspectionResult,
-    InspectionSerializer,
-    OutputBlock,
-    PipelineInspector,
-    PlotRenderer,
-    Renderer,
-    StepView,
-    TextBlock,
-)
-from .operator import OperatorArgument, OperatorDescription
-from .ops import (
-    AsType,
-    ArgMax,
-    FilterPredictions,
-    FilterPredictionsByClass,
-    FilterPredictionsByScore,
-    FilterPredictionsByArea,
-    Batch,
-    Collate,
-    ConvertBoxFormat,
-    ConvertColorSpace,
-    Decode,
-    Distribute,
-    Gather,
-    GatherRows,
-    GatherScores,
-    LoadFile,
-    DrawBoxes,
-    DrawMasks,
-    ApplyTensorMask,
-    BinarizeTensor,
-    CreateTensorMask,
-    CreateTensorMaskByThreshold,
-    BinarizeTensorByThreshold,
-    FilterTensorsByClasses,
-    FilterTensorsByMasksArea,
-    FilterTensors,
-    FilterTensorsByScore,
-    MapTensor,
-    MultiplyTensors,
-    MeanMaskScores,
-    MasksToBoxes,
-    Select,
-    SelectTensors,
-    SortTensorsBy,
-    ResizeMasks,
-    TopK,
-    TopKIndices2D,
-    Infer,
-    LogDetections,
-    MapPredictionsToObjects,
-    NMM,
-    NMS,
-    Normalize,
-    Pick,
-    ProjectBoxes,
-    ProjectMasks,
-    ProjectRoIMasks,
-    ReconstructMasks,
-    Resize,
-    SaveImage,
-    Scale,
-    Scatter,
-    SideEffectOp,
-    Extract,
-    Sigmoid,
-    Slice,
-    Softmax,
-    Squeeze,
-    ToDetections,
-    ToSegmentations,
-    Transpose,
-    UnBatch,
-    WeightMasksByScores,
-)
-from .region import RegionCloser, RegionOpener
-from .tiling import Stitch, Tile, TileRect
-from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
-from .types import (
-    Detections,
-    ImagePayload,
-    Prediction,
-    ResizeTransform,
-    RuntimeOutputs,
-    Segmentations,
-    TensorPayload,
-    TensorRegistry,
-)
-from .validation import PipelineValidationError, TypeContract
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING
 
 __all__ = [
     "Benchmark",
@@ -293,3 +154,326 @@ __all__ = [
     "UnBatch",
     "WeightMasksByScores",
 ]
+
+_MODULE_EXPORTS = {
+    ".benchmark": [
+        "Benchmark",
+        "BenchmarkBuilder",
+        "BenchmarkCollector",
+        "BenchmarkDiff",
+        "BenchmarkSweep",
+        "BenchmarkResult",
+        "InvocationStat",
+        "InvocationStatDiff",
+        "MeasurementConfig",
+    ],
+    ".collectors": [
+        "AggregateCollector",
+        "CaptureCollector",
+        "ConcurrentCollector",
+        "PrintCollector",
+        "SerialCollector",
+        "ThroughputCollector",
+    ],
+    ".context": [
+        "Context",
+        "Recall",
+        "Store",
+    ],
+    ".control": [
+        "SHORT_CIRCUIT",
+    ],
+    ".core": [
+        "Pipeline",
+        "PipelineDescription",
+        "Embed",
+        "embed",
+        "Inline",
+        "inline",
+        "Operator",
+        "OperatorLike",
+    ],
+    ".data_ops": [
+        "CollectItems",
+        "Distinct",
+        "DistinctBy",
+        "DropNull",
+        "FilterNotNull",
+        "Filter",
+        "LazyPerItem",
+        "Map",
+        "MapNotNull",
+        "MapValue",
+        "PerItem",
+        "StreamItems",
+        "WrapMappingInObject",
+        "Take",
+        "TakeWhile",
+    ],
+    ".density": [
+        "BlendImages",
+        "ClampDensity",
+        "DensityPrediction",
+        "DensityToHeatmap",
+        "SumDensity",
+        "ToDensityPrediction",
+    ],
+    ".factory": [
+        "DataFactory",
+        "Factory",
+        "PipelineFactory",
+        "data_factory",
+        "pipeline_factory",
+        "InputFn",
+    ],
+    ".inspection": [
+        "GroupBlock",
+        "HtmlRenderer",
+        "ImageBlock",
+        "OutputBlock",
+        "PipelineInspector",
+        "PlotRenderer",
+        "Renderer",
+        "StepView",
+        "TextBlock",
+    ],
+    ".inspection_artifacts": [
+        "InspectionResult",
+        "InspectionSerializer",
+    ],
+    ".operator": [
+        "OperatorArgument",
+        "OperatorDescription",
+    ],
+    ".ops": [
+        "AsType",
+        "ArgMax",
+        "FilterPredictions",
+        "FilterPredictionsByClass",
+        "FilterPredictionsByScore",
+        "FilterPredictionsByArea",
+        "Batch",
+        "Collate",
+        "ConvertBoxFormat",
+        "ConvertColorSpace",
+        "Decode",
+        "Distribute",
+        "Gather",
+        "GatherRows",
+        "GatherScores",
+        "LoadFile",
+        "DrawBoxes",
+        "DrawMasks",
+        "ApplyTensorMask",
+        "BinarizeTensor",
+        "CreateTensorMask",
+        "CreateTensorMaskByThreshold",
+        "BinarizeTensorByThreshold",
+        "FilterTensorsByClasses",
+        "FilterTensorsByMasksArea",
+        "FilterTensors",
+        "FilterTensorsByScore",
+        "MapTensor",
+        "MultiplyTensors",
+        "MeanMaskScores",
+        "MasksToBoxes",
+        "Select",
+        "SelectTensors",
+        "SortTensorsBy",
+        "ResizeMasks",
+        "TopK",
+        "TopKIndices2D",
+        "Infer",
+        "LogDetections",
+        "MapPredictionsToObjects",
+        "NMM",
+        "NMS",
+        "Normalize",
+        "Pick",
+        "ProjectBoxes",
+        "ProjectMasks",
+        "ProjectRoIMasks",
+        "ReconstructMasks",
+        "Resize",
+        "SaveImage",
+        "Scale",
+        "Scatter",
+        "SideEffectOp",
+        "Extract",
+        "Sigmoid",
+        "Slice",
+        "Softmax",
+        "Squeeze",
+        "ToDetections",
+        "ToSegmentations",
+        "Transpose",
+        "UnBatch",
+        "WeightMasksByScores",
+    ],
+    ".region": [
+        "RegionCloser",
+        "RegionOpener",
+    ],
+    ".tiling": [
+        "Stitch",
+        "Tile",
+        "TileRect",
+    ],
+    ".tracing": [
+        "InvocationTrace",
+        "StepSpan",
+        "TraceCollector",
+        "TracingConfig",
+    ],
+    ".types": [
+        "Detections",
+        "ImagePayload",
+        "Prediction",
+        "ResizeTransform",
+        "RuntimeOutputs",
+        "Segmentations",
+        "TensorPayload",
+        "TensorRegistry",
+    ],
+    ".validation": [
+        "PipelineValidationError",
+        "TypeContract",
+    ],
+}
+
+_ATTR_TO_MODULE = {
+    name: module_name
+    for module_name, names in _MODULE_EXPORTS.items()
+    for name in names
+}
+
+if TYPE_CHECKING:
+    from .benchmark import (
+        Benchmark,
+        BenchmarkBuilder,
+        BenchmarkCollector,
+        BenchmarkDiff,
+        BenchmarkResult,
+        BenchmarkSweep,
+        InvocationStat,
+        InvocationStatDiff,
+        MeasurementConfig,
+    )
+    from .collectors import (
+        AggregateCollector,
+        CaptureCollector,
+        ConcurrentCollector,
+        PrintCollector,
+        SerialCollector,
+        ThroughputCollector,
+    )
+    from .context import Context, Recall, Store
+    from .control import SHORT_CIRCUIT
+    from .core import Embed, Inline, Operator, OperatorLike, Pipeline, PipelineDescription, embed, inline
+    from .data_ops import (
+        CollectItems,
+        Distinct,
+        DistinctBy,
+        DropNull,
+        Filter,
+        FilterNotNull,
+        LazyPerItem,
+        Map,
+        MapNotNull,
+        MapValue,
+        PerItem,
+        StreamItems,
+        Take,
+        TakeWhile,
+        WrapMappingInObject,
+    )
+    from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
+    from .factory import DataFactory, Factory, InputFn, PipelineFactory, data_factory, pipeline_factory
+    from .inspection import GroupBlock, HtmlRenderer, ImageBlock, OutputBlock, PipelineInspector, PlotRenderer, Renderer, StepView, TextBlock
+    from .inspection_artifacts import InspectionResult, InspectionSerializer
+    from .operator import OperatorArgument, OperatorDescription
+    from .ops import (
+        ApplyTensorMask,
+        ArgMax,
+        AsType,
+        Batch,
+        BinarizeTensor,
+        BinarizeTensorByThreshold,
+        Collate,
+        ConvertBoxFormat,
+        ConvertColorSpace,
+        CreateTensorMask,
+        CreateTensorMaskByThreshold,
+        Decode,
+        Distribute,
+        DrawBoxes,
+        DrawMasks,
+        Extract,
+        FilterPredictions,
+        FilterPredictionsByArea,
+        FilterPredictionsByClass,
+        FilterPredictionsByScore,
+        FilterTensors,
+        FilterTensorsByClasses,
+        FilterTensorsByMasksArea,
+        FilterTensorsByScore,
+        Gather,
+        GatherRows,
+        GatherScores,
+        Infer,
+        LoadFile,
+        LogDetections,
+        MapPredictionsToObjects,
+        MapTensor,
+        MasksToBoxes,
+        MeanMaskScores,
+        MultiplyTensors,
+        NMM,
+        NMS,
+        Normalize,
+        Pick,
+        ProjectBoxes,
+        ProjectMasks,
+        ProjectRoIMasks,
+        ReconstructMasks,
+        Resize,
+        ResizeMasks,
+        SaveImage,
+        Scale,
+        Scatter,
+        Select,
+        SelectTensors,
+        SideEffectOp,
+        Sigmoid,
+        Slice,
+        Softmax,
+        SortTensorsBy,
+        Squeeze,
+        ToDetections,
+        ToSegmentations,
+        TopK,
+        TopKIndices2D,
+        Transpose,
+        UnBatch,
+        WeightMasksByScores,
+    )
+    from .region import RegionCloser, RegionOpener
+    from .tiling import Stitch, Tile, TileRect
+    from .tracing import InvocationTrace, StepSpan, TraceCollector, TracingConfig
+    from .types import Detections, ImagePayload, Prediction, ResizeTransform, RuntimeOutputs, Segmentations, TensorPayload, TensorRegistry
+    from .validation import PipelineValidationError, TypeContract
+
+
+def __getattr__(name: str) -> object:
+    try:
+        module_name = _ATTR_TO_MODULE[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    module = import_module(module_name, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

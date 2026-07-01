@@ -45,7 +45,6 @@ import base64
 import dataclasses
 import html as _html
 import os
-import pickle
 import tempfile
 import webbrowser
 from collections.abc import Mapping
@@ -60,7 +59,8 @@ _IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins_
 _TINT = np.array([0.25, 0.45, 1.0], dtype=np.float32)
 _HTML_ORIENTATIONS = ("horizontal", "vertical")
 
-from .tracing import InvocationTrace, StepSpan, _fmt_batch_size
+from .inspection_artifacts import InspectionResult, InspectionSerializer
+from .tracing import StepSpan, _fmt_batch_size
 from .tiling import TileRect
 from .types import (
     Detections,
@@ -1221,102 +1221,3 @@ class PlotRenderer:
 # ---------------------------------------------------------------------------
 # Serializer
 # ---------------------------------------------------------------------------
-
-class InspectionSerializer:
-    """Serializes / deserializes an InspectionResult to bytes via pickle.
-
-    Example::
-
-        # On the inference machine:
-        result = pipeline.inspect(image_path)
-        data: bytes = InspectionSerializer().dumps(result)
-        upload_to_s3(data, key="run42/inspection.pkl")
-
-        # On a dev laptop:
-        data = download_from_s3(key="run42/inspection.pkl")
-        result = InspectionSerializer().loads(data)
-        PipelineInspector().show(result)
-    """
-
-    def dumps(self, result: InspectionResult) -> bytes:
-        return pickle.dumps(self._sanitize(result))
-
-    @staticmethod
-    def _sanitize(result: InspectionResult) -> InspectionResult:
-        """Return a copy with operator_type cleared so locally-defined classes don't break pickle."""
-        return InspectionResult(
-            [InspectionSerializer._sanitize_span(s) for s in result.spans]
-        )
-
-    @staticmethod
-    def _sanitize_span(span: StepSpan) -> StepSpan:
-        child = None
-        if span.child_trace is not None:
-            child = InvocationTrace(
-                spans=[InspectionSerializer._sanitize_span(s) for s in span.child_trace.spans],
-                total_duration_s=span.child_trace.total_duration_s,
-                batch_size=span.child_trace.batch_size,
-                workers=span.child_trace.workers,
-            )
-        return dataclasses.replace(span, operator_type=None, child_trace=child)
-
-    def loads(self, data: bytes) -> InspectionResult:
-        obj = pickle.loads(data)
-        if not isinstance(obj, InspectionResult):
-            raise TypeError(f"Expected InspectionResult, got {type(obj).__name__}")
-        return obj
-
-    def dump(self, result: InspectionResult, path: str | Path) -> Path:
-        out = Path(path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(self.dumps(result))
-        return out
-
-    def load(self, path: str | Path) -> InspectionResult:
-        return self.loads(Path(path).read_bytes())
-
-
-# ---------------------------------------------------------------------------
-# Public result class — pure data
-# ---------------------------------------------------------------------------
-
-class InspectionResult:
-    """The result of Pipeline.inspect(): raw span data, no display logic.
-
-    To render, pass this to PipelineInspector::
-
-        result = pipeline.inspect(image)
-        PipelineInspector().show(result)
-        PipelineInspector().save_to_html(result, "report.html")
-    """
-
-    def __init__(self, spans: list[StepSpan]) -> None:
-        self.spans = spans
-
-    def __repr__(self) -> str:
-        lines = ["InspectionResult:"]
-        self._repr_spans(self.spans, lines, indent=2)
-        return "\n".join(lines)
-
-    @staticmethod
-    def _repr_spans(spans: list[StepSpan], lines: list[str], indent: int) -> None:
-        prefix = " " * indent
-        for span in spans:
-            shape = span.output_shape or ""
-            err = " [ERROR]" if span.error else ""
-            lines.append(f"{prefix}{span.label:35s}  {str(shape):20s}{err}")
-            if span.child_trace is not None:
-                InspectionResult._repr_spans(span.child_trace.spans, lines, indent + 2)
-
-    def _repr_html_(self) -> str:
-        """Jupyter auto-render hook — uses default PipelineInspector."""
-        return PipelineInspector().to_html(self)
-
-    def dump(self, path: str | Path) -> Path:
-        """Serialize this result to a file."""
-        return InspectionSerializer().dump(self, path)
-
-    @staticmethod
-    def load(path: str | Path) -> InspectionResult:
-        """Load a serialized result from a file."""
-        return InspectionSerializer().load(path)

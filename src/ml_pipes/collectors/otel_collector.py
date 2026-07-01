@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-# Optional OpenTelemetry bridge.
-# Install with: pip install ml-pipes[otel]
-# Never imported by core.py or __init__.py — no implicit dependency.
-from opentelemetry import trace as otel_trace
+from importlib import import_module
 
 from .concurrent_collector import ConcurrentCollector
 from ..tracing import InvocationTrace
+
+
+def _load_otel_trace() -> object:
+    try:
+        return import_module("opentelemetry.trace")
+    except ImportError as exc:  # pragma: no cover - depends on optional dependency state
+        raise ImportError(
+            "ml_pipes.collectors.OtelCollector requires the optional otel extra. "
+            "Install it with `pip install ml-pipes[otel]`."
+        ) from exc
 
 
 class OtelCollector(ConcurrentCollector):
@@ -21,7 +28,9 @@ class OtelCollector(ConcurrentCollector):
 
     def __init__(self, tracer_name: str = "ml-pipes") -> None:
         super().__init__()
+        otel_trace = _load_otel_trace()
         self._tracer = otel_trace.get_tracer(tracer_name)
+        self._otel_trace = otel_trace
 
     def _collect(self, trace: InvocationTrace) -> None:
         with self._tracer.start_as_current_span("pipeline") as root:
@@ -35,7 +44,7 @@ class OtelCollector(ConcurrentCollector):
                 if span.error:
                     # Status(StatusCode) form required since opentelemetry-api 1.1;
                     # pyproject.toml pins >=1.20 so this is always safe.
-                    s.set_status(otel_trace.Status(otel_trace.StatusCode.ERROR))
+                    s.set_status(self._otel_trace.Status(self._otel_trace.StatusCode.ERROR))
                 if span.input_shape is not None:
                     s.set_attribute("input_shape", str(span.input_shape))
                 if span.output_shape is not None:
