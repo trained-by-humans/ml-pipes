@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 
 from .operator import Operator
-from .types import ImagePayload, TensorRegistry
+from .tensor_types import TensorRegistry
+from .vision_types import ImagePayload
 
 
 @dataclass(frozen=True)
