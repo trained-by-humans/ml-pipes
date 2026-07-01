@@ -7,7 +7,9 @@ pipelines explicitly.
 ## Install
 
 ```bash
-pip install -e .[torch]
+pip install 'ml-pipes[torch]'
+# Most examples in this doc also use vision operators:
+pip install 'ml-pipes[torch,vision]'
 ```
 
 After installing the torch extra, the package layout looks like this:
@@ -321,8 +323,8 @@ Torch operator groups:
 
 Implementation and exports live in:
 
-- [`src/ml_pipes/torch/__init__.py`](../src/ml_pipes/torch/__init__.py)
-- [`src/ml_pipes/torch/ops.py`](../src/ml_pipes/torch/ops.py)
+- [`packages/torch/src/ml_pipes/torch/__init__.py`](../packages/torch/src/ml_pipes/torch/__init__.py)
+- [`packages/torch/src/ml_pipes/torch/ops.py`](../packages/torch/src/ml_pipes/torch/ops.py)
 
 Behavioral examples live in:
 

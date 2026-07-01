@@ -8,6 +8,7 @@ Shared ml-pipes reference docs, tutorials, and design notes live here.
 - [DESIGN.md](DESIGN.md)
 - [SCAFFOLDING.md](SCAFFOLDING.md)
 - [OPERATORS.md](OPERATORS.md)
+- [PACKAGES.md](PACKAGES.md)
 - [operators/README.md](operators/README.md)
 - [PERFORMANCE.md](PERFORMANCE.md)
 - [REGIONS.md](REGIONS.md)

@@ -21,6 +21,17 @@ into the shared `.example_assets/` cache next to this directory on demand.
 Generic entry points such as `run_detection.py` do not download defaults;
 provide the model path and input path explicitly.
 
+## Install Profiles
+
+Choose the package stack that matches the example family you want to run:
+
+```bash
+pip install 'ml-pipes[onnx,vision]'              # most vision + ONNX examples
+pip install 'ml-pipes[inspection,onnx,vision]'   # inspection examples
+pip install 'ml-pipes[torch,vision]'             # torch examples
+pip install flask                                # HTTP endpoint example
+```
+
 ## Inference On Files
 
 | Example | Model | Task | Notable pipeline features |

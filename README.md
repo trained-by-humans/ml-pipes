@@ -14,26 +14,65 @@ understand.
 
 ## Quick Start
 
-`ml-pipes` requires Python 3.10+. Run commands from the repository root.
+`ml-pipes` requires Python 3.10+.
+
+Published installs:
 
 ```bash
-pip install -e .
-# Optional extras
-pip install -e .[torch]  # Torch operators
-pip install -e .[otel]   # OpenTelemetry collector support
-pip install -e .[dev]    # tests and type checking
+pip install ml-pipes                    # core + standard operators
+pip install 'ml-pipes[vision]'         # add tensor + vision
+pip install 'ml-pipes[onnx,vision]'    # baseline ONNX inference stack
+pip install 'ml-pipes[torch,vision]'   # Torch + vision stack
+pip install 'ml-pipes[inspection]'     # inspection surface on top of installed components
+pip install 'ml-pipes[otel]'           # OpenTelemetry collector support
+```
+
+From a repository checkout, install the workspace members you need:
+
+```bash
+python -m pip install \
+  -e packages/core \
+  -e packages/tensor \
+  -e packages/vision \
+  -e packages/onnx \
+  -e packages/torch \
+  -e packages/meta
 ```
 
 Run a baseline detection pipeline:
 
 ```bash
+pip install 'ml-pipes[onnx,vision]'
 python examples/run_yolo8_onnx.py
 ```
+
+Public imports are component-scoped. Import `Pipeline` from `ml_pipes.core`,
+core routing operators from `ml_pipes.standard`, tensor operators from
+`ml_pipes.tensor`, vision operators from `ml_pipes.vision`, ONNX operators
+from `ml_pipes.onnx`, and Torch operators from `ml_pipes.torch`. The root
+`ml_pipes` namespace is intentionally a namespace package only; it does not
+re-export convenience symbols.
 
 The core inference pipeline in
 [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py) looks like this:
 
 ```python
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import Extract, Infer
+from ml_pipes.standard import Pick, Recall, Store
+from ml_pipes.tensor import ArgMax, GatherScores, Slice, Squeeze, Transpose
+from ml_pipes.vision import (
+    ConvertBoxFormat,
+    Detections,
+    ImagePayload,
+    NMS,
+    Normalize,
+    ProjectBoxes,
+    Resize,
+    ToDetections,
+)
+
+
 def yolo8_inference_pipeline(
     model_path: Path,
     conf_threshold: float = 0.25,
@@ -204,6 +243,8 @@ total               0.03       0.03       0.00       0.03       0.03
 ## Where To Go Next
 
 - [examples/README.md](examples/README.md) — full runnable example index
+- [docs/PACKAGES.md](docs/PACKAGES.md) — package matrix, install profiles,
+  and release order
 - [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — wrap a new model in a pipeline
 - [docs/OPERATORS.md](docs/OPERATORS.md) — reuse or define operators
 - [docs/COMPOSITION.md](docs/COMPOSITION.md) — compose pipelines into larger

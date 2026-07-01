@@ -8,5 +8,13 @@ members = [
     "packages/meta",
 ]
 
+[tool.uv.sources]
+ml-pipes = { workspace = true }
+ml-pipes-core = { workspace = true }
+ml-pipes-onnx = { workspace = true }
+ml-pipes-tensor = { workspace = true }
+ml-pipes-torch = { workspace = true }
+ml-pipes-vision = { workspace = true }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
