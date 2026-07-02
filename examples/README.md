@@ -25,10 +25,8 @@ The commands below are shown from the repository root. If you prefer to work
 from `examples/`, drop the leading `examples/` prefix from script paths and
 use `.example_assets/` instead of `examples/.example_assets/`.
 
-Most self-contained examples download the models and sample assets they need
-into the shared `.example_assets/` cache next to this directory on demand.
-Generic entry points such as `run_detection.py` do not download defaults;
-provide the model path and input path explicitly.
+Most examples run with minimal setup out of the box. Read the entry you want
+to run for any example-specific setup or required inputs.
 
 For the package matrix and the component import model behind these install
 profiles, see [docs/PACKAGES.md](../docs/PACKAGES.md).

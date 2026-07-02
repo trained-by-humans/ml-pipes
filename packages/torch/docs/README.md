@@ -4,28 +4,15 @@
 pipelines and the boundary operators needed to compose mixed NumPy + Torch
 pipelines explicitly.
 
-## Install
+Today the package focuses on:
 
-```bash
-pip install 'ml-pipes[torch]'
-# Most examples in this doc also use vision operators:
-pip install 'ml-pipes[torch,vision]'
-```
+- explicit NumPy/Torch boundary crossing and device placement
+- Torch inference with one `TorchTensorPayload` flowing into `TorchInfer`
+- Torch-side registry postprocess that you intentionally keep on-device
 
-After installing the torch extra, the package layout looks like this:
-
-```text
-ml_pipes
-├─ NumPy-oriented core
-│  ├─ NumPy Tensor operators
-│  ├─ ONNX inference
-│  ├─ Projection / Visualization
-│  └─ And many more...
-└─ ml_pipes.torch
-   ├─ Torch inference
-   ├─ Torch tensor operators (Postprocess)
-   └─ Torch boundary operators (Conversion)
-```
+It does not try to wrap the full Torch ecosystem. Training loops, datasets,
+model authoring, and richer framework-specific wrappers still stay outside the
+package's current scope.
 
 ## Runtime Types
 
@@ -109,7 +96,7 @@ Example boundary crossing:
 from ml_pipes.core import Pipeline
 from ml_pipes.tensor import (
     ArgMax,
-    GatherScores,
+    GatherRows,
     Slice,
 )
 from ml_pipes.vision import (
@@ -132,7 +119,7 @@ pipeline = Pipeline([
     Slice("preds", slice(None, 4), as_="boxes"),
     Slice("preds", slice(4, None), as_="class_scores"),
     ArgMax("class_scores", as_="classes"),
-    GatherScores("class_scores", "classes", as_="scores"),
+    GatherRows("class_scores", "classes", as_="scores"),
     ToDetections(boxes="boxes", scores="scores", classes="classes"),
     MapPredictionsToObjects(fields={"score": "scores", "class_id": "classes", "box": "boxes"}),
 ])
@@ -312,11 +299,13 @@ Torch operator groups:
 - synchronization:
   `TorchSynchronizeTensors`
 - tensor math / indexing / filtering:
-  `TorchArgMax`, `TorchGatherRows`, `TorchGatherScores`, `TorchTopK`,
+  `TorchArgMax`, `TorchGatherRows` (public alias: `TorchGatherScores`), `TorchTopK`,
   `TorchTopKIndices2D`, `TorchSlice`, `TorchSoftmax`, `TorchSigmoid`,
-  `TorchMultiplyTensors`, `TorchCreateTensorMask`, `TorchCreateTensorMaskByThreshold`,
+  `TorchMultiplyTensors`, `TorchCreateTensorMask`,
+  `TorchCreateTensorMaskByThreshold`,
   `TorchApplyTensorMask`, `TorchSelectTensors`, `TorchFilterTensorsByScore`,
-  `TorchFilterTensorsByMasksArea`, `TorchSortTensorsBy`
+  `TorchFilterTensorsByClasses`, `TorchFilterTensorsByMasksArea`,
+  `TorchSortTensorsBy`
 - segmentation helpers:
   `TorchWeightMasksByScores`, `TorchResizeMasks`, `TorchMeanMaskScores`,
   `TorchMasksToBoxes`, `TorchNMS`

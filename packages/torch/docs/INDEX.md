@@ -1,13 +1,27 @@
-# ml-pipes-torch Operator Index
+# ml-pipes-torch Index
 
-This file catalogs the operators shipped with `ml-pipes-torch` through
-`ml_pipes.torch`.
+This page catalogs the Torch package surface in `ml_pipes.torch`.
 
 For framework-wide operator concepts, see
-[`docs/OPERATORS.md`](../../../docs/OPERATORS.md). For the Torch
-execution-domain guide, see [`README.md`](README.md). For the cross-package
-package catalogs, see
+[`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
+For the cross-package package catalogs, see
 [`docs/OPERATORS.md#package-catalogs`](../../../docs/OPERATORS.md#package-catalogs).
+
+## Package Primitives
+
+| Surface | Notes |
+|---|---|
+| `TorchTensorPayload` | Main Torch-backed single-tensor boundary. |
+| `TorchTensorRegistry` | Main named working set for Torch-side postprocess. |
+| `TorchRuntimeOutputs` | Runtime value used between `TorchInfer` and output extraction or distribution. |
+
+## Public Aliases
+
+| Public alias | Primary name | Note |
+|---|---|---|
+| `TorchGatherScores(...)` | `TorchGatherRows(...)` | `scores` comes from the common use of gathering one selected score from each row. |
+| `TorchBinarizeTensor(...)` | `TorchCreateTensorMask(...)` | `binarize` comes from older wording for turning a tensor into a boolean mask. |
+| `TorchBinarizeTensorByThreshold(...)` | `TorchCreateTensorMaskByThreshold(...)` | `binarize` comes from threshold-based boolean mask creation. |
 
 ## Domain Boundaries And Device Movement
 
@@ -25,7 +39,7 @@ package catalogs, see
 | Operator | Notes |
 |---|---|
 | `TorchAsType(dtype, src=None, as_=None)` | Casts Torch-backed tensor values or named registry tensors. |
-| `TorchInfer(model, input_layout="NCHW", ...)` | Runs a Torch-native model and returns `TorchRuntimeOutputs`. |
+| `TorchInfer(model, input_layout="NCHW", ...)` | Runs a Torch-native callable on one `TorchTensorPayload` and returns `TorchRuntimeOutputs`. |
 | `TorchExtract(*names, as_=...)` | Extracts named Torch outputs into `TorchTensorRegistry`. |
 | `TorchDistribute()` | Splits batched `TorchRuntimeOutputs` into per-sample outputs. |
 | `TorchCollate()` | Stacks `list[TorchTensorPayload]` into one batched payload. |
@@ -35,13 +49,13 @@ package catalogs, see
 | Operator | Notes |
 |---|---|
 | `TorchArgMax(...)` | Argmax over a named Torch tensor. |
-| `TorchGatherRows(...)` / `TorchGatherScores(...)` | Row-wise gather driven by another registry tensor of indices. |
+| `TorchGatherRows(...)` | Row-wise gather driven by another registry tensor of indices. |
 | `TorchTopK(...)` / `TorchTopKIndices2D(...)` | Top-k ranking helpers for 1D and 2D tensors. |
 | `TorchSlice(...)` | Slices a named tensor in a Torch registry. |
 | `TorchSoftmax(...)` / `TorchSigmoid(...)` | Standard per-tensor nonlinearities. |
 | `TorchMultiplyTensors(...)` | Element-wise multiplication of two named tensors. |
-| `TorchCreateTensorMask(...)` / `TorchBinarizeTensor(...)` | Builds boolean masks from Torch tensors. |
-| `TorchCreateTensorMaskByThreshold(...)` / `TorchBinarizeTensorByThreshold(...)` | Threshold-based mask creation. |
+| `TorchCreateTensorMask(...)` | Builds boolean masks from Torch tensors. |
+| `TorchCreateTensorMaskByThreshold(...)` | Threshold-based mask creation. |
 | `TorchApplyTensorMask(...)` | Applies one boolean mask across one or more tensors. |
 | `TorchSelectTensors(...)` | Applies integer-index selection across one or more tensors. |
 | `TorchFilterTensorsByScore(...)` | Filters tensors by a score threshold. |

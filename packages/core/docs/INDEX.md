@@ -1,12 +1,25 @@
-# ml-pipes-core Operator Index
-
-This file catalogs the operators shipped with `ml-pipes-core`, primarily
-through `ml_pipes.standard`.
+# ml-pipes-core Index
 
 For framework-wide operator concepts, see
 [`docs/OPERATORS.md`](../../../docs/OPERATORS.md). For the cross-package
 package catalogs, see
 [`docs/OPERATORS.md#package-catalogs`](../../../docs/OPERATORS.md#package-catalogs).
+
+## User-Facing Modules
+
+| Module | Notes |
+|---|---|
+| `ml_pipes.core` | Owns `Pipeline`, `Operator`, and pipeline-composition helpers such as `embed()` and `inline()`. |
+| `ml_pipes.standard` | Owns the generic reusable operators listed below. |
+
+## Core Pipeline Primitives
+
+| API | Notes |
+|---|---|
+| `Pipeline([...])` | Ordered execution harness around operator boundaries. |
+| `Operator` | Decorator for self-describing callable classes. |
+| `embed(p)` / `Embed(p)` | Joins a child pipeline as one isolated step. |
+| `inline(p)` / `Inline(p)` | Flattens a child pipeline into the parent at construction time. |
 
 ## Selection And Context
 

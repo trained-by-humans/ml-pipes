@@ -299,7 +299,7 @@ pipeline = Pipeline([
     Slice("preds", slice(None, 4), as_="boxes"),
     Slice("preds", slice(4, None), as_="class_scores"),
     ArgMax("class_scores", as_="classes"),
-    GatherScores("class_scores", "classes", as_="scores"),
+    GatherRows("class_scores", "classes", as_="scores"),
     ConvertBoxFormat(from_="cxcywh"),
 
     # Filter and project

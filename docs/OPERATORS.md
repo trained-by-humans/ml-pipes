@@ -364,18 +364,33 @@ inspect, trace, and benchmark as standalone boundaries.
 - Return a single value when the operator produces one semantic result.
 - For ordinary transforms, treat the input as immutable and return a new value
   instead of mutating the input in place.
-- Use a fixed-length tuple when the operator returns multiple values. This
+- Use a fixed-length tuple when the operator returns multiple values that are
+  small, short-lived, and positionally obvious to the next few steps. This
   pairs naturally with the multi-input pattern described in the input rules
   above.
 - Use a dedicated dataclass when fields have high cohesion, represent one
-  named result, and are usually used together.
+  named result, and are usually used together by name.
 - A useful pattern is the carry-forward tuple: return the original value
   together with a new derived value when later pipeline steps are expected to
   keep using both. Rendering is a good example: an operator can return
   `(rendered_image, detections)` so later steps can save the image while still
   rendering, filtering, or logging the detections in different ways.
 - In-place mutation is acceptable when the payload is already mutation-oriented
-  and that keeps the pipeline clearer, as with registry-style payloads.
+  and that keeps the pipeline clearer.
+- Use a registry-style payload when many operators cooperatively read and write
+  named intermediate slots, as with `TensorRegistry` or `TorchTensorRegistry`.
+
+### Naming And Aliases
+
+- Choose one primary name for each operator surface based on what the operator
+  does.
+- Do not name an operator relative to other operators or to one specific
+  pipeline shape. Operators can appear in any position and in many different
+  pipelines.
+- Use aliases when a domain-specific spelling makes a common use case read
+  better.
+- Treat aliases as alternate spellings of the same operator, not as separate
+  operators with different semantics.
 
 ### Static Verification
 
@@ -418,9 +433,9 @@ inspect, trace, and benchmark as standalone boundaries.
 
 ## Package Catalogs
 
-The concrete operator catalogs live with their owning packages. Use this page
+The concrete package indexes live with their owning packages. Use this page
 for the shared operator model and design constraints, and use the package
-catalogs when you need the concrete operator surface for one domain.
+indexes when you need the concrete operator surface for one domain.
 
 For package installs and public imports, see [PACKAGES.md](PACKAGES.md).
 

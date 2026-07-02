@@ -143,6 +143,17 @@ Examples in this repo:
 - [../examples/run_sms_spam_prepare.py](../examples/run_sms_spam_prepare.py)
   shows composition around data preparation and cleanup
 
+## Composition Best Practices
+
+- Use `Store` / `Recall` when one derived value needs to be recovered later
+  after several unrelated steps. This keeps the main flowing boundary focused
+  on the value the next operators actually work on.
+- Use a registry-style workspace when one stage needs to accumulate many named
+  intermediates and later steps read them by name rather than by tuple
+  position. `TensorRegistry` is one example of this pattern, but the same idea
+  also appears in other runtime-oriented systems that work with named tensors
+  or buffers.
+
 ## Composing Pipelines
 
 When you already have named pipelines, ml-pipes gives you two ways to compose
@@ -288,7 +299,7 @@ infer_stage = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes
 project_stage = Pipeline([Recall("transform"), ProjectBoxes(), NMS(), ToDetections()])
 
 detection = (
-    Pipeline([Resize((640, 640)), Store("transform", index=1), Pick(0), Normalize()])
+    Pipeline([Resize((640, 640)), Store("transform", source=1), Pick(0), Normalize()])
     + infer_stage
     + project_stage
 )

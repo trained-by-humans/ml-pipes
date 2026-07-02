@@ -1,15 +1,26 @@
-# ml-pipes-tensor Operator Index
+# ml-pipes-tensor Index
 
-This file catalogs the tensor operators shipped with `ml-pipes-tensor`
-through `ml_pipes.tensor`.
+This page catalogs the tensor package surface in `ml_pipes.tensor`.
 
 For framework-wide operator concepts, see
-[`docs/OPERATORS.md`](../../../docs/OPERATORS.md). For the cross-package
-package catalogs, see
+[`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
+For the cross-package package catalogs, see
 [`docs/OPERATORS.md#package-catalogs`](../../../docs/OPERATORS.md#package-catalogs).
 
-Most tensor operators keep the flowing boundary as `TensorRegistry`. They
-mutate, project, rank, or mask named tensors inside that registry.
+## Package Primitives
+
+| Surface | Notes |
+|---|---|
+| `TensorPayload` | One-tensor boundary type. |
+| `TensorRegistry` | Multi-tensor working set used by most operators in this package. |
+
+## Public Aliases
+
+| Public alias | Primary name | Note |
+|---|---|---|
+| `GatherScores(...)` | `GatherRows(...)` | `scores` comes from the common use of gathering one selected score from each row. |
+| `BinarizeTensor(...)` | `CreateTensorMask(...)` | `binarize` comes from older wording for turning a tensor into a boolean mask. |
+| `BinarizeTensorByThreshold(...)` | `CreateTensorMaskByThreshold(...)` | `binarize` comes from threshold-based boolean mask creation. |
 
 ## Dtype And Shape
 
@@ -25,12 +36,12 @@ mutate, project, rank, or mask named tensors inside that registry.
 
 | Operator | Notes |
 |---|---|
-| `GatherRows(src, indices, as_=None)` / `GatherScores(...)` | Row-wise gather driven by another registry tensor of indices. |
+| `GatherRows(src, indices, as_=None)` | Row-wise gather driven by another registry tensor of indices. |
 | `TopK(src, k, values_as, indices_as)` | Returns the top-k values and indices from a 1D tensor. |
 | `TopKIndices2D(src, k, ...)` | Returns top-k values plus row and column indices from a 2D tensor. |
 | `ArgMax(src, axis=-1, as_=None)` | Computes argmax along an axis. |
-| `CreateTensorMask(src, predicate, as_)` / `BinarizeTensor(...)` | Builds a boolean mask from a tensor. |
-| `CreateTensorMaskByThreshold(src, threshold, as_=None)` / `BinarizeTensorByThreshold(...)` | Convenience threshold-based mask creation. |
+| `CreateTensorMask(src, predicate, as_)` | Builds a boolean mask from a tensor. |
+| `CreateTensorMaskByThreshold(src, threshold, as_=None)` | Convenience threshold-based mask creation. |
 | `ApplyTensorMask(*srcs, mask, as_=...)` | Applies one boolean mask across one or more tensors. |
 | `SelectTensors(*srcs, indices, as_=...)` | Applies integer-index selection across one or more tensors. |
 | `FilterTensors(*srcs, by, predicate, as_=...)` | Filters one or more tensors by a predicate on another tensor. |

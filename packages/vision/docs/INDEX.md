@@ -1,12 +1,22 @@
-# ml-pipes-vision Operator Index
+# ml-pipes-vision Index
 
-This file catalogs the vision operators shipped with `ml-pipes-vision`
-through `ml_pipes.vision`.
+This page catalogs the vision package surface in `ml_pipes.vision`.
 
 For framework-wide operator concepts, see
-[`docs/OPERATORS.md`](../../../docs/OPERATORS.md). For the cross-package
-package catalogs, see
+[`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
+For the cross-package package catalogs, see
 [`docs/OPERATORS.md#package-catalogs`](../../../docs/OPERATORS.md#package-catalogs).
+
+## Package Primitives
+
+| Surface | Notes |
+|---|---|
+| `ImagePayload` | Main image boundary type. |
+| `ResizeTransform` | Carries resize metadata needed later for projection back to source-image space. |
+| `Detections` | Typed detection result. |
+| `Segmentations` | Typed segmentation result. |
+| `DensityPrediction` | Typed density-map result. |
+| `TileRect` | Describes one tile in original-image coordinates. |
 
 ## Input And Preprocessing
 

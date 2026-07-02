@@ -1,21 +1,24 @@
 # ml-pipes-tensor
 
-`ml-pipes-tensor` is a package for the `ml-pipes` framework. It adds tensor
-payloads and tensor-domain operators to `ml-pipes`.
+`ml-pipes-tensor` is the shared tensor workbench for `ml-pipes`.
 
-While its operators are plain callables, this package is best used as part of
-an `ml-pipes` pipeline. See the main project docs and examples for the broader
-framework usage model.
+Use this package when a pipeline needs NumPy-side tensor shaping, ranking,
+masking, filtering, collation, or light arithmetic between a runtime boundary
+and a typed task result. In practice, it often carries the reusable tensor
+postprocess that sits after ONNX or Torch output extraction and before a task
+package such as vision finalizes the result.
+
+Operators can be used as plain callables, but this package is best used inside
+an `ml-pipes` pipeline.
 
 ## Package Reference
 
-| Field          | Value                                                                                                                                                   |
-|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Package        | `ml-pipes-tensor`                                                                                                                                       |
-| Depends on     | `ml-pipes-core`, `numpy`                                                                                                                                |
-| Public modules | `ml_pipes.tensor`                                                                                                                                       |
-| Content        | tensor payloads and registries; dtype casting; shape and layout transforms; tensor selection, filtering, ranking, and masking; collation and arithmetic |
+| Field          | Value                                                                                                                                                     |
+|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Package        | `ml-pipes-tensor` ([Index](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/INDEX.md))                                        |
+| Depends on     | `ml-pipes-core`                                                                                                                                           |
+| Public modules | `ml_pipes.tensor`                                                                                                                                         |
+| Content        | shared tensor values; NumPy-side tensor shaping and selection; masking, ranking, collation, and light arithmetic                                          |
 
-See
-[`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
 for direct package installs, umbrella profiles, and the full package matrix.

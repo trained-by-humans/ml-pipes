@@ -187,7 +187,7 @@ from ml_pipes.vision import ToDetections
 
 pipeline = Pipeline([
     Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
-    Store("tile_rects", index=1),
+    Store("tile_rects", source=1),
     Pick(0),
     Scatter(max_concurrency=4),
     Resize((640, 640)),
