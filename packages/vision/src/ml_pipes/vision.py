@@ -91,6 +91,7 @@ def _is_unresolved_object_list(annotation: Any) -> bool:
     return annotation is list or (get_origin(annotation) is list and not is_concrete_annotation(annotation))
 
 
+@Operator
 class LoadFile:
     def __call__(self, image_path: str | Path) -> bytes:
         path = Path(image_path)
@@ -99,6 +100,7 @@ class LoadFile:
         return path.read_bytes()
 
 
+@Operator
 class Decode:
     def __call__(self, data: bytes) -> ImagePayload:
         import cv2

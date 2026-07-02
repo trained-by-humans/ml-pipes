@@ -15,6 +15,7 @@ class DensityPrediction:
     density_map: np.ndarray
 
 
+@Operator
 class ClampDensity:
     def __call__(self, prediction: DensityPrediction) -> DensityPrediction:
         return DensityPrediction(
@@ -22,6 +23,7 @@ class ClampDensity:
         )
 
 
+@Operator
 class SumDensity:
     def __call__(self, prediction: DensityPrediction) -> float:
         return float(prediction.density_map.sum())

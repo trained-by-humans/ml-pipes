@@ -78,6 +78,7 @@ class Tile:
         return tiles, rects
 
 
+@Operator
 class Stitch:
     """Reassemble per-tile Detections into a single global Detections.
 

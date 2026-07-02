@@ -254,6 +254,7 @@ class ToDevice:
         )
 
 
+@Operator
 class TorchSynchronizeTensors:
     def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
         if current_output is not Any and is_assignable(
@@ -899,6 +900,7 @@ class TorchExtract:
         return registry
 
 
+@Operator
 class TorchCollate:
     def __call__(self, tensors: list[TorchTensorPayload]) -> TorchTensorPayload:
         if not tensors:
@@ -916,6 +918,7 @@ class TorchCollate:
         )
 
 
+@Operator
 class TorchDistribute:
     def __call__(self, outputs: TorchRuntimeOutputs) -> list[TorchRuntimeOutputs]:
         n = outputs.tensors[0].array.shape[0]

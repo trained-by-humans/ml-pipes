@@ -467,6 +467,7 @@ class SortTensorsBy:
         return registry
 
 
+@Operator
 class Collate:
     def __call__(self, tensors: list[TensorPayload]) -> TensorPayload:
         if not tensors:

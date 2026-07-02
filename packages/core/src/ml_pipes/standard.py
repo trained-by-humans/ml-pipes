@@ -207,6 +207,7 @@ class Pick(Generic[PickIndexT]):
         return normalized_index
 
 
+@Operator
 class UnBatch(RegionCloser[list[BatchItemT], BatchItemT]):
     def resolve_contract(
         self,
@@ -295,6 +296,7 @@ class Batch(RegionOpener[BatchItemT, list[BatchItemT]]):
         return (Any,), out
 
 
+@Operator
 class Gather(RegionCloser[ScatterItemT, list[ScatterItemT]]):
     def resolve_contract(
         self,

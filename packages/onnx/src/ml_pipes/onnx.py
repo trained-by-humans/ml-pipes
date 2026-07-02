@@ -104,6 +104,7 @@ class Extract:
         return registry
 
 
+@Operator
 class Distribute:
     """Split a batched RuntimeOutputs back into a list of per-sample outputs."""
 
