@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+import subprocess
+import sys
+import textwrap
+
 import ml_pipes
 import ml_pipes.core as core
 import ml_pipes.inspection as inspection
@@ -15,6 +20,52 @@ def test_root_namespace_has_no_legacy_convenience_exports() -> None:
     assert not hasattr(ml_pipes, "Decode")
     assert not hasattr(ml_pipes, "Infer")
     assert not hasattr(ml_pipes, "InspectionResult")
+
+
+def test_core_import_does_not_require_inspection_extras() -> None:
+    script = textwrap.dedent(
+        """
+        import importlib.abc
+        import sys
+
+        blocked = {"cv2", "ml_pipes.onnx", "ml_pipes.tensor", "ml_pipes.vision"}
+
+        class Blocker(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname in blocked or any(fullname.startswith(name + ".") for name in blocked):
+                    raise ModuleNotFoundError(f"No module named {fullname!r}")
+                return None
+
+        sys.meta_path.insert(0, Blocker())
+
+        import ml_pipes.core
+
+        unexpected = sorted(
+            name
+            for name in sys.modules
+            if name in {
+                "ml_pipes.inspection.formatters",
+                "ml_pipes.inspection.html_renderer",
+                "ml_pipes.inspection.plot_renderer",
+                "ml_pipes.inspection.inspector",
+                "ml_pipes.inspection.views",
+            }
+            or name in blocked
+            or any(name.startswith(blocked_name + ".") for blocked_name in blocked)
+        )
+        assert not unexpected, unexpected
+        """
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        cwd=Path(__file__).resolve().parent.parent,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_core_component_surface_is_curated() -> None:
