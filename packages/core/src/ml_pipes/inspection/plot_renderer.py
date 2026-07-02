@@ -11,6 +11,18 @@ from .views import (
 )
 
 
+def _load_matplotlib() -> tuple[object, object]:
+    try:
+        import matplotlib
+        import matplotlib.pyplot as plt
+    except ImportError as exc:  # pragma: no cover - depends on optional dependency state
+        raise ImportError(
+            "ml_pipes.inspection plotting requires matplotlib from the optional inspection extra. "
+            "Install it with `pip install ml-pipes[inspection]`."
+        ) from exc
+    return matplotlib, plt
+
+
 class PlotRenderer:
     """Renders a list of StepViews as a matplotlib Figure.
 
@@ -48,8 +60,7 @@ class PlotRenderer:
         return lines
 
     def render(self, views: list[StepView]) -> "matplotlib.figure.Figure":
-        import matplotlib
-        import matplotlib.pyplot as plt
+        matplotlib, plt = _load_matplotlib()
 
         flat = _flatten_step_views(views)
         count = len(flat)

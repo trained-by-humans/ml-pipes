@@ -346,9 +346,10 @@ class PipelineInspector:
 
             display(HTML(self.to_html(result, orientation=orientation)))
         else:
+            self.to_plot(result, cols=cols)
+
             import matplotlib.pyplot as plt
 
-            self.to_plot(result, cols=cols)
             plt.show()
 
     def show_in_browser(self, result: InspectionResult, orientation: str = "horizontal") -> None:
