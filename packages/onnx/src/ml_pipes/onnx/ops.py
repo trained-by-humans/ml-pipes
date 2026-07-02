@@ -6,9 +6,9 @@ from pathlib import Path
 
 import numpy as np
 
-from .onnx_types import RuntimeOutputs
-from .operator import Operator
-from .tensor_types import TensorPayload, TensorRegistry
+from ml_pipes.operator import Operator
+from ml_pipes.tensor import TensorPayload, TensorRegistry
+from .types import RuntimeOutputs
 
 __all__ = [
     "Distribute",

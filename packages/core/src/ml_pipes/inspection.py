@@ -61,24 +61,23 @@ _HTML_ORIENTATIONS = ("horizontal", "vertical")
 
 from .inspection_artifacts import InspectionResult, InspectionSerializer
 from .tracing import StepSpan, _fmt_batch_size
-from .tiling import TileRect
 
 
-def _import_inspection_dependencies() -> tuple[object, type, type, type, type, type, type, type]:
+def _import_inspection_dependencies() -> tuple[object, type, type, type, type, type, type, type, type, type]:
     try:
         cv2 = import_module("cv2")
         from .onnx import RuntimeOutputs
         from .tensor import TensorPayload, TensorRegistry
-        from .vision import Detections, ImagePayload, ResizeTransform, Segmentations
+        from .vision import Detections, ImagePayload, ResizeTransform, Segmentations, Tile, TileRect
     except ImportError as exc:  # pragma: no cover - exercised when optional packages are absent
         raise ImportError(
             "ml_pipes.inspection requires the optional inspection extra. "
             "Install it with `pip install ml-pipes[inspection]`."
         ) from exc
-    return cv2, Detections, ImagePayload, ResizeTransform, RuntimeOutputs, Segmentations, TensorPayload, TensorRegistry
+    return cv2, Detections, ImagePayload, ResizeTransform, RuntimeOutputs, Segmentations, TensorPayload, TensorRegistry, Tile, TileRect
 
 
-cv2, Detections, ImagePayload, ResizeTransform, RuntimeOutputs, Segmentations, TensorPayload, TensorRegistry = (
+cv2, Detections, ImagePayload, ResizeTransform, RuntimeOutputs, Segmentations, TensorPayload, TensorRegistry, Tile, TileRect = (
     _import_inspection_dependencies()
 )
 
@@ -387,7 +386,6 @@ _SPAN_FORMATTERS: dict[type, SpanFormatter] = {}
 
 
 def _register_builtin_formatters() -> None:
-    from .tiling import Tile
     from .region import RegionOpener
 
     # --- Output formatters (subclasses before base classes) ---

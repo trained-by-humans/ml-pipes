@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .operator import Operator
-from .vision_types import Detections, ImagePayload
+from ml_pipes.operator import Operator
+from .types import Detections, ImagePayload
 
 
 @dataclass(frozen=True)

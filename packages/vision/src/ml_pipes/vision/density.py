@@ -5,9 +5,9 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from .operator import Operator
-from .tensor_types import TensorRegistry
-from .vision_types import ImagePayload
+from ml_pipes.operator import Operator
+from ml_pipes.tensor import TensorRegistry
+from .types import ImagePayload
 
 
 @dataclass(frozen=True)

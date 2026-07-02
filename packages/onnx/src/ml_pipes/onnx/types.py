@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .tensor_types import TensorPayload
+from ml_pipes.tensor import TensorPayload
 
 __all__ = [
     "RuntimeOutputs",

@@ -6,9 +6,9 @@ from typing import Any, Generic, Literal, TypeAlias, TypeVar, cast, overload
 import numpy as np
 import numpy.typing as npt
 
-from ._typing.annotation import is_assignable
-from .operator import Operator
-from .tensor_types import TensorPayload, TensorRegistry
+from ml_pipes._typing.annotation import is_assignable
+from ml_pipes.operator import Operator
+from .types import TensorPayload, TensorRegistry
 
 __all__ = [
     "ApplyTensorMask",

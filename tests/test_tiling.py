@@ -20,7 +20,7 @@ from ml_pipes.vision import (
     Tile,
     TileRect,
 )
-from ml_pipes.tiling import _compute_tile_rects
+from ml_pipes.vision.tiling import _compute_tile_rects
 
 
 # ---------------------------------------------------------------------------
