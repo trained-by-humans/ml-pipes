@@ -4,7 +4,7 @@ import dataclasses
 import pickle
 from pathlib import Path
 
-from .tracing import InvocationTrace, StepSpan
+from ..tracing import InvocationTrace, StepSpan
 
 
 class InspectionResult:
@@ -30,7 +30,7 @@ class InspectionResult:
 
     def _repr_html_(self) -> str:
         """Jupyter auto-render hook — uses default PipelineInspector."""
-        from .inspection import PipelineInspector
+        from .inspector import PipelineInspector
 
         return PipelineInspector().to_html(self)
 
@@ -39,7 +39,7 @@ class InspectionResult:
         return InspectionSerializer().dump(self, path)
 
     @staticmethod
-    def load(path: str | Path) -> InspectionResult:
+    def load(path: str | Path) -> "InspectionResult":
         """Load a serialized result from a file."""
         return InspectionSerializer().load(path)
 
@@ -53,14 +53,14 @@ class InspectionSerializer:
     @staticmethod
     def _sanitize(result: InspectionResult) -> InspectionResult:
         """Return a copy with operator_type cleared so locally-defined classes don't break pickle."""
-        return InspectionResult([InspectionSerializer._sanitize_span(s) for s in result.spans])
+        return InspectionResult([InspectionSerializer._sanitize_span(span) for span in result.spans])
 
     @staticmethod
     def _sanitize_span(span: StepSpan) -> StepSpan:
         child = None
         if span.child_trace is not None:
             child = InvocationTrace(
-                spans=[InspectionSerializer._sanitize_span(s) for s in span.child_trace.spans],
+                spans=[InspectionSerializer._sanitize_span(child_span) for child_span in span.child_trace.spans],
                 total_duration_s=span.child_trace.total_duration_s,
                 batch_size=span.child_trace.batch_size,
                 workers=span.child_trace.workers,

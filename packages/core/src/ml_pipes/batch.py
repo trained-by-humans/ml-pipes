@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+import time
+from typing import Any, TypeVar, get_args, get_origin
+
+from .operator import Operator
+from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
+from .tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace
+
+
+# ---------------------------------------------------------------------------
+# Coordination primitive
+# ---------------------------------------------------------------------------
 
 
 class _Entry:
@@ -9,10 +19,10 @@ class _Entry:
 
     def __init__(self, value: Any) -> None:
         self.value = value
-        self.event: threading.Event = threading.Event()  # fired exactly once by distribute / distribute_exception
-        self.result: Any = None                          # set by distribute()
-        self.exception: BaseException | None = None      # set by distribute_exception()
-        self.batch_span: Any = None                      # StepSpan | None, written by leader before event.set()
+        self.event: threading.Event = threading.Event()
+        self.result: Any = None
+        self.exception: BaseException | None = None
+        self.batch_span: Any = None
 
 
 class LeaderBatch:
@@ -21,6 +31,7 @@ class LeaderBatch:
     The leader receives the raw per-sample inputs and is responsible for
     running the batch region and calling distribute().
     """
+
     __slots__ = ("inputs",)
 
     def __init__(self, inputs: list[Any]) -> None:
@@ -34,11 +45,17 @@ class FollowerResult:
     This thread's per-sample result is ready to consume. If the leader
     failed, exception is set and result is None.
     """
+
     __slots__ = ("result", "batch_span", "exception")
 
-    def __init__(self, result: Any, batch_span: Any = None, exception: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        result: Any,
+        batch_span: Any = None,
+        exception: BaseException | None = None,
+    ) -> None:
         self.result = result
-        self.batch_span = batch_span  # StepSpan | None, copied from leader via _Entry
+        self.batch_span = batch_span
         self.exception = exception
 
 
@@ -72,94 +89,69 @@ class BatchGate:
         self._timeout = timeout
         self._lock = threading.Lock()
         self._pending: list[_Entry] = []
-        self._batch_cond: threading.Condition | None = None  # per-batch, recreated each cycle
-        # Per-leader-thread state so concurrent batches don't interfere.
+        self._batch_cond: threading.Condition | None = None
         self._local = threading.local()
-
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
 
     def enter(self, value: Any) -> LeaderBatch | FollowerResult:
         """
         Register *value* for the next batch.
 
-        Returns ``LeaderBatch``    for the thread that wins the drain race.
-        Returns ``FollowerResult`` for all other threads (blocks until the
-                                    leader distributes results).
+        Returns ``LeaderBatch`` for the thread that wins the drain race.
+        Returns ``FollowerResult`` for all other threads.
         Raises the batch-region exception for followers when the leader fails.
         """
+
         entry = _Entry(value)
 
-        # Phase 1 — batch formation: wait in the lobby for a full batch or timeout.
         with self._lock:
             if not self._pending:
-                # First arrival for this batch — create a fresh condition so that
-                # notify_all() cannot bleed into a concurrent or future batch.
                 self._batch_cond = threading.Condition(self._lock)
 
-            # Keep a local reference to this batch condition
             cond = self._batch_cond
             self._pending.append(entry)
 
             if len(self._pending) == self._size:
-                # Full batch — wake all lobby waiters.
                 cond.notify_all()
             else:
-                # Partial batch — wait for either a full batch or timeout.
                 cond.wait(timeout=self._timeout)
-                # Cascade: wake any remaining batch members so everyone races together.
                 cond.notify_all()
 
-            # Race to drain _pending — only the thread whose entry is still
-            # present wins.  A woken follower whose entry was already collected
-            # must not drain entries that belong to the next batch.
             if entry in self._pending:
                 batch = self._pending[:]
                 self._pending.clear()
-                self._batch_cond = None  # release the condition for this batch cycle
+                self._batch_cond = None
                 self._local.batch = batch
                 self._local.leader_idx = batch.index(entry)
-                return LeaderBatch([e.value for e in batch])
+                return LeaderBatch([item.value for item in batch])
 
-        # Phase 2 — batch operation: wait for the leader to fire our entry's event.
         entry.event.wait()
-
         return FollowerResult(entry.result, batch_span=entry.batch_span, exception=entry.exception)
 
     def distribute(self, results: list[Any], batch_span: Any = None) -> Any:
-        """
-        Called by the pipeline (leader thread) at the UnBatch position.
+        """Write follower results and return the leader's own result."""
 
-        Writes each follower's result (and optional batch_span) and fires their event.
-        Returns the leader's own result.
-        """
         batch: list[_Entry] = self._local.batch
         leader_idx: int = self._local.leader_idx
 
         if len(results) != len(batch):
-            # Do NOT delete _local state yet — distribute_exception will need it.
             raise RuntimeError(
                 f"Batch size mismatch: {len(batch)} inputs but {len(results)} results"
             )
 
-        # Clean up before signalling so re-entrant pipelines are safe.
         del self._local.batch, self._local.leader_idx
 
-        for i, (entry, result) in enumerate(zip(batch, results)):
-            if i == leader_idx:
-                continue  # leader is not waiting — skip
+        for index, (entry, result) in enumerate(zip(batch, results)):
+            if index == leader_idx:
+                continue
             entry.result = result
-            entry.batch_span = batch_span  # written before event.set() — happens-before guarantee
+            entry.batch_span = batch_span
             entry.event.set()
 
         return results[leader_idx]
 
     def distribute_exception(self, exc: BaseException, batch_span: Any = None) -> None:
-        """
-        Propagate *exc* to all followers so they unblock and raise instead of
-        hanging.  Safe to call even if distribute() already cleaned up.
-        """
+        """Propagate *exc* to all followers so they unblock and raise."""
+
         batch: list[_Entry] | None = getattr(self._local, "batch", None)
         if batch is None:
             return
@@ -171,10 +163,108 @@ class BatchGate:
         if hasattr(self._local, "leader_idx"):
             del self._local.leader_idx
 
-        for i, entry in enumerate(batch):
-            if i == leader_idx:
+        for index, entry in enumerate(batch):
+            if index == leader_idx:
                 continue
             entry.exception = exc
-            entry.batch_span = batch_span  # written before event.set() — happens-before guarantee
+            entry.batch_span = batch_span
             entry.event.set()
 
+
+# ---------------------------------------------------------------------------
+# Public operators
+# ---------------------------------------------------------------------------
+
+
+BatchItemT = TypeVar("BatchItemT")
+
+
+@Operator
+class UnBatch(RegionCloser[list[BatchItemT], BatchItemT]):
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        if current_output is not None and get_origin(current_output) is list:
+            args = get_args(current_output)
+            return (Any,), args[0] if args else Any
+        return (Any,), Any
+
+
+@Operator
+class Batch(RegionOpener[BatchItemT, list[BatchItemT]]):
+    closing_type = UnBatch
+
+    def __init__(self, size: int, timeout: float = 0.05) -> None:
+        self.gate = BatchGate(size, timeout)
+
+    def run_region(
+        self,
+        current: BatchItemT,
+        label: str,
+        execute_region: RegionExecutor[list[BatchItemT], Any],
+        trace: RegionTraceLike,
+        cfg: TracingConfig | None,
+    ) -> Any:
+        del cfg
+        gate = self.gate
+
+        t_gate_enter = time.perf_counter()
+        outcome = gate.enter(current)
+        gate_blocked_duration = time.perf_counter() - t_gate_enter
+
+        if not isinstance(outcome, LeaderBatch):
+            batch_region_duration = outcome.batch_span.duration_s if outcome.batch_span is not None else 0.0
+            lobby_wait_duration = gate_blocked_duration - batch_region_duration
+            trace.spans.append(StepSpan(f"{label}[wait]", t_gate_enter, lobby_wait_duration))
+            if outcome.batch_span is not None:
+                trace.spans.append(outcome.batch_span)
+            if outcome.exception is not None:
+                raise outcome.exception
+            return outcome.result
+
+        trace.spans.append(StepSpan(f"{label}[wait]", t_gate_enter, gate_blocked_duration))
+        current = outcome.inputs
+        batch_size = len(current) if hasattr(current, "__len__") else None
+        collecting = isinstance(trace, InvocationTrace)
+        child_trace = InvocationTrace(batch_size=batch_size) if collecting else _NoOpTrace(batch_size=batch_size)
+
+        t_region = time.perf_counter()
+        try:
+            current, child_trace = execute_region(current, child_trace)
+        except Exception as exc:
+            error_span = StepSpan(
+                label,
+                t_region,
+                child_trace.total_duration_s,
+                error=True,
+                child_trace=child_trace if collecting else None,
+                operator_type=type(self),
+            )
+            trace.spans.append(error_span)
+            gate.distribute_exception(exc, batch_span=error_span if collecting else None)
+            raise
+
+        batch_span = StepSpan(
+            label,
+            t_region,
+            child_trace.total_duration_s,
+            child_trace=child_trace if collecting else None,
+            operator_type=type(self),
+        )
+        trace.spans.append(batch_span)
+        return gate.distribute(current, batch_span=batch_span if collecting else None)
+
+    def resolve_contract(
+        self,
+        current_output: Any | None,
+        stored_annotations: dict[str, Any],
+        expand_output_annotation: Any,
+        validation_error_type: type[Exception],
+    ) -> tuple[Any, Any]:
+        del stored_annotations, expand_output_annotation, validation_error_type
+        out = list[current_output] if current_output is not None else list[Any]
+        return (Any,), out

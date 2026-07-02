@@ -8,12 +8,6 @@ from ._typing.annotation import build_union_annotation_from_options, variadic_tu
 from .operator import Operator
 from .selector import Selector, SelectorInput
 
-CurrentT = TypeVar("CurrentT")
-InputT = TypeVar("InputT", contravariant=True)
-OutputT = TypeVar("OutputT", covariant=True)
-StoredT = TypeVar("StoredT")
-InsertIndexT = TypeVar("InsertIndexT", bound=int | None)
-
 
 @dataclass(frozen=True)
 class Context:
@@ -49,6 +43,13 @@ class Context:
         merged = dict(self.values)
         merged.update(metadata)
         return Context(merged)
+
+
+CurrentT = TypeVar("CurrentT")
+InputT = TypeVar("InputT", contravariant=True)
+OutputT = TypeVar("OutputT", covariant=True)
+StoredT = TypeVar("StoredT")
+InsertIndexT = TypeVar("InsertIndexT", bound=int | None)
 
 
 class ContextOp(ABC, Generic[InputT, OutputT]):

@@ -14,7 +14,7 @@ from ._typing.signatures import validate_operator_signature
 from .collectors import CaptureCollector
 from .context import Context, ContextOp
 from .control import SHORT_CIRCUIT
-from .inspection_artifacts import InspectionResult
+from .inspection.artifacts import InspectionResult
 from .operator import Operator, OperatorDescription
 from .region import RegionCloser, RegionOpener, RegionTraceLike
 from .tracing import (
