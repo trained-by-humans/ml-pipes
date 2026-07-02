@@ -246,7 +246,7 @@ If score thresholding is all you need, `NMS(conf_threshold=...)` may already
 be enough by itself.
 
 For more filtering and selection operators, see
-[operators/README.md](operators/README.md).
+the package-owned catalogs in [OPERATORS.md](OPERATORS.md).
 
 The exact operators can change by model family. The important point is the
 ordering: cheap filters first, heavier work later.

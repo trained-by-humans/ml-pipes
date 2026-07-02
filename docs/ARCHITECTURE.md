@@ -75,8 +75,8 @@ Architecturally, that means:
 - annotations, labels, and config descriptions give validation, inspection,
   tracing, and description something concrete to work with
 
-For operator boundaries and creation guidelines, see [OPERATORS.md](OPERATORS.md).
-For the shared operator catalog, see [operators/README.md](operators/README.md).
+For operator boundaries, creation guidelines, and package-owned catalogs, see
+[OPERATORS.md](OPERATORS.md).
 
 ### Context
 

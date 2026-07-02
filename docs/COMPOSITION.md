@@ -113,14 +113,14 @@ That usually gives you:
 
 In this repo, common starting points are:
 
-- `ml_pipes.ops` for image, inference, tensor-registry, context, region, and
-  side-effect operators
-- `ml_pipes.data_ops` for iterable and data-preparation workflows such as
-  filtering, mapping, deduplication, and shaping
-- `ml_pipes.torch.ops` for torch-specific operator boundaries
+- `ml_pipes.standard` for routing, context, region, and data-preparation
+  operators
+- `ml_pipes.tensor`, `ml_pipes.vision`, and `ml_pipes.onnx` for tensor,
+  vision, and ONNX runtime operators
+- `ml_pipes.torch` for Torch-specific operator boundaries
 
-The operator overview lives in [OPERATORS.md](OPERATORS.md). The concrete
-catalog lives in [operators/README.md](operators/README.md).
+The operator overview and package-owned catalogs live in
+[OPERATORS.md](OPERATORS.md).
 
 ### Reuse First, Then Add New Operators
 

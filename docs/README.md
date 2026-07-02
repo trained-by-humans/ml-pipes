@@ -1,7 +1,8 @@
 # Documentation
 
 Shared ml-pipes reference docs, tutorials, and design notes live here.
-Package-specific guides live under their matching package directories.
+For package-specific guides and package-owned docs, start with
+[PACKAGES.md](PACKAGES.md).
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 - [BENCHMARKING.md](BENCHMARKING.md)
@@ -10,7 +11,6 @@ Package-specific guides live under their matching package directories.
 - [SCAFFOLDING.md](SCAFFOLDING.md)
 - [OPERATORS.md](OPERATORS.md)
 - [PACKAGES.md](PACKAGES.md)
-- [operators/README.md](operators/README.md)
 - [PERFORMANCE.md](PERFORMANCE.md)
 - [REGIONS.md](REGIONS.md)
 - [TRACING.md](TRACING.md)

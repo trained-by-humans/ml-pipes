@@ -415,3 +415,19 @@ inspect, trace, and benchmark as standalone boundaries.
 - Verify the operator inside a real pipeline. `validate()` checks its
   boundary, `inspect()` shows what value flows through it, and tracing or
   benchmarking can be added once correctness is already established.
+
+## Package Catalogs
+
+The concrete operator catalogs live with their owning packages. Use this page
+for the shared operator model and design constraints, and use the package
+catalogs when you need the concrete operator surface for one domain.
+
+For package installs and public imports, see [PACKAGES.md](PACKAGES.md).
+
+| Package | Public modules | Package catalog | Focus |
+|---|---|---|---|
+| `ml-pipes-core` | `ml_pipes.standard` | [packages/core/docs/INDEX.md](../packages/core/docs/INDEX.md) | routing, context, regions, and data-preparation operators |
+| `ml-pipes-tensor` | `ml_pipes.tensor` | [packages/tensor/docs/INDEX.md](../packages/tensor/docs/INDEX.md) | tensor registry transforms, ranking, masking, and batch assembly |
+| `ml-pipes-onnx` | `ml_pipes.onnx` | [packages/onnx/docs/INDEX.md](../packages/onnx/docs/INDEX.md) | ONNX runtime invocation and output extraction |
+| `ml-pipes-vision` | `ml_pipes.vision` | [packages/vision/docs/INDEX.md](../packages/vision/docs/INDEX.md) | image preprocessing, detection and segmentation, tiling, rendering, and density |
+| `ml-pipes-torch` | `ml_pipes.torch` | [packages/torch/docs/INDEX.md](../packages/torch/docs/INDEX.md) | Torch domain boundaries, runtime, device movement, and Torch-native postprocess |
