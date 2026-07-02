@@ -94,6 +94,11 @@ def test_strict_rejects_vague_output_only():
         Pipeline([IntToString(), VagueOutputOp()]).validate(strict=True)
 
 
+def test_strict_rejects_vague_output_between_typed_ops():
+    with pytest.raises(PipelineValidationError, match="1:VagueOutputOp"):
+        Pipeline([IntToString(), VagueOutputOp(), StringToFloat()]).validate(strict=True)
+
+
 def test_strict_error_includes_operator_label():
     with pytest.raises(PipelineValidationError, match="1:VagueOutputOp"):
         Pipeline([IntToString(), VagueOutputOp()]).validate(strict=True)
@@ -279,7 +284,7 @@ def test_log_detections_passes_strict_validation(tmp_path):
     from ml_pipes.vision import LogDetections
 
     class MakeDetections:
-        def __call__(self, value: int) -> list:
+        def __call__(self, value: int) -> list[dict[str, object]]:
             return []
 
     op = LogDetections(

@@ -449,18 +449,10 @@ class PipelineValidator:
                     f"  Fix: annotate the parameter with a concrete type, or implement resolve_contract "
                     f"to accept and thread the upstream type dynamically."
                 )
-            output_is_concrete = is_concrete_annotation(boundary.effective_output_type) or boundary.does_contract_resolve_concretely()
-            if (
-                not output_is_concrete
-                and i + 1 < len(boundaries)
-                and is_concrete_annotation(boundaries[i + 1].collapsed_input_annotation)
-                and satisfies_annotation_constraint(
-                    boundary.effective_output_type,
-                    boundaries[i + 1].collapsed_input_annotation,
-                )
+            if not (
+                is_concrete_annotation(boundary.effective_output_type)
+                or boundary.does_contract_resolve_concretely()
             ):
-                output_is_concrete = True
-            if not output_is_concrete:
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
