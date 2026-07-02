@@ -52,10 +52,13 @@ def test_tensor_alias_exports_preserve_identity() -> None:
     assert tensor.BinarizeTensorByThreshold is tensor.CreateTensorMaskByThreshold
 
 
-def test_workspace_packages_ship_py_typed_markers() -> None:
-    for package_name in ("core", "tensor", "vision", "onnx", "torch"):
-        marker = ROOT / "packages" / package_name / "src" / "ml_pipes" / "py.typed"
-        assert marker.is_file(), package_name
+def test_workspace_packages_assign_root_py_typed_marker_to_core_only() -> None:
+    markers = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in ROOT.glob("packages/*/src/ml_pipes/py.typed")
+    )
+
+    assert markers == ["packages/core/src/ml_pipes/py.typed"]
 
 
 def test_ml_pipes_torch_exports_all_public_ops_and_aliases() -> None:
