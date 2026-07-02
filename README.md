@@ -28,14 +28,20 @@ To pick the matching install for other runnable examples, see
 [examples/README.md](examples/README.md). For the full package matrix and the
 public component import model, see [docs/PACKAGES.md](docs/PACKAGES.md).
 
-The core inference pipeline in
-[examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py) looks like this:
+## Supported Use-cases/Domains
+
+`ml-pipes` supports multiple domains through installable packages. For the
+current package coverage, install profiles, and public imports, see
+[docs/PACKAGES.md](docs/PACKAGES.md).
+
+One concrete example is vision inference with `ml-pipes[vision,onnx]`, as
+shown in [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py):
 
 ```python
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Extract, Infer
 from ml_pipes.standard import Pick, Recall, Store
-from ml_pipes.tensor import ArgMax, GatherScores, Slice, Squeeze, Transpose
+from ml_pipes.tensor import ArgMax, GatherRows, Slice, Squeeze, Transpose
 from ml_pipes.vision import (
     ConvertBoxFormat,
     Detections,
@@ -65,7 +71,7 @@ def yolo8_inference_pipeline(
             Slice("preds", slice(None, 4), as_="boxes"),
             Slice("preds", slice(4, None), as_="scores"),
             ArgMax("scores", as_="classes"),
-            GatherScores("scores", "classes"),
+            GatherRows("scores", "classes"),
             ConvertBoxFormat(from_="cxcywh"),
             NMS(conf_threshold=conf_threshold),
             Recall("resize_transform"),
@@ -76,11 +82,9 @@ def yolo8_inference_pipeline(
     )
 ```
 
-Most self-contained examples download the models and sample assets they need
-into the shared `examples/.example_assets/` cache on demand. Generic entry points
-such as `examples/run_detection.py` expect explicit inputs instead. For more
-runnable entry points, including the equivalent `examples/`-local commands,
-see [examples/README.md](examples/README.md).
+Most examples run with minimal setup out of the box. See
+[examples/README.md](examples/README.md) for runnable entry points and any
+example-specific setup.
 
 ## Why ml-pipes
 
@@ -92,6 +96,9 @@ see [examples/README.md](examples/README.md).
   without changing the surrounding scaffolding pattern.
 - **Compose larger systems.** Merge or embed pipelines to build services,
   endpoints, data-preparation flows, and larger ML applications.
+
+For the design rationale and internal structure behind this model, see
+[docs/DESIGN.md](docs/DESIGN.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Key Features
 
@@ -138,6 +145,8 @@ print(contract)
 TypeContract(input_type=<class 'str'>, output_type=list[str])
 ```
 
+Try it: [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py)
+
 ### Inspection
 
 Inspection runs the pipeline once and gives you a step-by-step view of what
@@ -154,6 +163,8 @@ InspectionResult:
   1:Lowercase                          str
   2:split_words                        list [2]
 ```
+
+Try it: [examples/run_inspect.py](examples/run_inspect.py)
 
 ### Tracing
 
@@ -174,6 +185,8 @@ pipeline.set_tracing(None)
   2:split_words                     0.01ms  (17.1%)
   total                             0.04ms
 ```
+
+Try it: [examples/run_yolo8_tracing.py](examples/run_yolo8_tracing.py)
 
 ### Benchmarking
 
@@ -201,31 +214,17 @@ total               0.03       0.03       0.00       0.03       0.03
 2:split_words       0.01       0.01       0.00       0.01       0.01
 ```
 
-## Start From A Concrete Goal
-
-- **Run a baseline vision pipeline** with
-  [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py).
-- **Inspect and debug one run** with
-  [examples/run_inspect.py](examples/run_inspect.py).
-- **Wrap your own model** with
-  [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
-- **Build a service or larger app** with
-  [examples/run_yolo8_endpoint.py](examples/run_yolo8_endpoint.py) and
-  [docs/COMPOSITION.md](docs/COMPOSITION.md).
-- **See a non-vision pipeline** with
-  [examples/run_sms_spam_prepare.py](examples/run_sms_spam_prepare.py).
+Try it: [examples/benchmarks/run_yolo8_benchmark.py](examples/benchmarks/run_yolo8_benchmark.py)
 
 ## Where To Go Next
 
-- [examples/README.md](examples/README.md) — full runnable example index
-- [docs/PACKAGES.md](docs/PACKAGES.md) — package matrix, install profiles,
-  and public imports
-- [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md) — wrap a new model in a pipeline
-- [docs/OPERATORS.md](docs/OPERATORS.md) — reuse or define operators
-- [docs/COMPOSITION.md](docs/COMPOSITION.md) — compose pipelines into larger
-  applications
-- [docs/DESIGN.md](docs/DESIGN.md) and
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — understand the rationale and
-  internal structure
-- [docs/README.md](docs/README.md) — full documentation index
-- [HUMANS.md](HUMANS.md) — maintainer-only workspace and release notes
+- **Browse the documentation** in [docs/README.md](docs/README.md).
+- **Start from runnable examples** in [examples/README.md](examples/README.md).
+- **Run a baseline vision pipeline** with [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py).
+- **Inspect and debug one run** with
+  [examples/run_inspect.py](examples/run_inspect.py).
+- **Build a service or larger app** with
+  [examples/run_yolo8_endpoint.py](examples/run_yolo8_endpoint.py) and
+  [docs/COMPOSITION.md](docs/COMPOSITION.md).
+- **Wrap your own model** with
+  [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
