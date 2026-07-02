@@ -1,13 +1,13 @@
 # ml-pipes
 
-Umbrella meta-package for `ml-pipes` component installs.
+`ml-pipes` is the umbrella install package for the `ml-pipes` framework. It
+installs `ml-pipes-core` by default and uses extras to pull in additional
+framework packages.
 
-`ml-pipes` is the install entrypoint for the project. It installs
-`ml-pipes-core` by default and uses extras to pull in domain packages like
-vision, ONNX, Torch, inspection, and OpenTelemetry support. The root
-`ml_pipes` namespace remains a namespace package only, so public imports come
-from component modules such as `ml_pipes.core`, `ml_pipes.tensor`,
-`ml_pipes.vision`, `ml_pipes.onnx`, and `ml_pipes.torch`.
+After installation, import the component modules you use, such as
+`ml_pipes.core`, `ml_pipes.tensor`, `ml_pipes.vision`, `ml_pipes.onnx`, or
+`ml_pipes.torch`. See the main project docs and examples for the broader
+framework usage model.
 
 Example:
 
@@ -30,4 +30,4 @@ not with nested extra syntax such as `ml-pipes[core[otel]]`.
 
 For existing install profiles, the package matrix, and the public component
 import model, see the
-[package guide](../../docs/PACKAGES.md).
+[package guide](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md).

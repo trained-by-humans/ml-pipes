@@ -1,8 +1,11 @@
 # ml-pipes-onnx
 
-ONNX runtime operators and output types for `ml-pipes`. This package owns only
-the ONNX runtime surface. Tensor operators used in the same pipeline still
-come from `ml_pipes.tensor`.
+`ml-pipes-onnx` is a package for the `ml-pipes` framework. It adds the ONNX
+execution domain to `ml-pipes`.
+
+While its operators are plain callables, this package is best used as part of
+an `ml-pipes` pipeline. See the main project docs and examples for the broader
+framework usage model.
 
 ## Package Reference
 
@@ -13,5 +16,6 @@ come from `ml_pipes.tensor`.
 | Public modules | `ml_pipes.onnx`                                                                    |
 | Content        | ONNX runtime invocation; runtime outputs; output extraction and batch distribution |
 
-See [`docs/PACKAGES.md`](../../docs/PACKAGES.md) for direct package installs,
-umbrella profiles, and the full package matrix.
+See
+[`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+for direct package installs, umbrella profiles, and the full package matrix.

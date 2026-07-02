@@ -1,8 +1,11 @@
 # ml-pipes-vision
 
-Vision payloads and vision-domain operators for `ml-pipes`. This package owns
-the vision operator families. Tensor operators that appear in the same
-pipeline still come from `ml_pipes.tensor`.
+`ml-pipes-vision` is a package for the `ml-pipes` framework. It adds the
+vision domain to `ml-pipes`.
+
+While its operators are plain callables, this package is best used as part of
+an `ml-pipes` pipeline. See the main project docs and examples for the broader
+framework usage model.
 
 ## Package Reference
 
@@ -13,5 +16,6 @@ pipeline still come from `ml_pipes.tensor`.
 | Public modules | `ml_pipes.vision`                                                                                              |
 | Content        | image payloads and file I/O; image transforms; detection; segmentation; density; tiling; rendering and logging |
 
-See [`docs/PACKAGES.md`](../../docs/PACKAGES.md) for direct package installs,
-umbrella profiles, and the full package matrix.
+See
+[`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+for direct package installs, umbrella profiles, and the full package matrix.
