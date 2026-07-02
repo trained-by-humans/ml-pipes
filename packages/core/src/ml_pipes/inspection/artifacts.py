@@ -28,11 +28,16 @@ class InspectionResult:
             if span.child_trace is not None:
                 InspectionResult._repr_spans(span.child_trace.spans, lines, indent + 2)
 
-    def _repr_html_(self) -> str:
-        """Jupyter auto-render hook — uses default PipelineInspector."""
-        from .inspector import PipelineInspector
+    def _repr_html_(self) -> str | None:
+        """Jupyter auto-render hook — falls back to plain text when HTML extras are absent."""
+        try:
+            from .inspector import PipelineInspector
 
-        return PipelineInspector().to_html(self)
+            return PipelineInspector().to_html(self)
+        except ImportError as exc:
+            if "optional inspection extra" in str(exc):
+                return None
+            raise
 
     def dump(self, path: str | Path) -> Path:
         """Serialize this result to a file."""

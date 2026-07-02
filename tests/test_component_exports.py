@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +13,15 @@ import ml_pipes.onnx as onnx
 import ml_pipes.standard as standard
 import ml_pipes.tensor as tensor
 import ml_pipes.vision as vision
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_SRC_DIRS = [
+    ROOT / "packages" / "core" / "src",
+    ROOT / "packages" / "tensor" / "src",
+    ROOT / "packages" / "vision" / "src",
+    ROOT / "packages" / "onnx" / "src",
+    ROOT / "packages" / "torch" / "src",
+]
 
 
 def test_root_namespace_has_no_legacy_convenience_exports() -> None:
@@ -57,10 +67,17 @@ def test_core_import_does_not_require_inspection_extras() -> None:
         """
     )
 
+    env = os.environ.copy()
+    search_path = os.pathsep.join(str(path) for path in PACKAGE_SRC_DIRS)
+    env["PYTHONPATH"] = (
+        search_path if not env.get("PYTHONPATH") else search_path + os.pathsep + env["PYTHONPATH"]
+    )
+
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
-        cwd=Path(__file__).resolve().parent.parent,
+        cwd=ROOT,
+        env=env,
         text=True,
         check=False,
     )
