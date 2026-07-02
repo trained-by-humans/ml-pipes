@@ -73,6 +73,7 @@ __all__ = [
     "ProjectRoIMasks",
     "ReconstructMasks",
     "Resize",
+    "ResizeMasks",
     "ResizeTransform",
     "SaveImage",
     "Segmentations",
