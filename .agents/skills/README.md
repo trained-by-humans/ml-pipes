@@ -1,79 +1,125 @@
 # Skills Index
 
-Repository documentation Markdown files are the source of truth.
-Use `docs/README.md` as the shared doc index.
-Use this file only to pick the right workflow and the right docs for the
-requested change.
-
-## Change Surfaces
-
-- `ml-pipes` is the framework surface that contains core + operator-packages
-  such as `ml-pipes/ops.py` or `ml-pipes/torch/ops.py`.
-- `examples/` are reference apps and repro targets.
+Use this file only to pick the right workflow and the right owning scope.
+For repo-level guidance such as source of truth and repository structure,
+follow `AGENTS.md`.
+Use `docs/README.md` as the shared doc index and `docs/PACKAGES.md` to
+resolve package ownership.
 
 ## Agent Roles
 
 This repo assumes two common agent roles:
 
-- `integrator`: uses `ml-pipes` to build, adapt, or debug pipelines in
-  examples or downstream code
-- `maintainer`: changes `ml-pipes` itself, including shared runtime behavior,
-  operator packages, tests, and framework docs
+- `integrator`: uses `ml-pipes` to build, adapt, or debug a concrete pipeline
+  in `examples/` or downstream code
+- `maintainer`: changes the shared framework, package-owned public surfaces,
+  tests, or docs
 
 Do not switch between `integrator` and `maintainer` roles without explicit
 user approval:
 
-- If local pipeline work appears to require framework changes, ask before
-switching into a maintainer skill.
-- If framework work turns out to be only local example or integration work, ask
-before switching into an integrator skill.
+- If local pipeline work appears to require framework or package changes, ask
+  before switching into a maintainer skill.
+- If framework work turns out to be only local example or integration work,
+  ask before switching into an integrator skill.
 - Exception: a maintainer may update examples when those changes are required
-to verify or reflect an approved maintainer-side change.
+  to verify or reflect an approved shared change.
 
-## Route By Change Locality
+## Workflow Loop
 
-Start from the outermost scope that can satisfy the request. Keep the change
-local unless the requested behavior clearly belongs in a shared layer.
+Process maintainer work in three stages:
 
-1. `examples/` scope
-   Read `examples/README.md` and the closest runnable example or repro target.
-   If the request is about one pipeline, local wiring, model quirks, or
-   example docs, stay in `examples/` and use `pipeline-builder`.
-   If the first broken step or boundary is still unclear, use
-   `pipeline-debugger`.
+1. `<Concrete Changes Stage>`
+2. `<Target Stage>`
+3. `<Placement Stage>`
 
-2. operator-package scope
-   Read `docs/OPERATORS.md` and `docs/operators/README.md`.
-   If the requested behavior should be shared across more than one pipeline
-   and belongs in operator composition rather than runtime semantics, use
-   `maintainer-operators`.
-   Work in the operator-facing surfaces under `src/ml_pipes/` and the matching
-   docs/tests.
+Each pass should end with a concrete target location: package, module, file,
+and line when known.
 
-3. core framework scope
-   Read `docs/DESIGN.md` and `docs/ARCHITECTURE.md`.
-   If the request changes shared runtime, validation, typing, tracing,
-   benchmarking, CLI behavior, or other framework semantics, use
-   `maintainer-core`.
-   Work in `src/ml_pipes/`, shared docs, and shared tests.
+```text
+request
+    -> <Concrete Changes Stage>
+    -> for each concrete change:
+         -> <Target Stage>
+         -> <Placement Stage>
+```
 
-Use `maintainer-triage` when the requested outcome is understood but it is
-still unclear whether the change should stay in `examples/`, move into an
-operator package, or belong in core.
+## Concrete Changes Stage
+
+The main agent turns the user request into one or more candidate concrete
+changes by reading the relevant docs and code.
+
+```text
+Input: User Request
+- Interpret the request into candidate concrete changes
+- Keep changes local at first
+- If a change has to move into the framework, keep it in memory instead of
+  writing it immediately
+- Split big requests with multiple change surfaces into smaller changes
+- Output: Concrete Change(s)
+```
+
+## Target Stage
+
+Use `[maintainer-triage]` to propose a target location for each concrete
+change before trying to place it with an implementation skill.
+
+```text
+Input: Concrete Change
+- Run [maintainer-triage] to propose the target package/location
+- Make sure the target is narrow enough to place the change into a specific
+  package, module, file, and line when known
+- If the target varies, split the change into smaller ones with a clear target
+- Output: Targeted Change(s)
+```
+
+## Placement Stage
+
+Once the change is concrete and has a proposed target location, let the
+maintainer skill for that target confirm whether it really belongs there.
+
+```text
+Input: Targeted Change
+- <Select Skill By Target> to select the skill
+- Run the selected skill
+- If the skill accepts the target: place the current change
+- If the skill rejects the change (with a suggestion or reasoning): loop back through <Target Stage>
+```
+
+## Select Skill By Target
+
+Use this step only when the change is already concrete and has a specific
+target location.
+This step only selects the skill. It does not process the change itself.
+
+Order matters:
+
+```text
+when(target):
+    is examples/**:
+        if debugging: [pipeline-debugger]
+        else: [pipeline-builder]
+    is docs/** or packages/core/**:
+        [maintainer-core]
+    is packages/{tensor,vision,onnx,torch}/**:
+        [maintainer-operators]
+    else:
+        [maintainer-triage]
+```
 
 ## Skills
 
-- `pipeline-builder`: compose, adapt, extend, simplify, or document a
-  concrete pipeline in `examples/` or downstream code
-- `pipeline-debugger`: localize the first failing step, boundary, or failure
-  class in an existing pipeline
-- `maintainer-operators`: add, change, or document shared behavior in
-  operator packages
-- `maintainer-core`: implement shared framework-layer changes in
-  `src/ml_pipes/`
-- `maintainer-triage`: confirm whether a requested change belongs in
-  `examples/`, an operator package, or the core library
+- `pipeline-builder`: compose, adapt, simplify, or document a concrete
+  pipeline using the current package surfaces
+- `pipeline-debugger`: localize the first bad step or boundary and return the
+  concrete follow-up target
+- `maintainer-operators`: change a package-owned shared surface and its
+  package docs/exports
+- `maintainer-core`: change core-owned runtime or tooling behavior under
+  `packages/core/`
+- `maintainer-triage`: propose the target location for concrete changes,
+  split mixed changes, and identify the target of each one
 
 Choose the skill that best matches the current task.
-If the chosen skill explicitly redirects to another skill, follow that
-handoff.
+If a skill returns corrected target reasoning or a suggested target, loop
+back through `## Target Stage` and `## Placement Stage` before continuing.

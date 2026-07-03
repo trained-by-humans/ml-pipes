@@ -1,66 +1,78 @@
 ---
 name: maintainer-operators
-description: Add or maintain operators in ml-pipes operator packages. Use when Codex needs to check for an existing exact or similar operator, decide whether to extend it or add a new one in the right package or file, validate that the boundary is truly generic for that package, implement it using the operator rules, and verify it with a small runnable example.
+description: Add or maintain package-owned surfaces in ml-pipes packages. Use when Codex needs to work inside an already-routed package target, check whether a requested operator or package export already exists, update the right package-local code and docs, and verify the change with a focused pipeline or package-level check.
 ---
 
 # Maintainer Operators
 
 Repository documentation Markdown files define semantics. This file only
-drives operator-layer decisions.
+drives package-surface decisions.
 
-Use this skill when the task is to add, change, simplify, or document an
-operator in a shared operator package.
+Use this skill when the task is to add, change, simplify, or document a
+shared surface owned by one of the package modules such as
+`ml_pipes.tensor`, `ml_pipes.vision`, `ml_pipes.onnx`, or `ml_pipes.torch`
+after the target package is already known.
 
 ## Goal
 
-The goal of this skill is to place or update a truly generic operator in the
-right shared package, not to push one-off pipeline logic into shared code.
-Stop once package fit, operator shape, and small-example verification are
-confirmed.
+The goal of this skill is to place or update a truly reusable package-owned
+surface in the right package, not to push one-off pipeline logic into shared
+code.
+Stop once package fit, operator shape, package docs, and focused verification
+are complete.
 
-## Follow this Workflow
+## Follow This Workflow
 
-1. Confirm package fit.
-   If the package is already specified, verify the operator belongs there.
-   Otherwise, find the most relevant operator package or file.
+1. Confirm the routed package target first.
+   Read `docs/PACKAGES.md` to confirm the routed public module and package.
 
-2. Check for an existing exact operator.
-   Look for an operator whose semantics already match the requested behavior.
-   If the existing operator already matches the request, skip the change and
-   report the existing operator instead.
+2. Read the owning package docs.
+   Read `packages/<name>/README.md` and `packages/<name>/docs/INDEX.md` for
+   the selected package.
+   Use `docs/OPERATORS.md` only for shared operator rules.
 
-3. Check for a semantically similar operator.
-   If a nearby operator covers most of the requested behavior, decide whether
-   extending that operator still makes semantic sense and preserves single
-   responsibility.
-   Prefer extending an existing operator in place over creating a duplicate
-   operator with slightly different semantics.
+3. Check the current package surface.
+   Look for an existing exact surface first: operator, value type, export,
+   alias, or package doc entry.
+   If it already matches the request, stop and report the existing surface.
 
-4. Confirm boundary fit.
-   If the request still needs a new or changed operator, check that the
-   operator boundary is truly generic and matches the domain of that package
-   and the other operators already in it.
+4. Check for a semantically similar surface.
+   If a nearby operator or exported value covers most of the request, decide
+   whether extending it still preserves one clear package-owned boundary.
+   Prefer extending an existing package surface over creating a duplicate.
 
-5. Validate the operator shape.
-   Use `docs/OPERATORS.md` to make sure the operator follows the shared rules:
-   clear boundary, precise `__call__` annotations, meaningful config, and
-   `resolve_contract(...)` only when needed.
+5. Confirm package fit.
+   Use package ownership, not convenience, to decide where the change belongs:
+   - generic framework and generic operators -> core
+   - shared NumPy tensor work -> tensor
+   - image preprocessing, typed vision outputs, rendering/logging -> vision
+   - ONNX runtime boundary -> onnx
+   - Torch execution boundary and Torch-native postprocess -> torch
+   If the routed package does not fit, stop and return the corrected concrete
+   target to the skill router.
 
-6. Place or update the operator.
-   Update the existing operator in place when the request fits it.
-   Create a new operator only when the behavior does not fit an existing one.
-   Do not move an operator unless the user explicitly requested that move.
+6. Choose the package-local source file.
+   After the package is clear, place the change under
+   `packages/<name>/src/ml_pipes/<module>/...` in the file that matches the
+   behavior already grouped there.
 
-7. Verify with a small runnable example.
-   Create and run a focused example that checks how the operator composes in a
-   pipeline and how it behaves with the operator tooling from
-   `docs/OPERATORS.md`, such as composition, validation, description,
-   inspection, and tracing when useful.
+7. Keep package docs and exports aligned.
+   If the public package surface changes, update the package `__init__`,
+   package README, package docs index, and any shared tests that curate the
+   public surface.
+
+8. Verify with a focused package-level check.
+   Use the smallest pipeline, package test, or example that proves the updated
+   surface composes correctly and is exported/documented correctly.
 
 ## Report Back
 
-- report whether the operator belonged in the specified or selected package
-- report whether an existing operator already matched, an existing operator was
-  extended, a new operator was added, or the request was rejected as not
-  generic enough for a shared package
-- report the verification result from the small example
+- report which public module and package own the change
+- report whether an existing surface already matched, an existing surface was
+  extended, or a new package surface was added
+- report the focused verification result
+
+## Return To The Router When
+
+- the routed package target does not fit; report the corrected package,
+  module, file, and line when known

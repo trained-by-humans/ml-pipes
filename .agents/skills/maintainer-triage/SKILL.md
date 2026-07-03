@@ -1,54 +1,61 @@
 ---
 name: maintainer-triage
-description: Triage proposed changes in ml-pipes once the requested behavior is understood. Use when Codex needs to decide whether a change, or each component of a mixed change, should stay local to an example or downstream pipeline, move into an operator package, or belong in the core library.
+description: Propose a target location for concrete changes in ml-pipes. Use when Codex needs to check whether a change stays local, lands in a package-owned surface, or belongs in core, split mixed changes by final location, and hand the resulting targets back to the skill router.
 ---
 
 # Maintainer Triage
 
 Repository documentation Markdown files define semantics. This file only
-drives ownership decisions.
+drives target triage.
 
-Use this skill when the requested outcome is understood and the next decision
-is which layer should own the change.
+Use this skill when the agent already has one or more concrete changes and
+the next decision is what target location those changes should use.
 
 ## Goal
 
-The goal of this skill is ownership, not implementation.
-For mixed changes, split the work into components and triage each component
+The goal of this skill is target selection, not interpretation or
+implementation.
+For mixed requests, split the work into components and target each one
 separately.
-Start from the most local scope and move inward only when a component clearly
-belongs in a shared layer.
-Stop once the correct owning scope is clear.
+Start from concrete changes and narrow each one to its intended target
+location.
+Stop once every component has a concrete target or the narrowest confident
+target available.
 
-## Check Scopes In Order
+## Find The Target
 
-1. Check `examples/`
-   - Read `examples/README.md`.
-   - Confirm whether the current component is local to one example or
-     downstream pipeline.
-   - If yes, stop triage for that component and return to the skill router to
-     choose `pipeline-builder` or `pipeline-debugger`.
-   - If no, continue to the next scope.
+1. Start from concrete changes.
+   Do not invent the change from scratch here. Begin from the change the
+   main agent already inferred from the request, docs, and code.
 
-2. Check operator packages
-   - Read `docs/OPERATORS.md` and `docs/operators/README.md`.
-   - Confirm whether the current component belongs in an operator package.
-   - If yes, stop triage for that component and return to the skill router to
-     choose `maintainer-operators`.
-   - If no, continue to the next scope.
+2. Check the most likely final location for each change.
+   Read `examples/README.md`, `docs/PACKAGES.md`, and the relevant package or
+   core docs only as needed to identify where the change should end up.
 
-3. Check core framework
-   - Read `docs/DESIGN.md` and `docs/ARCHITECTURE.md`.
-   - Confirm whether the current component belongs in shared runtime or
-     tooling behavior.
-   - If yes, stop triage for that component and return to the skill router to
-     choose `maintainer-core`.
-   - If no, use the fallback below.
+3. Split mixed requests by target.
+   If different parts of the request land in different places, separate them
+   into different changes rather than keeping one blended task.
 
-## If Ownership Is Still Unclear
+4. Narrow the target as far as the evidence supports.
+   For each change, identify:
+   - package
+   - module
+   - file
+   - line
+   If the exact file or line is still unclear, stop at the narrowest
+   confident target.
 
-- Ask the user whether the current component is meant to stay local to one
-  example or integration, be reused across multiple pipelines, or change
-  shared framework behavior.
-- If that is still unclear, prefer keeping the component local rather than
-  moving it into a shared layer.
+## If Target Is Still Unclear
+
+- Ask whether the change is meant to stay local, land in one package-owned
+  surface, or change shared framework behavior.
+- If that is still unclear, report the unresolved alternatives and the
+  missing information rather than guessing the target.
+
+## Output
+
+The output of this skill should name, for each change:
+
+- the concrete target: package, module, file, and line when known
+- the intended final location if the exact file is still unknown
+- any unresolved ambiguity that must be settled before routing
