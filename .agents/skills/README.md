@@ -19,9 +19,9 @@ Do not switch between `integrator` and `maintainer` roles without explicit
 user approval:
 
 - If local pipeline work appears to require framework or package changes, ask
-  before switching into a maintainer skill.
+  before switching to maintainer work.
 - If framework work turns out to be only local example or integration work,
-  ask before switching into an integrator skill.
+  ask before switching to integrator work.
 - Exception: a maintainer may update examples when those changes are required
   to verify or reflect an approved shared change.
 
@@ -46,8 +46,8 @@ request
 
 ## Concrete Changes Stage
 
-The main agent turns the user request into one or more candidate concrete
-changes by reading the relevant docs and code.
+Turn the user request into one or more candidate concrete changes by reading
+the relevant docs and code.
 
 ```text
 Input: User Request
@@ -62,35 +62,39 @@ Input: User Request
 ## Target Stage
 
 Use `[maintainer-triage]` to propose a target location for each concrete
-change before trying to place it with an implementation skill.
+change before trying to place it with the relevant implementation workflow.
 
 ```text
 Input: Concrete Change
 - Run [maintainer-triage] to propose the target package/location
+- Reuse any rejection reasoning from a previous placement attempt
 - Make sure the target is narrow enough to place the change into a specific
   package, module, file, and line when known
 - If the target varies, split the change into smaller ones with a clear target
+- If triage still reports unresolved ambiguity, stop before placement
 - Output: Targeted Change(s)
 ```
 
 ## Placement Stage
 
-Once the change is concrete and has a proposed target location, let the
-maintainer skill for that target confirm whether it really belongs there.
+Once the change is concrete and has a proposed target location, use the
+selected maintainer workflow to confirm whether it really belongs there.
 
 ```text
 Input: Targeted Change
-- <Select Skill By Target> to select the skill
-- Run the selected skill
-- If the skill accepts the target: place the current change
-- If the skill rejects the change (with a suggestion or reasoning): loop back through <Target Stage>
+- <Select Skill By Target> to choose the next workflow
+- Apply the selected skill guidance
+- If the selected guidance confirms the target: place the current change
+- If the selected guidance rejects the target or reports unresolved ambiguity:
+  loop back through <Target Stage> with that reasoning
 ```
 
 ## Select Skill By Target
 
 Use this step only when the change is already concrete and has a specific
 target location.
-This step only selects the skill. It does not process the change itself.
+This step only selects which skill guidance to apply next.
+It does not process the change itself.
 
 Order matters:
 
@@ -111,7 +115,7 @@ when(target):
 
 - `pipeline-builder`: compose, adapt, simplify, or document a concrete
   pipeline using the current package surfaces
-- `pipeline-debugger`: localize the first bad step or boundary and return the
+- `pipeline-debugger`: localize the first bad step or boundary and identify the
   concrete follow-up target
 - `maintainer-operators`: change a package-owned shared surface and its
   package docs/exports
@@ -121,5 +125,3 @@ when(target):
   split mixed changes, and identify the target of each one
 
 Choose the skill that best matches the current task.
-If a skill returns corrected target reasoning or a suggested target, loop
-back through `## Target Stage` and `## Placement Stage` before continuing.

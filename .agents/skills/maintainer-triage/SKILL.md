@@ -1,6 +1,6 @@
 ---
 name: maintainer-triage
-description: Propose a target location for concrete changes in ml-pipes. Use when Codex needs to check whether a change stays local, lands in a package-owned surface, or belongs in core, split mixed changes by final location, and hand the resulting targets back to the skill router.
+description: Propose a target location for concrete changes in ml-pipes. Use when Codex needs to check whether a change stays local, lands in a package-owned surface, or belongs in core, split mixed changes by final location, and produce the resulting targets for the next routing step.
 ---
 
 # Maintainer Triage
@@ -8,7 +8,7 @@ description: Propose a target location for concrete changes in ml-pipes. Use whe
 Repository documentation Markdown files define semantics. This file only
 drives target triage.
 
-Use this skill when the agent already has one or more concrete changes and
+Use this skill when the current work already has one or more concrete changes and
 the next decision is what target location those changes should use.
 
 ## Goal
@@ -26,7 +26,9 @@ target available.
 
 1. Start from concrete changes.
    Do not invent the change from scratch here. Begin from the change the
-   main agent already inferred from the request, docs, and code.
+   current workflow already inferred from the request, docs, and code.
+   If a previous placement attempt rejected a target, reuse that rejection
+   reasoning here instead of restarting from scratch.
 
 2. Check the most likely final location for each change.
    Read `examples/README.md`, `docs/PACKAGES.md`, and the relevant package or

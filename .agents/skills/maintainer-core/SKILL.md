@@ -41,27 +41,39 @@ Stop once the core change is implemented and verified in core-owned surfaces.
    Read `docs/COMPOSITION.md`, `docs/VALIDATION.md`, `docs/TRACING.md`, or
    `docs/BENCHMARKING.md` only when that subsystem is part of the change.
 
-5. Keep the change in core-owned surfaces.
-   Work in `packages/core/src/ml_pipes/`, shared docs under `docs/`, and
-   shared tests under `tests/`.
+5. Confirm core fit.
+   If the core docs show the change does not fit the core package, reject it
+   for this scope and report why it does not fit core.
 
-6. Keep non-core behavior out of core.
-   Do not move package-specific payloads, runtime boundaries, or task-specific
-   postprocess into core. Those belong in the owning package under
-   `packages/<name>/`.
+6. Implement the requested change.
+   Once the change still fits core after that check, implement the change under
+   `packages/core/src/ml_pipes/` in the file that matches the
+   behavior already grouped there.
 
-7. Update user-facing ownership docs when needed.
-   If the public core surface changes, update the relevant core package docs
-   and any shared framework docs that describe that surface.
+7. Check the implementation against the shared operator rules when needed.
+   If the change adds, changes, or updates a generic reusable operator in
+   `ml_pipes.standard`, read `docs/OPERATORS.md` and make sure the
+   implementation follows those rules.
 
-8. Verify at the framework level.
+8. Verify the core behavior.
    Run the smallest targeted shared tests or examples that confirm the new
-   core behavior and any affected public surface.
+   core behavior and the final public shape of the change.
 
-## Return To The Router When
+9. Align the docs to the verified surface.
+   If the verified core change affects a documented public surface, update
+   the relevant core package docs and any shared framework docs that describe
+   that surface.
 
-- the change is really package-owned surface work; report the corrected
-  target package, module, file, and line when known
-- the change is local to one example or downstream pipeline; report the
-  corrected target under `examples/**`
-- the correct target is still unclear; report the unresolved alternatives
+## Output
+
+- report which core surface owns the change
+- report whether an existing core surface already matched, an existing
+  surface was extended, or a new core surface was added
+- report the focused verification result
+
+## Reject When Scope Does Not Fit
+
+- the change is really package-owned surface work; explain why it does not
+  fit core
+- the change is local to one example or downstream pipeline; explain why it
+  does not fit core

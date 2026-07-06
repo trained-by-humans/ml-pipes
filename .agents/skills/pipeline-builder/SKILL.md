@@ -71,9 +71,9 @@ inputs and expected outputs, or the remaining issue needs debugging.
     If the remaining issue is not local composition work, identify the
     narrowest concrete targets you can support from the current evidence:
     package, module, file, and line when known.
-    Return those targets to the skill router for the next step.
+    Report those targets so the next routing step can continue.
 
-## Hand Off To
+## Switch To
 
 - `pipeline-debugger` only when the user wants the local pipeline failure
   localized further before making changes

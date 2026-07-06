@@ -56,9 +56,9 @@ reduced to concrete follow-up targets.
    - line
    If the exact line is still unclear, stop at the narrowest confident target.
 
-7. Return to the skill router.
-   Finish once the localized issue, root cause, and concrete targets are
-   clear enough for the router to place the next change.
+7. Finish with the next target.
+   Stop once the localized issue, root cause, and concrete targets are
+   clear enough for the next routing step.
 
 ## Output
 
