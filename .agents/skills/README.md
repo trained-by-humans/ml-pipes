@@ -106,7 +106,7 @@ when(target):
     is docs/** or packages/core/**:
         [maintainer-core]
     is packages/{tensor,vision,onnx,torch}/**:
-        [maintainer-operators]
+        [maintainer-packages]
     else:
         [maintainer-triage]
 ```
@@ -117,7 +117,7 @@ when(target):
   pipeline using the current package surfaces
 - `pipeline-debugger`: localize the first bad step or boundary and identify the
   concrete follow-up target
-- `maintainer-operators`: change a package-owned shared surface and its
+- `maintainer-packages`: change a package-owned shared surface and its
   package docs/exports
 - `maintainer-core`: change core-owned runtime or tooling behavior under
   `packages/core/`

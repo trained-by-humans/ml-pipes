@@ -1,9 +1,9 @@
 ---
-name: maintainer-operators
-description: Add or maintain package-owned surfaces in ml-pipes packages. Use when Codex needs to work inside an already-routed package target, check whether a requested operator or package export already exists, update the right package-local code and docs, and verify the change with a focused pipeline or package-level check.
+name: maintainer-packages
+description: Add or maintain package-owned surfaces in ml-pipes packages. Use when Codex needs to work inside an already-routed package target, check whether a requested operator, value type, alias, or package export already exists, update the right package-local code and docs, and verify the change with a focused pipeline or package-level check.
 ---
 
-# Maintainer Operators
+# Maintainer Packages
 
 Repository documentation Markdown files define semantics. This file only
 drives package-surface decisions.
