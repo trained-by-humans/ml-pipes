@@ -21,14 +21,8 @@ Minimal example:
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.onnx import (
-    Distribute,
-    Infer,
-)
-from ml_pipes.standard import (
-    Batch,
-    UnBatch,
-)
+from ml_pipes.onnx import Distribute, Infer
+from ml_pipes.standard import Batch, UnBatch
 from ml_pipes.tensor import Collate
 
 
@@ -109,21 +103,11 @@ list of samples.
 Example:
 
 ```python
-from ml_pipes.onnx import (
-    Distribute,
-    Extract,
-    Infer,
-)
-from ml_pipes.standard import Batch
-from ml_pipes.tensor import Collate
-from ml_pipes.vision import NMS
 from ml_pipes.core import Pipeline
-from ml_pipes.standard import UnBatch
-from ml_pipes.vision import (
-    Normalize,
-    Resize,
-    ToDetections,
-)
+from ml_pipes.onnx import Distribute, Extract, Infer
+from ml_pipes.standard import Batch, UnBatch
+from ml_pipes.tensor import Collate
+from ml_pipes.vision import NMS, Normalize, Resize, ToDetections
 
 
 pipeline = Pipeline([
@@ -159,30 +143,10 @@ region with `list[T]`, and the region body runs once per item.
 Example:
 
 ```python
-from ml_pipes.onnx import (
-    Extract,
-    Infer,
-)
-from ml_pipes.standard import (
-    Gather,
-    Pick,
-)
-from ml_pipes.vision import (
-    NMS,
-    Normalize,
-)
 from ml_pipes.core import Pipeline
-from ml_pipes.standard import (
-    Recall,
-    Scatter,
-    Store,
-)
-from ml_pipes.vision import (
-    Resize,
-    Stitch,
-    Tile,
-)
-from ml_pipes.vision import ToDetections
+from ml_pipes.onnx import Extract, Infer
+from ml_pipes.standard import Gather, Pick, Recall, Scatter, Store
+from ml_pipes.vision import NMS, Normalize, Resize, Stitch, Tile, ToDetections
 
 
 pipeline = Pipeline([
@@ -286,11 +250,7 @@ Minimal skeleton:
 ```python
 from typing import Any
 
-from ml_pipes.core import (
-    Operator,
-    RegionCloser,
-    RegionOpener,
-)
+from ml_pipes.core import Operator, RegionCloser, RegionOpener
 
 
 class MyRegionEnd(RegionCloser[str, list[str]]):

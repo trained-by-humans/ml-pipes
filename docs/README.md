@@ -6,31 +6,33 @@ Package-owned guides live under `packages/<name>/docs/`.
 ## Start Here
 
 - [../README.md](../README.md) for the framework overview and quick start
-- [PACKAGES.md](PACKAGES.md) to choose the right package and import surface
 - [../examples/README.md](../examples/README.md) to run a concrete example first
+- [PACKAGES.md](PACKAGES.md) to choose the right package and import surface
 
 ## Understand The Pipeline Model
 
 - [OPERATORS.md](OPERATORS.md) for operator boundaries, naming, and design rules
-- [COMPOSITION.md](COMPOSITION.md) for pipeline composition, value shapes, and
-  `embed` / `inline`
-- [REGIONS.md](REGIONS.md) for batching, scatter/gather, and custom region
-  semantics
-- [SCAFFOLDING.md](SCAFFOLDING.md) to wrap a new model inside an explicit
-  pipeline
+- [COMPOSITION.md](COMPOSITION.md) for pipeline composition
+
+## Design And Architecture
+
+- [DESIGN.md](DESIGN.md) for the conceptual model and rationale
+- [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and runtime shape
 
 ## Tooling
 
 - [VALIDATION.md](VALIDATION.md) for static pipeline contract checking
 - [TRACING.md](TRACING.md) for one-run timing and collectors
 - [BENCHMARKING.md](BENCHMARKING.md) for repeated-run measurement and sweeps
+
+## Advanced Topics
+
+- [REGIONS.md](REGIONS.md) for batching, scatter/gather, and custom region
+  semantics
 - [PERFORMANCE.md](PERFORMANCE.md) for practical guidance on batching,
   concurrency, and throughput tradeoffs
-
-## Design And Architecture
-
-- [DESIGN.md](DESIGN.md) for the conceptual model and rationale
-- [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and runtime shape
+- [SCAFFOLDING.md](SCAFFOLDING.md) to wrap a new model inside an explicit
+  pipeline
 
 ## Package-Owned Docs
 

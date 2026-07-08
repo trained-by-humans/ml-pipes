@@ -113,16 +113,17 @@ examples.
 
 ## Features Built On Operators
 
-The pipeline's tooling works because operators define explicit boundaries.
+The features below are not provided by the `@Operator` decorator itself.
+They work because the framework treats operators as explicit pipeline
+boundaries with meaningful input, output, and step identity.
+When those boundaries are chosen well, composition, validation,
+description, inspection, tracing, and benchmarking all become useful.
 
 The examples below use the same tiny operator chain:
 
 ```python
 from ml_pipes.collectors import PrintCollector
-from ml_pipes.core import (
-    Operator,
-    Pipeline,
-)
+from ml_pipes.core import Operator, Pipeline
 
 
 def strip_text(text: str) -> str:
@@ -157,7 +158,8 @@ pipeline("  Hello World  ")
 ```
 
 > [!TIP]
-> That chaining behavior is the foundation the rest of the framework builds on.
+> That handoff between operators is the base layer the rest of the framework
+> builds on.
 
 ### Validation
 
@@ -175,8 +177,8 @@ Input: <class 'str'>, Output: list[str]
 ```
 
 > [!TIP]
-> This is why reusable operators should carry precise `__call__` annotations:
-> the validator reasons about the pipeline through operator boundaries.
+> Validation is only as good as the boundaries it can read, so precise
+> `__call__` annotations matter.
 
 ### Description
 
@@ -197,18 +199,15 @@ Pipeline([
 ```
 
 > [!TIP]
-> This is why reusable operators should have meaningful names and, when
-> configured, meaningful constructor arguments.
+> Good operator names and readable constructor arguments make pipeline
+> descriptions easier to scan.
 
 ### Inspection
 
 Inspection captures the value flowing through each operator boundary.
 
 ```python
-from ml_pipes.inspection import (
-    PipelineInspector,
-    TextBlock,
-)
+from ml_pipes.inspection import PipelineInspector, TextBlock
 
 pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
 result = pipeline.inspect("  Hello World  ")
@@ -233,8 +232,8 @@ for view in views:
 ```
 
 > [!TIP]
-> This is one reason small single-purpose operators are easier to debug than
-> large fused blocks.
+> Inspection is easier to read when each operator marks one clear step instead
+> of hiding several steps inside one fused block.
 
 ### Tracing
 
@@ -255,8 +254,8 @@ pipeline.set_tracing(None)
 ```
 
 > [!TIP]
-> If an operator is too broad or mixes unrelated work, tracing becomes less
-> useful because the latency is no longer attributed to a meaningful boundary.
+> Tracing is most useful when each timing line corresponds to one meaningful
+> step rather than a mixed block of work.
 
 ### Benchmark
 
@@ -264,10 +263,7 @@ Benchmarking repeats the pipeline over many runs and aggregates latency at the
 same operator boundaries tracing uses.
 
 ```python
-from ml_pipes.benchmark import (
-    Benchmark,
-    MeasurementConfig,
-)
+from ml_pipes.benchmark import Benchmark, MeasurementConfig
 
 result = Benchmark(
     pipeline,
@@ -290,8 +286,8 @@ runs: 5  (all values in ms)
 ```
 
 > [!TIP]
-> Benchmarking is most useful after the pipeline already works: it keeps the
-> same operator boundaries as tracing, but measures them across repeated runs.
+> Benchmarking reuses those same operator boundaries, but compares them across
+> repeated runs instead of one execution.
 
 ## Design Principles
 
@@ -431,18 +427,16 @@ inspect, trace, and benchmark as standalone boundaries.
   boundary, `inspect()` shows what value flows through it, and tracing or
   benchmarking can be added once correctness is already established.
 
-## Package Catalogs
+## Operator Packages
 
-The concrete package indexes live with their owning packages. Use this page
-for the shared operator model and design constraints, and use the package
-indexes when you need the concrete operator surface for one domain.
+So far this page has focused on what operators are and how to create them.
+In practice, many reusable operators already exist, so most users should start
+from [PACKAGES.md](PACKAGES.md) and then check the linked package index for
+the operators they need.
 
-For package installs and public imports, see [PACKAGES.md](PACKAGES.md).
+Start from `ml_pipes.standard` for shared generic building blocks such as
+routing, context, regions, and data-preparation work.
 
-| Package | Public modules | Package catalog | Focus |
-|---|---|---|---|
-| `ml-pipes-core` | `ml_pipes.standard` | [packages/core/docs/INDEX.md](../packages/core/docs/INDEX.md) | routing, context, regions, and data-preparation operators |
-| `ml-pipes-tensor` | `ml_pipes.tensor` | [packages/tensor/docs/INDEX.md](../packages/tensor/docs/INDEX.md) | tensor registry transforms, ranking, masking, and batch assembly |
-| `ml-pipes-onnx` | `ml_pipes.onnx` | [packages/onnx/docs/INDEX.md](../packages/onnx/docs/INDEX.md) | ONNX runtime invocation and output extraction |
-| `ml-pipes-vision` | `ml_pipes.vision` | [packages/vision/docs/INDEX.md](../packages/vision/docs/INDEX.md) | image preprocessing, detection and segmentation, tiling, rendering, and density |
-| `ml-pipes-torch` | `ml_pipes.torch` | [packages/torch/docs/INDEX.md](../packages/torch/docs/INDEX.md) | Torch domain boundaries, runtime, device movement, and Torch-native postprocess |
+Example: if postprocess is still tensor-shaped, start from the tensor package
+and its index in
+[packages/tensor/docs/INDEX.md](../packages/tensor/docs/INDEX.md).

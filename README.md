@@ -1,16 +1,12 @@
 # ml-pipes
 
-Build explicit ML pipelines you can run, inspect, validate, trace, and
+Build explicit ML pipelines you can validate, run, inspect, trace, and
 benchmark.
 
-`ml-pipes` is a compute-composition framework for ML systems built around
-explicit data flow. It keeps preprocessing, runtime calls, postprocessing, and
-application logic visible in one pipeline instead of spreading them across
-wrappers and hidden control flow.
-
-The same operator boundaries power validation, inspection, tracing, and
-benchmarking, so the pipeline you write is also the pipeline your tools
-understand.
+`ml-pipes` is a framework for composing explicit ML pipelines. It consists of
+a core pipeline runtime and a set of installable domain-specific operator
+packages, plus shared pipeline tooling built around explicit operator
+boundaries.
 
 ## Quick Start
 
@@ -107,10 +103,7 @@ example, you can define one small operator and drop it into a pipeline that
 already has a few steps:
 
 ```python
-from ml_pipes.core import (
-    Operator,
-    Pipeline,
-)
+from ml_pipes.core import Operator, Pipeline
 
 
 def strip_text(text: str) -> str:

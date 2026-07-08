@@ -94,18 +94,8 @@ Example boundary crossing:
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.tensor import (
-    ArgMax,
-    GatherRows,
-    Slice,
-)
-from ml_pipes.vision import (
-    Decode,
-    MapPredictionsToObjects,
-    Normalize,
-    Resize,
-    ToDetections,
-)
+from ml_pipes.tensor import ArgMax, GatherRows, Slice
+from ml_pipes.vision import Decode, MapPredictionsToObjects, Normalize, Resize, ToDetections
 from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
 
 pipeline = Pipeline([
@@ -177,11 +167,7 @@ run the model in Torch, then hand the outputs back to NumPy.
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.vision import (
-    Decode,
-    Normalize,
-    Resize,
-)
+from ml_pipes.vision import Decode, Normalize, Resize
 from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
 
 pipeline = Pipeline([
@@ -209,13 +195,7 @@ You can keep postprocess in Torch when it gives you a concrete benefit. The two 
 ```python
 from ml_pipes.core import Pipeline
 from ml_pipes.vision import ToSegmentations
-from ml_pipes.torch import (
-    ToNumpyRegistry,
-    TorchMasksToBoxes,
-    TorchResizeMasks,
-    TorchSigmoid,
-    TorchSoftmax,
-)
+from ml_pipes.torch import ToNumpyRegistry, TorchMasksToBoxes, TorchResizeMasks, TorchSigmoid, TorchSoftmax
 
 pipeline = Pipeline([
     ...,

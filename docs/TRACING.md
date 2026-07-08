@@ -17,15 +17,7 @@ It captures the operator-by-operator view of that call, including:
 from ml_pipes.collectors import PrintCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Infer
-from ml_pipes.vision import (
-    Decode,
-    NMS,
-    Normalize,
-)
-from ml_pipes.vision import (
-    Resize,
-    ToDetections,
-)
+from ml_pipes.vision import Decode, NMS, Normalize, Resize, ToDetections
 
 
 pipeline = Pipeline([

@@ -67,3 +67,11 @@ Report back:
 - the localized failure or root cause
 - the concrete follow-up target: package, module, file, and line when known
 - any remaining uncertainty that blocks narrowing the target further
+
+## Switch To
+
+- `pipeline-builder` only when the user wants the current example or
+  downstream pipeline fixed and the issue is now concrete enough for local
+  pipeline repair
+- if a local fix alone is not possible, report the concrete target instead of
+  switching to `pipeline-builder`

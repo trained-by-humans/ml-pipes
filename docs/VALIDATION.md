@@ -160,12 +160,7 @@ Examples:
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.standard import (
-    Batch,
-    Recall,
-    Store,
-    UnBatch,
-)
+from ml_pipes.standard import Batch, Recall, Store, UnBatch
 
 Pipeline([Store("x"), Recall("x")])                             # valid
 Pipeline([Recall("x")])                                         # invalid

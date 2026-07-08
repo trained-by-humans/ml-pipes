@@ -1,10 +1,8 @@
 # Skills Index
 
-Use this file only to pick the right workflow and the right owning scope.
-For repo-level guidance such as source of truth and repository structure,
-follow `AGENTS.md`.
-Use `docs/README.md` as the shared doc index and `docs/PACKAGES.md` to
-resolve package ownership.
+This file is the workflow router for the agent.
+Use it to run the high-level loop: turn requests into concrete changes, route
+each change to the right target, and then apply the matching skill.
 
 ## Agent Roles
 
@@ -27,21 +25,29 @@ user approval:
 
 ## Workflow Loop
 
-Process maintainer work in three stages:
+Maintainer work moves through three stages:
 
-1. `<Concrete Changes Stage>`
-2. `<Target Stage>`
-3. `<Placement Stage>`
+1. `<Concrete Changes Stage>` turns the full request into one or more
+   concrete changes.
+2. `<Target Stage>` takes one concrete change at a time and narrows it to one
+   or more targeted changes.
+3. `<Placement Stage>` takes one targeted change at a time and uses the
+   matching skill to confirm and place it.
 
-Each pass should end with a concrete target location: package, module, file,
-and line when known.
+The stages are not one big batch. Start by making the whole request concrete.
+After that, process each change gradually: target one concrete change, split
+it further if needed, and place each targeted change before moving on.
+
+Each placement pass should end with a concrete target location: package,
+module, file, and line when known.
 
 ```text
 request
     -> <Concrete Changes Stage>
     -> for each concrete change:
          -> <Target Stage>
-         -> <Placement Stage>
+         -> for each targeted change:
+              -> <Placement Stage>
 ```
 
 ## Concrete Changes Stage
@@ -83,10 +89,9 @@ selected maintainer workflow to confirm whether it really belongs there.
 ```text
 Input: Targeted Change
 - <Select Skill By Target> to choose the next workflow
-- Apply the selected skill guidance
-- If the selected guidance confirms the target: place the current change
-- If the selected guidance rejects the target or reports unresolved ambiguity:
-  loop back through <Target Stage> with that reasoning
+- Apply the selected skill guidance to confirm and place the change
+- If placement does not succeed, loop back through <Target Stage> with that
+  reasoning
 ```
 
 ## Select Skill By Target

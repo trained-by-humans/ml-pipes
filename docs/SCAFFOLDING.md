@@ -245,8 +245,9 @@ NMS(),
 If score thresholding is all you need, `NMS(conf_threshold=...)` may already
 be enough by itself.
 
-For more filtering and selection operators, see
-the package-owned catalogs in [OPERATORS.md](OPERATORS.md).
+For more filtering and selection operators, start with
+[PACKAGES.md](PACKAGES.md) and then check the relevant package docs for your
+domain.
 
 The exact operators can change by model family. The important point is the
 ordering: cheap filters first, heavier work later.
