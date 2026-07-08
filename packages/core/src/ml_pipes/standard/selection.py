@@ -1,60 +1,10 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import Any, Generic, Literal, TypeVar, get_args, get_origin, overload
 
-from .batch import Batch, UnBatch
-from .context import Recall, Store
-from .data_ops import (
-    CollectItems,
-    Distinct,
-    DistinctBy,
-    DropNull,
-    Filter,
-    FilterNotNull,
-    LazyPerItem,
-    Map,
-    MapNotNull,
-    MapValue,
-    PerItem,
-    StreamItems,
-    Take,
-    TakeWhile,
-    WrapMappingInObject,
-)
-from .operator import Operator
-from .scatter import Gather, Scatter
-from .selector import Selector, SelectorInput
-from .validation import PipelineValidationError
+from ml_pipes.operator import Operator
+from ml_pipes.selector import Selector, SelectorInput
 
-__all__ = [
-    "Batch",
-    "CollectItems",
-    "Distinct",
-    "DistinctBy",
-    "DropNull",
-    "Filter",
-    "FilterNotNull",
-    "Gather",
-    "LazyPerItem",
-    "Map",
-    "MapNotNull",
-    "MapValue",
-    "PerItem",
-    "Pick",
-    "Recall",
-    "Scatter",
-    "Select",
-    "SideEffectOp",
-    "Store",
-    "StreamItems",
-    "Take",
-    "TakeWhile",
-    "UnBatch",
-    "WrapMappingInObject",
-]
-
-PayloadT = TypeVar("PayloadT")
 PickIndexT = TypeVar("PickIndexT", bound=int)
 PickFirstT = TypeVar("PickFirstT")
 PickSecondT = TypeVar("PickSecondT")
@@ -80,7 +30,7 @@ class Select:
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
+        del stored_annotations, expand_output_annotation
         if current_output is Any:
             return (Any,), Any
 
@@ -145,7 +95,6 @@ class Pick(Generic[PickIndexT]):
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations, expand_output_annotation
-        error_type = validation_error_type or PipelineValidationError
 
         if current_output is Any or current_output is tuple:
             return (tuple[Any, ...],), Any
@@ -157,10 +106,17 @@ class Pick(Generic[PickIndexT]):
 
         parts = self._fixed_tuple_parts(current_output)
         if parts is None:
-            raise error_type(f"Pick requires a tuple boundary, got {current_output}")
+            raise validation_error_type(f"Pick requires a tuple boundary, got {current_output}")
 
         selected = tuple(
-            parts[self._normalize_fixed_index(index, len(parts), current_output, error_type)]
+            parts[
+                self._normalize_fixed_index(
+                    index,
+                    len(parts),
+                    current_output,
+                    validation_error_type,
+                )
+            ]
             for index in self.indices
         )
         input_annotation = current_output if get_origin(current_output) is tuple else tuple[parts]
@@ -199,29 +155,3 @@ class Pick(Generic[PickIndexT]):
                 f"Pick({index}) is out of bounds for {current_output} (length {size})"
             )
         return normalized_index
-
-
-class SideEffectOp(ABC, Generic[PayloadT]):
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        if "__call__" in cls.__dict__:
-            raise TypeError(
-                f"{cls.__name__} must not override __call__; implement effect() instead"
-            )
-
-    @abstractmethod
-    def effect(self, payload: PayloadT) -> None:
-        raise NotImplementedError
-
-    def __call__(self, payload: PayloadT) -> PayloadT:
-        self.effect(payload)
-        return payload
-
-    def resolve_contract(
-        self,
-        current_output: Any | None,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[tuple[Any, ...], Any]:
-        return (Any,), current_output

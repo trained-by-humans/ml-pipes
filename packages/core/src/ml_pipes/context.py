@@ -4,9 +4,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Mapping, TypeVar, overload
 
-from ._typing.annotation import build_union_annotation_from_options, variadic_tuple_item_annotation
-from .operator import Operator
-from .selector import Selector, SelectorInput
+from ml_pipes._typing.annotation import build_union_annotation_from_options, variadic_tuple_item_annotation
+from ml_pipes.operator import Operator
+from ml_pipes.selector import Selector, SelectorInput
 
 
 @dataclass(frozen=True)
@@ -179,6 +179,7 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
         expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
+        del validation_error_type
         stored_annotation = stored_annotations.get(self.name, Any)
         current_item_annotation = variadic_tuple_item_annotation(current_output)
         if current_item_annotation is not None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .views import (
+from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
     OutputBlock,

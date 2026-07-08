@@ -5,15 +5,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypeVar, get_args, get_origin
 
-from .control import SHORT_CIRCUIT
-from .operator import Operator
-from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
-from .tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, merge_traces
-
-
-# ---------------------------------------------------------------------------
-# Coordination primitive
-# ---------------------------------------------------------------------------
+from ml_pipes.control import SHORT_CIRCUIT
+from ml_pipes.operator import Operator
+from ml_pipes.region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
+from ml_pipes.tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, merge_traces
 
 
 class _ScatterEntry:
@@ -70,11 +65,6 @@ class ScatterGate:
                 first_exc = entry.exception
 
         return entries, first_exc
-
-
-# ---------------------------------------------------------------------------
-# Public operators
-# ---------------------------------------------------------------------------
 
 
 ScatterItemT = TypeVar("ScatterItemT")

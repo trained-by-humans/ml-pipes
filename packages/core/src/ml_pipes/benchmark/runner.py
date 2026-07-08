@@ -5,11 +5,11 @@ from typing import Any
 
 import numpy as np
 
-from ..collectors.concurrent_collector import ConcurrentCollector
-from ..core import Pipeline
-from ..factory import DataFactory, InputFn, PipelineFactory
-from ..tracing import InvocationTrace
-from .results import BenchmarkResult, InvocationStat
+from ml_pipes.collectors.concurrent_collector import ConcurrentCollector
+from ml_pipes.pipeline import Pipeline
+from ml_pipes.factory import DataFactory, InputFn, PipelineFactory
+from ml_pipes.tracing import InvocationTrace
+from ml_pipes.benchmark.results import BenchmarkResult, InvocationStat
 
 
 @dataclass

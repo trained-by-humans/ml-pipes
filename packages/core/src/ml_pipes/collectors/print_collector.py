@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .capture_collector import CaptureCollector
-from ..tracing import InvocationTrace
+from ml_pipes.collectors.capture_collector import CaptureCollector
+from ml_pipes.tracing import InvocationTrace
 
 
 class PrintCollector(CaptureCollector):

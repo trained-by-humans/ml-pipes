@@ -4,8 +4,8 @@ import os
 import time
 from collections import deque
 
-from .aggregate_collector import AggregateCollector
-from ..tracing import InvocationTrace
+from ml_pipes.collectors.aggregate_collector import AggregateCollector
+from ml_pipes.tracing import InvocationTrace
 
 try:
     import psutil as _psutil

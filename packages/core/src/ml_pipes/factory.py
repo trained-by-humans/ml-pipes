@@ -4,7 +4,7 @@ import functools
 import inspect
 from typing import Any, Callable, Generic, TypeVar, cast
 
-from .core import Pipeline
+from ml_pipes.pipeline import Pipeline
 
 FactoryOutputT = TypeVar("FactoryOutputT")
 FactoryT = TypeVar("FactoryT", bound="Factory[Any]")

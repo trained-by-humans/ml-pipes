@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from abc import abstractmethod
 
-from ..tracing import InvocationTrace, TraceCollector
+from ml_pipes.tracing import InvocationTrace, TraceCollector
 
 
 class SerialCollector(TraceCollector):

@@ -4,7 +4,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, get_args, get_origin, get_type_hints
 
-from .annotation import (
+from ml_pipes._typing.annotation import (
     _MISSING_ANNOTATION,
     build_union_annotation_from_options,
     describe_annotation,
@@ -12,7 +12,7 @@ from .annotation import (
     is_union_annotation,
     is_unknown_annotation,
 )
-from .signatures import _POSITIONAL_VALUE_PARAMETER_KINDS
+from ml_pipes._typing.signatures import _POSITIONAL_VALUE_PARAMETER_KINDS
 
 
 class AttributeResolutionError(Exception):

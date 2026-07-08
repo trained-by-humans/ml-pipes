@@ -4,8 +4,8 @@ import base64
 import html as _html
 from pathlib import Path
 
-from .formatters import cv2
-from .views import (
+from ml_pipes.inspection.formatters import cv2
+from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
     OutputBlock,

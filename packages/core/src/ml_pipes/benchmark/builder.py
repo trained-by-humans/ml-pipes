@@ -4,10 +4,10 @@ import itertools
 import sys
 from typing import Any, Callable, TypeAlias
 
-from ..core import Pipeline
-from ..factory import DataFactory, InputFn, PipelineFactory
-from .results import BenchmarkResult
-from .runner import BenchmarkSweep, MeasurementConfig
+from ml_pipes.pipeline import Pipeline
+from ml_pipes.factory import DataFactory, InputFn, PipelineFactory
+from ml_pipes.benchmark.results import BenchmarkResult
+from ml_pipes.benchmark.runner import BenchmarkSweep, MeasurementConfig
 
 PipelineFactoryLike: TypeAlias = Callable[..., Pipeline[Any, Any]]
 DataFactoryLike: TypeAlias = Callable[..., InputFn]

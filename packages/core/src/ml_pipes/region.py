@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeAlias, TypeVar
 
 if TYPE_CHECKING:
-    from .tracing import InvocationTrace, TracingConfig, _NoOpTrace
+    from ml_pipes.tracing import InvocationTrace, TracingConfig, _NoOpTrace
     RegionTraceLike: TypeAlias = InvocationTrace | _NoOpTrace
 else:
     RegionTraceLike = Any

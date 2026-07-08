@@ -5,7 +5,7 @@ from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from itertools import islice, takewhile
 from typing import Any, Generic, TypeVar, cast, get_args, get_origin
 
-from ._typing.annotation import (
+from ml_pipes._typing.annotation import (
     is_assignable,
     is_iterable_annotation,
     is_mapping_annotation,
@@ -15,18 +15,18 @@ from ._typing.annotation import (
     remove_none_annotation_options,
     resolve_iterable_item_annotation,
 )
-from ._typing.inspection import (
+from ml_pipes._typing.inspection import (
     resolve_callable_annotations,
 )
-from ._typing.signatures import (
+from ml_pipes._typing.signatures import (
     validate_nullary_callable_signature,
     validate_unary_callable_signature,
 )
-from .control import SHORT_CIRCUIT
-from .operator import Operator
-from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
-from .selector import Selector, SelectorInput
-from .tracing import PendingSpan, InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, _extract_shape, capture_value, operator_config
+from ml_pipes.control import SHORT_CIRCUIT
+from ml_pipes.operator import Operator
+from ml_pipes.region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
+from ml_pipes.selector import Selector, SelectorInput
+from ml_pipes.tracing import PendingSpan, InvocationTrace, StepSpan, TracingConfig, _NoOpTrace, _extract_shape, capture_value, operator_config
 
 
 StateT = TypeVar("StateT")

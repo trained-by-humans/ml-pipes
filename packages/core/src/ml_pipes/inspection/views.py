@@ -5,7 +5,7 @@ from typing import Any, Callable, Protocol
 
 import numpy as np
 
-from ..tracing import StepSpan
+from ml_pipes.tracing import StepSpan
 
 
 @dataclass

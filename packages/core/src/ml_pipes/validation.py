@@ -4,7 +4,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Any
 
-from ._typing.annotation import (
+from ml_pipes._typing.annotation import (
     _are_annotations_equivalent,
     _collect_any_placeholder_bindings,
     _replace_any_placeholders_in_order,
@@ -22,10 +22,10 @@ from ._typing.annotation import (
     satisfies_annotation_constraint,
     tighten_annotation,
 )
-from ._typing.inspection import resolve_callable_annotations
-from ._typing.signatures import validate_operator_signature
-from .context import ContextOp, Recall, Store
-from .region import RegionCloser, RegionOpener
+from ml_pipes._typing.inspection import resolve_callable_annotations
+from ml_pipes._typing.signatures import validate_operator_signature
+from ml_pipes.context import ContextOp, Recall, Store
+from ml_pipes.region import RegionCloser, RegionOpener
 
 
 class PipelineValidationError(ValueError):
@@ -113,7 +113,7 @@ class _OperatorBoundary:
                 probe_input,
                 probe_annotations,
                 expand_annotation_parts,
-                None,
+                PipelineValidationError,
             )
         except Exception:
             return None

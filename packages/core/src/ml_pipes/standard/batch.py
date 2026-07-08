@@ -4,14 +4,9 @@ import threading
 import time
 from typing import Any, TypeVar, get_args, get_origin
 
-from .operator import Operator
-from .region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
-from .tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace
-
-
-# ---------------------------------------------------------------------------
-# Coordination primitive
-# ---------------------------------------------------------------------------
+from ml_pipes.operator import Operator
+from ml_pipes.region import RegionCloser, RegionExecutor, RegionOpener, RegionTraceLike
+from ml_pipes.tracing import InvocationTrace, StepSpan, TracingConfig, _NoOpTrace
 
 
 class _Entry:
@@ -169,11 +164,6 @@ class BatchGate:
             entry.exception = exc
             entry.batch_span = batch_span
             entry.event.set()
-
-
-# ---------------------------------------------------------------------------
-# Public operators
-# ---------------------------------------------------------------------------
 
 
 BatchItemT = TypeVar("BatchItemT")

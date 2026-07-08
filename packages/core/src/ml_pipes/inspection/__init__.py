@@ -32,11 +32,11 @@ _LAZY_EXPORTS = {
 }
 
 if TYPE_CHECKING:
-    from .artifacts import InspectionResult, InspectionSerializer
-    from .html_renderer import HtmlRenderer
-    from .inspector import PipelineInspector
-    from .plot_renderer import PlotRenderer
-    from .views import GroupBlock, ImageBlock, OutputBlock, Renderer, StepView, TextBlock
+    from ml_pipes.inspection.artifacts import InspectionResult, InspectionSerializer
+    from ml_pipes.inspection.html_renderer import HtmlRenderer
+    from ml_pipes.inspection.inspector import PipelineInspector
+    from ml_pipes.inspection.plot_renderer import PlotRenderer
+    from ml_pipes.inspection.views import GroupBlock, ImageBlock, OutputBlock, Renderer, StepView, TextBlock
 
 
 def __getattr__(name: str) -> Any:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from importlib import import_module
 
-from .concurrent_collector import ConcurrentCollector
-from ..tracing import InvocationTrace
+from ml_pipes.collectors.concurrent_collector import ConcurrentCollector
+from ml_pipes.tracing import InvocationTrace
 
 
 def _load_otel_trace() -> object:

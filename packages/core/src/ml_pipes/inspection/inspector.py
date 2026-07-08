@@ -12,8 +12,8 @@ from typing import Any
 
 import numpy as np
 
-from .artifacts import InspectionResult
-from .views import (
+from ml_pipes.inspection.artifacts import InspectionResult
+from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
     OutputBlock,
@@ -67,7 +67,7 @@ class PipelineInspector:
     """Converts an InspectionResult into views and renders them."""
 
     def __init__(self) -> None:
-        from .formatters import default_output_formatters, default_span_formatters
+        from ml_pipes.inspection.formatters import default_output_formatters, default_span_formatters
 
         self._output_fmts: dict[type, OutputFormatter] = default_output_formatters()
         self._span_fmts: dict[type, SpanFormatter] = default_span_formatters()
@@ -287,7 +287,7 @@ class PipelineInspector:
     def to_html(self, result: InspectionResult, orientation: str = "horizontal") -> str:
         """Return a self-contained HTML string."""
 
-        from .html_renderer import HtmlRenderer
+        from ml_pipes.inspection.html_renderer import HtmlRenderer
 
         return HtmlRenderer(orientation=orientation).render(self.build_views(result))
 
@@ -299,7 +299,7 @@ class PipelineInspector:
     ) -> Path:
         """Write an HTML report to *path* and return it."""
 
-        from .html_renderer import HtmlRenderer
+        from ml_pipes.inspection.html_renderer import HtmlRenderer
 
         return HtmlRenderer(orientation=orientation).save(self.build_views(result), path)
 
@@ -312,7 +312,7 @@ class PipelineInspector:
     ) -> "matplotlib.figure.Figure":
         """Return a matplotlib Figure."""
 
-        from .plot_renderer import PlotRenderer
+        from ml_pipes.inspection.plot_renderer import PlotRenderer
 
         return PlotRenderer(cols=cols, cell_w=cell_w, cell_h=cell_h).render(self.build_views(result))
 

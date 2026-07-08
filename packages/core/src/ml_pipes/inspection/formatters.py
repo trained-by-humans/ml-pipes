@@ -5,9 +5,9 @@ from typing import Any
 
 import numpy as np
 
-from ..region import RegionOpener
-from ..tracing import StepSpan, _fmt_batch_size
-from .views import (
+from ml_pipes.region import RegionOpener
+from ml_pipes.tracing import StepSpan, _fmt_batch_size
+from ml_pipes.inspection.views import (
     ImageBlock,
     OutputBlock,
     OutputFormatter,

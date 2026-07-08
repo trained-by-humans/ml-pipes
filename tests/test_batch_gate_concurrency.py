@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from ml_pipes.batch import BatchGate, LeaderBatch, FollowerResult
+from ml_pipes.standard.batch import BatchGate, FollowerResult, LeaderBatch
 
 
 # ---------------------------------------------------------------------------

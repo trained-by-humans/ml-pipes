@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .diff import BenchmarkDiff
+    from ml_pipes.benchmark.diff import BenchmarkDiff
 
 
 @dataclass
@@ -128,7 +128,7 @@ class BenchmarkResult:
         )
 
     def diff(self, other: "BenchmarkResult") -> "BenchmarkDiff":
-        from .diff import _make_diff
+        from ml_pipes.benchmark.diff import _make_diff
 
         return _make_diff(self, other)
 

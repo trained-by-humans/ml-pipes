@@ -4,7 +4,7 @@ import dataclasses
 import pickle
 from pathlib import Path
 
-from ..tracing import InvocationTrace, StepSpan
+from ml_pipes.tracing import InvocationTrace, StepSpan
 
 
 class InspectionResult:
@@ -31,7 +31,7 @@ class InspectionResult:
     def _repr_html_(self) -> str | None:
         """Jupyter auto-render hook — falls back to plain text when HTML extras are absent."""
         try:
-            from .inspector import PipelineInspector
+            from ml_pipes.inspection.inspector import PipelineInspector
 
             return PipelineInspector().to_html(self)
         except ImportError as exc:

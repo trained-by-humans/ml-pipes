@@ -4,7 +4,7 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import Any, NoReturn, TypeAlias, get_args, get_origin
 
-from ._typing.annotation import (
+from ml_pipes._typing.annotation import (
     _MISSING_ANNOTATION,
     _annotation_shape,
     build_union_annotation_from_options,
@@ -20,7 +20,7 @@ from ._typing.annotation import (
     resolve_typed_dict_key_annotation,
     variadic_tuple_item_annotation,
 )
-from ._typing.inspection import (
+from ml_pipes._typing.inspection import (
     AttributeInspectionError,
     MissingAttributeError,
     MissingTypedDictKeyError,

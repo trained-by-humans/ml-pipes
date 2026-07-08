@@ -6,7 +6,7 @@ import threading
 from abc import abstractmethod
 from typing import Any
 
-from ..tracing import InvocationTrace, TraceCollector
+from ml_pipes.tracing import InvocationTrace, TraceCollector
 
 _SENTINEL = object()
 _log = logging.getLogger(__name__)

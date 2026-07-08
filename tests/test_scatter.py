@@ -20,7 +20,7 @@ from ml_pipes.vision import (
     ImagePayload,
     Resize,
 )
-from ml_pipes.scatter import ScatterGate, _ScatterEntry
+from ml_pipes.standard.scatter import ScatterGate, _ScatterEntry
 
 
 # ---------------------------------------------------------------------------

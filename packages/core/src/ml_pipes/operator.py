@@ -474,7 +474,7 @@ def _format_callable_value(value: Any) -> str:
 
 def _is_pipeline_instance(value: Any) -> bool:
     try:
-        from .core import Pipeline
+        from ml_pipes.pipeline import Pipeline
     except Exception:
         return False
     return isinstance(value, Pipeline)

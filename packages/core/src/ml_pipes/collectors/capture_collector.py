@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .serial_collector import SerialCollector
-from ..tracing import InvocationTrace
+from ml_pipes.collectors.serial_collector import SerialCollector
+from ml_pipes.tracing import InvocationTrace
 
 
 class CaptureCollector(SerialCollector):

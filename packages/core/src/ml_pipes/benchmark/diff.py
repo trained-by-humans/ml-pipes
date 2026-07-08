@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .results import BenchmarkResult, InvocationStat
+from ml_pipes.benchmark.results import BenchmarkResult, InvocationStat
 
 
 @dataclass(frozen=True)
