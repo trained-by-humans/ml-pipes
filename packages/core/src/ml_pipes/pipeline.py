@@ -57,13 +57,6 @@ OperatorLike = Callable[..., Any] | ContextOp[Any, Any] | RegionOpener[Any, Any]
 
 
 @dataclass(frozen=True)
-class Region:
-    opening_op: type
-    closing_op: type
-    name: str
-
-
-@dataclass(frozen=True)
 class PipelineDescription:
     operators: list[OperatorDescription] = field(default_factory=list)
 
