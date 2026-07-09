@@ -1,6 +1,7 @@
 # Contributing
 
-This guide only covers local contributor setup.
+This guide covers local contributor setup and a few repository-level
+maintenance tasks.
 
 ## Local Setup
 
@@ -15,7 +16,7 @@ source .venv/bin/activate
 python -m pip install -U pip pytest
 ```
 
-Install the packages you need in editable mode.
+Install the smallest editable package set that matches your work:
 
 Core-only work:
 
@@ -33,7 +34,25 @@ python -m pip install \
   -e packages/onnx
 ```
 
-Add optional extras only when needed.
+Full workspace setup:
+
+```bash
+python -m pip install \
+  -e packages/core \
+  -e packages/tensor \
+  -e packages/vision \
+  -e packages/onnx \
+  -e packages/torch \
+  -e packages/meta
+```
+
+Add optional surfaces only when needed:
+
+Torch without the full workspace setup:
+
+```bash
+python -m pip install -e packages/torch
+```
 
 Inspection and otel:
 
@@ -41,15 +60,9 @@ Inspection and otel:
 python -m pip install -e "packages/core[inspection,otel]"
 ```
 
-Torch:
-
-```bash
-python -m pip install -e packages/torch
-```
-
-The umbrella package under `packages/meta/` is only needed when you want to
-check published install behavior. Most contributor work should install the
-editable workspace packages directly.
+The common shared-framework setup covers most contributor work and much of the
+test suite. The umbrella package under `packages/meta/` is mainly for checking
+published install behavior.
 
 ## Run Tests
 
@@ -59,9 +72,26 @@ From the repository root:
 python -m pytest
 ```
 
-Install the packages that match the surfaces you are testing before running
-the full suite. For example, many shared tests expect the common framework
-stack (`core`, `tensor`, `vision`, and `onnx`) to be installed.
+Match your install profile to the surfaces you are testing. The common
+shared-framework setup covers many shared tests; add `packages/torch` when
+running Torch-specific tests.
+
+## Release Workflow
+
+Publish packages in dependency order:
+
+1. `ml-pipes-core`
+2. `ml-pipes-tensor`
+3. `ml-pipes-vision`
+4. `ml-pipes-onnx`
+5. `ml-pipes-torch`
+6. `ml-pipes`
+
+Run a release dry-run from the repository root with:
+
+```bash
+python scripts/release_packages.py --dry-run
+```
 
 ## IDE Setup
 
