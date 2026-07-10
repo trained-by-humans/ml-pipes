@@ -32,18 +32,22 @@ from common import (
 )
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 
-from ml_pipes import (
-    Detections,
-    Gather,
-    ImagePayload,
+from ml_pipes.core import (
     Inline,
-    NMM,
-    Pick,
     Pipeline,
+)
+from ml_pipes.standard import (
+    Gather,
+    Pick,
     Recall,
     Scatter,
-    Stitch,
     Store,
+)
+from ml_pipes.vision import (
+    Detections,
+    ImagePayload,
+    NMM,
+    Stitch,
     Tile,
 )
 

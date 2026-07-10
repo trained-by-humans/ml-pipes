@@ -54,26 +54,20 @@ several layers of base classes:
 class BaseInference:
     def predict(self, image): ...
 
-
 class Model(BaseInference):
     def preprocess(self, image): ...
-
 
 class RuntimeModel(Model):
     def infer(self, tensor): ...
 
-
 class OnnxModel(RuntimeModel):
     def session(self): ...
-
 
 class DetectionModel(OnnxModel):
     def postprocess(self, outputs): ...
 
-
 class YoloDetector(DetectionModel):
     def postprocess(self, outputs): ...
-
 
 class DetrDetector(DetectionModel):
     def postprocess(self, outputs): ...
@@ -83,8 +77,6 @@ Nothing is wrong with any one layer in isolation. The problem is that to
 understand one prediction you now have to jump through multiple base classes to
 find preprocessing, runtime invocation, output decoding, and task-specific
 postprocessing.
-
-**Because explicitness matters, the obvious choice is composition.**
 
 Composition keeps the workflow directly visible instead of distributing it
 across an inheritance chain. A pipeline is a plain list of small, single-purpose
@@ -105,7 +97,7 @@ Pipeline([
     Slice("preds", slice(None, 4), as_="boxes"),
     Slice("preds", slice(4, None), as_="scores"),
     ArgMax("scores", as_="classes"),
-    GatherScores("scores", "classes"),
+    GatherRows("scores", "classes"),
     ConvertBoxFormat(from_="cxcywh"),
     NMS(),
     Recall("resize_transform"),
@@ -134,12 +126,23 @@ Pipeline([
     Squeeze("logits"),
     Softmax("logits"),
     ArgMax("logits", as_="classes"),
-    GatherScores("logits", "classes", as_="scores"),
+    GatherRows("logits", "classes", as_="scores"),
     Scale("boxes", by=(640, 640, 640, 640)),
     ConvertBoxFormat(from_="cxcywh"),
     ...,
 ])
 ```
+
+## Explicit Over Implicit
+
+Composition is one way `ml-pipes` stays explicit, but the principle is broader.
+The framework prefers visible data flow over behavior hidden behind framework
+magic, lifecycle hooks, or hidden object state.
+
+In practice, the important boundaries should be readable from the pipeline
+itself: where a value comes from, where it changes shape, where a model runs,
+and where outputs become the next domain object. The goal is not verbosity for
+its own sake, but a path that is easy to inspect, debug, validate, and change.
 
 ## Why Function-Style Coding Fits ML Workflows
 

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ml-pipes"
+version = "0.1.0"
+description = "Umbrella meta-package for ml-pipes component installs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ml-pipes-core==0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/trained-by-humans/ml-pipes"
+Repository = "https://github.com/trained-by-humans/ml-pipes"
+Documentation = "https://github.com/trained-by-humans/ml-pipes/blob/main/README.md"
+"Package Guide" = "https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md"
+
+[project.optional-dependencies]
+inspection = [
+    "ml-pipes-core[inspection]==0.1.0",
+]
+onnx = [
+    "ml-pipes-onnx==0.1.0",
+]
+otel = [
+    "ml-pipes-core[otel]==0.1.0",
+]
+tensor = [
+    "ml-pipes-tensor==0.1.0",
+]
+torch = [
+    "ml-pipes-torch==0.1.0",
+]
+vision = [
+    "ml-pipes-vision==0.1.0",
+]
+all = [
+    "ml-pipes-core[inspection,otel]==0.1.0",
+    "ml-pipes-onnx==0.1.0",
+    "ml-pipes-tensor==0.1.0",
+    "ml-pipes-torch==0.1.0",
+    "ml-pipes-vision==0.1.0",
+]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "README.md",
+    "pyproject.toml",
+]

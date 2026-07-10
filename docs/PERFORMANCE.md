@@ -137,7 +137,7 @@ the expected number of items.
 ```python
 pipeline = Pipeline([
     Tile(slice_wh=(640, 640), overlap_wh=(100, 100)),
-    Store("tile_rects", index=1),
+    Store("tile_rects", source=1),
     Pick(0),
     Scatter(max_concurrency=4),   # ◀ fans out list[ImagePayload] to 4 workers
     Resize((640, 640)),
@@ -239,7 +239,7 @@ data transformation.
 pipeline = Pipeline([
     Decode(),
     Resize(input_size),
-    Store("transform", index=1),
+    Store("transform", source=1),
     Pick(0),
     Normalize(),
     Batch(size=4, timeout=0.05),    # ◀ threads rendezvous here

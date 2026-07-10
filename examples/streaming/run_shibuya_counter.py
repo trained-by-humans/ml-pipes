@@ -17,37 +17,45 @@ import cv2
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
 from ..run_yolo8_onnx import YOLO8_MODELS
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
-from ml_pipes import (
+from ml_pipes.collectors import ThroughputCollector
+from ml_pipes.core import (
+    Pipeline,
+    Inline,
+)
+from ml_pipes.onnx import (
+    Extract,
+    Infer,
+)
+from ml_pipes.standard import (
+    Gather,
+    Pick,
+    Recall,
+    Scatter,
+    Store,
+)
+from ml_pipes.tensor import (
     ArgMax,
+    GatherScores,
+    Slice,
+    Squeeze,
+    Transpose,
+)
+from ml_pipes.vision import (
     ConvertBoxFormat,
     Detections,
     DrawBoxes,
-    Extract,
     FilterPredictionsByArea,
     FilterPredictionsByClass,
     FilterTensorsByClasses,
-    Gather,
-    GatherScores,
     ImagePayload,
-    Infer,
     NMS,
     NMM,
     Normalize,
-    Pick,
-    Pipeline,
     ProjectBoxes,
-    Recall,
     Resize,
-    Scatter,
-    Slice,
-    Squeeze,
     Stitch,
-    Store,
     Tile,
-    ThroughputCollector,
     ToDetections,
-    Transpose,
-    Inline,
 )
 
 _KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella

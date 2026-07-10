@@ -87,7 +87,7 @@ RunMyModel()
 Use the built-in runtime operators when they fit. If your model runs through a
 different library, wrap that call in a small callable or operator so the model
 itself is still one visible step in the pipeline. For Torch-specific
-boundaries, see [TORCH.md](TORCH.md).
+boundaries, see [packages/torch/docs/README.md](../packages/torch/docs/README.md).
 
 ## Step 2 — Prepare The Model Inputs
 
@@ -245,8 +245,9 @@ NMS(),
 If score thresholding is all you need, `NMS(conf_threshold=...)` may already
 be enough by itself.
 
-For more filtering and selection operators, see
-[operators/README.md](operators/README.md).
+For more filtering and selection operators, start with
+[PACKAGES.md](PACKAGES.md) and then check the relevant package docs for your
+domain.
 
 The exact operators can change by model family. The important point is the
 ordering: cheap filters first, heavier work later.
@@ -299,7 +300,7 @@ pipeline = Pipeline([
     Slice("preds", slice(None, 4), as_="boxes"),
     Slice("preds", slice(4, None), as_="class_scores"),
     ArgMax("class_scores", as_="classes"),
-    GatherScores("class_scores", "classes", as_="scores"),
+    GatherRows("class_scores", "classes", as_="scores"),
     ConvertBoxFormat(from_="cxcywh"),
 
     # Filter and project

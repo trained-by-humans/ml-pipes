@@ -36,7 +36,7 @@ For reusable configured logic, use a class with `__call__`. Decorating it with
 `@Operator` makes it self-describing in `repr()` and `describe()`:
 
 ```python
-from ml_pipes import Operator
+from ml_pipes.core import Operator
 
 
 @Operator
@@ -56,7 +56,7 @@ repr(Prefix("tag: "))
 Pipelines can mix both forms freely:
 
 ```python
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 
 pipeline = Pipeline([strip_text, Prefix("tag: ")])
 assert pipeline("  hello  ") == "tag: hello"
@@ -113,12 +113,17 @@ examples.
 
 ## Features Built On Operators
 
-The pipeline's tooling works because operators define explicit boundaries.
+The features below are not provided by the `@Operator` decorator itself.
+They work because the framework treats operators as explicit pipeline
+boundaries with meaningful input, output, and step identity.
+When those boundaries are chosen well, composition, validation,
+description, inspection, tracing, and benchmarking all become useful.
 
 The examples below use the same tiny operator chain:
 
 ```python
-from ml_pipes import Operator, Pipeline, PrintCollector
+from ml_pipes.collectors import PrintCollector
+from ml_pipes.core import Operator, Pipeline
 
 
 def strip_text(text: str) -> str:
@@ -153,7 +158,8 @@ pipeline("  Hello World  ")
 ```
 
 > [!TIP]
-> That chaining behavior is the foundation the rest of the framework builds on.
+> That handoff between operators is the base layer the rest of the framework
+> builds on.
 
 ### Validation
 
@@ -171,8 +177,8 @@ Input: <class 'str'>, Output: list[str]
 ```
 
 > [!TIP]
-> This is why reusable operators should carry precise `__call__` annotations:
-> the validator reasons about the pipeline through operator boundaries.
+> Validation is only as good as the boundaries it can read, so precise
+> `__call__` annotations matter.
 
 ### Description
 
@@ -193,15 +199,15 @@ Pipeline([
 ```
 
 > [!TIP]
-> This is why reusable operators should have meaningful names and, when
-> configured, meaningful constructor arguments.
+> Good operator names and readable constructor arguments make pipeline
+> descriptions easier to scan.
 
 ### Inspection
 
 Inspection captures the value flowing through each operator boundary.
 
 ```python
-from ml_pipes import PipelineInspector, TextBlock
+from ml_pipes.inspection import PipelineInspector, TextBlock
 
 pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
 result = pipeline.inspect("  Hello World  ")
@@ -226,8 +232,8 @@ for view in views:
 ```
 
 > [!TIP]
-> This is one reason small single-purpose operators are easier to debug than
-> large fused blocks.
+> Inspection is easier to read when each operator marks one clear step instead
+> of hiding several steps inside one fused block.
 
 ### Tracing
 
@@ -248,8 +254,8 @@ pipeline.set_tracing(None)
 ```
 
 > [!TIP]
-> If an operator is too broad or mixes unrelated work, tracing becomes less
-> useful because the latency is no longer attributed to a meaningful boundary.
+> Tracing is most useful when each timing line corresponds to one meaningful
+> step rather than a mixed block of work.
 
 ### Benchmark
 
@@ -257,7 +263,7 @@ Benchmarking repeats the pipeline over many runs and aggregates latency at the
 same operator boundaries tracing uses.
 
 ```python
-from ml_pipes import Benchmark, MeasurementConfig
+from ml_pipes.benchmark import Benchmark, MeasurementConfig
 
 result = Benchmark(
     pipeline,
@@ -280,8 +286,8 @@ runs: 5  (all values in ms)
 ```
 
 > [!TIP]
-> Benchmarking is most useful after the pipeline already works: it keeps the
-> same operator boundaries as tracing, but measures them across repeated runs.
+> Benchmarking reuses those same operator boundaries, but compares them across
+> repeated runs instead of one execution.
 
 ## Design Principles
 
@@ -354,18 +360,33 @@ inspect, trace, and benchmark as standalone boundaries.
 - Return a single value when the operator produces one semantic result.
 - For ordinary transforms, treat the input as immutable and return a new value
   instead of mutating the input in place.
-- Use a fixed-length tuple when the operator returns multiple values. This
+- Use a fixed-length tuple when the operator returns multiple values that are
+  small, short-lived, and positionally obvious to the next few steps. This
   pairs naturally with the multi-input pattern described in the input rules
   above.
 - Use a dedicated dataclass when fields have high cohesion, represent one
-  named result, and are usually used together.
+  named result, and are usually used together by name.
 - A useful pattern is the carry-forward tuple: return the original value
   together with a new derived value when later pipeline steps are expected to
   keep using both. Rendering is a good example: an operator can return
   `(rendered_image, detections)` so later steps can save the image while still
   rendering, filtering, or logging the detections in different ways.
 - In-place mutation is acceptable when the payload is already mutation-oriented
-  and that keeps the pipeline clearer, as with registry-style payloads.
+  and that keeps the pipeline clearer.
+- Use a registry-style payload when many operators cooperatively read and write
+  named intermediate slots, as with `TensorRegistry` or `TorchTensorRegistry`.
+
+### Naming And Aliases
+
+- Choose one primary name for each operator surface based on what the operator
+  does.
+- Do not name an operator relative to other operators or to one specific
+  pipeline shape. Operators can appear in any position and in many different
+  pipelines.
+- Use aliases when a domain-specific spelling makes a common use case read
+  better.
+- Treat aliases as alternate spellings of the same operator, not as separate
+  operators with different semantics.
 
 ### Static Verification
 
@@ -405,3 +426,17 @@ inspect, trace, and benchmark as standalone boundaries.
 - Verify the operator inside a real pipeline. `validate()` checks its
   boundary, `inspect()` shows what value flows through it, and tracing or
   benchmarking can be added once correctness is already established.
+
+## Operator Packages
+
+So far this page has focused on what operators are and how to create them.
+In practice, many reusable operators already exist, so most users should start
+from [PACKAGES.md](PACKAGES.md) and then check the linked package index for
+the operators they need.
+
+Start from `ml_pipes.standard` for shared generic building blocks such as
+routing, context, regions, and data-preparation work.
+
+Example: if postprocess is still tensor-shaped, start from the tensor package
+and its index in
+[packages/tensor/docs/INDEX.md](../packages/tensor/docs/INDEX.md).

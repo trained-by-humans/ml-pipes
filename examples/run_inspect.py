@@ -59,13 +59,17 @@ from common import (
 from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from run_yolo8_batch import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
 from run_yolo8_tile import yolo8_tiled_pipeline
-from ml_pipes import (
-    Gather,
+from ml_pipes.core import (
     Inline,
+    Pipeline,
+)
+from ml_pipes.inspection import (
     InspectionResult,
     InspectionSerializer,
-    Pipeline,
     PipelineInspector,
+)
+from ml_pipes.standard import (
+    Gather,
     Scatter,
 )
 

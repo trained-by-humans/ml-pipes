@@ -38,7 +38,7 @@ from examples.common import (
 )
 from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 
-from ml_pipes import Pipeline
+from ml_pipes.core import Pipeline
 from ml_pipes.benchmark import Benchmark, BenchmarkResult, MeasurementConfig
 
 

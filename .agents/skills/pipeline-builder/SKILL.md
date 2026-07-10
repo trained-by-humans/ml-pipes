@@ -1,12 +1,12 @@
 ---
 name: pipeline-builder
-description: Compose or improve concrete pipelines with ml-pipes. Use when Codex needs to start from a new or existing pipeline, inspect available operators, choose compositions, add missing local operators only when necessary, and get the pipeline working correctly first. Defer tracing, sweep, or benchmark optimization work until the pipeline already runs and validates, unless performance is the blocking issue.
+description: Compose or improve concrete pipelines with ml-pipes. Use when Codex needs to start from a new or existing pipeline, identify the package chain it should use, select current package-owned operators, add missing local steps only when necessary, and get the concrete pipeline working before considering shared extraction.
 ---
 
 # Pipeline Builder
 
 Repository documentation Markdown files define semantics. This file only
-drives pipeline composition decisions.
+drives concrete pipeline composition decisions.
 
 Use this skill when the task is to compose, adapt, extend, simplify, or
 document a concrete pipeline in an example or downstream integration.
@@ -15,58 +15,65 @@ document a concrete pipeline in an example or downstream integration.
 
 The goal of this skill is to build a concrete working pipeline, not to extract
 shared framework or package behavior.
-Stop once the pipeline validates and behaves correctly on the provided
+Stop once the pipeline validates and behaves correctly on representative
 inputs and expected outputs, or the remaining issue needs debugging.
 
-## Follow this Workflow
+## Follow This Workflow
 
-1. Detect the boundary.
-   Define the pipeline input and output first. Start from the boundary you
-   need to turn into the result.
+1. Define the boundary first.
+   State the pipeline input and output before selecting operators.
 
-2. Detect the task category.
-   Choose the primary guide for the task:
-   - `model scaffolding` -> read `docs/SCAFFOLDING.md`
-   - `general pipeline composition` -> read `docs/COMPOSITION.md`
+2. Identify the package chain.
+   Read `docs/PACKAGES.md` and decide which package surfaces the pipeline
+   should cross.
+   Common chains include:
+   - `vision -> onnx -> tensor -> vision`
+   - `vision -> tensor -> torch`
+   - `core + standard` around any of the above
 
-3. Extract the important transformations.
-   List the meaningful transformations needed to turn the input into the
-   output.
+3. Choose the main guide.
+   Use:
+   - `docs/SCAFFOLDING.md` for model wrapping and runtime scaffolding
+   - `docs/COMPOSITION.md` for general pipeline composition
 
-4. Check existing examples.
-   Check `examples/README.md` to see whether a similar pipeline already
-   exists and use it as a reference.
+4. Check runnable examples first.
+   Read `examples/README.md` and start from the closest example or repro
+   target before inventing a new pipeline shape.
 
-5. Check existing operator packages.
-   From the task, domain, and closest example, identify the main operator
-   package and any auxiliary packages, then check
-   `docs/operators/README.md` for matching operators.
+5. Inspect the owning package surfaces.
+   For each package in the chain, read the package `README.md` and
+   `docs/INDEX.md` to find the current exported operators and value types.
 
-6. Generate any missing operators.
-   If existing operators do not cover the pipeline, generate the missing
-   functions or operators needed for this pipeline. Read
-   `docs/OPERATORS.md` only when you need guidance for a local operator.
-   Do not introduce new shared operators while building a pipeline. Prefer
-   local functions or local operators until reuse requirements are confirmed.
+6. List the meaningful transformations.
+   Break the pipeline into explicit stages and map each stage to the package
+   that should own it.
 
-7. Compose the pipeline.
-   Use the selected primary guide to turn those transformations into an
-   explicit pipeline.
+7. Add local steps only when needed.
+   If existing package surfaces do not cover a stage, add the missing local
+   functions or local operators in the example or downstream code.
+   Use `docs/OPERATORS.md` only when you need guidance for a local operator.
+   Do not introduce new shared package or core behavior while building the
+   pipeline.
 
-8. Validate the composition.
-   Run `validate()` to make sure the pipeline boundaries connect. Read
-   `docs/VALIDATION.md` when validation fails or boundary contracts changed.
+8. Compose and validate.
+   Build the explicit pipeline and run `validate()`.
+   Read `docs/VALIDATION.md` when boundary mismatch or contract issues appear.
 
 9. Run the pipeline on a representative input.
-   If an input is provided, execute the pipeline to make sure it runs.
+   Execute the pipeline on a realistic input and compare against the expected
+   output when one is available.
 
-10. Compare against the expected output.
-   If an expected output is provided, compare the result against it.
+10. Inspect drift when needed.
+    Use `inspect()` to localize where the value begins to drift from the
+    expected result.
 
-11. Inspect drift when the result does not match.
-   Use `inspect()` to check which step starts to drift from the expected
-   result.
+11. Record the concrete follow-up targets when local work stops.
+    If the remaining issue is not local composition work, identify the
+    narrowest concrete targets you can support from the current evidence:
+    package, module, file, and line when known.
+    Report those targets so the next routing step can continue.
 
-## Hand Off To
+## Switch To
 
-- `pipeline-debugger` when the generated pipeline does not work as expected
+- `pipeline-debugger` only when the user wants the local pipeline failure
+  localized further before making changes

@@ -9,8 +9,15 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import assert_type
 
-from ml_pipes.ops import DrawBoxes, DrawMasks
-from ml_pipes.types import Detections, ImagePayload, Segmentations
+from ml_pipes.vision import (
+    DrawBoxes,
+    DrawMasks,
+)
+from ml_pipes.vision import (
+    Detections,
+    ImagePayload,
+    Segmentations,
+)
 
 
 @dataclass

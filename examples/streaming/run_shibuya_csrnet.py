@@ -20,24 +20,30 @@ import numpy as np
 
 from ..common import add_assets_dir_arg, download_if_missing
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
-from ml_pipes import (
+from ml_pipes.collectors import ThroughputCollector
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
+    Extract,
+    RuntimeOutputs,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
     AsType,
+    Squeeze,
+    TensorPayload,
+)
+from ml_pipes.vision import (
     BlendImages,
     ClampDensity,
     DensityToHeatmap,
-    Extract,
     ImagePayload,
     Normalize,
-    Pick,
-    Pipeline,
-    Recall,
-    RuntimeOutputs,
-    Squeeze,
-    Store,
     SumDensity,
-    TensorPayload,
     ToDensityPrediction,
-    ThroughputCollector,
 )
 
 CSRNET_MODEL_NAME = "csrnet_shanghaitech_b_rootstrap.pth"

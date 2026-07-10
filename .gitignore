@@ -24,6 +24,8 @@ venv/
 # Packaging / build artifacts
 build/
 dist/
+packages/*/dist-noiso/
+*.whl
 *.egg-info/
 .eggs/
 pip-wheel-metadata/

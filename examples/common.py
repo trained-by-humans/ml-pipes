@@ -5,18 +5,20 @@ import shutil
 import urllib.request
 from pathlib import Path
 
-from ml_pipes import (
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
+    Recall,
+    Store,
+)
+from ml_pipes.vision import (
     Decode,
     Detections,
     DrawBoxes,
     DrawMasks,
     ImagePayload,
     LoadFile,
-    Pipeline,
-    Recall,
     SaveImage,
     Segmentations,
-    Store,
 )
 
 ASSETS_DIR = Path(__file__).parent / ".example_assets"

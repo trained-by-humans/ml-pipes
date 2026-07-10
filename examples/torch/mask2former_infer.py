@@ -8,7 +8,16 @@ import numpy as np
 import torch
 
 from examples.common import COCO_IMAGE_NAME, build_output_path
-from ml_pipes import ConvertColorSpace, Decode, LoadFile, Pipeline, Select, Store
+from ml_pipes.core import Pipeline
+from ml_pipes.standard import (
+    Select,
+    Store,
+)
+from ml_pipes.vision import (
+    ConvertColorSpace,
+    Decode,
+    LoadFile,
+)
 from ml_pipes.torch.types import TorchTensorRegistry
 
 MASK2FORMER_MODEL_IDS: dict[str, str] = {

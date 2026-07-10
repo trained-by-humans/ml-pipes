@@ -22,7 +22,7 @@ The goal of composition is not to hide a whole workflow inside one operator.
 The goal is to choose boundaries that make the workflow understandable,
 correct, and observable.
 
-## Composing Pipelines From Code
+## Composing Pipelines From Existing Code
 
 ### Start From The Goal
 
@@ -72,7 +72,7 @@ You do not need to implement every step up front. Start by naming the
 boundaries you want to observe, then fill them in:
 
 ```python
-from ml_pipes import Operator, Pipeline
+from ml_pipes.core import Operator, Pipeline
 
 
 @Operator
@@ -97,38 +97,35 @@ pipeline = Pipeline([
 
 ## Composing With Existing Operators
 
-When existing operators already cover part of the problem, use them first.
-
-That usually gives you:
+When existing operators already cover part of the problem, use them first. This usually gives you:
 
 - clearer boundaries
 - better validation
 - better inspection and tracing output
 - less one-off code to maintain
 
-### Start From The Closest Package
-
-In this repo, common starting points are:
-
-- `ml_pipes.ops` for image, inference, tensor-registry, context, region, and
-  side-effect operators
-- `ml_pipes.data_ops` for iterable and data-preparation workflows such as
-  filtering, mapping, deduplication, and shaping
-- `ml_pipes.torch.ops` for torch-specific operator boundaries
-
-The operator overview lives in [OPERATORS.md](OPERATORS.md). The concrete
-catalog lives in [operators/README.md](operators/README.md).
-
-### Reuse First, Then Add New Operators
-
 The normal composition order is:
 
-1. start from the closest existing operators
+1. start from existing operators
 2. compose as much of the pipeline as possible from them
 3. add new operators only where the existing operator surface does not cover
    the need
 
-That is usually better than writing a large custom operator up front.
+### Start From The Closest Operator Package
+
+Start from the shared building blocks, then move outward only as needed:
+
+- begin with `ml_pipes.standard`, which provides the generic building blocks
+  for data manipulation, routing, context, regions, and other reusable steps
+  that shape composition and performance
+- then check the package index in [PACKAGES.md](PACKAGES.md) to see whether a
+  package already exists for the current domain or task boundary; for example,
+  tensor-shaped postprocess should usually start from the `ml_pipes.tensor` package
+- if you still cannot find the right package surface, check the runnable
+  examples in [../examples/README.md](../examples/README.md) to see whether a
+  similar pipeline already exists before adding new local operators
+
+### Add New Operators Only Where Needed
 
 When you do need a new operator, keep it narrow and follow
 [OPERATORS.md](OPERATORS.md).
@@ -138,15 +135,33 @@ Examples in this repo:
 - [../examples/run_yolo8_onnx.py](../examples/run_yolo8_onnx.py) starts from
   existing vision and inference operators
 - [../examples/run_sms_spam_prepare.py](../examples/run_sms_spam_prepare.py)
-  shows composition around data preparation and cleanup
+  shows composition around data preparation and cleanup where local operators
+  still make sense
 
-## Composing Pipelines
+## Composition Best Practices
 
-When you already have named pipelines, ml-pipes gives you two ways to compose
+Composition quality still depends on operator quality, so the operator best
+practices in [OPERATORS.md](OPERATORS.md) apply here as well.
+
+The points below focus on how multiple steps work together inside one
+pipeline.
+
+- Use `Store` / `Recall` when one derived value needs to be recovered later
+  after several unrelated steps. This keeps the main flowing boundary focused
+  on the value the next operators actually work on.
+- Use a registry-style workspace when one stage needs to accumulate many named
+  intermediates and later steps read them by name rather than by tuple
+  position. `TensorRegistry` is one example of this pattern, but the same idea
+  also appears in other runtime-oriented systems that work with named tensors
+  or buffers.
+
+## Combining Existing Pipelines
+
+When you already have named pipelines, ml-pipes gives you two ways to combine
 them: **join** and **merge**.
 
 Use this section when the question is no longer "how do I build one pipeline
-from steps?" but "how do I compose pipelines that already exist?"
+from steps?" but "how do I combine pipelines that already exist?"
 
 ### Join
 
@@ -183,6 +198,36 @@ After
 Join is the right choice when you want to keep boundaries between whole
 pipeline blocks.
 
+#### Inside a pipeline definition: `embed(p)` / `Embed(p)`
+
+Use these inside `Pipeline([...])` to join another named pipeline.
+
+```python
+preprocess = Pipeline([Resize((640, 640)), Normalize()])
+infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
+
+detection = Pipeline([
+    Decode(),
+    embed(preprocess),
+    embed(infer),
+    NMS(),
+    ToDetections(),
+])
+```
+
+#### Outside a pipeline definition: `a >> b`
+
+Use this outside a pipeline definition to join existing named pipelines.
+
+```python
+decode = Pipeline([Decode()])
+preprocess = Pipeline([Resize((640, 640)), Normalize()])
+infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
+postprocess = Pipeline([NMS(), ToDetections()])
+
+detection = decode >> preprocess >> infer >> postprocess
+```
+
 ### Merge
 
 Merging two pipelines produces a single flat pipeline. The original pipelines
@@ -215,35 +260,9 @@ After
 Merge is the right choice when the composed result should behave like one
 uniform pipeline.
 
-### API Forms
+#### Inside a pipeline definition: `inline(p)` / `Inline(p)`
 
-You can compose existing pipelines both inside and outside a pipeline
-definition.
-
-#### Inside a pipeline definition
-
-Use these inside the operator list passed to `Pipeline([...])`.
-
-##### Join `embed(p)` / `Embed(p)`
-
-Joins `p` as a self-contained block. Isolated context, live reference.
-
-```python
-preprocess = Pipeline([Resize((640, 640)), Normalize()])
-infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
-
-detection = Pipeline([
-    Decode(),
-    embed(preprocess),
-    embed(infer),
-    NMS(),
-    ToDetections(),
-])
-```
-
-##### Merge `inline(p)` / `Inline(p)`
-
-Merges `p` into the parent list at construction time.
+Use these inside `Pipeline([...])` to merge another named pipeline.
 
 ```python
 preprocess = Pipeline([Resize((640, 640)), Normalize()])
@@ -258,43 +277,24 @@ detection = Pipeline([
 ])
 ```
 
-#### Outside a pipeline definition
+#### Outside a pipeline definition: `a + b`
 
-Use these to compose existing named pipelines directly.
-
-##### Join `a >> b`
-
-Mirrors `embed(p)`. Returns a new pipeline where both `a` and `b` are
-isolated blocks held by live reference.
-
-```python
-decode = Pipeline([Decode()])
-preprocess = Pipeline([Resize((640, 640)), Normalize()])
-infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
-postprocess = Pipeline([NMS(), ToDetections()])
-
-detection = decode >> preprocess >> infer >> postprocess
-```
-
-##### Merge `a + b`
-
-Mirrors `inline(p)`. Returns a new flat pipeline with shared context.
+Use this outside a pipeline definition to merge existing named pipelines.
 
 ```python
 infer_stage = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
 project_stage = Pipeline([Recall("transform"), ProjectBoxes(), NMS(), ToDetections()])
 
 detection = (
-    Pipeline([Resize((640, 640)), Store("transform", index=1), Pick(0), Normalize()])
+    Pipeline([Resize((640, 640)), Store("transform", source=1), Pick(0), Normalize()])
     + infer_stage
     + project_stage
 )
 ```
 
-##### Merge in place `pipeline.extend([...])`
+#### In place: `pipeline.extend([...])`
 
-Mutates an existing pipeline by appending more operators directly into its flat
-list.
+Use this to append more operators directly into an existing flat pipeline.
 
 ```python
 pipeline = Pipeline([Decode(), Resize((640, 640))])

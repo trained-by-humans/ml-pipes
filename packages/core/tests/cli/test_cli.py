@@ -1,0 +1,411 @@
+from __future__ import annotations
+
+import functools
+import sys
+import types
+
+import pytest
+
+from ml_pipes.core import Pipeline
+from ml_pipes.factory import (
+    PipelineFactory,
+    data_factory,
+    pipeline_factory,
+)
+from ml_pipes.__main__ import (
+    CLIError,
+    _build_file_input_fns,
+    _build_parser,
+    _parse_config_arg,
+    _parse_config_axis,
+    _parse_config_value,
+    _parse_config_list,
+    _resolve_pipeline_factory,
+    cmd_benchmark,
+)
+
+
+def _passthrough_wrapper(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+# ---------------------------------------------------------------------------
+# Axis value parsing
+# ---------------------------------------------------------------------------
+
+def test_parse_config_value_nxm_tuple():
+    assert _parse_config_value("320x320") == (320, 320)
+    assert _parse_config_value("40x40") == (40, 40)
+
+
+def test_parse_config_value_3tuple():
+    assert _parse_config_value("1x2x3") == (1, 2, 3)
+
+
+def test_parse_config_value_int():
+    assert _parse_config_value("4") == 4
+
+
+def test_parse_config_value_float():
+    assert _parse_config_value("0.25") == pytest.approx(0.25)
+    assert _parse_config_value("1.5") == pytest.approx(1.5)
+
+
+def test_parse_config_value_str():
+    assert _parse_config_value("fast") == "fast"
+    assert _parse_config_value("true") == "true"
+
+
+def test_parse_config_axis_integers():
+    key, vals = _parse_config_axis("workers=1,2,4,8")
+    assert key == "workers"
+    assert vals == [1, 2, 4, 8]
+
+
+def test_parse_config_axis_tuples():
+    key, vals = _parse_config_axis("slice_wh=320x320,480x480")
+    assert key == "slice_wh"
+    assert vals == [(320, 320), (480, 480)]
+
+
+def test_parse_config_axis_floats():
+    key, vals = _parse_config_axis("conf=0.1,0.25,0.5")
+    assert key == "conf"
+    assert vals == pytest.approx([0.1, 0.25, 0.5])
+
+
+def test_parse_config_axis_no_equals_raises():
+    with pytest.raises(CLIError, match="--axis must be in the form"):
+        _parse_config_axis("noequalssign")
+
+
+def test_parse_config_axis_empty_values_raises():
+    with pytest.raises(CLIError, match="--axis has no values"):
+        _parse_config_axis("key=")
+
+
+# ---------------------------------------------------------------------------
+# Config JSON parsing
+# ---------------------------------------------------------------------------
+
+def test_parse_config_list_valid():
+    result = _parse_config_list(['{"a": 1}', '{"b": "x"}'])
+    assert result == [{"a": 1}, {"b": "x"}]
+
+
+def test_parse_config_list_invalid_json_raises():
+    with pytest.raises(CLIError, match="invalid JSON in --config #1"):
+        _parse_config_list(["{bad json}"])
+
+
+def test_parse_config_list_non_dict_raises():
+    with pytest.raises(CLIError, match="must be a JSON object"):
+        _parse_config_list(["[1, 2, 3]"])
+
+
+def _fake_module(name: str, **attrs) -> types.ModuleType:
+    m = types.ModuleType(name)
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    return m
+
+
+# ---------------------------------------------------------------------------
+# CLI factory resolution
+# ---------------------------------------------------------------------------
+
+def test_resolve_pipeline_factory_explicit_undecorated_wraps_keyword_callable():
+    seen = {}
+
+    def plain(x=1, y=2):
+        seen["args"] = (x, y)
+        return Pipeline([])
+
+    m = _fake_module("_test5")
+    result = _resolve_pipeline_factory(m, plain, "_test5:plain")
+    assert isinstance(result, PipelineFactory)
+    assert isinstance(result(x=10, y=20), Pipeline)
+    assert seen["args"] == (10, 20)
+    assert isinstance(result.build({"x": 10, "y": 20}), Pipeline)
+    assert seen["args"] == (10, 20)
+
+
+# ---------------------------------------------------------------------------
+# File input builder
+# ---------------------------------------------------------------------------
+
+def test_build_file_input_fns(tmp_path):
+    f1 = tmp_path / "a.jpg"
+    f2 = tmp_path / "b.jpg"
+    f1.write_bytes(b"fake")
+    f2.write_bytes(b"fake")
+    fns, labels = _build_file_input_fns([str(f1), str(f2)])
+    assert len(fns) == 2
+    assert labels == ["a.jpg", "b.jpg"]
+    id1, val1, tag1, meta1 = fns[0]()
+    assert id1 == "a.jpg"
+    assert val1 == f1
+    assert tag1 is None
+    assert meta1 is None
+
+
+def test_build_file_input_fns_basename_collision(tmp_path):
+    d1 = tmp_path / "setA"
+    d2 = tmp_path / "setB"
+    d1.mkdir()
+    d2.mkdir()
+    f1 = d1 / "img001.jpg"
+    f2 = d2 / "img001.jpg"
+    f1.write_bytes(b"fake")
+    f2.write_bytes(b"fake")
+    fns, labels = _build_file_input_fns([str(f1), str(f2)])
+    assert labels[0] != labels[1], "colliding basenames must produce distinct labels"
+    assert str(f1) == labels[0]
+    assert str(f2) == labels[1]
+    id1, _, _, _ = fns[0]()
+    id2, _, _, _ = fns[1]()
+    assert id1 != id2
+
+
+def test_build_file_input_fns_missing_raises(tmp_path):
+    with pytest.raises(CLIError, match="input file not found"):
+        _build_file_input_fns([str(tmp_path / "nonexistent.jpg")])
+
+
+# ---------------------------------------------------------------------------
+# Integration — cmd_benchmark with injected fake module
+# ---------------------------------------------------------------------------
+
+class _Identity:
+    def __call__(self, x):
+        return x
+
+
+def _make_identity_pipeline(**kwargs):
+    from ml_pipes.core import Pipeline
+    return Pipeline([_Identity()])
+
+
+_wrapped_identity = pipeline_factory(_make_identity_pipeline)
+
+
+def test_cmd_benchmark_end_to_end(tmp_path, capsys):
+    f = tmp_path / "input.bin"
+    f.write_bytes(b"data")
+
+    mod = types.ModuleType("_test_bench_integration")
+    mod._wrapped_identity = _wrapped_identity
+    sys.modules["_test_bench_integration"] = mod
+
+    try:
+        parser = _build_parser()
+        args = parser.parse_args([
+            "benchmark", "_test_bench_integration:_wrapped_identity",
+            "--input", str(f),
+            "--runs", "2", "--warmup", "1",
+        ])
+        code = cmd_benchmark(args)
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "total" in out
+        assert "mean" in out
+    finally:
+        del sys.modules["_test_bench_integration"]
+
+
+def test_cmd_benchmark_missing_required_arg_raises(tmp_path):
+    f = tmp_path / "input.bin"
+    f.write_bytes(b"data")
+
+    def _needs_arg(required_param):  # no default → must be in config
+        from ml_pipes.core import Pipeline
+        return Pipeline([_Identity()])
+
+    wrapped = pipeline_factory(_needs_arg)
+
+    mod = types.ModuleType("_test_bench_missing")
+    mod.wrapped = wrapped
+    sys.modules["_test_bench_missing"] = mod
+
+    try:
+        parser = _build_parser()
+        args = parser.parse_args([
+            "benchmark", "_test_bench_missing:wrapped",
+            "--input", str(f),
+            "--runs", "2", "--warmup", "1",
+        ])
+        with pytest.raises(CLIError, match="pipeline factory is missing required config key"):
+            cmd_benchmark(args)
+    finally:
+        del sys.modules["_test_bench_missing"]
+
+
+def test_resolve_pipeline_factory_wrapped_decorated_export_raises():
+    @pipeline_factory
+    def make_pipeline():
+        return Pipeline([_Identity()])
+
+    wrapped = _passthrough_wrapper(make_pipeline)
+
+    mod = types.ModuleType("_test_wrapped_factory")
+    mod.wrapped = wrapped
+
+    with pytest.raises(CLIError, match=r"@pipeline_factory must be the outermost decorator"):
+        _resolve_pipeline_factory(mod, None, "_test_wrapped_factory")
+
+
+# ---------------------------------------------------------------------------
+# --arg / --data-arg parsing
+# ---------------------------------------------------------------------------
+
+def test_parse_config_arg_valid():
+    assert _parse_config_arg("workers=4") == ("workers", 4)
+    assert _parse_config_arg("mode=fast") == ("mode", "fast")
+    assert _parse_config_arg("wh=320x240") == ("wh", (320, 240))
+
+
+def test_parse_config_arg_no_equals_raises():
+    with pytest.raises(CLIError, match="--arg must be in the form"):
+        _parse_config_arg("noequalssign")
+
+
+def test_parse_config_arg_empty_key_raises():
+    with pytest.raises(CLIError, match="--arg key is empty"):
+        _parse_config_arg("=value")
+
+
+
+# ---------------------------------------------------------------------------
+# Parser: --data-arg present on run and benchmark
+# ---------------------------------------------------------------------------
+
+def test_parser_data_arg_on_run():
+    parser = _build_parser()
+    args = parser.parse_args(["run", "some.module", "--data-arg", "image_path=img.jpg"])
+    assert args.data_args == ["image_path=img.jpg"]
+
+
+def test_parser_data_arg_on_benchmark():
+    parser = _build_parser()
+    args = parser.parse_args([
+        "benchmark", "some.module",
+        "--data-arg", "image_path=img.jpg",
+        "--runs", "2",
+    ])
+    assert args.data_args == ["image_path=img.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# Parser: benchmark mutual exclusion groups
+# ---------------------------------------------------------------------------
+
+def test_parser_benchmark_arg_and_config_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "benchmark", "some.module",
+            "--arg", "workers=4",
+            "--config", '{"workers": 4}',
+        ])
+
+
+def test_parser_benchmark_arg_and_axis_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "benchmark", "some.module",
+            "--arg", "workers=4",
+            "--axis", "workers=1,2,4",
+        ])
+
+
+def test_parser_benchmark_data_arg_and_data_config_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "benchmark", "some.module",
+            "--data-arg", "image_path=img.jpg",
+            "--data-config", '{"image_path": "img.jpg"}',
+        ])
+
+
+def test_parser_benchmark_data_arg_and_data_axis_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "benchmark", "some.module",
+            "--data-arg", "image_path=img.jpg",
+            "--data-axis", "image_path=img1.jpg,img2.jpg",
+        ])
+
+
+def test_parser_benchmark_data_config_and_data_axis_mutually_exclusive():
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "benchmark", "some.module",
+            "--data-config", '{"image_path": "img.jpg"}',
+            "--data-axis", "image_path=img1.jpg,img2.jpg",
+        ])
+
+
+# ---------------------------------------------------------------------------
+# Integration — cmd_benchmark with data_factory
+# ---------------------------------------------------------------------------
+
+def test_cmd_benchmark_with_data_factory(tmp_path, capsys):
+    @data_factory
+    def make_data(image_path="default.jpg"):
+        def _fn():
+            return (image_path, image_path, None, None)
+        return _fn
+
+    mod = types.ModuleType("_test_sweep_data")
+    mod._wrapped_identity = _wrapped_identity
+    mod.make_data = make_data
+    sys.modules["_test_sweep_data"] = mod
+
+    try:
+        parser = _build_parser()
+        args = parser.parse_args([
+            "benchmark", "_test_sweep_data:_wrapped_identity", "_test_sweep_data:make_data",
+            "--data-arg", "image_path=test.jpg",
+            "--runs", "2", "--warmup", "1",
+        ])
+        code = cmd_benchmark(args)
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "mean" in out
+    finally:
+        del sys.modules["_test_sweep_data"]
+
+
+def test_cmd_benchmark_with_data_axis(tmp_path, capsys):
+    @data_factory
+    def make_data(image_path="default.jpg"):
+        def _fn():
+            return (image_path, image_path, None, None)
+        return _fn
+
+    mod = types.ModuleType("_test_sweep_data_axis")
+    mod._wrapped_identity = _wrapped_identity
+    mod.make_data = make_data
+    sys.modules["_test_sweep_data_axis"] = mod
+
+    try:
+        parser = _build_parser()
+        args = parser.parse_args([
+            "benchmark", "_test_sweep_data_axis:_wrapped_identity", "_test_sweep_data_axis:make_data",
+            "--data-axis", "image_path=img1.jpg,img2.jpg",
+            "--runs", "2", "--warmup", "1",
+        ])
+        code = cmd_benchmark(args)
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "mean" in out
+    finally:
+        del sys.modules["_test_sweep_data_axis"]

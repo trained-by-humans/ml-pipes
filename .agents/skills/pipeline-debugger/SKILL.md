@@ -1,6 +1,6 @@
 ---
 name: pipeline-debugger
-description: Debug broken or unexpected pipelines in ml-pipes. Use when Codex needs to reproduce a failing pipeline, reduce it to the smallest failing sub-pipeline, localize the first broken operator or boundary, classify the failure type, and gather evidence with describe, validate, inspect, tracing, or debug examples before deciding ownership or implementing the fix.
+description: Debug broken or unexpected pipelines in ml-pipes. Use when Codex needs to reproduce a failing pipeline, reduce it to the smallest failing sub-pipeline, localize the first bad boundary or step, and identify the concrete follow-up target such as package, module, file, and line.
 ---
 
 # Pipeline Debugger
@@ -9,52 +9,69 @@ Repository documentation Markdown files define semantics. This file only
 drives failure localization.
 
 Use this skill when a pipeline already exists but the first bad boundary,
-step, or failure class is not yet known.
+step, or concrete follow-up target is not yet known.
 
 ## Goal
 
 The goal of this skill is localization, not repair.
 Stop once the first confirmed failing boundary or root cause is identified and
-the finding matches the user's report.
+reduced to concrete follow-up targets.
 
-## Follow this Workflow
+## Follow This Workflow
 
 1. Identify the failing pipeline and input.
    Start from the code, command, test, factory input, or payload the user
-   provided that matches the reported issue.
-   If the failing pipeline code is missing or incomplete, use
-   `examples/README.md` to find the closest runnable example or repro target.
+   provided.
+   If the exact path is missing or incomplete, use `examples/README.md` to
+   find the closest runnable example or repro target.
 
 2. Reproduce and reduce the issue.
-   Reproduce the issue in the provided code path first.
+   Reproduce the reported failure in the provided path first.
    If that path is not runnable, reproduce it with the closest example, then
    reduce the failing case to the smallest pipeline that still shows the same
-   problem. Read `docs/COMPOSITION.md` if the pipeline shape itself is unclear.
+   problem.
 
 3. Validate composition first.
-   Run `validate()` before deeper runtime debugging. Read `docs/VALIDATION.md`
-   when boundary mismatch or composition failure is a likely cause.
+   Run `validate()` before deeper runtime debugging.
+   Read `docs/VALIDATION.md` when boundary mismatch or contract failure is a
+   likely cause.
 
-4. Inspect the data flow.
-   Use `inspect()` to see how the input is processed through the pipeline. Use
-   `examples/run_inspect.py` and `examples/run_inspect_errors.py` as the first
-   reference for localizing the bad step.
+4. Inspect the value flow.
+   Use `inspect()` to localize the first step whose output no longer matches
+   expectations.
+   Use `examples/run_inspect.py` and `examples/run_inspect_errors.py` as the
+   first reference for inspection-driven debugging.
 
 5. Trace only when runtime behavior matters.
    Use tracing only when inspection is not enough or the problem is about
-   timing, runtime order, concurrency, or slow steps. Read `docs/TRACING.md`
-   only when tracing is actually needed.
+   timing, runtime order, concurrency, or slow steps.
+   Read `docs/TRACING.md` only when tracing is actually needed.
 
-6. Stop at a confirmed localized issue.
-   Finish once the issue is isolated and confirmed to match what the user
-   described. The output of this skill should be a localized issue and root
-   cause, not the final fix.
+6. Record the concrete follow-up targets.
+   For the first confirmed failure, identify the narrowest concrete targets
+   you can support from the evidence:
+   - package
+   - module
+   - file
+   - line
+   If the exact line is still unclear, stop at the narrowest confident target.
 
-## Hand Off To
+7. Finish with the next target.
+   Stop once the localized issue, root cause, and concrete targets are
+   clear enough for the next routing step.
 
-- `pipeline-builder` only when the user wants follow-up changes to the
-  pipeline after the issue is localized
+## Output
 
-Otherwise, report the localized issue and root cause back to the user.
-If the finding points to shared core or operator-package behavior, report that
-explicitly and wait for the user to request a maintainer-side fix.
+Report back:
+
+- the localized failure or root cause
+- the concrete follow-up target: package, module, file, and line when known
+- any remaining uncertainty that blocks narrowing the target further
+
+## Switch To
+
+- `pipeline-builder` only when the user wants the current example or
+  downstream pipeline fixed and the issue is now concrete enough for local
+  pipeline repair
+- if a local fix alone is not possible, report the concrete target instead of
+  switching to `pipeline-builder`

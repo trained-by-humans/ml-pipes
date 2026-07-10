@@ -23,27 +23,45 @@ where:
 ## Source Of Truth
 
 - Repository documentation Markdown files are the source of truth for all semantics and APIs:
-  `README.md`, `docs/**/*.md`, and `examples/**/*.md`.
+  `README.md`, `docs/**/*.md`, `packages/*/README.md`,
+  `packages/*/docs/**/*.md`, and `examples/**/*.md`.
 - Agent files should only be used to choose the right workflow and the target layer for any changes.
 - If there is a conflict between repository documents and any agent or skill file,
   follow the repository documentation.
 
 ## Repository Structure
 
-- `src/ml_pipes/`: framework runtime, shared operators, typing, validation,
-  tracing, benchmarking, and CLI surfaces
-- `docs/`: framework docs, tutorials, and reference material
-- `examples/`: runnable example pipelines, integration patterns, and repro
-  targets
-- `tests/`: framework-level verification and regression coverage
+```text
+ml-pipes/
+├── README.md                # main project entry point
+├── docs/                    # shared framework docs
+├── examples/                # runnable pipelines and repro targets
+├── tests/                   # shared regression coverage
+├── packages/
+│   ├── core/                # core framework package and shared tooling
+│   ├── <domain-package>/    # package-owned public module, code, and docs
+│   │   ├── README.md
+│   │   ├── docs/
+│   │   ├── pyproject.toml
+│   │   └── src/
+│   │       └── ml_pipes/
+│   └── meta/                # umbrella install package and install profiles
+└── .agents/skills/          # workflow router and task skills
+```
+
+- `packages/<domain-package>/` covers the non-core workspace packages
+  published under the shared `ml_pipes` namespace.
 
 ## Change Practices
 
-- Prefer the smallest owning surface that satisfies the request. Keep changes
-  local unless shared behavior is required.
+- Prefer the smallest owning surface that satisfies the request:
+  example-local code first, then package-owned shared surfaces, then
+  core-owned framework behavior.
+- Keep changes local unless shared behavior is clearly required.
 - Add or update focused tests when shared behavior changes.
-- Keep docs aligned when documented semantics, guidance, or example-facing
-  behavior change.
+- Keep package docs aligned when a package-owned public surface changes.
+- Keep shared docs aligned when framework semantics, ownership, or
+  example-facing behavior change.
 - If shared core behavior changes, update affected examples so the framework
   and its reference integrations stay aligned.
 
@@ -60,5 +78,9 @@ relevant docs, examples, and tests together so the repository stays coherent.
 
 ## Workflow Router
 
-For workflow-specific guidance, start with
-`.agents/skills/README.md` and then read the matching `SKILL.md`.
+For workflow-specific guidance:
+
+- use `docs/README.md` as the shared doc index
+- use `docs/PACKAGES.md` to resolve package ownership
+- then start with `.agents/skills/README.md` and read the matching
+  `SKILL.md`

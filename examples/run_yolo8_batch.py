@@ -7,32 +7,38 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from common import add_assets_dir_arg, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
-from ml_pipes import (
-    ArgMax,
+from ml_pipes.collectors import PrintCollector
+from ml_pipes.core import Pipeline
+from ml_pipes.onnx import (
+    Distribute,
+    Infer,
+    Extract,
+)
+from ml_pipes.standard import (
     Batch,
+    Pick,
+    Recall,
+    Store,
+    UnBatch,
+)
+from ml_pipes.tensor import (
+    ArgMax,
     Collate,
+    GatherScores,
+    Slice,
+    Squeeze,
+    Transpose,
+)
+from ml_pipes.vision import (
     ConvertBoxFormat,
     Decode,
     Detections,
-    Distribute,
     LoadFile,
-    GatherScores,
-    Infer,
     NMS,
     Normalize,
-    Pick,
-    Pipeline,
-    PrintCollector,
     ProjectBoxes,
-    Recall,
     Resize,
-    Extract,
-    Slice,
-    Squeeze,
-    Store,
     ToDetections,
-    Transpose,
-    UnBatch,
 )
 
 # Batched YOLOv8 detection across multiple images using concurrent threads.

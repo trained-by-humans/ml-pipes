@@ -15,14 +15,18 @@ if __name__ == "__main__" and __package__ is None:
 from ..common import COCO_CLASSES, add_assets_dir_arg, add_model_arg, resolve_model_path
 from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from .stream_common import FrameReader
-from ml_pipes import (
-    DrawBoxes,
+from ml_pipes.core import (
     Embed,
-    ImagePayload,
-    Pick,
     Pipeline,
+)
+from ml_pipes.standard import (
+    Pick,
     Recall,
     Store,
+)
+from ml_pipes.vision import (
+    DrawBoxes,
+    ImagePayload,
 )
 
 
