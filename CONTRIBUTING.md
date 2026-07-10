@@ -8,6 +8,11 @@ maintenance tasks.
 `ml-pipes` is a multi-package repo. The repository root is a workspace, not an
 installable package, so do not run `pip install -e .` from the root.
 
+Contributor installs are local workspace installs. The package
+`pyproject.toml` files describe the published consumer dependency graph, so
+from a fresh clone do not rely on standalone editable installs for packages
+that depend on unpublished siblings.
+
 Create a virtual environment first:
 
 ```bash
@@ -16,7 +21,7 @@ source .venv/bin/activate
 python -m pip install -U pip pytest
 ```
 
-Install the smallest editable package set that matches your work:
+Install the smallest local package set that matches your work:
 
 Core-only work:
 
@@ -48,21 +53,30 @@ python -m pip install \
 
 Add optional surfaces only when needed:
 
-Torch without the full workspace setup:
+Torch contributor setup:
 
 ```bash
-python -m pip install -e packages/torch
+python -m pip install \
+  -e packages/core \
+  -e packages/tensor \
+  -e packages/torch
 ```
 
-Inspection and otel:
+Inspection and otel contributor setup:
 
 ```bash
-python -m pip install -e "packages/core[inspection,otel]"
+python -m pip install \
+  -e "packages/core[inspection,otel]" \
+  -e packages/tensor \
+  -e packages/vision \
+  -e packages/onnx
 ```
 
 The common shared-framework setup covers most contributor work and much of the
 test suite. The umbrella package under `packages/meta/` is mainly for checking
-published install behavior.
+published install behavior. Once the packages are published, consumer installs
+should use the published package names and profiles from the package docs
+rather than these local workspace commands.
 
 ## Run Tests
 
