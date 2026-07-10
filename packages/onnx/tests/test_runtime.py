@@ -29,6 +29,23 @@ def test_extract_renames_tensor_with_as_():
     assert np.array_equal(registry["preds"], array)
 
 
+def test_extract_preserves_empty_named_tensors() -> None:
+    outputs = RuntimeOutputs(
+        tensors=(
+            TensorPayload(array=np.zeros((0, 4), dtype=np.float32), layout="NC", dtype="float32"),
+            TensorPayload(array=np.zeros((0,), dtype=np.float32), layout="N", dtype="float32"),
+        ),
+        names=("boxes", "scores"),
+    )
+
+    registry = Extract("boxes", "scores")(outputs)
+
+    assert registry["boxes"].shape == (0, 4)
+    assert registry["boxes"].dtype == np.float32
+    assert registry["scores"].shape == (0,)
+    assert registry["scores"].dtype == np.float32
+
+
 def test_extract_raises_on_missing_output_name():
     outputs = RuntimeOutputs(
         tensors=(TensorPayload(array=np.zeros((1,), dtype=np.float32), layout="UNKNOWN", dtype="float32"),),
@@ -77,6 +94,26 @@ def test_distribute_mutating_one_sample_does_not_affect_another():
     result[0].tensors[0].array[:] = 99.0
 
     assert np.all(result[1].tensors[0].array == 1.0)
+
+
+def test_distribute_preserves_empty_detection_axes_per_sample() -> None:
+    outputs = RuntimeOutputs(
+        tensors=(
+            TensorPayload(array=np.zeros((2, 0, 4), dtype=np.float32), layout="NNC", dtype="float32"),
+            TensorPayload(array=np.zeros((2, 0), dtype=np.float32), layout="NN", dtype="float32"),
+        ),
+        names=("boxes", "scores"),
+    )
+
+    result = Distribute()(outputs)
+
+    assert len(result) == 2
+    for sample in result:
+        assert sample.names == ("boxes", "scores")
+        assert sample.tensors[0].array.shape == (1, 0, 4)
+        assert sample.tensors[0].array.dtype == np.float32
+        assert sample.tensors[1].array.shape == (1, 0)
+        assert sample.tensors[1].array.dtype == np.float32
 
 
 def test_infer_op_requires_requested_model_dtype():

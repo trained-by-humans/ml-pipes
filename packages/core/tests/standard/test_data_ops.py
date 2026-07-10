@@ -682,6 +682,10 @@ def test_distinct_deduplicates_by_selected_value() -> None:
     assert [item.payload["msg"] for item in result if item.payload is not None] == ["one", "three"]
 
 
+def test_distinct_handles_empty_iterable() -> None:
+    assert Distinct(source="cleaned")([]) == []
+
+
 def test_distinct_validation_accepts_existing_selector() -> None:
     Pipeline([Distinct(source="cleaned")]).validate(
         pipeline_input_type=list[StrictCarrier],
@@ -716,6 +720,10 @@ def test_distinct_by_deduplicates_by_computed_value() -> None:
     result = DistinctBy(_hash_text)(["a", "bb", "cc", "d"])
 
     assert result == ["a", "bb"]
+
+
+def test_distinct_by_handles_empty_iterable() -> None:
+    assert DistinctBy(_lower_text)([]) == []
 
 
 def test_distinct_by_validation_checks_fn_input_type() -> None:
@@ -770,6 +778,10 @@ def test_take_supports_iterables() -> None:
     assert Take(2)(items) == [0, 1]
 
 
+def test_take_handles_empty_iterable() -> None:
+    assert Take(2)([]) == []
+
+
 def test_take_supports_value_shaped_iterables() -> None:
     assert Take(2)("hello") == ["h", "e"]
 
@@ -811,6 +823,10 @@ def test_take_rejects_scalar_boundary_during_validation() -> None:
 
 def test_take_while_supports_iterables() -> None:
     assert TakeWhile(lambda value: value < 3)(range(5)) == [0, 1, 2]
+
+
+def test_take_while_handles_empty_iterable() -> None:
+    assert TakeWhile(_has_min_length)([]) == []
 
 
 def test_take_while_supports_value_shaped_iterables() -> None:
@@ -1337,3 +1353,24 @@ def test_region_and_sequence_ops_preserve_item_type_for_validation() -> None:
 
     assert contract.input_type == list[dict[str, object]]
     assert contract.output_type == int
+
+
+def test_per_item_distinct_and_take_handle_empty_iterable_without_invoking_inner_ops() -> None:
+    seen: list[int] = []
+
+    def mark(value: int) -> Box:
+        seen.append(value)
+        return Box(value)
+
+    pipeline = Pipeline([
+        PerItem(),
+        mark,
+        CollectItems(),
+        Distinct(source="value"),
+        Take(5),
+    ])
+
+    result = pipeline([])
+
+    assert result == []
+    assert seen == []
