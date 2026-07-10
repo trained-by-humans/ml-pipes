@@ -8,7 +8,18 @@ import sys
 import pytest
 
 
-ROOT = Path(__file__).resolve().parents[1]
+def _repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for candidate in (here, *here.parents):
+        if (
+            (candidate / "pyproject.toml").is_file()
+            and (candidate / "packages" / "core" / "src").is_dir()
+        ):
+            return candidate
+    raise RuntimeError("Could not locate repository root")
+
+
+ROOT = _repo_root()
 PACKAGE_SRC_DIRS = [
     ROOT / "packages" / "core" / "src",
     ROOT / "packages" / "tensor" / "src",

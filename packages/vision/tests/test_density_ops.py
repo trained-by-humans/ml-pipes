@@ -132,6 +132,7 @@ def test_density_to_heatmap_does_not_mutate_prediction() -> None:
 
 def test_density_to_heatmap_accepts_custom_colormap_and_interpolation() -> None:
     import cv2
+
     source = ImagePayload(array=np.zeros((20, 10, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
     prediction = DensityPrediction(density_map=np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32))
 
@@ -139,9 +140,7 @@ def test_density_to_heatmap_accepts_custom_colormap_and_interpolation() -> None:
     _, jet_heatmap = DensityToHeatmap(colormap=cv2.COLORMAP_JET)(source, prediction)
     _, nearest_heatmap = DensityToHeatmap(interpolation=cv2.INTER_NEAREST)(source, prediction)
 
-    # Different colormap produces different pixel values.
     assert not np.array_equal(default_heatmap.array, jet_heatmap.array)
-    # Different interpolation produces different pixel values when upscaling a 2×2 map.
     assert not np.array_equal(default_heatmap.array, nearest_heatmap.array)
 
 
@@ -151,7 +150,7 @@ def test_density_to_heatmap_accepts_integer_density_without_precast() -> None:
 
     _, heatmap = DensityToHeatmap()(source, prediction)
 
-    assert heatmap.array.max() > 0  # non-zero input produced a visible heatmap
+    assert heatmap.array.max() > 0
     assert np.count_nonzero(heatmap.array) > 0
 
 

@@ -8,23 +8,35 @@ import numpy as np
 import pytest
 import torch
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def _repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for candidate in (here, *here.parents):
+        if (
+            (candidate / "pyproject.toml").is_file()
+            and (candidate / "packages" / "core" / "src").is_dir()
+        ):
+            return candidate
+    raise RuntimeError("Could not locate repository root")
+
+
+PROJECT_ROOT = _repo_root()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from examples.torch.mask2former_infer import (
+from examples.torch.mask2former_infer import (  # noqa: E402
     LoadedMask2Former,
     Mask2FormerInfer,
     build_mask2former_preprocess_pipeline,
 )
-from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFromQueries
-from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries
-from ml_pipes.core import Pipeline
-from ml_pipes.standard import Recall
-from ml_pipes.tensor import ArgMax
-from ml_pipes.torch import TorchArgMax
-from ml_pipes.torch.types import TorchTensorRegistry
-from ml_pipes.tensor import TensorRegistry
+from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFromQueries  # noqa: E402
+from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries  # noqa: E402
+from ml_pipes.core import Pipeline  # noqa: E402
+from ml_pipes.standard import Recall  # noqa: E402
+from ml_pipes.tensor import ArgMax  # noqa: E402
+from ml_pipes.tensor import TensorRegistry  # noqa: E402
+from ml_pipes.torch import TorchArgMax  # noqa: E402
+from ml_pipes.torch.types import TorchTensorRegistry  # noqa: E402
 
 
 def _write_png(path: Path, image: np.ndarray) -> None:

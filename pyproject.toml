@@ -17,4 +17,5 @@ ml-pipes-torch = { workspace = true }
 ml-pipes-vision = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+testpaths = ["tests", "packages", "examples"]

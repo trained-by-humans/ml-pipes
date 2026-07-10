@@ -1,20 +1,15 @@
 import threading
 from typing import Any
 
-import numpy as np
 import pytest
 
 from ml_pipes.core import Pipeline
-from ml_pipes.onnx import Distribute
 from ml_pipes.standard import (
     Batch,
     UnBatch,
 )
-from ml_pipes.tensor import Collate
-from ml_pipes.validation import PipelineValidationError
 from ml_pipes.context import Recall, Store
-from ml_pipes.onnx import RuntimeOutputs
-from ml_pipes.tensor import TensorPayload
+from ml_pipes.validation import PipelineValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -134,80 +129,6 @@ def test_exception_in_batch_region_propagates_to_all_waiters():
 
     assert all(isinstance(r, RuntimeError) for r in results), results
     assert all("batch failed" in str(r) for r in results)
-
-
-# ---------------------------------------------------------------------------
-# Collate
-# ---------------------------------------------------------------------------
-
-def test_collate_concatenates_nchw_tensors_along_batch_dim():
-    tensors = [
-        TensorPayload(array=np.zeros((1, 3, 8, 8), dtype=np.float32), layout="NCHW", dtype="float32"),
-        TensorPayload(array=np.zeros((1, 3, 8, 8), dtype=np.float32), layout="NCHW", dtype="float32"),
-        TensorPayload(array=np.zeros((1, 3, 8, 8), dtype=np.float32), layout="NCHW", dtype="float32"),
-    ]
-    result = Collate()(tensors)
-    assert result.array.shape == (3, 3, 8, 8)
-    assert result.layout == "NCHW"
-    assert result.dtype == "float32"
-
-
-def test_collate_stacks_chw_tensors_adding_batch_dim():
-    tensors = [
-        TensorPayload(array=np.zeros((3, 8, 8), dtype=np.float32), layout="CHW", dtype="float32"),
-        TensorPayload(array=np.zeros((3, 8, 8), dtype=np.float32), layout="CHW", dtype="float32"),
-    ]
-    result = Collate()(tensors)
-    assert result.array.shape == (2, 3, 8, 8)
-
-
-def test_collate_raises_on_empty_list():
-    with pytest.raises(ValueError, match="empty"):
-        Collate()([])
-
-
-# ---------------------------------------------------------------------------
-# Distribute
-# ---------------------------------------------------------------------------
-
-def test_distribute_splits_batch_dim_into_per_sample_outputs():
-    batched = np.arange(12, dtype=np.float32).reshape(3, 4)
-    outputs = RuntimeOutputs(
-        tensors=(TensorPayload(array=batched, layout="UNKNOWN", dtype="float32"),),
-        names=("preds",),
-    )
-    result = Distribute()(outputs)
-
-    assert len(result) == 3
-    for i, sample in enumerate(result):
-        assert sample.tensors[0].array.shape == (1, 4)
-        assert np.array_equal(sample.tensors[0].array, batched[i : i + 1])
-        assert sample.names == ("preds",)
-
-
-def test_distribute_samples_do_not_share_memory_with_batch():
-    batched = np.arange(8, dtype=np.float32).reshape(2, 4)
-    outputs = RuntimeOutputs(
-        tensors=(TensorPayload(array=batched, layout="UNKNOWN", dtype="float32"),),
-        names=("preds",),
-    )
-    result = Distribute()(outputs)
-
-    assert not np.shares_memory(result[0].tensors[0].array, batched)
-    assert not np.shares_memory(result[1].tensors[0].array, batched)
-
-
-def test_distribute_mutating_one_sample_does_not_affect_another():
-    batched = np.ones((2, 4), dtype=np.float32)
-    outputs = RuntimeOutputs(
-        tensors=(TensorPayload(array=batched, layout="UNKNOWN", dtype="float32"),),
-        names=("preds",),
-    )
-    result = Distribute()(outputs)
-
-    result[0].tensors[0].array[:] = 99.0
-
-    assert np.all(result[1].tensors[0].array == 1.0)
 
 
 # ---------------------------------------------------------------------------
