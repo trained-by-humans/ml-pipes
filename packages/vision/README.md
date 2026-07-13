@@ -16,7 +16,9 @@ an `ml-pipes` pipeline.
 
 | Field          | Value                                                                                                               |
 |----------------|---------------------------------------------------------------------------------------------------------------------|
-| Package        | `ml-pipes-vision` ([Index](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/docs/INDEX.md))  |
+| Package        | `ml-pipes-vision`                                                                                                    |
+| Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/docs/README.md)         |
+| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/docs/INDEX.md)           |
 | Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                                  |
 | Public modules | `ml_pipes.vision`                                                                                                   |
 | Content        | image input handling; preprocessing; typed vision predictions; tiling; rendering and logging                        |

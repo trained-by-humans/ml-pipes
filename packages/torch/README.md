@@ -11,17 +11,16 @@ explicitly.
 Operators can be used as plain callables, but this package is best used inside
 an `ml-pipes` pipeline.
 
-For the Torch execution-domain guide, see
-[`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/README.md).
-
 ## Package Reference
 
-| Field          | Value                                                                                                                                                                     |
-|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Package        | `ml-pipes-torch` ([Index](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/INDEX.md))                                                          |
-| Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                                                                                        |
-| Public modules | `ml_pipes.torch`                                                                                                                                                          |
-| Content        | Torch execution stages; NumPy/Torch boundary crossing; device placement; Torch-native tensor postprocess                                                                  |
+| Field          | Value                                                                                                     |
+|----------------|-----------------------------------------------------------------------------------------------------------|
+| Package        | `ml-pipes-torch`                                                                                          |
+| Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/README.md) |
+| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/INDEX.md)   |
+| Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                        |
+| Public modules | `ml_pipes.torch`                                                                                          |
+| Content        | Torch execution stages; NumPy/Torch boundary crossing; device placement; Torch-native tensor postprocess  |
 
 See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
 for direct package installs, umbrella profiles, and the full package matrix.

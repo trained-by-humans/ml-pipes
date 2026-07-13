@@ -15,7 +15,9 @@ an `ml-pipes` pipeline.
 
 | Field          | Value                                                                                                           |
 |----------------|-----------------------------------------------------------------------------------------------------------------|
-| Package        | `ml-pipes-onnx` ([Index](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/onnx/docs/INDEX.md))  |
+| Package        | `ml-pipes-onnx`                                                                                                |
+| Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/onnx/docs/README.md)      |
+| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/onnx/docs/INDEX.md)        |
 | Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                              |
 | Public modules | `ml_pipes.onnx`                                                                                                 |
 | Content        | ONNX Runtime integration; runtime-output handling; output extraction and batch distribution                     |

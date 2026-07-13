@@ -13,12 +13,14 @@ an `ml-pipes` pipeline.
 
 ## Package Reference
 
-| Field          | Value                                                                                                                                                     |
-|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Package        | `ml-pipes-tensor` ([Index](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/INDEX.md))                                        |
-| Depends on     | `ml-pipes-core`                                                                                                                                           |
-| Public modules | `ml_pipes.tensor`                                                                                                                                         |
-| Content        | shared tensor values; NumPy-side tensor shaping and selection; masking, ranking, collation, and light arithmetic                                          |
+| Field          | Value                                                                                                            |
+|----------------|------------------------------------------------------------------------------------------------------------------|
+| Package        | `ml-pipes-tensor`                                                                                                |
+| Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/README.md)       |
+| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/INDEX.md)         |
+| Depends on     | `ml-pipes-core`                                                                                                  |
+| Public modules | `ml_pipes.tensor`                                                                                                |
+| Content        | shared tensor values; NumPy-side tensor shaping and selection; masking, ranking, collation, and light arithmetic |
 
 See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
 for direct package installs, umbrella profiles, and the full package matrix.

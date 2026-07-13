@@ -16,7 +16,8 @@ for the framework overview, installation model, and end-to-end examples.
 
 | Field             | Value                                                                                                                                                                                  |
 |-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Package           | `ml-pipes-core` ([Index](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/core/docs/INDEX.md))                                                                         |
+| Package           | `ml-pipes-core`                                                                                                                                                                         |
+| Reference         | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/core/docs/INDEX.md)                                                                                 |
 | Optional installs | `inspection`, `otel`                                                                                                                                                                   |
 | Depends on        | `—`                                                                                                                                                                                    |
 | Public modules    | `ml_pipes.core`, `ml_pipes.standard`, `ml_pipes.validation`, `ml_pipes.tracing`, `ml_pipes.collectors`, `ml_pipes.factory`, `ml_pipes.benchmark`, `ml_pipes.inspection`                |
