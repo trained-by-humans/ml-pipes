@@ -54,3 +54,31 @@ def test_load_pyproject_requires_toml_parser(monkeypatch: pytest.MonkeyPatch) ->
 
     with pytest.raises(RuntimeError, match="install tomli"):
         module._load_pyproject(module.ROOT / "packages" / "core")
+
+
+def test_ensure_release_tooling_requires_build_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_release_packages_module()
+
+    def fake_find_spec(name: str) -> object | None:
+        if name in {"build", "hatchling"}:
+            return None
+        return object()
+
+    monkeypatch.setattr(module.importlib.util, "find_spec", fake_find_spec)
+
+    with pytest.raises(RuntimeError, match="Missing modules: build, hatchling"):
+        module._ensure_release_tooling(include_upload=False)
+
+
+def test_ensure_release_tooling_requires_twine_for_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_release_packages_module()
+
+    def fake_find_spec(name: str) -> object | None:
+        if name == "twine":
+            return None
+        return object()
+
+    monkeypatch.setattr(module.importlib.util, "find_spec", fake_find_spec)
+
+    with pytest.raises(RuntimeError, match="Missing modules: twine"):
+        module._ensure_release_tooling(include_upload=True)

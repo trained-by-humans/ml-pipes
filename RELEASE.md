@@ -13,20 +13,25 @@ standard-library `tomllib` module is not available there yet.
 Install the local release tooling you need:
 
 ```bash
-python -m pip install -U build hatchling twine
+python3 -m pip install -U build hatchling twine
 ```
 
 If you are using Python 3.10, also install:
 
 ```bash
-python -m pip install -U tomli
+python3 -m pip install -U tomli
 ```
 
-## Version Alignment
+## Validate Release Metadata
 
-All published package versions must stay aligned. Before cutting a release,
-confirm that every `packages/*/pyproject.toml` version matches the intended
-release tag `vX.Y.Z`.
+Before cutting a release, validate release metadata from the repository root:
+
+```bash
+python3 scripts/release_packages.py --validate --tag v0.1.0
+```
+
+This checks that all published package versions stay aligned and that the
+release tag matches that shared version.
 
 Publish packages in dependency order:
 
@@ -37,24 +42,16 @@ Publish packages in dependency order:
 5. `ml-pipes-torch`
 6. `ml-pipes`
 
-## Validate Release Metadata
-
-Validate release metadata from the repository root with:
-
-```bash
-python scripts/release_packages.py --validate --tag v0.1.0
-```
-
-This check is strict. If the command cannot read package `pyproject.toml`
-files, it fails and tells you to use Python 3.11+ or install `tomli`.
-
 ## Local Dry-Run
 
 Run a release dry-run from the repository root with:
 
 ```bash
-python scripts/release_packages.py --dry-run
+python3 scripts/release_packages.py --dry-run
 ```
+
+This command builds the distributions locally and requires the release
+tooling from the setup step above.
 
 ## GitHub Release Flow
 

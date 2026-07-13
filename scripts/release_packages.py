@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import importlib.util
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +58,28 @@ def _load_pyproject(package_dir: Path) -> dict[str, Any]:
         ) from _TOML_IMPORT_ERROR
     with (package_dir / "pyproject.toml").open("rb") as handle:
         return tomllib.load(handle)
+
+
+def _pip_install_command(*packages: str) -> str:
+    return shlex.join([sys.executable, "-m", "pip", "install", "-U", *packages])
+
+
+def _ensure_release_tooling(*, include_upload: bool) -> None:
+    required_modules = ["build", "hatchling"]
+    if include_upload:
+        required_modules.append("twine")
+
+    missing_modules = [name for name in required_modules if importlib.util.find_spec(name) is None]
+    if not missing_modules:
+        return
+
+    missing = ", ".join(missing_modules)
+    action = "release publishing" if include_upload else "release dry-run"
+    raise RuntimeError(
+        f"{action} requires release tooling in this interpreter. "
+        f"Missing modules: {missing}. "
+        f"Install them with: {_pip_install_command('build', 'hatchling', 'twine')}"
+    )
 
 
 def _requirement_name(requirement: str) -> str:
@@ -224,6 +248,8 @@ def main() -> int:
             print(f"- {manifest.dist_name}: runtime deps -> {dependencies}", flush=True)
         return 0
 
+    _ensure_release_tooling(include_upload=args.publish)
+
     outdir = args.outdir
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -250,4 +276,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+    except subprocess.CalledProcessError as exc:
+        command = shlex.join(str(arg) for arg in exc.cmd)
+        print(
+            f"Error: command failed with exit code {exc.returncode}: {command}",
+            file=sys.stderr,
+        )
+        raise SystemExit(exc.returncode) from None
