@@ -107,11 +107,13 @@ jobs:
       - name: Install test tooling
         run: python -m pip install -U pip pytest
 
-      - name: Install torch package chain
+      - name: Install torch package and inspection chain
         run: |
           python -m pip install \
-            -e packages/core \
+            -e "packages/core[inspection]" \
             -e packages/tensor \
+            -e packages/vision \
+            -e packages/onnx \
             -e packages/torch
 
       - name: Run torch package smoke tests
@@ -119,7 +121,8 @@ jobs:
           python -m pytest -q \
             packages/torch/tests/test_exports.py \
             packages/torch/tests/test_torch.py \
-            packages/torch/tests/test_integration.py
+            packages/torch/tests/test_integration.py \
+            packages/torch/tests/test_inspection.py
 
       - name: Check tracked files for mutations
         run: |
