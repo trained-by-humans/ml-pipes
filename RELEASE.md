@@ -30,7 +30,8 @@ Before cutting a release, validate release metadata from the repository root:
 python3 scripts/release_packages.py --validate --tag v0.1.0
 ```
 
-This checks that all published package versions stay aligned and that the
+This checks that all published package versions stay aligned, internal
+`ml-pipes` pins stay aligned across runtime dependencies and extras, and the
 release tag matches that shared version.
 
 Publish packages in dependency order:

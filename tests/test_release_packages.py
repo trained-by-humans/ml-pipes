@@ -23,6 +23,103 @@ def _skip_without_toml_parser(module: object) -> None:
         pytest.skip("release metadata validation requires tomli on Python 3.10 or Python 3.11+")
 
 
+def _fake_release_pyprojects(version: str = "0.2.0") -> dict[str, dict[str, object]]:
+    return {
+        "core": {
+            "project": {
+                "name": "ml-pipes-core",
+                "version": version,
+                "dependencies": [
+                    "numpy>=1.26",
+                ],
+                "optional-dependencies": {
+                    "inspection": [
+                        f"ml-pipes-onnx=={version}",
+                        f"ml-pipes-tensor=={version}",
+                        f"ml-pipes-vision=={version}",
+                    ],
+                },
+            },
+        },
+        "tensor": {
+            "project": {
+                "name": "ml-pipes-tensor",
+                "version": version,
+                "dependencies": [
+                    f"ml-pipes-core=={version}",
+                    "numpy>=1.26",
+                ],
+            },
+        },
+        "vision": {
+            "project": {
+                "name": "ml-pipes-vision",
+                "version": version,
+                "dependencies": [
+                    f"ml-pipes-core=={version}",
+                    f"ml-pipes-tensor=={version}",
+                    "numpy>=1.26",
+                ],
+            },
+        },
+        "onnx": {
+            "project": {
+                "name": "ml-pipes-onnx",
+                "version": version,
+                "dependencies": [
+                    f"ml-pipes-core=={version}",
+                    f"ml-pipes-tensor=={version}",
+                    "numpy>=1.26",
+                ],
+            },
+        },
+        "torch": {
+            "project": {
+                "name": "ml-pipes-torch",
+                "version": version,
+                "dependencies": [
+                    f"ml-pipes-core=={version}",
+                    f"ml-pipes-tensor=={version}",
+                    "numpy>=1.26",
+                ],
+            },
+        },
+        "meta": {
+            "project": {
+                "name": "ml-pipes",
+                "version": version,
+                "dependencies": [
+                    f"ml-pipes-core=={version}",
+                ],
+                "optional-dependencies": {
+                    "all": [
+                        f"ml-pipes-core[inspection]=={version}",
+                        f"ml-pipes-onnx=={version}",
+                        f"ml-pipes-tensor=={version}",
+                        f"ml-pipes-torch=={version}",
+                        f"ml-pipes-vision=={version}",
+                    ],
+                },
+            },
+        },
+    }
+
+
+def _patch_pyprojects(
+    monkeypatch: pytest.MonkeyPatch,
+    module: object,
+    *,
+    version: str = "0.2.0",
+) -> dict[str, dict[str, object]]:
+    pyprojects = _fake_release_pyprojects(version=version)
+
+    def fake_load_pyproject(package_dir: Path) -> dict[str, object]:
+        return pyprojects[package_dir.name]
+
+    monkeypatch.setattr(module, "_load_pyproject", fake_load_pyproject)
+    return pyprojects
+
+
 def test_validate_release_metadata_accepts_current_manifests() -> None:
     module = _load_release_packages_module()
     _skip_without_toml_parser(module)
@@ -36,6 +133,14 @@ def test_validate_release_metadata_accepts_current_manifests() -> None:
     assert manifests[0].runtime_internal_dependencies == ()
     assert manifests[1].runtime_internal_dependencies == ("ml-pipes-core",)
     assert manifests[-1].runtime_internal_dependencies == ("ml-pipes-core",)
+    assert any(
+        dependency.source == "project.optional-dependencies.inspection"
+        for dependency in manifests[0].internal_dependency_requirements
+    )
+    assert any(
+        dependency.source == "project.optional-dependencies.all"
+        for dependency in manifests[-1].internal_dependency_requirements
+    )
 
 
 def test_validate_release_metadata_rejects_mismatched_tag() -> None:
@@ -44,6 +149,42 @@ def test_validate_release_metadata_rejects_mismatched_tag() -> None:
 
     with pytest.raises(ValueError, match="Release tag"):
         module.validate_release_metadata("v9.9.9")
+
+
+def test_validate_release_metadata_rejects_stale_runtime_internal_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_release_packages_module()
+    pyprojects = _patch_pyprojects(monkeypatch, module)
+
+    pyprojects["vision"]["project"]["dependencies"][0] = "ml-pipes-core==0.1.0"
+
+    with pytest.raises(ValueError, match="project.dependencies requirement"):
+        module.validate_release_metadata("v0.2.0")
+
+
+def test_validate_release_metadata_rejects_stale_optional_internal_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_release_packages_module()
+    pyprojects = _patch_pyprojects(monkeypatch, module)
+
+    pyprojects["core"]["project"]["optional-dependencies"]["inspection"][0] = "ml-pipes-onnx==0.1.0"
+
+    with pytest.raises(ValueError, match="project.optional-dependencies.inspection requirement"):
+        module.validate_release_metadata("v0.2.0")
+
+
+def test_validate_release_metadata_requires_exact_internal_pins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_release_packages_module()
+    pyprojects = _patch_pyprojects(monkeypatch, module)
+
+    pyprojects["tensor"]["project"]["dependencies"][0] = "ml-pipes-core>=0.2.0"
+
+    with pytest.raises(ValueError, match="must pin an exact version with =="):
+        module.validate_release_metadata("v0.2.0")
 
 
 def test_load_pyproject_requires_toml_parser(monkeypatch: pytest.MonkeyPatch) -> None:

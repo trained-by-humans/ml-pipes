@@ -36,6 +36,18 @@ PACKAGE_ORDER = [
 INTERNAL_DIST_NAMES = {dist_name for _, dist_name in PACKAGE_ORDER}
 PACKAGE_ORDER_INDEX = {dist_name: index for index, (_, dist_name) in enumerate(PACKAGE_ORDER)}
 _REQUIREMENT_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+_PINNED_REQUIREMENT_RE = re.compile(
+    r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"(?:\[[^\]]+\])?\s*==\s*(?P<version>[^;\s]+)\s*(?:;.*)?$"
+)
+
+
+@dataclass(frozen=True)
+class InternalDependency:
+    dist_name: str
+    version: str
+    source: str
+    requirement: str
 
 
 @dataclass(frozen=True)
@@ -44,6 +56,7 @@ class PackageManifest:
     dist_name: str
     version: str
     runtime_internal_dependencies: tuple[str, ...]
+    internal_dependency_requirements: tuple[InternalDependency, ...]
 
 
 def _artifact_glob(dist_name: str) -> str:
@@ -89,14 +102,87 @@ def _requirement_name(requirement: str) -> str:
     return match.group(1)
 
 
-def _runtime_internal_dependencies(project: dict[str, Any]) -> tuple[str, ...]:
-    dependencies = project.get("dependencies", [])
-    internal_dependencies: list[str] = []
-    for requirement in dependencies:
-        name = _requirement_name(requirement)
-        if name in INTERNAL_DIST_NAMES:
-            internal_dependencies.append(name)
+def _internal_dependency(requirement: str, *, source: str) -> InternalDependency | None:
+    name = _requirement_name(requirement)
+    if name not in INTERNAL_DIST_NAMES:
+        return None
+
+    match = _PINNED_REQUIREMENT_RE.match(requirement)
+    if match is None:
+        raise ValueError(
+            f"Internal dependency {requirement!r} in {source} must pin an exact version with ==."
+        )
+    return InternalDependency(
+        dist_name=name,
+        version=match.group("version"),
+        source=source,
+        requirement=requirement,
+    )
+
+
+def _internal_dependencies(requirements: Any, *, source: str) -> tuple[InternalDependency, ...]:
+    if not isinstance(requirements, list):
+        raise ValueError(f"{source} must be a list of dependency strings")
+
+    internal_dependencies: list[InternalDependency] = []
+    for requirement in requirements:
+        if not isinstance(requirement, str):
+            raise ValueError(f"{source} must contain dependency strings")
+        dependency = _internal_dependency(requirement, source=source)
+        if dependency is not None:
+            internal_dependencies.append(dependency)
     return tuple(internal_dependencies)
+
+
+def _runtime_internal_dependencies(project: dict[str, Any]) -> tuple[InternalDependency, ...]:
+    dependencies = project.get("dependencies", [])
+    return _internal_dependencies(dependencies, source="project.dependencies")
+
+
+def _optional_internal_dependencies(project: dict[str, Any]) -> tuple[InternalDependency, ...]:
+    optional_dependencies = project.get("optional-dependencies", {})
+    if not isinstance(optional_dependencies, dict):
+        raise ValueError("project.optional-dependencies must be a table")
+
+    internal_dependencies: list[InternalDependency] = []
+    for extra_name, requirements in optional_dependencies.items():
+        source = f"project.optional-dependencies.{extra_name}"
+        internal_dependencies.extend(_internal_dependencies(requirements, source=source))
+    return tuple(internal_dependencies)
+
+
+def _runtime_internal_dependency_names(
+    dependencies: tuple[InternalDependency, ...],
+) -> tuple[str, ...]:
+    internal_dependencies: list[str] = []
+    for dependency in dependencies:
+        internal_dependencies.append(dependency.dist_name)
+    return tuple(internal_dependencies)
+
+
+def _validate_internal_dependency_pins(
+    manifests: list[PackageManifest],
+    *,
+    expected_version: str,
+) -> None:
+    for manifest in manifests:
+        for dependency in manifest.internal_dependency_requirements:
+            if dependency.version != expected_version:
+                raise ValueError(
+                    f"{manifest.dist_name} declares {dependency.source} requirement "
+                    f"{dependency.requirement!r}, but internal packages must be pinned "
+                    f"to =={expected_version}"
+                )
+
+
+def _validate_runtime_publish_order(manifests: list[PackageManifest]) -> None:
+    for manifest in manifests:
+        for dependency in manifest.runtime_internal_dependencies:
+            if PACKAGE_ORDER_INDEX[dependency] >= PACKAGE_ORDER_INDEX[manifest.dist_name]:
+                raise ValueError(
+                    f"Publish order is invalid: {manifest.dist_name} depends on {dependency}, "
+                    "but the dependency is not published earlier"
+                )
 
 
 def _package_manifest(package_dir_name: str, expected_dist_name: str) -> PackageManifest:
@@ -117,11 +203,17 @@ def _package_manifest(package_dir_name: str, expected_dist_name: str) -> Package
     if not isinstance(version, str) or not version:
         raise ValueError(f"{package_dir / 'pyproject.toml'} is missing project.version")
 
+    runtime_internal_dependencies = _runtime_internal_dependencies(project)
+    optional_internal_dependencies = _optional_internal_dependencies(project)
+
     return PackageManifest(
         package_dir_name=package_dir_name,
         dist_name=expected_dist_name,
         version=version,
-        runtime_internal_dependencies=_runtime_internal_dependencies(project),
+        runtime_internal_dependencies=_runtime_internal_dependency_names(
+            runtime_internal_dependencies
+        ),
+        internal_dependency_requirements=runtime_internal_dependencies + optional_internal_dependencies,
     )
 
 
@@ -141,17 +233,8 @@ def validate_release_metadata(expected_tag: str | None = None) -> tuple[str, lis
             f"Release tag {expected_tag!r} does not match package version 'v{version}'"
         )
 
-    for manifest in manifests:
-        for dependency in manifest.runtime_internal_dependencies:
-            if dependency not in PACKAGE_ORDER_INDEX:
-                raise ValueError(
-                    f"{manifest.dist_name} depends on unknown internal package {dependency!r}"
-                )
-            if PACKAGE_ORDER_INDEX[dependency] >= PACKAGE_ORDER_INDEX[manifest.dist_name]:
-                raise ValueError(
-                    f"Publish order is invalid: {manifest.dist_name} depends on {dependency}, "
-                    "but the dependency is not published earlier"
-                )
+    _validate_internal_dependency_pins(manifests, expected_version=version)
+    _validate_runtime_publish_order(manifests)
 
     return version, manifests
 
