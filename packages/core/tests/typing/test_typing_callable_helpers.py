@@ -3,7 +3,11 @@ from unittest.mock import patch
 
 import pytest
 
-from ml_pipes._typing.inspection import resolve_callable_annotations
+from ml_pipes._typing.inspection import (
+    bind_method_call_parameter_names,
+    resolve_callable_annotations,
+    resolve_callable_signature_annotations,
+)
 from ml_pipes._typing.signatures import (
     validate_callable_signature,
     validate_nullary_callable_signature,
@@ -36,6 +40,55 @@ def test_resolve_callable_annotations_orders_positional_annotations() -> None:
 
     assert annotations.parameter_annotations == (int, str)
     assert annotations.return_annotation is bool
+
+
+def test_resolve_callable_signature_annotations_preserves_keyword_only_parameters() -> None:
+    def predicate(value: int, *, expected: str = "x") -> bool:
+        return str(value) == expected
+
+    annotations = resolve_callable_signature_annotations(predicate)
+
+    assert annotations.is_inspectable is True
+    assert tuple(parameter.parameter.name for parameter in annotations.parameters) == (
+        "value",
+        "expected",
+    )
+    assert tuple(parameter.parameter.kind for parameter in annotations.parameters) == (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+    assert tuple(parameter.annotation for parameter in annotations.parameters) == (
+        int,
+        str,
+    )
+    assert tuple(
+        parameter.parameter.default is not inspect.Parameter.empty
+        for parameter in annotations.parameters
+    ) == (
+        False,
+        True,
+    )
+    assert annotations.return_annotation is bool
+
+
+def test_bind_method_call_parameter_names_hides_inspect_binding_details() -> None:
+    class Filterable:
+        def filter(self, mask: list[bool], *, limit: int = 0) -> None:
+            del mask, limit
+
+    mask_token = object()
+    limit_token = object()
+
+    parameter_names = bind_method_call_parameter_names(
+        Filterable.filter,
+        (mask_token,),
+        {"limit": limit_token},
+    )
+
+    assert parameter_names == {
+        mask_token: "mask",
+        limit_token: "limit",
+    }
 
 
 def test_unary_callable_signature_reuses_public_callable_validation() -> None:

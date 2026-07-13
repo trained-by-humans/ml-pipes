@@ -4,6 +4,7 @@ import pytest
 
 from ml_pipes._typing.annotation import _MISSING_ANNOTATION
 from ml_pipes._typing.inspection import (
+    resolve_attribute_annotation_info,
     AttributeInspectionError,
     MissingAttributeError,
     MissingTypedDictKeyError,
@@ -29,6 +30,16 @@ class _UntypedPropertyAttributeOwner:
     @property
     def value(self):
         return ""
+
+
+class _WritablePropertyAttributeOwner:
+    @property
+    def value(self) -> str:
+        return ""
+
+    @value.setter
+    def value(self, value: str) -> None:
+        del value
 
 
 class _BrokenAttributeOwner:
@@ -87,6 +98,44 @@ def test_resolve_attribute_annotation(annotation: Any, attribute: str, expected:
         assert result is _MISSING_ANNOTATION
         return
     assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("annotation", "attribute", "expected_annotation", "expected_writable"),
+    [
+        pytest.param(
+            _AnnotatedAttributeOwner,
+            "value",
+            int,
+            True,
+            id="annotated-attribute",
+        ),
+        pytest.param(
+            _PropertyAttributeOwner,
+            "value",
+            str,
+            False,
+            id="readonly-property",
+        ),
+        pytest.param(
+            _WritablePropertyAttributeOwner,
+            "value",
+            str,
+            True,
+            id="writable-property",
+        ),
+    ],
+)
+def test_resolve_attribute_annotation_info(
+    annotation: Any,
+    attribute: str,
+    expected_annotation: Any,
+    expected_writable: bool,
+) -> None:
+    result = resolve_attribute_annotation_info(annotation, attribute)
+
+    assert result.annotation == expected_annotation
+    assert result.is_writable is expected_writable
 
 
 def test_resolve_attribute_annotation_raises_for_missing_attribute() -> None:

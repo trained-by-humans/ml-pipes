@@ -91,6 +91,57 @@ class _MissingLabelsPrediction(_PredictionBase):
     pass
 
 
+class _WrongFilterKeywordOnly(_PredictionBase):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        del limit
+        return self
+
+
+class _WritableObjectValue(Protocol):
+    value: object
+
+
+class _ReadonlyObjectValue(Protocol):
+    @property
+    def value(self) -> object:
+        ...
+
+
+class _IntValueField:
+    value: int
+
+
+class _ReadonlyIntValue:
+    @property
+    def value(self) -> int:
+        return 1
+
+
+class _KeywordLimitFilter(Protocol):
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        ...
+
+
+class _MatchingKeywordLimitFilter:
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        del mask, limit
+        return self
+
+
+class _OptionalKeywordLimitFilter:
+    def filter(self, mask: Sequence[bool], *, limit: int = 0) -> Self:
+        del mask, limit
+        return self
+
+
+class _MissingKeywordLimitFilter:
+    def filter(self, mask: Sequence[bool]) -> Self:
+        del mask
+        return self
+
+
 @pytest.mark.parametrize(
     ("annotation", "expected"),
     [
@@ -299,6 +350,7 @@ def test_is_assignable_accepts_structural_protocol_with_data_and_self_return(
     [
         pytest.param(_WrongLabelPrediction, id="wrong-attribute-type"),
         pytest.param(_WrongFilterReturn, id="wrong-method-return"),
+        pytest.param(_WrongFilterKeywordOnly, id="wrong-method-keyword-only"),
         pytest.param(_MissingLabelsPrediction, id="missing-attribute"),
     ],
 )
@@ -310,6 +362,35 @@ def test_is_assignable_rejects_invalid_structural_protocol_implementation(
 
 def test_tighten_annotation_prefers_concrete_protocol_implementation() -> None:
     assert tighten_annotation(_FilterableLabels, _GoodPrediction) is _GoodPrediction
+
+
+def test_is_assignable_rejects_narrow_writable_protocol_field() -> None:
+    assert not is_assignable(_IntValueField, _WritableObjectValue)
+
+
+def test_is_assignable_accepts_covariant_readonly_protocol_property() -> None:
+    assert is_assignable(_ReadonlyIntValue, _ReadonlyObjectValue)
+
+
+def test_is_assignable_rejects_readonly_property_for_writable_protocol_field() -> None:
+    assert not is_assignable(_ReadonlyIntValue, _WritableObjectValue)
+
+
+@pytest.mark.parametrize(
+    "source_annotation",
+    [
+        pytest.param(_MatchingKeywordLimitFilter, id="matching"),
+        pytest.param(_OptionalKeywordLimitFilter, id="optional"),
+    ],
+)
+def test_is_assignable_accepts_protocol_method_with_keyword_only_parameter(
+    source_annotation: Any,
+) -> None:
+    assert is_assignable(source_annotation, _KeywordLimitFilter)
+
+
+def test_is_assignable_rejects_protocol_method_missing_keyword_only_parameter() -> None:
+    assert not is_assignable(_MissingKeywordLimitFilter, _KeywordLimitFilter)
 
 
 @pytest.mark.parametrize(

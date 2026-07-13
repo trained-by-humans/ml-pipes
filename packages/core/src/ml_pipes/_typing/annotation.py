@@ -9,6 +9,7 @@ from collections.abc import (
     Sequence,
     Set as AbstractSet,
 )
+import inspect
 from types import UnionType
 from typing import Any, Callable, TypeVar, get_args, get_origin, get_type_hints
 
@@ -639,8 +640,9 @@ def _is_structurally_assignable_to_protocol(
     protocol_stack: set[tuple[type, type]],
 ) -> bool:
     from ml_pipes._typing.inspection import (
-        resolve_attribute_annotation,
-        resolve_callable_annotations,
+        bind_method_call_parameter_names,
+        resolve_attribute_annotation_info,
+        resolve_callable_signature_annotations,
     )
 
     source_owner = _resolve_annotation_owner(source_annotation)
@@ -658,24 +660,44 @@ def _is_structurally_assignable_to_protocol(
     try:
         for member in get_protocol_members(target_owner):
             try:
-                target_member_annotation = resolve_attribute_annotation(
+                target_member_info = resolve_attribute_annotation_info(
                     target_owner,
                     member,
                 )
             except Exception:
                 return False
 
-            if target_member_annotation is not _MISSING_ANNOTATION:
+            if target_member_info.annotation is not _MISSING_ANNOTATION:
                 try:
-                    source_member_annotation = resolve_attribute_annotation(
+                    source_member_info = resolve_attribute_annotation_info(
                         source_owner,
                         member,
                     )
                 except Exception:
                     return False
-                if not _is_assignable(
-                    _replace_self_annotation(source_member_annotation, source_owner),
-                    _replace_self_annotation(target_member_annotation, source_owner),
+                if source_member_info.annotation is _MISSING_ANNOTATION:
+                    return False
+                source_member_annotation = _replace_self_annotation(
+                    source_member_info.annotation,
+                    source_owner,
+                )
+                target_member_annotation = _replace_self_annotation(
+                    target_member_info.annotation,
+                    source_owner,
+                )
+                if target_member_info.is_writable:
+                    if not source_member_info.is_writable:
+                        return False
+                    if not _is_compatible_under_variance(
+                        source_member_annotation,
+                        target_member_annotation,
+                        _INVARIANT,
+                        protocol_stack,
+                    ):
+                        return False
+                elif not _is_assignable(
+                    source_member_annotation,
+                    target_member_annotation,
                     protocol_stack,
                 ):
                     return False
@@ -686,7 +708,8 @@ def _is_structurally_assignable_to_protocol(
                 target_owner,
                 member,
                 protocol_stack,
-                resolve_callable_annotations,
+                bind_method_call_parameter_names,
+                resolve_callable_signature_annotations,
             ):
                 return False
     finally:
@@ -700,7 +723,8 @@ def _is_protocol_method_member_assignable(
     target_owner: type,
     member: str,
     protocol_stack: set[tuple[type, type]],
-    resolve_callable_annotations: Callable[..., Any],
+    bind_method_call_parameter_names: Callable[..., Any],
+    resolve_callable_signature_annotations: Callable[..., Any],
 ) -> bool:
     source_member = getattr(source_owner, member, _MISSING_ANNOTATION)
     target_member = getattr(target_owner, member, _MISSING_ANNOTATION)
@@ -709,41 +733,65 @@ def _is_protocol_method_member_assignable(
     if not callable(source_member) or not callable(target_member):
         return False
 
-    source_annotations = resolve_callable_annotations(source_member)
-    target_annotations = resolve_callable_annotations(target_member)
-    source_parameter_annotations = source_annotations.parameter_annotations
+    source_annotations = resolve_callable_signature_annotations(source_member)
+    target_annotations = resolve_callable_signature_annotations(target_member)
     source_return_annotation = source_annotations.return_annotation
-    target_parameter_annotations = target_annotations.parameter_annotations
     target_return_annotation = target_annotations.return_annotation
     if source_return_annotation is None or target_return_annotation is None:
         return False
-
-    source_value_parameters = tuple(
-        _replace_self_annotation(annotation, source_owner)
-        for annotation in source_parameter_annotations[1:]
-    )
-    target_value_parameters = tuple(
-        _replace_self_annotation(annotation, source_owner)
-        for annotation in target_parameter_annotations[1:]
-    )
-    if len(source_value_parameters) != len(target_value_parameters):
+    if not source_annotations.is_inspectable or not target_annotations.is_inspectable:
         return False
+
+    source_value_parameters = source_annotations.parameters[1:]
+    target_value_parameters = target_annotations.parameters[1:]
     if any(
-        source_parameter is None or target_parameter is None
-        for source_parameter, target_parameter in zip(
-            source_value_parameters,
-            target_value_parameters,
-            strict=True,
-        )
+        parameter.annotation is None
+        or parameter.parameter.kind in {
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        }
+        for parameter in (*source_value_parameters, *target_value_parameters)
     ):
         return False
 
-    for source_parameter, target_parameter in zip(
-        source_value_parameters,
+    representative_calls = _representative_protocol_method_calls(
         target_value_parameters,
-        strict=True,
-    ):
-        if not _is_assignable(target_parameter, source_parameter, protocol_stack):
+    )
+    if representative_calls is None:
+        return False
+
+    source_parameters_by_name = {
+        parameter.parameter.name: parameter
+        for parameter in source_value_parameters
+    }
+    target_parameters_by_name = {
+        parameter.parameter.name: parameter
+        for parameter in target_value_parameters
+    }
+    for args, kwargs, _ in representative_calls:
+        if bind_method_call_parameter_names(source_member, args, kwargs) is None:
+            return False
+
+    full_call_args, full_call_kwargs, placeholder_tokens = representative_calls[-1]
+    source_parameter_bindings = bind_method_call_parameter_names(
+        source_member,
+        full_call_args,
+        full_call_kwargs,
+    )
+    if source_parameter_bindings is None:
+        return False
+
+    for parameter_name, token in placeholder_tokens.items():
+        source_parameter_name = source_parameter_bindings.get(token)
+        source_parameter = source_parameters_by_name.get(source_parameter_name)
+        target_parameter = target_parameters_by_name.get(parameter_name)
+        if source_parameter is None or target_parameter is None:
+            return False
+        if not _is_assignable(
+            _replace_self_annotation(target_parameter.annotation, source_owner),
+            _replace_self_annotation(source_parameter.annotation, source_owner),
+            protocol_stack,
+        ):
             return False
 
     return _is_assignable(
@@ -751,6 +799,57 @@ def _is_protocol_method_member_assignable(
         _replace_self_annotation(target_return_annotation, source_owner),
         protocol_stack,
     )
+
+
+def _representative_protocol_method_calls(
+    parameters: tuple[Any, ...],
+) -> list[tuple[tuple[object, ...], dict[str, object], dict[str, object]]] | None:
+    calls = [
+        _build_protocol_method_call(parameters, include_optional=False, prefer_keywords=False),
+        _build_protocol_method_call(parameters, include_optional=False, prefer_keywords=True),
+        _build_protocol_method_call(parameters, include_optional=True, prefer_keywords=False),
+        _build_protocol_method_call(parameters, include_optional=True, prefer_keywords=True),
+    ]
+    if any(call is None for call in calls):
+        return None
+    return [call for call in calls if call is not None]
+
+
+def _build_protocol_method_call(
+    parameters: tuple[Any, ...],
+    *,
+    include_optional: bool,
+    prefer_keywords: bool,
+) -> tuple[tuple[object, ...], dict[str, object], dict[str, object]] | None:
+    args: list[object] = []
+    kwargs: dict[str, object] = {}
+    placeholder_tokens: dict[str, object] = {}
+
+    for parameter in parameters:
+        if (
+            not include_optional
+            and parameter.parameter.default is not inspect.Parameter.empty
+        ):
+            continue
+
+        token = object()
+        placeholder_tokens[parameter.parameter.name] = token
+        if parameter.parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+            args.append(token)
+            continue
+        if parameter.parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD:
+            if prefer_keywords:
+                kwargs[parameter.parameter.name] = token
+            else:
+                args.append(token)
+            continue
+        if parameter.parameter.kind is inspect.Parameter.KEYWORD_ONLY:
+            kwargs[parameter.parameter.name] = token
+            continue
+        return None
+
+    return tuple(args), kwargs, placeholder_tokens
+
 
 def _replace_self_annotation(annotation: Any, concrete_owner: type) -> Any:
     return _transform_annotation(

@@ -74,6 +74,17 @@ class _WrongProtocolReturn:
         return 0
 
 
+class _WrongProtocolKeywordOnly(_ProtocolPredictionBase):
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        del limit
+        return self
+
+
 class ProduceProtocolPrediction:
     def __call__(self, value: int) -> _ProtocolPrediction:
         return _ProtocolPrediction([value])
@@ -89,9 +100,46 @@ class ProduceWrongProtocolReturn:
         return _WrongProtocolReturn([value])
 
 
+class ProduceWrongProtocolKeywordOnly:
+    def __call__(self, value: int) -> _WrongProtocolKeywordOnly:
+        return _WrongProtocolKeywordOnly([value])
+
+
 class FilterProtocolPrediction:
     def __call__(self, value: _ProtocolPredictionT) -> _ProtocolPredictionT:
         return value.filter([True for _ in value.labels])
+
+
+class _WritableValueContract(Protocol):
+    value: object
+
+    def keep(self) -> Self:
+        ...
+
+
+_WritableValueT = TypeVar("_WritableValueT", bound=_WritableValueContract)
+
+
+class _WritableValueBase:
+    def keep(self) -> Self:
+        return self
+
+
+class _NarrowWritableValue(_WritableValueBase):
+    value: int
+
+    def __init__(self, value: int):
+        self.value = value
+
+
+class ProduceNarrowWritableValue:
+    def __call__(self, value: int) -> _NarrowWritableValue:
+        return _NarrowWritableValue(value)
+
+
+class KeepWritableValue:
+    def __call__(self, value: _WritableValueT) -> _WritableValueT:
+        return value.keep()
 
 
 class IntToString:
@@ -399,6 +447,7 @@ def test_pipeline_validate_accepts_structural_protocol_boundary():
     [
         pytest.param(ProduceWrongProtocolPrediction(), id="wrong-attribute-type"),
         pytest.param(ProduceWrongProtocolReturn(), id="wrong-method-return"),
+        pytest.param(ProduceWrongProtocolKeywordOnly(), id="wrong-method-keyword-only"),
     ],
 )
 def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer):
@@ -407,6 +456,17 @@ def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer
         match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
     ):
         Pipeline([producer, FilterProtocolPrediction()]).validate()
+
+
+def test_pipeline_validate_rejects_narrow_writable_structural_protocol_boundary():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:KeepWritableValue",
+    ):
+        Pipeline([
+            ProduceNarrowWritableValue(),
+            KeepWritableValue(),
+        ]).validate()
 
 
 def test_pipeline_auto_validate_raises_during_initialization():
