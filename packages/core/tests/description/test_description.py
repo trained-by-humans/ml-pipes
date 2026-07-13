@@ -25,10 +25,6 @@ from ml_pipes.standard import (
     UnBatch,
 )
 from ml_pipes.tensor import AsType
-from ml_pipes.tracing import (
-    InvocationTrace,
-    TraceCollector,
-)
 from ml_pipes.vision import (
     FilterPredictionsByClass,
     FilterPredictionsByScore,
@@ -76,11 +72,6 @@ class ReprOnlyLegacyOp:
 
     def __repr__(self) -> str:
         return "LegacyCustom"
-
-
-class _Capture(TraceCollector):
-    def on_trace(self, trace: InvocationTrace) -> None:
-        del trace
 
 
 def _named_identity(value: Any) -> Any:
@@ -521,18 +512,6 @@ def test_describe_verbose_expands_embed_pipeline(capsys):
         "FloatToBool()",
     )
     assert captured.out == description.render(verbose=True) + "\n"
-
-
-def test_describe_ignores_custom_operator_labels_when_present():
-    pipeline = Pipeline([ConfiguredIntToString(), StringToFloat()])
-    pipeline.set_tracing(_Capture(), operator_labels=["to_str", "to_float"])
-
-    description = pipeline.describe()
-
-    assert [operator.name for operator in description.operators] == [
-        "ConfiguredIntToString",
-        "StringToFloat",
-    ]
 
 
 @pytest.mark.parametrize(

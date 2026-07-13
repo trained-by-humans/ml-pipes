@@ -183,13 +183,6 @@ def test_spans_ordered_and_labelled():
     assert [s.label for s in cap.traces[0].spans] == ["0:_double", "1:_add_one"]
 
 
-def test_custom_operator_labels():
-    p, cap = _make_pipeline([_double, _add_one],
-                             operator_labels=["double", "add_one"])
-    p(1)
-    assert [s.label for s in cap.traces[0].spans] == ["double", "add_one"]
-
-
 def test_error_span_flagged():
     p, cap = _make_pipeline([_double, _failing])
     with pytest.raises(ValueError, match="boom"):

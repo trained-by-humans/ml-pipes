@@ -163,7 +163,6 @@ def _fmt_trace(trace: "InvocationTrace", indent: int = 0) -> str:
 @dataclass
 class TracingConfig:
     collector: TraceCollector
-    operator_labels: list[str] | None = None
     capture_config: bool = False
     capture_shapes: bool = False
     _capture_outputs: bool = False  # used internally by Pipeline.inspect(); not exposed via set_tracing()

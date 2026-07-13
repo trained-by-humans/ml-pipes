@@ -72,7 +72,6 @@ from ml_pipes.collectors import PrintCollector
 
 pipeline.set_tracing(
     PrintCollector(),
-    operator_labels=["strip", "lower", "split"],
     capture_config=True,
     capture_shapes=True,
 )

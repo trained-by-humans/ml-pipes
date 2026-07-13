@@ -100,13 +100,16 @@ class Pipeline(Generic[InputT, OutputT]):
     def set_tracing(
         self,
         collector: TraceCollector | None,
-        operator_labels: list[str] | None = None,
         capture_config: bool = False,
         capture_shapes: bool = False,
     ) -> None:
         """Attach or replace tracing. Pass collector=None to disable."""
         self._tracing_config = (
-            TracingConfig(collector, operator_labels, capture_config, capture_shapes)
+            TracingConfig(
+                collector,
+                capture_config=capture_config,
+                capture_shapes=capture_shapes,
+            )
             if collector is not None else None
         )
 
@@ -255,7 +258,7 @@ class Pipeline(Generic[InputT, OutputT]):
         cfg: TracingConfig | None,
     ) -> tuple[Any, Context]:
         operator = self.operators[i]
-        label = self._label_for(i, cfg.operator_labels if cfg else None)
+        label = self._label_for(i)
         region_start = i + 1
         region_end = self._find_region_end(region_start, type(operator), operator.closing_type)
 
@@ -266,9 +269,7 @@ class Pipeline(Generic[InputT, OutputT]):
         result = operator.run_region(current, label, execute_region, trace, cfg)
         return result, context
 
-    def _label_for(self, i: int, custom_labels: list[str] | None = None) -> str:
-        if custom_labels and i < len(custom_labels):
-            return custom_labels[i]
+    def _label_for(self, i: int) -> str:
         op = self.operators[i]
         name = op.__name__ if inspect.isfunction(op) or inspect.ismethod(op) else type(op).__name__
         return f"{i}:{name}"
@@ -282,7 +283,7 @@ class Pipeline(Generic[InputT, OutputT]):
         cfg: TracingConfig | None,
     ) -> tuple[Any, Context]:
         operator = self.operators[i]
-        label = self._label_for(i, cfg.operator_labels if cfg else None)
+        label = self._label_for(i)
         capture = cfg.capture_shapes if cfg else False
         t = time.perf_counter()
         try:
