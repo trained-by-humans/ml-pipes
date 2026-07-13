@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, get_origin, get_type_hints
+from typing import Any, Callable, get_args, get_type_hints
 
 from ml_pipes._typing.annotation import (
     _MISSING_ANNOTATION,
+    _resolve_annotation_owner,
     build_union_annotation_from_options,
     describe_annotation,
     is_typed_dict_annotation,
@@ -175,15 +176,6 @@ def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
     if descriptor is not _MISSING_ANNOTATION:
         return _MISSING_ANNOTATION
     raise MissingAttributeError(annotation, attribute)
-
-
-def _resolve_annotation_owner(annotation: Any) -> type | None:
-    origin = get_origin(annotation)
-    if isinstance(origin, type):
-        return origin
-    if isinstance(annotation, type):
-        return annotation
-    return None
 
 
 def _resolve_class_field_annotation(owner: type, attribute: str) -> Any:

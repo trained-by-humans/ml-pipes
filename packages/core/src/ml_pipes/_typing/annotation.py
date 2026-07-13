@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from collections.abc import (
     Collection,
     Iterable,
@@ -13,12 +12,20 @@ from collections.abc import (
 from types import UnionType
 from typing import Any, Callable, TypeVar, get_args, get_origin, get_type_hints
 
+try:
+    from typing import Self as _TypingSelf, get_protocol_members, is_protocol
+except ImportError:  # pragma: no cover
+    from typing_extensions import Self as _TypingSelf, get_protocol_members, is_protocol
+
+from typing_extensions import Self as _ExtensionSelf
+
 _UNBOUND = object()
 _NONE_TYPE = type(None)
 _MISSING_ANNOTATION = object()
 _COVARIANT = "covariant"
 _INVARIANT = "invariant"
 _CONTRAVARIANT = "contravariant"
+_SELF_ANNOTATIONS = frozenset({_TypingSelf, _ExtensionSelf})
 
 
 class _UnboundTypevarBindingError(Exception):
@@ -335,6 +342,14 @@ def is_assignable(
     source_annotation: Any,
     target_annotation: Any,
 ) -> bool:
+    return _is_assignable(source_annotation, target_annotation, set())
+
+
+def _is_assignable(
+    source_annotation: Any,
+    target_annotation: Any,
+    protocol_stack: set[tuple[type, type]],
+) -> bool:
     if isinstance(target_annotation, TypeVar):
         target_annotation = _typevar_constraint_annotation(target_annotation)
     if isinstance(source_annotation, TypeVar):
@@ -346,17 +361,21 @@ def is_assignable(
     if is_union_annotation(target_annotation):
         return all(
             any(
-                is_assignable(source_option, target_option)
+                _is_assignable(source_option, target_option, protocol_stack)
                 for target_option in get_args(target_annotation)
             )
             for source_option in _union_options(source_annotation)
         )
     if is_union_annotation(source_annotation):
         return all(
-            is_assignable(option, target_annotation)
+            _is_assignable(option, target_annotation, protocol_stack)
             for option in get_args(source_annotation)
         )
-    return _is_non_union_assignable(source_annotation, target_annotation)
+    return _is_non_union_assignable(
+        source_annotation,
+        target_annotation,
+        protocol_stack,
+    )
 
 
 def tighten_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
@@ -386,13 +405,10 @@ def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -
     if candidate_annotation is object:
         return current_annotation
     if isinstance(current_annotation, type) and isinstance(candidate_annotation, type):
-        try:
-            if issubclass(current_annotation, candidate_annotation):
-                return current_annotation
-            if issubclass(candidate_annotation, current_annotation):
-                return candidate_annotation
-        except TypeError:
-            return _UNBOUND
+        if is_assignable(current_annotation, candidate_annotation):
+            return current_annotation
+        if is_assignable(candidate_annotation, current_annotation):
+            return candidate_annotation
         return _UNBOUND
 
     arg_pairs = _tighten_generic_argument_pairs(current_annotation, candidate_annotation)
@@ -423,24 +439,47 @@ def materialize_probe_annotation(annotation: Any) -> Any:
 
 
 def is_concrete_assignable(source_annotation: Any, target_annotation: Any) -> bool:
+    return _is_concrete_assignable(source_annotation, target_annotation, set())
+
+
+def _is_concrete_assignable(
+    source_annotation: Any,
+    target_annotation: Any,
+    protocol_stack: set[tuple[type, type]],
+) -> bool:
     if not isinstance(source_annotation, type) or not isinstance(target_annotation, type):
         return False
     try:
-        return issubclass(source_annotation, target_annotation)
+        if issubclass(source_annotation, target_annotation):
+            return True
     except TypeError:
-        return False
+        pass
+    return _is_structurally_assignable_to_protocol(
+        source_annotation,
+        target_annotation,
+        protocol_stack,
+    )
 
 
-def _is_non_union_assignable(source_annotation: Any, target_annotation: Any) -> bool:
+def _is_non_union_assignable(
+    source_annotation: Any,
+    target_annotation: Any,
+    protocol_stack: set[tuple[type, type]],
+) -> bool:
     source_shape = _annotation_shape(source_annotation)
     target_shape = _annotation_shape(target_annotation)
 
     if source_shape is None:
         if target_shape is None:
-            return is_concrete_assignable(source_annotation, target_annotation)
+            return _is_concrete_assignable(
+                source_annotation,
+                target_annotation,
+                protocol_stack,
+            )
         return _is_concrete_source_assignable_to_default_generic_target(
             source_annotation,
             target_shape=target_shape,
+            protocol_stack=protocol_stack,
         )
 
     if _is_parameterized_source_assignable_to_concrete_target(
@@ -448,6 +487,7 @@ def _is_non_union_assignable(source_annotation: Any, target_annotation: Any) -> 
         target_annotation,
         source_shape=source_shape,
         target_shape=target_shape,
+        protocol_stack=protocol_stack,
     ):
         return True
 
@@ -456,6 +496,7 @@ def _is_non_union_assignable(source_annotation: Any, target_annotation: Any) -> 
         target_annotation,
         source_shape=source_shape,
         target_shape=target_shape,
+        protocol_stack=protocol_stack,
     )
 
 
@@ -463,6 +504,7 @@ def _is_concrete_source_assignable_to_default_generic_target(
     source_annotation: Any,
     *,
     target_shape: tuple[Any, tuple[Any, ...]],
+    protocol_stack: set[tuple[type, type]],
 ) -> bool:
     if not isinstance(source_annotation, type):
         return False
@@ -472,7 +514,7 @@ def _is_concrete_source_assignable_to_default_generic_target(
     if bare_target_args is None or target_args != bare_target_args:
         return False
 
-    return is_concrete_assignable(source_annotation, target_origin)
+    return _is_concrete_assignable(source_annotation, target_origin, protocol_stack)
 
 
 def _is_parameterized_source_assignable_to_concrete_target(
@@ -481,6 +523,7 @@ def _is_parameterized_source_assignable_to_concrete_target(
     *,
     source_shape: tuple[Any, tuple[Any, ...]] | None = None,
     target_shape: tuple[Any, tuple[Any, ...]] | None = None,
+    protocol_stack: set[tuple[type, type]],
 ) -> bool:
     if source_shape is None:
         source_shape = _annotation_shape(source_annotation)
@@ -492,7 +535,7 @@ def _is_parameterized_source_assignable_to_concrete_target(
         return False
 
     source_origin, _ = source_shape
-    return is_concrete_assignable(source_origin, target_annotation)
+    return _is_concrete_assignable(source_origin, target_annotation, protocol_stack)
 
 
 def is_concrete_annotation(annotation: Any) -> bool:
@@ -569,6 +612,7 @@ def _is_generic_assignable(
     *,
     source_shape: tuple[Any, tuple[Any, ...]] | None = None,
     target_shape: tuple[Any, tuple[Any, ...]] | None = None,
+    protocol_stack: set[tuple[type, type]],
 ) -> bool:
     arg_pairs = _generic_argument_pairs(
         source_annotation,
@@ -579,20 +623,156 @@ def _is_generic_assignable(
     if arg_pairs is None:
         return False
     return all(
-        _is_compatible_under_variance(source_arg, target_arg, variance)
+        _is_compatible_under_variance(
+            source_arg,
+            target_arg,
+            variance,
+            protocol_stack,
+        )
         for source_arg, target_arg, variance in arg_pairs
     )
 
 
-def _is_compatible_under_variance(source_annotation: Any, target_annotation: Any, variance: str) -> bool:
+def _is_structurally_assignable_to_protocol(
+    source_annotation: Any,
+    target_annotation: Any,
+    protocol_stack: set[tuple[type, type]],
+) -> bool:
+    from ml_pipes._typing.inspection import (
+        resolve_attribute_annotation,
+        resolve_callable_annotations,
+    )
+
+    source_owner = _resolve_annotation_owner(source_annotation)
+    target_owner = _resolve_annotation_owner(target_annotation)
+    if not isinstance(source_owner, type) or not isinstance(target_owner, type):
+        return False
+    if not is_protocol(target_owner):
+        return False
+
+    pair = (source_owner, target_owner)
+    if pair in protocol_stack:
+        return True
+
+    protocol_stack.add(pair)
+    try:
+        for member in get_protocol_members(target_owner):
+            try:
+                target_member_annotation = resolve_attribute_annotation(
+                    target_owner,
+                    member,
+                )
+            except Exception:
+                return False
+
+            if target_member_annotation is not _MISSING_ANNOTATION:
+                try:
+                    source_member_annotation = resolve_attribute_annotation(
+                        source_owner,
+                        member,
+                    )
+                except Exception:
+                    return False
+                if not _is_assignable(
+                    _replace_self_annotation(source_member_annotation, source_owner),
+                    _replace_self_annotation(target_member_annotation, source_owner),
+                    protocol_stack,
+                ):
+                    return False
+                continue
+
+            if not _is_protocol_method_member_assignable(
+                source_owner,
+                target_owner,
+                member,
+                protocol_stack,
+                resolve_callable_annotations,
+            ):
+                return False
+    finally:
+        protocol_stack.discard(pair)
+
+    return True
+
+
+def _is_protocol_method_member_assignable(
+    source_owner: type,
+    target_owner: type,
+    member: str,
+    protocol_stack: set[tuple[type, type]],
+    resolve_callable_annotations: Callable[..., Any],
+) -> bool:
+    source_member = getattr(source_owner, member, _MISSING_ANNOTATION)
+    target_member = getattr(target_owner, member, _MISSING_ANNOTATION)
+    if source_member is _MISSING_ANNOTATION or target_member is _MISSING_ANNOTATION:
+        return False
+    if not callable(source_member) or not callable(target_member):
+        return False
+
+    source_annotations = resolve_callable_annotations(source_member)
+    target_annotations = resolve_callable_annotations(target_member)
+    source_parameter_annotations = source_annotations.parameter_annotations
+    source_return_annotation = source_annotations.return_annotation
+    target_parameter_annotations = target_annotations.parameter_annotations
+    target_return_annotation = target_annotations.return_annotation
+    if source_return_annotation is None or target_return_annotation is None:
+        return False
+
+    source_value_parameters = tuple(
+        _replace_self_annotation(annotation, source_owner)
+        for annotation in source_parameter_annotations[1:]
+    )
+    target_value_parameters = tuple(
+        _replace_self_annotation(annotation, source_owner)
+        for annotation in target_parameter_annotations[1:]
+    )
+    if len(source_value_parameters) != len(target_value_parameters):
+        return False
+    if any(
+        source_parameter is None or target_parameter is None
+        for source_parameter, target_parameter in zip(
+            source_value_parameters,
+            target_value_parameters,
+            strict=True,
+        )
+    ):
+        return False
+
+    for source_parameter, target_parameter in zip(
+        source_value_parameters,
+        target_value_parameters,
+        strict=True,
+    ):
+        if not _is_assignable(target_parameter, source_parameter, protocol_stack):
+            return False
+
+    return _is_assignable(
+        _replace_self_annotation(source_return_annotation, source_owner),
+        _replace_self_annotation(target_return_annotation, source_owner),
+        protocol_stack,
+    )
+
+def _replace_self_annotation(annotation: Any, concrete_owner: type) -> Any:
+    return _transform_annotation(
+        annotation,
+        lambda part: concrete_owner if part in _SELF_ANNOTATIONS else part,
+    )
+
+
+def _is_compatible_under_variance(
+    source_annotation: Any,
+    target_annotation: Any,
+    variance: str,
+    protocol_stack: set[tuple[type, type]],
+) -> bool:
     if variance == _INVARIANT:
         return (
-            is_assignable(source_annotation, target_annotation)
-            and is_assignable(target_annotation, source_annotation)
+            _is_assignable(source_annotation, target_annotation, protocol_stack)
+            and _is_assignable(target_annotation, source_annotation, protocol_stack)
         )
     if variance == _CONTRAVARIANT:
-        return is_assignable(target_annotation, source_annotation)
-    return is_assignable(source_annotation, target_annotation)
+        return _is_assignable(target_annotation, source_annotation, protocol_stack)
+    return _is_assignable(source_annotation, target_annotation, protocol_stack)
 
 
 def _generic_argument_pairs(

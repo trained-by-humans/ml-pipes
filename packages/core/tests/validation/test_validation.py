@@ -3,7 +3,7 @@ import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
+from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, Protocol, TypeVar
 
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import (
@@ -25,9 +25,73 @@ from ml_pipes.validation import (
 _VariadicT = TypeVar("_VariadicT")
 _BoxT = TypeVar("_BoxT")
 
+try:
+    from typing import Self
+except ImportError:  # pragma: no cover
+    from typing_extensions import Self
+
 
 class _Box(Generic[_BoxT]):
     pass
+
+
+class _ProtocolPredictionContract(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> Self:
+        ...
+
+
+_ProtocolPredictionT = TypeVar("_ProtocolPredictionT", bound=_ProtocolPredictionContract)
+
+
+class _ProtocolPredictionBase:
+    def filter(self, mask: Sequence[bool]) -> Self:
+        return self
+
+
+class _ProtocolPrediction(_ProtocolPredictionBase):
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+
+class _WrongProtocolPrediction(_ProtocolPredictionBase):
+    labels: Sequence[str]
+
+    def __init__(self, labels: Sequence[str]):
+        self.labels = labels
+
+
+class _WrongProtocolReturn:
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+    def filter(self, mask: Sequence[bool]) -> int:
+        return 0
+
+
+class ProduceProtocolPrediction:
+    def __call__(self, value: int) -> _ProtocolPrediction:
+        return _ProtocolPrediction([value])
+
+
+class ProduceWrongProtocolPrediction:
+    def __call__(self, value: int) -> _WrongProtocolPrediction:
+        return _WrongProtocolPrediction([str(value)])
+
+
+class ProduceWrongProtocolReturn:
+    def __call__(self, value: int) -> _WrongProtocolReturn:
+        return _WrongProtocolReturn([value])
+
+
+class FilterProtocolPrediction:
+    def __call__(self, value: _ProtocolPredictionT) -> _ProtocolPredictionT:
+        return value.filter([True for _ in value.labels])
 
 
 class IntToString:
@@ -318,6 +382,31 @@ def test_pipeline_validate_rejects_incompatible_operator_chain():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
+
+
+def test_pipeline_validate_accepts_structural_protocol_boundary():
+    contract = Pipeline([
+        ProduceProtocolPrediction(),
+        FilterProtocolPrediction(),
+    ]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is _ProtocolPrediction
+
+
+@pytest.mark.parametrize(
+    "producer",
+    [
+        pytest.param(ProduceWrongProtocolPrediction(), id="wrong-attribute-type"),
+        pytest.param(ProduceWrongProtocolReturn(), id="wrong-method-return"),
+    ],
+)
+def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
+    ):
+        Pipeline([producer, FilterProtocolPrediction()]).validate()
 
 
 def test_pipeline_auto_validate_raises_during_initialization():
@@ -869,6 +958,16 @@ def test_validate_publishes_bound_for_unresolved_typevar_boundary():
 
     assert contract.input_type is _Base
     assert contract.output_type is _Base
+
+
+def test_validate_publishes_specialized_output_for_resolved_typevar_boundary():
+    class IdentityTypeVar:
+        def __call__(self, x: _T) -> _T: ...  # type: ignore[empty-body]
+
+    contract = Pipeline([IdentityTypeVar()]).validate(pipeline_input_type=_Child)
+
+    assert contract.input_type is _Child
+    assert contract.output_type is _Child
 
 
 def test_validate_recursively_publishes_bound_inside_generic_output():

@@ -58,6 +58,7 @@ class _OperatorBoundary:
     context_inputs: dict[str, Any] | None
     dynamic_boundary: _BoundarySignature | None
     static_boundary: _BoundarySignature | None
+    resolved_output_type: Any | None = None
 
     @property
     def effective_boundary(self) -> _BoundarySignature:
@@ -69,6 +70,8 @@ class _OperatorBoundary:
 
     @property
     def effective_output_type(self) -> Any:
+        if self.resolved_output_type is not None:
+            return self.resolved_output_type
         return self.effective_boundary.output_type
 
     @property
@@ -335,6 +338,7 @@ class PipelineValidator:
                     current_boundary.effective_input_types,
                     current_boundary.effective_output_type,
                 )
+            current_boundary.resolved_output_type = previous_output_type
 
         return boundaries
 

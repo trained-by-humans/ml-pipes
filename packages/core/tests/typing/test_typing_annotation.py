@@ -17,6 +17,7 @@ from typing import (
     MutableMapping as TypingMutableMapping,
     MutableSequence as TypingMutableSequence,
     MutableSet as TypingMutableSet,
+    Protocol,
     TypeVar,
 )
 
@@ -35,6 +36,11 @@ from ml_pipes._typing.annotation import (
 
 _T = TypeVar("_T")
 
+try:
+    from typing import Self
+except ImportError:  # pragma: no cover
+    from typing_extensions import Self
+
 
 class _Box(Generic[_T]):
     pass
@@ -48,6 +54,41 @@ class _Indexable:
 class _WritableIndexable(_Indexable):
     def __setitem__(self, index: int, value: object) -> None:
         pass
+
+
+class _FilterableLabels(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> Self:
+        ...
+
+
+class _PredictionBase:
+    def filter(self, mask: Sequence[bool]) -> Self:
+        return self
+
+
+class _GoodPrediction(_PredictionBase):
+    labels: Sequence[int]
+
+
+class _GoodPredictionChild(_GoodPrediction):
+    pass
+
+
+class _WrongLabelPrediction(_PredictionBase):
+    labels: Sequence[str]
+
+
+class _WrongFilterReturn:
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> int:
+        return 0
+
+
+class _MissingLabelsPrediction(_PredictionBase):
+    pass
 
 
 @pytest.mark.parametrize(
@@ -238,6 +279,37 @@ def test_tighten_annotation_restores_missing_generic_arguments(
     expected: Any,
 ) -> None:
     assert tighten_annotation(current_annotation, candidate_annotation) == expected
+
+
+@pytest.mark.parametrize(
+    "source_annotation",
+    [
+        pytest.param(_GoodPrediction, id="concrete"),
+        pytest.param(_GoodPredictionChild, id="subclass"),
+    ],
+)
+def test_is_assignable_accepts_structural_protocol_with_data_and_self_return(
+    source_annotation: Any,
+) -> None:
+    assert is_assignable(source_annotation, _FilterableLabels)
+
+
+@pytest.mark.parametrize(
+    "source_annotation",
+    [
+        pytest.param(_WrongLabelPrediction, id="wrong-attribute-type"),
+        pytest.param(_WrongFilterReturn, id="wrong-method-return"),
+        pytest.param(_MissingLabelsPrediction, id="missing-attribute"),
+    ],
+)
+def test_is_assignable_rejects_invalid_structural_protocol_implementation(
+    source_annotation: Any,
+) -> None:
+    assert not is_assignable(source_annotation, _FilterableLabels)
+
+
+def test_tighten_annotation_prefers_concrete_protocol_implementation() -> None:
+    assert tighten_annotation(_FilterableLabels, _GoodPrediction) is _GoodPrediction
 
 
 @pytest.mark.parametrize(
