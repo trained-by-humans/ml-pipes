@@ -5,13 +5,6 @@ on:
   push:
     tags-ignore:
       - "v*"
-  workflow_call:
-    inputs:
-      include_artifact_build:
-        description: "Run the package build and twine-check job"
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -128,37 +121,3 @@ jobs:
         run: |
           git diff --exit-code
           git diff --cached --exit-code
-
-  build-artifacts:
-    name: Build Artifacts
-    if: ${{ github.event_name != 'workflow_call' || inputs.include_artifact_build }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install release tooling
-        run: python -m pip install -U pip build hatchling twine
-
-      - name: Build packages
-        run: python scripts/release_packages.py --dry-run --outdir dist/release
-
-      - name: Check built metadata
-        run: python -m twine check dist/release/*
-
-      - name: Check tracked files for mutations
-        run: |
-          git diff --exit-code
-          git diff --cached --exit-code
-
-      - name: Upload artifacts
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release

@@ -10,14 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-    with:
-      include_artifact_build: false
-
   validate-release:
     name: Validate Release Metadata
-    needs: ci
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -57,6 +51,11 @@ jobs:
 
       - name: Check built metadata
         run: python -m twine check dist/release/*
+
+      - name: Check tracked files for mutations
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
