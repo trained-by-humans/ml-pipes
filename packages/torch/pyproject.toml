@@ -7,6 +7,27 @@ name = "ml-pipes-torch"
 version = "0.1.0"
 description = "Torch tensor payloads and torch-domain operators for ml-pipes"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "inference",
+    "machine-learning",
+    "pipelines",
+    "pytorch",
+    "torch",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
 requires-python = ">=3.10"
 dependencies = [
     "ml-pipes-core==0.1.0",
@@ -16,11 +37,19 @@ dependencies = [
     "torchvision",
 ]
 
+[project.urls]
+Homepage = "https://github.com/trained-by-humans/ml-pipes"
+Documentation = "https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/INDEX.md"
+Repository = "https://github.com/trained-by-humans/ml-pipes"
+Issues = "https://github.com/trained-by-humans/ml-pipes/issues"
+Changelog = "https://github.com/trained-by-humans/ml-pipes/releases"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_pipes"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+    "LICENSE",
     "README.md",
     "pyproject.toml",
     "src/ml_pipes",

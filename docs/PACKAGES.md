@@ -108,7 +108,7 @@ packages/<name>/
   docs/           # package-owned guides and deep dives
   src/
     ml_pipes/...
-  LICENSE        # optional; only when this package needs different licensing
+  LICENSE         # package-local license file shipped with the distribution
   examples/      # optional; package-local examples when they belong here
 ```
 
@@ -118,8 +118,9 @@ packages/<name>/
   framework docs under the repository-level `docs/`.
 - `src/ml_pipes/...` contains the code that package publishes into the shared
   `ml_pipes` namespace.
-- `LICENSE` is only needed when a package must declare licensing different
-  from the main project licensing.
+- `LICENSE` is the package-local license file shipped with that distribution
+  and referenced by the published package metadata; it may carry the
+  repository-wide project license text or package-specific license terms.
 - `examples/` is optional; use it when examples are truly package-specific
   rather than general framework examples under the repository-level
   [examples/README.md](../examples/README.md).
