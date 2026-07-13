@@ -70,15 +70,12 @@ You enable or reconfigure tracing on an existing pipeline with
 from ml_pipes.collectors import PrintCollector
 
 
-pipeline.set_tracing(
-    PrintCollector(),
-    capture_config=True,
-    capture_shapes=True,
-)
+pipeline.set_tracing(PrintCollector())
 ```
 
-`capture_config` and `capture_shapes` are mainly debugging aids. They make the
-trace richer without changing the pipeline itself.
+Tracing stays focused on runtime step timing, failures, and region structure.
+If you need per-step outputs and richer debug snapshots, use
+`Pipeline.inspect()` instead.
 
 > [!NOTE]
 > The trace delivered to the collector is a frozen snapshot, so collectors can

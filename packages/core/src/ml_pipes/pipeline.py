@@ -100,16 +100,10 @@ class Pipeline(Generic[InputT, OutputT]):
     def set_tracing(
         self,
         collector: TraceCollector | None,
-        capture_config: bool = False,
-        capture_shapes: bool = False,
     ) -> None:
         """Attach or replace tracing. Pass collector=None to disable."""
         self._tracing_config = (
-            TracingConfig(
-                collector,
-                capture_config=capture_config,
-                capture_shapes=capture_shapes,
-            )
+            TracingConfig(collector)
             if collector is not None else None
         )
 

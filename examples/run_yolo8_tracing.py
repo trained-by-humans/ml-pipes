@@ -62,9 +62,9 @@ def main() -> int:
 
     # --- single detailed trace (warm-up run) ---
     print("\n=== Single invocation trace (warm-up run) ===\n")
-    pipeline.set_tracing(PrintCollector(), capture_shapes=True)
+    pipeline.set_tracing(PrintCollector())
     pipeline(image_path)
-    pipeline.set_tracing(None, capture_shapes=False)
+    pipeline.set_tracing(None)
 
     # --- aggregate over N runs ---
     print(f"\n=== Aggregate over {args.runs} runs ===\n")

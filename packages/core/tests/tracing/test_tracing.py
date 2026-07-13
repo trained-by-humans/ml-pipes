@@ -22,6 +22,7 @@ from ml_pipes.tracing import (
     InvocationTrace,
     StepSpan,
     TraceCollector,
+    TracingConfig,
 )
 from ml_pipes.tracing import PendingSpan, freeze_trace
 from ml_pipes.tensor import TensorPayload
@@ -77,7 +78,10 @@ def _failing(x: int) -> int:
 def _make_pipeline(ops: list[Any], **kw) -> tuple[Pipeline[Any, Any], _Capture]:
     cap = _Capture()
     p = Pipeline(ops)
-    p.set_tracing(cap, **kw)
+    if kw:
+        p._tracing_config = TracingConfig(cap, **kw)
+    else:
+        p.set_tracing(cap)
     return p, cap
 
 
@@ -205,6 +209,17 @@ def test_collector_error_does_not_crash_pipeline():
 def test_pipeline_constructor_no_longer_accepts_tracing():
     with pytest.raises(TypeError, match="tracing"):
         Pipeline([_double], tracing=None)
+
+
+def test_set_tracing_no_longer_accepts_capture_flags() -> None:
+    pipeline = Pipeline([_double])
+    collector = _Capture()
+
+    with pytest.raises(TypeError, match="capture_shapes"):
+        pipeline.set_tracing(collector, capture_shapes=True)
+
+    with pytest.raises(TypeError, match="capture_config"):
+        pipeline.set_tracing(collector, capture_config=True)
 
 
 def test_error_trace_delivered_to_collector():
