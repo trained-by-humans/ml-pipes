@@ -1,0 +1,385 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      include_artifact_build: false
+
+  validate-release:
+    name: Validate Release Metadata
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate package versions and publish order
+        run: |
+          args=(--validate)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            args+=(--tag "${GITHUB_REF_NAME}")
+          fi
+          python scripts/release_packages.py "${args[@]}"
+
+  build:
+    name: Build Release Artifacts
+    needs: validate-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install release tooling
+        run: python -m pip install -U pip build hatchling twine
+
+      - name: Build packages
+        run: python scripts/release_packages.py --dry-run --outdir dist/release
+
+      - name: Check built metadata
+        run: python -m twine check dist/release/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+  publish-testpypi-core:
+    name: Publish TestPyPI Core
+    if: ${{ github.event_name == 'push' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage core artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_core-* publish/
+
+      - name: Publish core to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-testpypi-tensor:
+    name: Publish TestPyPI Tensor
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-testpypi-core
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage tensor artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_tensor-* publish/
+
+      - name: Publish tensor to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-testpypi-vision:
+    name: Publish TestPyPI Vision
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-testpypi-tensor
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage vision artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_vision-* publish/
+
+      - name: Publish vision to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-testpypi-onnx:
+    name: Publish TestPyPI ONNX
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-testpypi-vision
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage ONNX artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_onnx-* publish/
+
+      - name: Publish ONNX to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-testpypi-torch:
+    name: Publish TestPyPI Torch
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-testpypi-onnx
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage torch artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_torch-* publish/
+
+      - name: Publish torch to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-testpypi-meta:
+    name: Publish TestPyPI Meta
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-testpypi-torch
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage meta artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes-* publish/
+          rm -f publish/ml_pipes_core-* publish/ml_pipes_tensor-* publish/ml_pipes_vision-* publish/ml_pipes_onnx-* publish/ml_pipes_torch-*
+
+      - name: Publish meta package to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi-core:
+    name: Publish PyPI Core
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-testpypi-meta
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage core artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_core-* publish/
+
+      - name: Publish core to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+
+  publish-pypi-tensor:
+    name: Publish PyPI Tensor
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-pypi-core
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage tensor artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_tensor-* publish/
+
+      - name: Publish tensor to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+
+  publish-pypi-vision:
+    name: Publish PyPI Vision
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-pypi-tensor
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage vision artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_vision-* publish/
+
+      - name: Publish vision to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+
+  publish-pypi-onnx:
+    name: Publish PyPI ONNX
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-pypi-vision
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage ONNX artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_onnx-* publish/
+
+      - name: Publish ONNX to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+
+  publish-pypi-torch:
+    name: Publish PyPI Torch
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-pypi-onnx
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage torch artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes_torch-* publish/
+
+      - name: Publish torch to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+
+  publish-pypi-meta:
+    name: Publish PyPI Meta
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-pypi-torch
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage meta artifacts
+        run: |
+          mkdir publish
+          cp dist/release/ml_pipes-* publish/
+          rm -f publish/ml_pipes_core-* publish/ml_pipes_tensor-* publish/ml_pipes_vision-* publish/ml_pipes_onnx-* publish/ml_pipes_torch-*
+
+      - name: Publish meta package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
