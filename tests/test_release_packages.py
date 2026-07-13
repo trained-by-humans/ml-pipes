@@ -2,12 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-import sys
 
 import pytest
-
-if sys.version_info < (3, 11):
-    pytest.importorskip("tomli")
 
 
 def _load_release_packages_module():
@@ -21,8 +17,14 @@ def _load_release_packages_module():
     return module
 
 
+def _skip_without_toml_parser(module: object) -> None:
+    if getattr(module, "tomllib", None) is None:
+        pytest.skip("release metadata validation requires tomli on Python 3.10 or Python 3.11+")
+
+
 def test_validate_release_metadata_accepts_current_manifests() -> None:
     module = _load_release_packages_module()
+    _skip_without_toml_parser(module)
 
     version, manifests = module.validate_release_metadata("v0.1.0")
 
@@ -37,6 +39,17 @@ def test_validate_release_metadata_accepts_current_manifests() -> None:
 
 def test_validate_release_metadata_rejects_mismatched_tag() -> None:
     module = _load_release_packages_module()
+    _skip_without_toml_parser(module)
 
     with pytest.raises(ValueError, match="Release tag"):
         module.validate_release_metadata("v9.9.9")
+
+
+def test_load_pyproject_requires_toml_parser(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_release_packages_module()
+
+    monkeypatch.setattr(module, "tomllib", None)
+    monkeypatch.setattr(module, "_TOML_IMPORT_ERROR", ModuleNotFoundError("No module named 'tomli'"))
+
+    with pytest.raises(RuntimeError, match="install tomli"):
+        module._load_pyproject(module.ROOT / "packages" / "core")

@@ -51,7 +51,8 @@ def _artifact_glob(dist_name: str) -> str:
 def _load_pyproject(package_dir: Path) -> dict[str, Any]:
     if tomllib is None:
         raise RuntimeError(
-            "release validation requires Python 3.11+ or the tomli package to read pyproject.toml"
+            "release validation requires a TOML parser to read pyproject.toml. "
+            "Use Python 3.11+ or install tomli when running under Python 3.10."
         ) from _TOML_IMPORT_ERROR
     with (package_dir / "pyproject.toml").open("rb") as handle:
         return tomllib.load(handle)

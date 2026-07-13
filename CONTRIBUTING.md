@@ -1,7 +1,6 @@
 # Contributing
 
-This guide covers local contributor setup and a few repository-level
-maintenance tasks.
+This guide covers local contributor setup and everyday test runs.
 
 ## Local Setup
 
@@ -90,41 +89,10 @@ Match your install profile to the surfaces you are testing. The common
 shared-framework setup covers many shared tests; add `packages/torch` when
 running Torch-specific tests.
 
-## Release Workflow
+## Repository Maintenance
 
-All published package versions must stay aligned. Before cutting a release,
-confirm that every `packages/*/pyproject.toml` version matches the intended
-release tag `vX.Y.Z`.
-
-Publish packages in dependency order:
-
-1. `ml-pipes-core`
-2. `ml-pipes-tensor`
-3. `ml-pipes-vision`
-4. `ml-pipes-onnx`
-5. `ml-pipes-torch`
-6. `ml-pipes`
-
-Validate release metadata from the repository root with:
-
-```bash
-python scripts/release_packages.py --validate --tag v0.1.0
-```
-
-Run a release dry-run from the repository root with:
-
-```bash
-python scripts/release_packages.py --dry-run
-```
-
-Publishing happens in GitHub Actions after you push a matching `vX.Y.Z` tag.
-The release workflow validates the shared version, builds all six
-distributions, publishes them to TestPyPI in dependency order, then publishes
-them to PyPI using trusted publishing.
-
-The repository should configure both the `testpypi` and `pypi` environments
-as trusted publishers before the first public release. Do not upload with
-long-lived PyPI tokens once the workflow is in place.
+Release-specific setup and package publishing workflow live in
+[RELEASE.md](RELEASE.md).
 
 ## IDE Setup
 
