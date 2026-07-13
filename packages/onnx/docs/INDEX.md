@@ -1,6 +1,8 @@
 # ml-pipes-onnx Index
 
 This page catalogs the ONNX package surface in `ml_pipes.onnx`.
+For package overview, scope, design principles, and usage patterns, see
+[`README.md`](./README.md).
 
 For framework-wide operator concepts, see
 [`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
@@ -9,8 +11,8 @@ For the cross-package package catalogs, see
 
 ## Package Primitives
 
-| Surface | Notes |
-|---|---|
+| Surface          | Notes                                                                                  |
+|------------------|----------------------------------------------------------------------------------------|
 | `RuntimeOutputs` | Value type used between ONNX runtime invocation and output extraction or distribution. |
 
 ## Runtime And Output Handling

@@ -1,6 +1,8 @@
 # ml-pipes-vision Index
 
 This page catalogs the vision package surface in `ml_pipes.vision`.
+For package overview, scope, design principles, and usage patterns, see
+[`README.md`](./README.md).
 
 For framework-wide operator concepts, see
 [`docs/OPERATORS.md`](../../../docs/OPERATORS.md).

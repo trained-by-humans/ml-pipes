@@ -293,7 +293,7 @@ pipeline = Pipeline([
     # Run model
     Infer("model.onnx"),
 
-    # Name and decode outputs
+    # General model postprocessing
     Extract("output0", as_="preds"),
     Squeeze("preds"),
     Transpose("preds"),
@@ -301,9 +301,9 @@ pipeline = Pipeline([
     Slice("preds", slice(4, None), as_="class_scores"),
     ArgMax("class_scores", as_="classes"),
     GatherRows("class_scores", "classes", as_="scores"),
-    ConvertBoxFormat(from_="cxcywh"),
 
-    # Filter and project
+    # Vision-specific postprocessing
+    ConvertBoxFormat(from_="cxcywh"),
     NMS(),
     Recall("resize_transform"),
     ProjectBoxes(),

@@ -1,6 +1,8 @@
 # ml-pipes-torch Index
 
 This page catalogs the Torch package surface in `ml_pipes.torch`.
+For package overview, scope, design principles, and usage patterns, see
+[`README.md`](./README.md).
 
 For framework-wide operator concepts, see
 [`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
