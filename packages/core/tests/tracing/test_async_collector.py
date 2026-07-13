@@ -9,7 +9,6 @@ from ml_pipes.collectors import (
 from ml_pipes.core import Pipeline
 from ml_pipes.tracing import (
     InvocationTrace,
-    TracingConfig,
 )
 
 
@@ -45,14 +44,16 @@ def _double(x: int) -> int:
 
 def test_serial_result_correct():
     cap = _SerialCapture()
-    p = Pipeline([_double], tracing=TracingConfig(collector=cap))
+    p = Pipeline([_double])
+    p.set_tracing(cap)
     assert p(3) == 6
     assert len(cap.traces) == 1
 
 
 def test_serial_concurrent_calls_no_lost_increments():
     cap = _SerialCapture()
-    p = Pipeline([_double], tracing=TracingConfig(collector=cap))
+    p = Pipeline([_double])
+    p.set_tracing(cap)
     n = 20
     barrier = threading.Barrier(n)
 
@@ -82,7 +83,8 @@ def test_concurrent_result_not_blocked():
             super()._collect(trace)
 
     with _SlowCapture() as cap:
-        p = Pipeline([_double], tracing=TracingConfig(collector=cap))
+        p = Pipeline([_double])
+        p.set_tracing(cap)
         t0 = time.perf_counter()
         result = p(3)
         elapsed = time.perf_counter() - t0
@@ -94,7 +96,8 @@ def test_concurrent_result_not_blocked():
 
 def test_concurrent_traces_delivered_after_flush():
     cap = _ConcurrentCapture()
-    p = Pipeline([_double], tracing=TracingConfig(collector=cap))
+    p = Pipeline([_double])
+    p.set_tracing(cap)
     p(1)
     p(2)
     cap.flush()
@@ -104,7 +107,8 @@ def test_concurrent_traces_delivered_after_flush():
 
 def test_concurrent_context_manager_flushes_on_exit():
     with _ConcurrentCapture() as cap:
-        p = Pipeline([_double], tracing=TracingConfig(collector=cap))
+        p = Pipeline([_double])
+        p.set_tracing(cap)
         for i in range(5):
             p(i)
     assert len(cap.traces) == 5
@@ -112,7 +116,9 @@ def test_concurrent_context_manager_flushes_on_exit():
 
 def test_concurrent_stop_idempotent():
     with _ConcurrentCapture() as cap:
-        Pipeline([_double], tracing=TracingConfig(collector=cap))(1)
+        p = Pipeline([_double])
+        p.set_tracing(cap)
+        p(1)
     cap.stop()
 
 

@@ -22,7 +22,7 @@ from ml_pipes.factory import (
     InputFn,
     PipelineFactory,
 )
-from ml_pipes.tracing import InvocationTrace, StepSpan, TracingConfig
+from ml_pipes.tracing import InvocationTrace, StepSpan
 from ml_pipes.collectors import PrintCollector
 
 

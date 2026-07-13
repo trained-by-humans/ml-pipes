@@ -63,8 +63,8 @@ When tracing is enabled:
 That means a collector always receives one whole-call trace, not partial step
 events.
 
-You can enable or reconfigure tracing either at construction time with
-`TracingConfig(...)` or at runtime with `set_tracing(...)`.
+You enable or reconfigure tracing on an existing pipeline with
+`set_tracing(...)`.
 
 ```python
 from ml_pipes.collectors import PrintCollector

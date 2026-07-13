@@ -44,7 +44,7 @@ from ml_pipes.torch import (
     TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
-from ml_pipes.tracing import TraceCollector, TracingConfig
+from ml_pipes.tracing import TraceCollector
 from ml_pipes.validation import PipelineValidationError
 from ml_pipes.vision import Normalize
 
@@ -313,15 +313,13 @@ def test_torch_registry_conversion_handoff_back_to_numpy() -> None:
 
 def test_torch_tracing_records_device_shapes_and_operator_config() -> None:
     collector = _CaptureCollector()
-    pipeline = Pipeline(
-        [
-            ToTorch(device="cpu"),
-            ToDevice("cpu"),
-            TorchInfer(torch.nn.Identity().eval(), serialize=True),
-            TorchExtract("output_0", as_="scores"),
-        ],
-        tracing=TracingConfig(collector=collector, capture_shapes=True, capture_config=True),
-    )
+    pipeline = Pipeline([
+        ToTorch(device="cpu"),
+        ToDevice("cpu"),
+        TorchInfer(torch.nn.Identity().eval(), serialize=True),
+        TorchExtract("output_0", as_="scores"),
+    ])
+    pipeline.set_tracing(collector, capture_shapes=True, capture_config=True)
     payload = TensorPayload(
         array=np.ones((1, 3, 2, 2), dtype=np.float32),
         layout="NCHW",

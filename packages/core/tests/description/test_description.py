@@ -28,7 +28,6 @@ from ml_pipes.tensor import AsType
 from ml_pipes.tracing import (
     InvocationTrace,
     TraceCollector,
-    TracingConfig,
 )
 from ml_pipes.vision import (
     FilterPredictionsByClass,
@@ -525,10 +524,8 @@ def test_describe_verbose_expands_embed_pipeline(capsys):
 
 
 def test_describe_ignores_custom_operator_labels_when_present():
-    pipeline = Pipeline(
-        [ConfiguredIntToString(), StringToFloat()],
-        tracing=TracingConfig(collector=_Capture(), operator_labels=["to_str", "to_float"]),
-    )
+    pipeline = Pipeline([ConfiguredIntToString(), StringToFloat()])
+    pipeline.set_tracing(_Capture(), operator_labels=["to_str", "to_float"])
 
     description = pipeline.describe()
 

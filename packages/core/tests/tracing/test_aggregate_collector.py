@@ -7,7 +7,6 @@ from ml_pipes.core import Pipeline
 from ml_pipes.tracing import (
     InvocationTrace,
     StepSpan,
-    TracingConfig,
 )
 
 
@@ -17,7 +16,8 @@ def _double(x: int) -> int:
 
 def test_concurrent_on_trace_no_lost_increments():
     with AggregateCollector() as agg:
-        p = Pipeline([_double], tracing=TracingConfig(collector=agg))
+        p = Pipeline([_double])
+        p.set_tracing(agg)
         n = 50
         barrier = threading.Barrier(n)
 

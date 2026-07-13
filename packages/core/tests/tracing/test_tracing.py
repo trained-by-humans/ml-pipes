@@ -22,7 +22,6 @@ from ml_pipes.tracing import (
     InvocationTrace,
     StepSpan,
     TraceCollector,
-    TracingConfig,
 )
 from ml_pipes.tracing import PendingSpan, freeze_trace
 from ml_pipes.tensor import TensorPayload
@@ -77,7 +76,8 @@ def _failing(x: int) -> int:
 
 def _make_pipeline(ops: list[Any], **kw) -> tuple[Pipeline[Any, Any], _Capture]:
     cap = _Capture()
-    p = Pipeline(ops, tracing=TracingConfig(collector=cap, **kw))
+    p = Pipeline(ops)
+    p.set_tracing(cap, **kw)
     return p, cap
 
 
@@ -204,8 +204,14 @@ def test_collector_error_does_not_crash_pipeline():
         def on_trace(self, trace: InvocationTrace) -> None:
             raise RuntimeError("collector is broken")
 
-    p = Pipeline([_double], tracing=TracingConfig(collector=_BrokenCollector()))
+    p = Pipeline([_double])
+    p.set_tracing(_BrokenCollector())
     assert p(3) == 6
+
+
+def test_pipeline_constructor_no_longer_accepts_tracing():
+    with pytest.raises(TypeError, match="tracing"):
+        Pipeline([_double], tracing=None)
 
 
 def test_error_trace_delivered_to_collector():
@@ -331,10 +337,9 @@ def _make_batch_pipeline(capture: _Capture) -> Pipeline[int, int]:
     def _identity_batch(x: list[int]) -> list[int]:
         return x
 
-    return Pipeline(
-        [Batch(size=2, timeout=1.0), _identity_batch, UnBatch(), _add_one],
-        tracing=TracingConfig(collector=capture),
-    )
+    pipeline = Pipeline([Batch(size=2, timeout=1.0), _identity_batch, UnBatch(), _add_one])
+    pipeline.set_tracing(capture)
+    return pipeline
 
 
 def _run_two_threads(pipeline: Pipeline[int, int]) -> list[int]:
@@ -419,10 +424,8 @@ def test_batch_follower_wait_span_present_on_leader_error():
         raise ValueError("batch boom")
 
     cap = _Capture()
-    p = Pipeline(
-        [Batch(size=2, timeout=1.0), _failing_batch, UnBatch(), _add_one],
-        tracing=TracingConfig(collector=cap),
-    )
+    p = Pipeline([Batch(size=2, timeout=1.0), _failing_batch, UnBatch(), _add_one])
+    p.set_tracing(cap)
     errors = [None, None]
 
     def run(idx, val):
@@ -540,7 +543,8 @@ def test_merge_traces_preserves_attributes_without_item_metric_synthesis():
 # ---------------------------------------------------------------------------
 
 def test_print_collector_does_not_raise(capsys):
-    p = Pipeline([_double, _add_one], tracing=TracingConfig(collector=PrintCollector()))
+    p = Pipeline([_double, _add_one])
+    p.set_tracing(PrintCollector())
     result = p(3)
     assert result == 7
     out = capsys.readouterr().out

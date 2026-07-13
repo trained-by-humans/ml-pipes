@@ -90,10 +90,9 @@ class Pipeline(Generic[InputT, OutputT]):
         self,
         operators: Iterable[OperatorLike],
         auto_validate: bool = False,
-        tracing: TracingConfig | None = None,
     ):
         self.operators = self._flatten(list(operators))
-        self._tracing_config = tracing
+        self._tracing_config: TracingConfig | None = None
         self._auto_validate = auto_validate
         if auto_validate:
             self.validate()
