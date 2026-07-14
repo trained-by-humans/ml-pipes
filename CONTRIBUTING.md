@@ -89,6 +89,18 @@ Match your install profile to the surfaces you are testing. The common
 shared-framework setup covers many shared tests; add `packages/torch` when
 running Torch-specific tests.
 
+## CI
+
+GitHub Actions CI covers normal development changes and is reused by the
+release workflow as a safety gate for tagged commits.
+
+CI focuses on the shared framework test path, smoke checks for key install
+shapes, and verification that the test runs do not leave tracked file
+mutations behind.
+
+> [!IMPORTANT]
+> Contributors should still run the relevant local tests before pushing.
+
 ## Repository Maintenance
 
 Release-specific setup and package publishing workflow live in

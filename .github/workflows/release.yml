@@ -10,8 +10,12 @@ permissions:
   contents: read
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   validate-release:
     name: Validate Release Metadata
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

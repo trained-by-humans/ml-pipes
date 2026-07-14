@@ -34,14 +34,8 @@ This checks that all published package versions stay aligned, internal
 `ml-pipes` pins stay aligned across runtime dependencies and extras, and the
 release tag matches that shared version.
 
-Publish packages in dependency order:
-
-1. `ml-pipes-core`
-2. `ml-pipes-tensor`
-3. `ml-pipes-vision`
-4. `ml-pipes-onnx`
-5. `ml-pipes-torch`
-6. `ml-pipes`
+Publish packages in dependency order. `scripts/release_packages.py`
+validates the current publish order before building or publishing.
 
 ## Local Dry-Run
 
@@ -54,12 +48,21 @@ python3 scripts/release_packages.py --dry-run
 This command builds the distributions locally and requires the release
 tooling from the setup step above.
 
-## GitHub Release Flow
+## Release Flow
 
 Publishing happens in GitHub Actions after you push a matching `vX.Y.Z` tag.
-The release workflow validates the shared version, builds all six
-distributions, publishes them to TestPyPI in dependency order, then publishes
-them to PyPI using trusted publishing.
+The release workflow runs this sequence:
+
+- rerun the shared CI smoke suite for the tagged commit
+- validate the shared version and internal package pins
+- build the release distributions
+- publish to TestPyPI in dependency order
+- publish to PyPI using trusted publishing
+
+> [!IMPORTANT]
+> If a publish is interrupted mid-run, rerunning the workflow is safe for
+> TestPyPI. PyPI stays strict on the first publish attempt for each workflow
+> run and only tolerates already-uploaded files on a rerun of that same run.
 
 The repository should configure both the `testpypi` and `pypi` environments
 as trusted publishers before the first public release. Do not upload with
