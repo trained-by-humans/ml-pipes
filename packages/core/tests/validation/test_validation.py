@@ -24,6 +24,7 @@ from ml_pipes.validation import (
 
 _VariadicT = TypeVar("_VariadicT")
 _BoxT = TypeVar("_BoxT")
+_LegacySelf = TypeVar("Self")
 
 try:
     from typing import Self
@@ -107,6 +108,56 @@ class ProduceWrongProtocolKeywordOnly:
 
 class FilterProtocolPrediction:
     def __call__(self, value: _ProtocolPredictionT) -> _ProtocolPredictionT:
+        return value.filter([True for _ in value.labels])
+
+
+class _LegacyProtocolPredictionContract(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        ...
+
+
+_LegacyProtocolPredictionT = TypeVar(
+    "_LegacyProtocolPredictionT",
+    bound=_LegacyProtocolPredictionContract,
+)
+
+
+class _LegacyProtocolPredictionBase:
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        return self
+
+
+class _LegacyProtocolPrediction(_LegacyProtocolPredictionBase):
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+
+class _LegacyWrongProtocolReturn:
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+    def filter(self, mask: Sequence[bool]) -> int:
+        return 0
+
+
+class ProduceLegacyProtocolPrediction:
+    def __call__(self, value: int) -> _LegacyProtocolPrediction:
+        return _LegacyProtocolPrediction([value])
+
+
+class ProduceLegacyWrongProtocolReturn:
+    def __call__(self, value: int) -> _LegacyWrongProtocolReturn:
+        return _LegacyWrongProtocolReturn([value])
+
+
+class FilterLegacyProtocolPrediction:
+    def __call__(self, value: _LegacyProtocolPredictionT) -> _LegacyProtocolPredictionT:
         return value.filter([True for _ in value.labels])
 
 
@@ -442,6 +493,16 @@ def test_pipeline_validate_accepts_structural_protocol_boundary():
     assert contract.output_type is _ProtocolPrediction
 
 
+def test_pipeline_validate_accepts_legacy_typevar_self_structural_protocol_boundary():
+    contract = Pipeline([
+        ProduceLegacyProtocolPrediction(),
+        FilterLegacyProtocolPrediction(),
+    ]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is _LegacyProtocolPrediction
+
+
 @pytest.mark.parametrize(
     "producer",
     [
@@ -456,6 +517,17 @@ def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer
         match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
     ):
         Pipeline([producer, FilterProtocolPrediction()]).validate()
+
+
+def test_pipeline_validate_rejects_legacy_typevar_self_wrong_return() -> None:
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:FilterLegacyProtocolPrediction",
+    ):
+        Pipeline([
+            ProduceLegacyWrongProtocolReturn(),
+            FilterLegacyProtocolPrediction(),
+        ]).validate()
 
 
 def test_pipeline_validate_rejects_narrow_writable_structural_protocol_boundary():

@@ -74,6 +74,7 @@ class CallableSignatureAnnotations:
 class AttributeAnnotationInfo:
     annotation: Any
     is_writable: bool
+    write_annotation: Any = _MISSING_ANNOTATION
 
 
 def resolve_callable_signature_annotations(
@@ -148,6 +149,7 @@ def bind_method_call_parameter_names(
         if argument_value is not synthetic_self
     }
 
+
 def _resolve_callable_hints(callable_: Callable[..., Any]) -> dict[str, Any]:
     return get_type_hints(_resolve_callable_hints_target(callable_))
 
@@ -178,8 +180,10 @@ def resolve_attribute_annotation_info(annotation: Any, attribute: str) -> Attrib
 
     if is_union_annotation(annotation):
         resolved_options: list[Any] = []
+        resolved_write_annotations: list[Any] = []
         is_writable = True
         saw_missing_annotation = False
+        saw_missing_write_annotation = False
         for option in get_args(annotation):
             option_info = resolve_attribute_annotation_info(option, attribute)
             if option_info.annotation is _MISSING_ANNOTATION:
@@ -187,11 +191,20 @@ def resolve_attribute_annotation_info(annotation: Any, attribute: str) -> Attrib
                 continue
             resolved_options.append(option_info.annotation)
             is_writable = is_writable and option_info.is_writable
+            if option_info.is_writable:
+                if option_info.write_annotation is _MISSING_ANNOTATION:
+                    saw_missing_write_annotation = True
+                else:
+                    resolved_write_annotations.append(option_info.write_annotation)
         if not resolved_options or saw_missing_annotation:
             return AttributeAnnotationInfo(_MISSING_ANNOTATION, False)
+        write_annotation = _MISSING_ANNOTATION
+        if is_writable and not saw_missing_write_annotation:
+            write_annotation = build_union_annotation_from_options(*resolved_write_annotations)
         return AttributeAnnotationInfo(
             build_union_annotation_from_options(*resolved_options),
             is_writable,
+            write_annotation,
         )
 
     if is_typed_dict_annotation(annotation):
@@ -201,7 +214,7 @@ def resolve_attribute_annotation_info(annotation: Any, attribute: str) -> Attrib
             raise AttributeInspectionError(annotation, attribute, "typed dict annotations are unavailable") from exc
         if hint is _MISSING_ANNOTATION:
             raise MissingTypedDictKeyError(annotation, attribute)
-        return AttributeAnnotationInfo(hint, True)
+        return AttributeAnnotationInfo(hint, True, hint)
 
     override = _resolve_attribute_override(annotation, attribute)
     if override is not _MISSING_ANNOTATION:
@@ -217,12 +230,17 @@ def resolve_attribute_annotation_info(annotation: Any, attribute: str) -> Attrib
         if descriptor.fget is None:
             raise MissingAttributeError(annotation, attribute)
         try:
-            hints = get_type_hints(descriptor.fget)
+            getter_annotation = get_type_hints(descriptor.fget).get(
+                "return",
+                _MISSING_ANNOTATION,
+            )
+            setter_annotation = _resolve_property_setter_annotation(descriptor)
         except (NameError, TypeError, ValueError) as exc:
             raise AttributeInspectionError(annotation, attribute, "property annotations are unavailable") from exc
         return AttributeAnnotationInfo(
-            hints.get("return", _MISSING_ANNOTATION),
+            getter_annotation,
             descriptor.fset is not None,
+            setter_annotation,
         )
 
     try:
@@ -230,10 +248,25 @@ def resolve_attribute_annotation_info(annotation: Any, attribute: str) -> Attrib
     except (NameError, TypeError, ValueError) as exc:
         raise AttributeInspectionError(annotation, attribute, "attribute annotations are unavailable") from exc
     if hint is not _MISSING_ANNOTATION:
-        return AttributeAnnotationInfo(hint, True)
+        return AttributeAnnotationInfo(hint, True, hint)
     if descriptor is not _MISSING_ANNOTATION:
         return AttributeAnnotationInfo(_MISSING_ANNOTATION, False)
     raise MissingAttributeError(annotation, attribute)
+
+
+def _resolve_property_setter_annotation(descriptor: property) -> Any:
+    if descriptor.fset is None:
+        return _MISSING_ANNOTATION
+
+    parameters = tuple(inspect.signature(descriptor.fset).parameters.values())
+    if len(parameters) < 2:
+        return _MISSING_ANNOTATION
+
+    setter_value_name = parameters[1].name
+    return get_type_hints(descriptor.fset).get(
+        setter_value_name,
+        _MISSING_ANNOTATION,
+    )
 
 
 def _resolve_class_field_annotation(owner: type, attribute: str) -> Any:

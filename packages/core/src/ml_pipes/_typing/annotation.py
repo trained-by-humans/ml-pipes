@@ -688,10 +688,28 @@ def _is_structurally_assignable_to_protocol(
                 if target_member_info.is_writable:
                     if not source_member_info.is_writable:
                         return False
-                    if not _is_compatible_under_variance(
+                    if not _is_assignable(
                         source_member_annotation,
                         target_member_annotation,
-                        _INVARIANT,
+                        protocol_stack,
+                    ):
+                        return False
+                    source_write_annotation = _replace_self_annotation(
+                        source_member_info.write_annotation,
+                        source_owner,
+                    )
+                    target_write_annotation = _replace_self_annotation(
+                        target_member_info.write_annotation,
+                        source_owner,
+                    )
+                    if (
+                        source_write_annotation is _MISSING_ANNOTATION
+                        or target_write_annotation is _MISSING_ANNOTATION
+                    ):
+                        return False
+                    if not _is_assignable(
+                        target_write_annotation,
+                        source_write_annotation,
                         protocol_stack,
                     ):
                         return False
@@ -768,31 +786,27 @@ def _is_protocol_method_member_assignable(
         parameter.parameter.name: parameter
         for parameter in target_value_parameters
     }
-    for args, kwargs, _ in representative_calls:
-        if bind_method_call_parameter_names(source_member, args, kwargs) is None:
+    for args, kwargs, placeholder_tokens in representative_calls:
+        source_parameter_bindings = bind_method_call_parameter_names(
+            source_member,
+            args,
+            kwargs,
+        )
+        if source_parameter_bindings is None:
             return False
 
-    full_call_args, full_call_kwargs, placeholder_tokens = representative_calls[-1]
-    source_parameter_bindings = bind_method_call_parameter_names(
-        source_member,
-        full_call_args,
-        full_call_kwargs,
-    )
-    if source_parameter_bindings is None:
-        return False
-
-    for parameter_name, token in placeholder_tokens.items():
-        source_parameter_name = source_parameter_bindings.get(token)
-        source_parameter = source_parameters_by_name.get(source_parameter_name)
-        target_parameter = target_parameters_by_name.get(parameter_name)
-        if source_parameter is None or target_parameter is None:
-            return False
-        if not _is_assignable(
-            _replace_self_annotation(target_parameter.annotation, source_owner),
-            _replace_self_annotation(source_parameter.annotation, source_owner),
-            protocol_stack,
-        ):
-            return False
+        for parameter_name, token in placeholder_tokens.items():
+            source_parameter_name = source_parameter_bindings.get(token)
+            source_parameter = source_parameters_by_name.get(source_parameter_name)
+            target_parameter = target_parameters_by_name.get(parameter_name)
+            if source_parameter is None or target_parameter is None:
+                return False
+            if not _is_assignable(
+                _replace_self_annotation(target_parameter.annotation, source_owner),
+                _replace_self_annotation(source_parameter.annotation, source_owner),
+                protocol_stack,
+            ):
+                return False
 
     return _is_assignable(
         _replace_self_annotation(source_return_annotation, source_owner),
@@ -854,7 +868,16 @@ def _build_protocol_method_call(
 def _replace_self_annotation(annotation: Any, concrete_owner: type) -> Any:
     return _transform_annotation(
         annotation,
-        lambda part: concrete_owner if part in _SELF_ANNOTATIONS else part,
+        lambda part: concrete_owner if _is_self_annotation(part) else part,
+    )
+
+
+def _is_self_annotation(annotation: Any) -> bool:
+    return annotation in _SELF_ANNOTATIONS or (
+        isinstance(annotation, TypeVar)
+        and annotation.__name__ == "Self"
+        and annotation.__bound__ is None
+        and not annotation.__constraints__
     )
 
 

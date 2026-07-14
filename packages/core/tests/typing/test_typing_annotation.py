@@ -35,6 +35,7 @@ from ml_pipes._typing.annotation import (
 )
 
 _T = TypeVar("_T")
+_LegacySelf = TypeVar("Self")
 
 try:
     from typing import Self
@@ -99,6 +100,29 @@ class _WrongFilterKeywordOnly(_PredictionBase):
         return self
 
 
+class _LegacySelfFilterableLabels(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        ...
+
+
+class _LegacySelfPredictionBase:
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        return self
+
+
+class _LegacySelfPrediction(_LegacySelfPredictionBase):
+    labels: Sequence[int]
+
+
+class _LegacySelfWrongFilterReturn:
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> int:
+        return 0
+
+
 class _WritableObjectValue(Protocol):
     value: object
 
@@ -117,6 +141,26 @@ class _ReadonlyIntValue:
     @property
     def value(self) -> int:
         return 1
+
+
+class _NarrowSetterObjectValue:
+    @property
+    def value(self) -> object:
+        return 1
+
+    @value.setter
+    def value(self, value: int) -> None:
+        del value
+
+
+class _WideSetterIntValue:
+    @property
+    def value(self) -> int:
+        return 1
+
+    @value.setter
+    def value(self, value: object) -> None:
+        del value
 
 
 class _KeywordLimitFilter(Protocol):
@@ -139,6 +183,23 @@ class _OptionalKeywordLimitFilter:
 class _MissingKeywordLimitFilter:
     def filter(self, mask: Sequence[bool]) -> Self:
         del mask
+        return self
+
+
+class _Mixer(Protocol):
+    def mix(self, left: int, right: str) -> Self:
+        ...
+
+
+class _MatchingMixer:
+    def mix(self, left: int, right: str) -> Self:
+        del left, right
+        return self
+
+
+class _ReorderedMixer:
+    def mix(self, right: str, left: int) -> Self:
+        del left, right
         return self
 
 
@@ -364,6 +425,14 @@ def test_tighten_annotation_prefers_concrete_protocol_implementation() -> None:
     assert tighten_annotation(_FilterableLabels, _GoodPrediction) is _GoodPrediction
 
 
+def test_is_assignable_accepts_legacy_typevar_self_protocol() -> None:
+    assert is_assignable(_LegacySelfPrediction, _LegacySelfFilterableLabels)
+
+
+def test_is_assignable_rejects_legacy_typevar_self_non_self_return() -> None:
+    assert not is_assignable(_LegacySelfWrongFilterReturn, _LegacySelfFilterableLabels)
+
+
 def test_is_assignable_rejects_narrow_writable_protocol_field() -> None:
     assert not is_assignable(_IntValueField, _WritableObjectValue)
 
@@ -374,6 +443,14 @@ def test_is_assignable_accepts_covariant_readonly_protocol_property() -> None:
 
 def test_is_assignable_rejects_readonly_property_for_writable_protocol_field() -> None:
     assert not is_assignable(_ReadonlyIntValue, _WritableObjectValue)
+
+
+def test_is_assignable_rejects_writable_property_with_narrow_setter() -> None:
+    assert not is_assignable(_NarrowSetterObjectValue, _WritableObjectValue)
+
+
+def test_is_assignable_accepts_writable_property_with_wide_setter() -> None:
+    assert is_assignable(_WideSetterIntValue, _WritableObjectValue)
 
 
 @pytest.mark.parametrize(
@@ -391,6 +468,14 @@ def test_is_assignable_accepts_protocol_method_with_keyword_only_parameter(
 
 def test_is_assignable_rejects_protocol_method_missing_keyword_only_parameter() -> None:
     assert not is_assignable(_MissingKeywordLimitFilter, _KeywordLimitFilter)
+
+
+def test_is_assignable_accepts_matching_protocol_method_positional_parameter_order() -> None:
+    assert is_assignable(_MatchingMixer, _Mixer)
+
+
+def test_is_assignable_rejects_reordered_protocol_method_positional_parameters() -> None:
+    assert not is_assignable(_ReorderedMixer, _Mixer)
 
 
 @pytest.mark.parametrize(

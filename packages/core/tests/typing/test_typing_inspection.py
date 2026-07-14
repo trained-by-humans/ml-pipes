@@ -42,6 +42,26 @@ class _WritablePropertyAttributeOwner:
         del value
 
 
+class _NarrowSetterPropertyAttributeOwner:
+    @property
+    def value(self) -> object:
+        return ""
+
+    @value.setter
+    def value(self, value: int) -> None:
+        del value
+
+
+class _UntypedSetterPropertyAttributeOwner:
+    @property
+    def value(self) -> str:
+        return ""
+
+    @value.setter
+    def value(self, value) -> None:
+        del value
+
+
 class _BrokenAttributeOwner:
     value: "MissingType"
 
@@ -101,13 +121,20 @@ def test_resolve_attribute_annotation(annotation: Any, attribute: str, expected:
 
 
 @pytest.mark.parametrize(
-    ("annotation", "attribute", "expected_annotation", "expected_writable"),
+    (
+        "annotation",
+        "attribute",
+        "expected_annotation",
+        "expected_writable",
+        "expected_write_annotation",
+    ),
     [
         pytest.param(
             _AnnotatedAttributeOwner,
             "value",
             int,
             True,
+            int,
             id="annotated-attribute",
         ),
         pytest.param(
@@ -115,6 +142,7 @@ def test_resolve_attribute_annotation(annotation: Any, attribute: str, expected:
             "value",
             str,
             False,
+            _MISSING_ANNOTATION,
             id="readonly-property",
         ),
         pytest.param(
@@ -122,7 +150,24 @@ def test_resolve_attribute_annotation(annotation: Any, attribute: str, expected:
             "value",
             str,
             True,
+            str,
             id="writable-property",
+        ),
+        pytest.param(
+            _NarrowSetterPropertyAttributeOwner,
+            "value",
+            object,
+            True,
+            int,
+            id="narrow-setter-property",
+        ),
+        pytest.param(
+            _UntypedSetterPropertyAttributeOwner,
+            "value",
+            str,
+            True,
+            _MISSING_ANNOTATION,
+            id="untyped-setter-property",
         ),
     ],
 )
@@ -131,11 +176,13 @@ def test_resolve_attribute_annotation_info(
     attribute: str,
     expected_annotation: Any,
     expected_writable: bool,
+    expected_write_annotation: Any,
 ) -> None:
     result = resolve_attribute_annotation_info(annotation, attribute)
 
     assert result.annotation == expected_annotation
     assert result.is_writable is expected_writable
+    assert result.write_annotation == expected_write_annotation
 
 
 def test_resolve_attribute_annotation_raises_for_missing_attribute() -> None:
