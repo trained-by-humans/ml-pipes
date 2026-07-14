@@ -89,6 +89,7 @@ jobs:
         with:
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-testpypi-tensor:
     name: Publish TestPyPI Tensor
@@ -116,6 +117,7 @@ jobs:
         with:
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-testpypi-vision:
     name: Publish TestPyPI Vision
@@ -143,6 +145,7 @@ jobs:
         with:
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-testpypi-onnx:
     name: Publish TestPyPI ONNX
@@ -170,6 +173,7 @@ jobs:
         with:
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-testpypi-torch:
     name: Publish TestPyPI Torch
@@ -197,6 +201,7 @@ jobs:
         with:
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-testpypi-meta:
     name: Publish TestPyPI Meta
@@ -225,6 +230,7 @@ jobs:
         with:
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-pypi-core:
     name: Publish PyPI Core
@@ -251,6 +257,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
+          skip-existing: true
 
   publish-pypi-tensor:
     name: Publish PyPI Tensor
@@ -277,6 +284,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
+          skip-existing: true
 
   publish-pypi-vision:
     name: Publish PyPI Vision
@@ -303,6 +311,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
+          skip-existing: true
 
   publish-pypi-onnx:
     name: Publish PyPI ONNX
@@ -329,6 +338,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
+          skip-existing: true
 
   publish-pypi-torch:
     name: Publish PyPI Torch
@@ -355,6 +365,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
+          skip-existing: true
 
   publish-pypi-meta:
     name: Publish PyPI Meta
@@ -382,3 +393,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
+          skip-existing: true
