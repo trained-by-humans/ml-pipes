@@ -57,7 +57,7 @@ class _WritableIndexable(_Indexable):
         pass
 
 
-class _FilterableLabels(Protocol):
+class _FilterableLabelsProtocol(Protocol):
     labels: Sequence[int]
 
     def filter(self, mask: Sequence[bool]) -> Self:
@@ -69,30 +69,30 @@ class _PredictionBase:
         return self
 
 
-class _GoodPrediction(_PredictionBase):
+class _IntLabelsPrediction(_PredictionBase):
     labels: Sequence[int]
 
 
-class _GoodPredictionChild(_GoodPrediction):
+class _IntLabelsPredictionChild(_IntLabelsPrediction):
     pass
 
 
-class _WrongLabelPrediction(_PredictionBase):
+class _StringLabelsPrediction(_PredictionBase):
     labels: Sequence[str]
 
 
-class _WrongFilterReturn:
+class _IntReturningFilterPrediction:
     labels: Sequence[int]
 
     def filter(self, mask: Sequence[bool]) -> int:
         return 0
 
 
-class _MissingLabelsPrediction(_PredictionBase):
+class _PredictionWithoutLabels(_PredictionBase):
     pass
 
 
-class _WrongFilterKeywordOnly(_PredictionBase):
+class _PredictionWithRequiredFilterLimit(_PredictionBase):
     labels: Sequence[int]
 
     def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
@@ -100,7 +100,7 @@ class _WrongFilterKeywordOnly(_PredictionBase):
         return self
 
 
-class _LegacySelfFilterableLabels(Protocol):
+class _LegacySelfFilterableProtocol(Protocol):
     labels: Sequence[int]
 
     def filter(self, mask: Sequence[bool]) -> _LegacySelf:
@@ -112,22 +112,22 @@ class _LegacySelfPredictionBase:
         return self
 
 
-class _LegacySelfPrediction(_LegacySelfPredictionBase):
+class _LegacySelfPreservingPrediction(_LegacySelfPredictionBase):
     labels: Sequence[int]
 
 
-class _LegacySelfWrongFilterReturn:
+class _LegacySelfIntReturningPrediction:
     labels: Sequence[int]
 
     def filter(self, mask: Sequence[bool]) -> int:
         return 0
 
 
-class _WritableObjectValue(Protocol):
+class _WritableObjectValueProtocol(Protocol):
     value: object
 
 
-class _ReadonlyObjectValue(Protocol):
+class _ReadonlyObjectValueProtocol(Protocol):
     @property
     def value(self) -> object:
         ...
@@ -137,13 +137,13 @@ class _IntValueField:
     value: int
 
 
-class _ReadonlyIntValue:
+class _ReadonlyIntValueProperty:
     @property
     def value(self) -> int:
         return 1
 
 
-class _NarrowSetterObjectValue:
+class _ObjectValueWithIntSetter:
     @property
     def value(self) -> object:
         return 1
@@ -153,7 +153,7 @@ class _NarrowSetterObjectValue:
         del value
 
 
-class _WideSetterIntValue:
+class _IntValueWithObjectSetter:
     @property
     def value(self) -> int:
         return 1
@@ -163,41 +163,41 @@ class _WideSetterIntValue:
         del value
 
 
-class _KeywordLimitFilter(Protocol):
+class _KeywordLimitFilterProtocol(Protocol):
     def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
         ...
 
 
-class _MatchingKeywordLimitFilter:
+class _KeywordLimitFilterWithRequiredLimit:
     def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
         del mask, limit
         return self
 
 
-class _OptionalKeywordLimitFilter:
+class _KeywordLimitFilterWithOptionalLimit:
     def filter(self, mask: Sequence[bool], *, limit: int = 0) -> Self:
         del mask, limit
         return self
 
 
-class _MissingKeywordLimitFilter:
+class _KeywordLimitFilterWithoutLimit:
     def filter(self, mask: Sequence[bool]) -> Self:
         del mask
         return self
 
 
-class _Mixer(Protocol):
+class _MixerProtocol(Protocol):
     def mix(self, left: int, right: str) -> Self:
         ...
 
 
-class _MatchingMixer:
+class _MixerWithMatchingOrder:
     def mix(self, left: int, right: str) -> Self:
         del left, right
         return self
 
 
-class _ReorderedMixer:
+class _MixerWithReorderedParameters:
     def mix(self, right: str, left: int) -> Self:
         del left, right
         return self
@@ -321,36 +321,25 @@ def test_is_assignable_accepts_bare_mutable_generic_aliases(
 
 
 @pytest.mark.parametrize(
-    ("source_annotation", "target_annotation"),
+    ("source_annotation", "target_annotation", "expected_assignable"),
     [
-        pytest.param(str, Iterable, id="str-to-Iterable"),
-        pytest.param(bytes, Iterable, id="bytes-to-Iterable"),
-        pytest.param(range, Iterable, id="range-to-Iterable"),
-        pytest.param(str, Sequence, id="str-to-Sequence"),
-        pytest.param(bytes, Sequence, id="bytes-to-Sequence"),
-        pytest.param(range, Collection, id="range-to-Collection"),
+        pytest.param(str, Iterable, True, id="str-to-Iterable"),
+        pytest.param(bytes, Iterable, True, id="bytes-to-Iterable"),
+        pytest.param(range, Iterable, True, id="range-to-Iterable"),
+        pytest.param(str, Sequence, True, id="str-to-Sequence"),
+        pytest.param(bytes, Sequence, True, id="bytes-to-Sequence"),
+        pytest.param(range, Collection, True, id="range-to-Collection"),
+        pytest.param(str, Iterable[int], False, id="str-to-Iterable[int]"),
+        pytest.param(bytes, Sequence[int], False, id="bytes-to-Sequence[int]"),
+        pytest.param(range, Collection[str], False, id="range-to-Collection[str]"),
     ],
 )
-def test_is_assignable_accepts_concrete_iterable_subtype_for_default_generic_target(
+def test_is_assignable_handles_concrete_iterable_subtype_targets(
     source_annotation: Any,
     target_annotation: Any,
+    expected_assignable: bool,
 ) -> None:
-    assert is_assignable(source_annotation, target_annotation)
-
-
-@pytest.mark.parametrize(
-    ("source_annotation", "target_annotation"),
-    [
-        pytest.param(str, Iterable[int], id="str-to-Iterable[int]"),
-        pytest.param(bytes, Sequence[int], id="bytes-to-Sequence[int]"),
-        pytest.param(range, Collection[str], id="range-to-Collection[str]"),
-    ],
-)
-def test_is_assignable_rejects_concrete_iterable_subtype_for_typed_generic_target(
-    source_annotation: Any,
-    target_annotation: Any,
-) -> None:
-    assert not is_assignable(source_annotation, target_annotation)
+    assert is_assignable(source_annotation, target_annotation) is expected_assignable
 
 
 @pytest.mark.parametrize(
@@ -394,88 +383,145 @@ def test_tighten_annotation_restores_missing_generic_arguments(
 
 
 @pytest.mark.parametrize(
-    "source_annotation",
+    ("implementation_annotation", "expected_assignable"),
     [
-        pytest.param(_GoodPrediction, id="concrete"),
-        pytest.param(_GoodPredictionChild, id="subclass"),
+        pytest.param(_IntLabelsPrediction, True, id="int-labels"),
+        pytest.param(_IntLabelsPredictionChild, True, id="int-labels-subclass"),
+        pytest.param(_StringLabelsPrediction, False, id="string-labels"),
+        pytest.param(_IntReturningFilterPrediction, False, id="int-returning-filter"),
+        pytest.param(
+            _PredictionWithRequiredFilterLimit,
+            False,
+            id="required-filter-limit",
+        ),
+        pytest.param(_PredictionWithoutLabels, False, id="missing-labels"),
     ],
 )
-def test_is_assignable_accepts_structural_protocol_with_data_and_self_return(
-    source_annotation: Any,
+def test_is_assignable_checks_structural_protocol_implementation(
+    implementation_annotation: Any,
+    expected_assignable: bool,
 ) -> None:
-    assert is_assignable(source_annotation, _FilterableLabels)
-
-
-@pytest.mark.parametrize(
-    "source_annotation",
-    [
-        pytest.param(_WrongLabelPrediction, id="wrong-attribute-type"),
-        pytest.param(_WrongFilterReturn, id="wrong-method-return"),
-        pytest.param(_WrongFilterKeywordOnly, id="wrong-method-keyword-only"),
-        pytest.param(_MissingLabelsPrediction, id="missing-attribute"),
-    ],
-)
-def test_is_assignable_rejects_invalid_structural_protocol_implementation(
-    source_annotation: Any,
-) -> None:
-    assert not is_assignable(source_annotation, _FilterableLabels)
+    assert is_assignable(
+        implementation_annotation,
+        _FilterableLabelsProtocol,
+    ) is expected_assignable
 
 
 def test_tighten_annotation_prefers_concrete_protocol_implementation() -> None:
-    assert tighten_annotation(_FilterableLabels, _GoodPrediction) is _GoodPrediction
-
-
-def test_is_assignable_accepts_legacy_typevar_self_protocol() -> None:
-    assert is_assignable(_LegacySelfPrediction, _LegacySelfFilterableLabels)
-
-
-def test_is_assignable_rejects_legacy_typevar_self_non_self_return() -> None:
-    assert not is_assignable(_LegacySelfWrongFilterReturn, _LegacySelfFilterableLabels)
-
-
-def test_is_assignable_rejects_narrow_writable_protocol_field() -> None:
-    assert not is_assignable(_IntValueField, _WritableObjectValue)
-
-
-def test_is_assignable_accepts_covariant_readonly_protocol_property() -> None:
-    assert is_assignable(_ReadonlyIntValue, _ReadonlyObjectValue)
-
-
-def test_is_assignable_rejects_readonly_property_for_writable_protocol_field() -> None:
-    assert not is_assignable(_ReadonlyIntValue, _WritableObjectValue)
-
-
-def test_is_assignable_rejects_writable_property_with_narrow_setter() -> None:
-    assert not is_assignable(_NarrowSetterObjectValue, _WritableObjectValue)
-
-
-def test_is_assignable_accepts_writable_property_with_wide_setter() -> None:
-    assert is_assignable(_WideSetterIntValue, _WritableObjectValue)
+    assert tighten_annotation(
+        _FilterableLabelsProtocol,
+        _IntLabelsPrediction,
+    ) is _IntLabelsPrediction
 
 
 @pytest.mark.parametrize(
-    "source_annotation",
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
     [
-        pytest.param(_MatchingKeywordLimitFilter, id="matching"),
-        pytest.param(_OptionalKeywordLimitFilter, id="optional"),
+        pytest.param(
+            _LegacySelfPreservingPrediction,
+            _LegacySelfFilterableProtocol,
+            True,
+            id="legacy-self-preserving",
+        ),
+        pytest.param(
+            _LegacySelfIntReturningPrediction,
+            _LegacySelfFilterableProtocol,
+            False,
+            id="legacy-self-int-return",
+        ),
+        pytest.param(
+            _IntValueField,
+            _WritableObjectValueProtocol,
+            False,
+            id="int-field-for-writable-object",
+        ),
+        pytest.param(
+            _ReadonlyIntValueProperty,
+            _ReadonlyObjectValueProtocol,
+            True,
+            id="readonly-int-property-for-readonly-object",
+        ),
+        pytest.param(
+            _ReadonlyIntValueProperty,
+            _WritableObjectValueProtocol,
+            False,
+            id="readonly-int-property-for-writable-object",
+        ),
+        pytest.param(
+            _ObjectValueWithIntSetter,
+            _WritableObjectValueProtocol,
+            False,
+            id="object-value-with-int-setter",
+        ),
+        pytest.param(
+            _IntValueWithObjectSetter,
+            _WritableObjectValueProtocol,
+            True,
+            id="int-value-with-object-setter",
+        ),
     ],
 )
-def test_is_assignable_accepts_protocol_method_with_keyword_only_parameter(
-    source_annotation: Any,
+def test_is_assignable_handles_protocol_attribute_shapes(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
 ) -> None:
-    assert is_assignable(source_annotation, _KeywordLimitFilter)
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
 
 
-def test_is_assignable_rejects_protocol_method_missing_keyword_only_parameter() -> None:
-    assert not is_assignable(_MissingKeywordLimitFilter, _KeywordLimitFilter)
+@pytest.mark.parametrize(
+    ("implementation_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _KeywordLimitFilterWithRequiredLimit,
+            True,
+            id="required-limit",
+        ),
+        pytest.param(
+            _KeywordLimitFilterWithOptionalLimit,
+            True,
+            id="optional-limit",
+        ),
+        pytest.param(
+            _KeywordLimitFilterWithoutLimit,
+            False,
+            id="missing-limit",
+        ),
+    ],
+)
+def test_is_assignable_handles_protocol_keyword_only_method_parameter(
+    implementation_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        _KeywordLimitFilterProtocol,
+    ) is expected_assignable
 
 
-def test_is_assignable_accepts_matching_protocol_method_positional_parameter_order() -> None:
-    assert is_assignable(_MatchingMixer, _Mixer)
-
-
-def test_is_assignable_rejects_reordered_protocol_method_positional_parameters() -> None:
-    assert not is_assignable(_ReorderedMixer, _Mixer)
+@pytest.mark.parametrize(
+    ("implementation_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _MixerWithMatchingOrder,
+            True,
+            id="matching-order",
+        ),
+        pytest.param(
+            _MixerWithReorderedParameters,
+            False,
+            id="reordered-parameters",
+        ),
+    ],
+)
+def test_is_assignable_preserves_protocol_method_positional_parameter_order(
+    implementation_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(implementation_annotation, _MixerProtocol) is expected_assignable
 
 
 @pytest.mark.parametrize(
