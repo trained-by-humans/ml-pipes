@@ -36,6 +36,8 @@ from ml_pipes._typing.annotation import (
 
 _T = TypeVar("_T")
 _LegacySelf = TypeVar("Self")
+_SourceBoxT = TypeVar("_SourceBoxT")
+_InheritedBoxT = TypeVar("_InheritedBoxT")
 
 try:
     from typing import Self
@@ -45,6 +47,29 @@ except ImportError:  # pragma: no cover
 
 class _Box(Generic[_T]):
     pass
+
+
+class _GenericProtocolBox(Generic[_SourceBoxT]):
+    value: _SourceBoxT
+
+    def get(self) -> _SourceBoxT:
+        raise NotImplementedError
+
+
+class _InheritedGenericProtocolBox(
+    Generic[_InheritedBoxT],
+    _GenericProtocolBox[_InheritedBoxT],
+):
+    pass
+
+
+class _IntValueProtocol(Protocol):
+    value: int
+
+
+class _IntGetterProtocol(Protocol):
+    def get(self) -> int:
+        ...
 
 
 class _Indexable:
@@ -592,6 +617,70 @@ def test_is_assignable_preserves_protocol_method_positional_parameter_order(
     ],
 )
 def test_is_assignable_handles_protocol_static_and_class_methods(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntValueProtocol,
+            True,
+            id="generic-attr-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntValueProtocol,
+            False,
+            id="generic-attr-str",
+        ),
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntGetterProtocol,
+            True,
+            id="generic-method-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntGetterProtocol,
+            False,
+            id="generic-method-str",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[int],
+            _IntValueProtocol,
+            True,
+            id="inherited-generic-attr-int",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[str],
+            _IntValueProtocol,
+            False,
+            id="inherited-generic-attr-str",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[int],
+            _IntGetterProtocol,
+            True,
+            id="inherited-generic-method-int",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[str],
+            _IntGetterProtocol,
+            False,
+            id="inherited-generic-method-str",
+        ),
+    ],
+)
+def test_is_assignable_preserves_source_generic_specialization_for_protocols(
     implementation_annotation: Any,
     protocol_annotation: Any,
     expected_assignable: bool,

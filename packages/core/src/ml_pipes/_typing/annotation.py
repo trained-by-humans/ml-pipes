@@ -11,7 +11,7 @@ from collections.abc import (
 )
 import inspect
 from types import UnionType
-from typing import Any, Callable, TypeVar, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Generic, Protocol, TypeVar, get_args, get_origin, get_type_hints
 
 try:
     from typing import Self as _TypingSelf, get_protocol_members, is_protocol
@@ -535,6 +535,13 @@ def _is_parameterized_source_assignable_to_concrete_target(
     if target_shape is not None:
         return False
 
+    if isinstance(target_annotation, type) and is_protocol(target_annotation):
+        return _is_structurally_assignable_to_protocol(
+            source_annotation,
+            target_annotation,
+            protocol_stack,
+        )
+
     source_origin, _ = source_shape
     return _is_concrete_assignable(source_origin, target_annotation, protocol_stack)
 
@@ -653,6 +660,13 @@ def _is_structurally_assignable_to_protocol(
     if not is_protocol(target_owner):
         return False
 
+    try:
+        source_typevar_bindings = _resolve_annotation_typevar_bindings(
+            source_annotation,
+        )
+    except _UnboundTypevarBindingError:
+        return False
+
     pair = (source_owner, target_owner)
     if pair in protocol_stack:
         return True
@@ -678,9 +692,10 @@ def _is_structurally_assignable_to_protocol(
                     return False
                 if source_member_info.annotation is _MISSING_ANNOTATION:
                     return False
-                source_member_annotation = _replace_self_annotation(
+                source_member_annotation = _specialize_source_protocol_annotation(
                     source_member_info.annotation,
                     source_owner,
+                    source_typevar_bindings,
                 )
                 target_member_annotation = _replace_self_annotation(
                     target_member_info.annotation,
@@ -695,9 +710,10 @@ def _is_structurally_assignable_to_protocol(
                         protocol_stack,
                     ):
                         return False
-                    source_write_annotation = _replace_self_annotation(
+                    source_write_annotation = _specialize_source_protocol_annotation(
                         source_member_info.write_annotation,
                         source_owner,
+                        source_typevar_bindings,
                     )
                     target_write_annotation = _replace_self_annotation(
                         target_member_info.write_annotation,
@@ -727,6 +743,7 @@ def _is_structurally_assignable_to_protocol(
                 target_owner,
                 member,
                 protocol_stack,
+                source_typevar_bindings,
                 bind_method_call_parameter_names,
                 method_signature_includes_receiver,
                 resolve_callable_signature_annotations,
@@ -743,6 +760,7 @@ def _is_protocol_method_member_assignable(
     target_owner: type,
     member: str,
     protocol_stack: set[tuple[type, type]],
+    source_typevar_bindings: dict[TypeVar, Any],
     bind_method_call_parameter_names: Callable[..., Any],
     method_signature_includes_receiver: Callable[..., Any],
     resolve_callable_signature_annotations: Callable[..., Any],
@@ -756,8 +774,15 @@ def _is_protocol_method_member_assignable(
 
     source_annotations = resolve_callable_signature_annotations(source_member)
     target_annotations = resolve_callable_signature_annotations(target_member)
-    source_return_annotation = source_annotations.return_annotation
-    target_return_annotation = target_annotations.return_annotation
+    source_return_annotation = _specialize_source_protocol_annotation(
+        source_annotations.return_annotation,
+        source_owner,
+        source_typevar_bindings,
+    )
+    target_return_annotation = _replace_self_annotation(
+        target_annotations.return_annotation,
+        source_owner,
+    )
     if source_return_annotation is None or target_return_annotation is None:
         return False
     if not source_annotations.is_inspectable or not target_annotations.is_inspectable:
@@ -802,11 +827,18 @@ def _is_protocol_method_member_assignable(
         return False
 
     source_parameters_by_name = {
-        parameter.parameter.name: parameter
+        parameter.parameter.name: _specialize_source_protocol_annotation(
+            parameter.annotation,
+            source_owner,
+            source_typevar_bindings,
+        )
         for parameter in source_value_parameters
     }
     target_parameters_by_name = {
-        parameter.parameter.name: parameter
+        parameter.parameter.name: _replace_self_annotation(
+            parameter.annotation,
+            source_owner,
+        )
         for parameter in target_value_parameters
     }
     for args, kwargs, placeholder_tokens in representative_calls:
@@ -821,13 +853,18 @@ def _is_protocol_method_member_assignable(
 
         for parameter_name, token in placeholder_tokens.items():
             source_parameter_name = source_parameter_bindings.get(token)
-            source_parameter = source_parameters_by_name.get(source_parameter_name)
-            target_parameter = target_parameters_by_name.get(parameter_name)
-            if source_parameter is None or target_parameter is None:
+            source_parameter_annotation = source_parameters_by_name.get(
+                source_parameter_name,
+            )
+            target_parameter_annotation = target_parameters_by_name.get(parameter_name)
+            if (
+                source_parameter_annotation is None
+                or target_parameter_annotation is None
+            ):
                 return False
             if not _is_assignable(
-                _replace_self_annotation(target_parameter.annotation, source_owner),
-                _replace_self_annotation(source_parameter.annotation, source_owner),
+                target_parameter_annotation,
+                source_parameter_annotation,
                 protocol_stack,
             ):
                 return False
@@ -894,6 +931,16 @@ def _replace_self_annotation(annotation: Any, concrete_owner: type) -> Any:
         annotation,
         lambda part: concrete_owner if _is_self_annotation(part) else part,
     )
+
+
+def _specialize_source_protocol_annotation(
+    annotation: Any,
+    source_owner: type,
+    source_typevar_bindings: dict[TypeVar, Any],
+) -> Any:
+    if source_typevar_bindings:
+        annotation = _apply_typevar_bindings(annotation, source_typevar_bindings)
+    return _replace_self_annotation(annotation, source_owner)
 
 
 def _is_self_annotation(annotation: Any) -> bool:
@@ -1138,6 +1185,53 @@ def _apply_typevar_bindings(
         if isinstance(template_part, TypeVar)
         else template_part,
     )
+
+
+def _resolve_annotation_typevar_bindings(annotation: Any) -> dict[TypeVar, Any]:
+    owner = _resolve_annotation_owner(annotation)
+    annotation_args = get_args(annotation)
+    if not isinstance(owner, type) or not annotation_args:
+        return {}
+    return _resolve_owner_typevar_bindings(owner, annotation_args)
+
+
+def _resolve_owner_typevar_bindings(
+    owner: type,
+    annotation_args: tuple[Any, ...],
+) -> dict[TypeVar, Any]:
+    owner_parameters = tuple(
+        parameter
+        for parameter in _generic_parameters(owner)
+        if isinstance(parameter, TypeVar)
+    )
+    if not owner_parameters:
+        return {}
+    if len(owner_parameters) != len(annotation_args):
+        return {}
+
+    owner_bindings = dict(zip(owner_parameters, annotation_args, strict=True))
+    inherited_bindings: dict[TypeVar, Any] = {}
+    for base_annotation in getattr(owner, "__orig_bases__", ()):
+        base_origin = get_origin(base_annotation)
+        if base_origin in {Generic, Protocol}:
+            continue
+        specialized_base_annotation = _apply_typevar_bindings(
+            base_annotation,
+            owner_bindings,
+        )
+        base_owner = _resolve_annotation_owner(specialized_base_annotation)
+        base_args = get_args(specialized_base_annotation)
+        if (
+            not isinstance(base_owner, type)
+            or base_owner in {Generic, Protocol}
+            or not base_args
+        ):
+            continue
+        inherited_bindings = _merge_typevar_bindings(
+            inherited_bindings,
+            _resolve_owner_typevar_bindings(base_owner, base_args),
+        )
+    return _merge_typevar_bindings(owner_bindings, inherited_bindings)
 
 
 def _build_union_annotation(*annotations: Any) -> Any:

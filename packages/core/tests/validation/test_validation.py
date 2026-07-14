@@ -25,6 +25,7 @@ from ml_pipes.validation import (
 _VariadicT = TypeVar("_VariadicT")
 _BoxT = TypeVar("_BoxT")
 _LegacySelf = TypeVar("Self")
+_GenericProtocolBoxT = TypeVar("_GenericProtocolBoxT")
 
 try:
     from typing import Self
@@ -34,6 +35,14 @@ except ImportError:  # pragma: no cover
 
 class _Box(Generic[_BoxT]):
     pass
+
+
+class _GenericProtocolBox(Generic[_GenericProtocolBoxT]):
+    def __init__(self, value: _GenericProtocolBoxT):
+        self.value = value
+
+    def get(self) -> _GenericProtocolBoxT:
+        return self.value
 
 
 class _ProtocolPredictionContract(Protocol):
@@ -222,6 +231,29 @@ class ProduceClassBuilderWithStringArg:
 class UseClassBuilder:
     def __call__(self, value: _ClassBuildT) -> str:
         return value.build(1)
+
+
+class _IntGetterContract(Protocol):
+    def get(self) -> int:
+        ...
+
+
+_IntGetterT = TypeVar("_IntGetterT", bound=_IntGetterContract)
+
+
+class ProduceGenericIntProtocolBox:
+    def __call__(self, value: int) -> _GenericProtocolBox[int]:
+        return _GenericProtocolBox(value)
+
+
+class ProduceGenericStringProtocolBox:
+    def __call__(self, value: int) -> _GenericProtocolBox[str]:
+        return _GenericProtocolBox(str(value))
+
+
+class UseIntGetter:
+    def __call__(self, value: _IntGetterT) -> int:
+        return value.get() + 1
 
 
 class _WritableValueContract(Protocol):
@@ -591,6 +623,15 @@ def test_pipeline_validate_accepts_protocol_static_and_class_methods(
     assert contract.output_type is str
 
 
+def test_pipeline_validate_accepts_specialized_generic_source_for_protocol_bound():
+    contract = Pipeline(
+        [ProduceGenericIntProtocolBox(), UseIntGetter()],
+    ).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is int
+
+
 @pytest.mark.parametrize(
     "producer",
     [
@@ -605,6 +646,14 @@ def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer
         match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
     ):
         Pipeline([producer, FilterProtocolPrediction()]).validate()
+
+
+def test_pipeline_validate_rejects_wrong_specialized_generic_source_for_protocol_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseIntGetter",
+    ):
+        Pipeline([ProduceGenericStringProtocolBox(), UseIntGetter()]).validate()
 
 
 @pytest.mark.parametrize(
