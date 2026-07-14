@@ -257,7 +257,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
-          skip-existing: true
+          skip-existing: ${{ github.run_attempt != '1' }}
 
   publish-pypi-tensor:
     name: Publish PyPI Tensor
@@ -284,7 +284,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
-          skip-existing: true
+          skip-existing: ${{ github.run_attempt != '1' }}
 
   publish-pypi-vision:
     name: Publish PyPI Vision
@@ -311,7 +311,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
-          skip-existing: true
+          skip-existing: ${{ github.run_attempt != '1' }}
 
   publish-pypi-onnx:
     name: Publish PyPI ONNX
@@ -338,7 +338,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
-          skip-existing: true
+          skip-existing: ${{ github.run_attempt != '1' }}
 
   publish-pypi-torch:
     name: Publish PyPI Torch
@@ -365,7 +365,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
-          skip-existing: true
+          skip-existing: ${{ github.run_attempt != '1' }}
 
   publish-pypi-meta:
     name: Publish PyPI Meta
@@ -393,4 +393,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: publish
-          skip-existing: true
+          skip-existing: ${{ github.run_attempt != '1' }}
