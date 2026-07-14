@@ -3,7 +3,7 @@ import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, Protocol, TypeVar
+from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, Protocol, TypedDict, TypeVar
 
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import (
@@ -238,7 +238,12 @@ class _IntGetterContract(Protocol):
         ...
 
 
+class _IntValueAttributeContract(Protocol):
+    value: int
+
+
 _IntGetterT = TypeVar("_IntGetterT", bound=_IntGetterContract)
+_IntValueAttributeT = TypeVar("_IntValueAttributeT", bound=_IntValueAttributeContract)
 
 
 class ProduceGenericIntProtocolBox:
@@ -254,6 +259,20 @@ class ProduceGenericStringProtocolBox:
 class UseIntGetter:
     def __call__(self, value: _IntGetterT) -> int:
         return value.get() + 1
+
+
+class _TypedDictIntValuePayload(TypedDict):
+    value: int
+
+
+class ProduceTypedDictIntValuePayload:
+    def __call__(self, value: int) -> _TypedDictIntValuePayload:
+        return {"value": value}
+
+
+class UseIntValueAttribute:
+    def __call__(self, value: _IntValueAttributeT) -> int:
+        return value.value + 1
 
 
 class _WritableValueContract(Protocol):
@@ -654,6 +673,14 @@ def test_pipeline_validate_rejects_wrong_specialized_generic_source_for_protocol
         match=r"Pipeline contract mismatch at 1:UseIntGetter",
     ):
         Pipeline([ProduceGenericStringProtocolBox(), UseIntGetter()]).validate()
+
+
+def test_pipeline_validate_rejects_typed_dict_source_for_protocol_attribute_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseIntValueAttribute",
+    ):
+        Pipeline([ProduceTypedDictIntValuePayload(), UseIntValueAttribute()]).validate()
 
 
 @pytest.mark.parametrize(

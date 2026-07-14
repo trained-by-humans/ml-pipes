@@ -683,6 +683,9 @@ def _is_structurally_assignable_to_protocol(
                 return False
 
             if target_member_info.annotation is not _MISSING_ANNOTATION:
+                # TypedDict keys are mapping entries, not runtime object attributes.
+                if is_typed_dict_annotation(source_annotation):
+                    return False
                 try:
                     source_member_info = resolve_attribute_annotation_info(
                         source_owner,

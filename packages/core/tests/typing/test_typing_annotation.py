@@ -18,6 +18,7 @@ from typing import (
     MutableSequence as TypingMutableSequence,
     MutableSet as TypingMutableSet,
     Protocol,
+    TypedDict,
     TypeVar,
 )
 
@@ -70,6 +71,10 @@ class _IntValueProtocol(Protocol):
 class _IntGetterProtocol(Protocol):
     def get(self) -> int:
         ...
+
+
+class _TypedDictIntValuePayload(TypedDict):
+    value: int
 
 
 class _Indexable:
@@ -689,6 +694,13 @@ def test_is_assignable_preserves_source_generic_specialization_for_protocols(
         implementation_annotation,
         protocol_annotation,
     ) is expected_assignable
+
+
+def test_is_assignable_rejects_typed_dict_as_protocol_attribute_source() -> None:
+    assert is_assignable(
+        _TypedDictIntValuePayload,
+        _IntValueProtocol,
+    ) is False
 
 
 @pytest.mark.parametrize(
