@@ -256,11 +256,11 @@ from ml_pipes.core import Operator, RegionCloser, RegionOpener
 class MyRegionEnd(RegionCloser[str, list[str]]):
     def resolve_contract(
         self,
-        current_output: Any | None,
+        upstream_annotation: Any | None,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
-        out = list[current_output] if current_output is not None else list[Any]
+        out = list[upstream_annotation] if upstream_annotation is not None else list[Any]
         return (Any,), out
 
 

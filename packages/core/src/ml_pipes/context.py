@@ -77,7 +77,7 @@ class ContextOp(ABC, Generic[InputT, OutputT]):
     @abstractmethod
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
@@ -104,16 +104,16 @@ class Store(ContextOp[CurrentT, CurrentT]):
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         stored_annotations[self.name] = self._selector.validate_read(
-            current_output,
+            upstream_annotation,
             validation_error_type=validation_error_type,
             error_prefix=f"Store({self.name!r}, {self._selector!r})",
         )
-        return (Any,), current_output
+        return (Any,), upstream_annotation
 
 
 @Operator
@@ -176,13 +176,13 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del validation_error_type
         stored_annotation = stored_annotations.get(self.name, Any)
-        current_item_annotation = variadic_tuple_item_annotation(current_output)
+        current_item_annotation = variadic_tuple_item_annotation(upstream_annotation)
         if current_item_annotation is not None:
             merged_item_annotation = build_union_annotation_from_options(
                 current_item_annotation,
@@ -190,7 +190,7 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
             )
             return (Any,), tuple[merged_item_annotation, ...]
 
-        current_parts = expand_annotation_parts(current_output)
+        current_parts = expand_annotation_parts(upstream_annotation)
         if self.index is None:
             result_parts = current_parts + (stored_annotation,)
         else:

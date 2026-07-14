@@ -406,7 +406,7 @@ class Embed(Generic[InputT, OutputT]):
 
     def resolve_contract(
         self,
-        current_output: Any | None,
+        upstream_annotation: Any | None,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
@@ -418,15 +418,15 @@ class Embed(Generic[InputT, OutputT]):
             ) from exc
 
         if type_contract is None:
-            return (Any,), current_output
+            return (Any,), upstream_annotation
 
-        if current_output is not None and not is_assignable(
-            current_output,
+        if upstream_annotation is not None and not is_assignable(
+            upstream_annotation,
             type_contract.input_type,
         ):
             raise validation_error_type(
                 f"Pipeline contract mismatch: incoming type "
-                f"{format_annotation(current_output)} is incompatible with "
+                f"{format_annotation(upstream_annotation)} is incompatible with "
                 f"embed() input {format_annotation(type_contract.input_type)}"
             )
 

@@ -25,20 +25,20 @@ class Select:
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations
-        if current_output is Any:
+        if upstream_annotation is Any:
             return (Any,), Any
 
         selected = self._selector.validate_read(
-            current_output,
+            upstream_annotation,
             validation_error_type=validation_error_type,
             error_prefix=f"Select({self._selector!r})",
         )
-        return (current_output,), selected
+        return (upstream_annotation,), selected
 
 
 @Operator
@@ -88,36 +88,36 @@ class Pick(Generic[PickIndexT]):
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations
 
-        if current_output is Any or current_output is tuple:
+        if upstream_annotation is Any or upstream_annotation is tuple:
             return (tuple[Any, ...],), Any
 
-        repeated_item = self._homogeneous_tuple_item(current_output)
+        repeated_item = self._homogeneous_tuple_item(upstream_annotation)
         if repeated_item is not None:
             selected = tuple(repeated_item for _ in self.indices)
-            return (current_output,), selected[0] if len(selected) == 1 else tuple[selected]
+            return (upstream_annotation,), selected[0] if len(selected) == 1 else tuple[selected]
 
-        parts = self._fixed_tuple_parts(current_output)
+        parts = self._fixed_tuple_parts(upstream_annotation)
         if parts is None:
-            raise validation_error_type(f"Pick requires a tuple boundary, got {current_output}")
+            raise validation_error_type(f"Pick requires a tuple boundary, got {upstream_annotation}")
 
         selected = tuple(
             parts[
                 self._normalize_fixed_index(
                     index,
                     len(parts),
-                    current_output,
+                    upstream_annotation,
                     validation_error_type,
                 )
             ]
             for index in self.indices
         )
-        input_annotation = current_output if get_origin(current_output) is tuple else tuple[parts]
+        input_annotation = upstream_annotation if get_origin(upstream_annotation) is tuple else tuple[parts]
         return (input_annotation,), selected[0] if len(selected) == 1 else tuple[selected]
 
     @staticmethod
@@ -144,12 +144,12 @@ class Pick(Generic[PickIndexT]):
     def _normalize_fixed_index(
         index: int,
         size: int,
-        current_output: Any,
+        upstream_annotation: Any,
         error_type: type[Exception],
     ) -> int:
         normalized_index = index if index >= 0 else size + index
         if normalized_index < 0 or normalized_index >= size:
             raise error_type(
-                f"Pick({index}) is out of bounds for {current_output} (length {size})"
+                f"Pick({index}) is out of bounds for {upstream_annotation} (length {size})"
             )
         return normalized_index

@@ -454,7 +454,7 @@ class PipelineValidator:
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
-                    f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
+                    f"to return the upstream type (e.g. passthrough: return (Any,), upstream_annotation)."
                 )
 
 def require_operator_annotations(

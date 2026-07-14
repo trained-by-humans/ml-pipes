@@ -66,7 +66,7 @@ alone. `resolve_contract(...)` exists for those cases.
 
 Use it when the operator boundary depends on:
 
-- the current upstream type
+- the upstream annotation
 - stored context annotations
 - a transitive or passthrough relationship that static annotations cannot
   express cleanly
@@ -86,11 +86,11 @@ class AttachStored(ContextOp[Any, Any]):
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
         return (current, context.load(self.name)), context
 
-    def resolve_contract(self, current_output, stored_annotations, error_type):
+    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
         stored_type = stored_annotations.get(self.name)
         if stored_type is None:
             raise error_type(f"{self.name!r} is not available in context")
-        return (Any,), tuple[current_output, stored_type]
+        return (Any,), tuple[upstream_annotation, stored_type]
 ```
 
 Built-in operators such as `Store`, `Recall`, `Pick`, `Batch`, `UnBatch`,
@@ -371,8 +371,8 @@ class ContractPassthrough:
     def __call__(self, value: Any) -> Any:
         return value
 
-    def resolve_contract(self, current_output, stored_annotations, error_type):
-        return (Any,), current_output
+    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+        return (Any,), upstream_annotation
 
 
 contract = Pipeline([ContractPassthrough(), IntToString()]).validate(

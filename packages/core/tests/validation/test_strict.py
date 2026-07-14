@@ -42,8 +42,8 @@ class PassthroughOp(ContextOp):
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
         return current, context
 
-    def resolve_contract(self, current_output, stored_annotations, error_type):
-        return (Any,), current_output  # accept anything, promise to return what I received
+    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+        return (Any,), upstream_annotation  # accept anything, promise to return what I received
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ def test_strict_rejects_dynamic_tuple_output_with_any():
         def __call__(self, value: int) -> tuple[int, Any]:
             return value, value
 
-        def resolve_contract(self, current_output, stored_annotations, validation_error_type):
+        def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
             return (int,), (int, Any)
 
     with pytest.raises(PipelineValidationError, match="output type is unresolved"):
@@ -214,8 +214,8 @@ def test_strict_rejects_partially_unresolved_transitive_tuple_output():
         def __call__(self, value: int) -> tuple[int, Any]:
             return value, value
 
-        def resolve_contract(self, current_output, stored_annotations, validation_error_type):
-            return (int,), (current_output, Any)
+        def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+            return (int,), (upstream_annotation, Any)
 
     with pytest.raises(PipelineValidationError, match="output type is unresolved"):
         Pipeline([PartiallyResolvedDynamicTupleOutput()]).validate(strict=True)

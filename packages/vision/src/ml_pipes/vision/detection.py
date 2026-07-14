@@ -383,7 +383,7 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
@@ -391,17 +391,17 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
 
         concrete_objects = list[ObjectMapping]
         if self.at is None:
-            if current_output is Any or _is_unresolved_object_list(current_output):
+            if upstream_annotation is Any or _is_unresolved_object_list(upstream_annotation):
                 return (concrete_objects,), concrete_objects
-            return (current_output,), current_output
+            return (upstream_annotation,), upstream_annotation
 
-        if current_output is Any:
+        if upstream_annotation is Any:
             return (Any,), Any
 
-        if get_origin(current_output) is tuple:
-            parts = get_args(current_output)
-        elif isinstance(current_output, tuple):
-            parts = current_output
+        if get_origin(upstream_annotation) is tuple:
+            parts = get_args(upstream_annotation)
+        elif isinstance(upstream_annotation, tuple):
+            parts = upstream_annotation
         else:
             return (Any,), Any
 
@@ -410,11 +410,11 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
             error_type = validation_error_type or PipelineValidationError
             raise error_type(
                 f"LogDetections(at={self.at}) is out of bounds for "
-                f"{current_output} (length {len(parts)})"
+                f"{upstream_annotation} (length {len(parts)})"
             )
 
         logged_annotation = parts[normalized_index]
         if logged_annotation is Any or _is_unresolved_object_list(logged_annotation):
             logged_annotation = concrete_objects
         updated_parts = parts[:normalized_index] + (logged_annotation,) + parts[normalized_index + 1 :]
-        return (current_output,), updated_parts
+        return (upstream_annotation,), updated_parts

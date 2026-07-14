@@ -404,23 +404,23 @@ class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations
         if self.at is None:
-            if current_output is not Any and is_assignable(current_output, Prediction):
-                return (current_output,), list[ObjectMapping]
+            if upstream_annotation is not Any and is_assignable(upstream_annotation, Prediction):
+                return (upstream_annotation,), list[ObjectMapping]
             return (Any,), Any
 
-        if current_output is Any:
+        if upstream_annotation is Any:
             return (Any,), Any
 
-        if get_origin(current_output) is tuple:
-            parts = get_args(current_output)
-        elif isinstance(current_output, tuple):
-            parts = current_output
+        if get_origin(upstream_annotation) is tuple:
+            parts = get_args(upstream_annotation)
+        elif isinstance(upstream_annotation, tuple):
+            parts = upstream_annotation
         else:
             return (Any,), Any
 
@@ -429,12 +429,12 @@ class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
             error_type = validation_error_type or PipelineValidationError
             raise error_type(
                 f"MapPredictionsToObjects(at={self.at}) is out of bounds for "
-                f"{current_output} (length {len(parts)})"
+                f"{upstream_annotation} (length {len(parts)})"
             )
         if not is_assignable(parts[normalized_index], Prediction):
             return (Any,), Any
         updated_parts = parts[:normalized_index] + (list[ObjectMapping],) + parts[normalized_index + 1 :]
-        return (current_output,), updated_parts
+        return (upstream_annotation,), updated_parts
 
     def _resolve_prediction_value(self, payload: object) -> PredictionT:
         if self.at is None:
