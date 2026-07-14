@@ -174,7 +174,6 @@ class UnBatch(RegionCloser[list[BatchItemT], BatchItemT]):
     def resolve_contract(
         self,
         upstream_annotation: Any | None,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
         if upstream_annotation is not None and get_origin(upstream_annotation) is list:
@@ -250,9 +249,8 @@ class Batch(RegionOpener[BatchItemT, list[BatchItemT]]):
     def resolve_contract(
         self,
         upstream_annotation: Any | None,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
-        del stored_annotations, validation_error_type
+        del validation_error_type
         out = list[upstream_annotation] if upstream_annotation is not None else list[Any]
         return (Any,), out

@@ -220,7 +220,7 @@ class ContractPassthrough:
     def __call__(self, value: Any) -> Any:
         return value
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+    def resolve_contract(self, upstream_annotation, validation_error_type):
         return (Any,), upstream_annotation
 
 
@@ -228,7 +228,7 @@ class DynamicFixedDictOutput:
     def __call__(self, value: Any) -> dict[str, int]:
         return {"x": 1}
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+    def resolve_contract(self, upstream_annotation, validation_error_type):
         return (Any,), dict[str, int]
 
 
@@ -236,7 +236,7 @@ class PlainTupleProjection:
     def __call__(self, value: Any) -> tuple[Any, Any]:
         return value, value
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+    def resolve_contract(self, upstream_annotation, validation_error_type):
         return (Any,), (upstream_annotation, upstream_annotation)
 
 
@@ -244,7 +244,7 @@ class PartiallyResolvedTupleOutput:
     def __call__(self, value: Any) -> tuple[Any, Any]:
         return value, value
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+    def resolve_contract(self, upstream_annotation, validation_error_type):
         return (Any,), (upstream_annotation, Any)
 
 
@@ -355,7 +355,7 @@ def test_pipeline_validate_does_not_swallow_non_annotation_static_signature_erro
         def __call__(self, value: "MissingType") -> int:
             return 1
 
-        def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+        def resolve_contract(self, upstream_annotation, validation_error_type):
             return (Any,), int
 
     pipeline = Pipeline([BrokenStaticButDynamic()])
@@ -975,10 +975,9 @@ def test_project_input_annotation_from_output_template_matches_plain_tuple_templ
         def resolve_contract(
             self,
             upstream_annotation,
-            stored_annotations,
             validation_error_type,
         ):
-            del stored_annotations, validation_error_type
+            del validation_error_type
             return (upstream_annotation,), (upstream_annotation, str)
 
     boundary = _make_projection_boundary(
@@ -998,10 +997,9 @@ def test_project_input_annotation_from_output_template_supports_ordered_any_bind
         def resolve_contract(
             self,
             upstream_annotation,
-            stored_annotations,
             validation_error_type,
         ):
-            del stored_annotations, validation_error_type
+            del validation_error_type
             left_annotation, right_annotation = expand_annotation_parts(upstream_annotation)
             return expand_annotation_parts(upstream_annotation), tuple[list[left_annotation], list[right_annotation]]
 
@@ -1022,10 +1020,9 @@ def test_project_input_annotation_from_output_template_rejects_placeholder_count
         def resolve_contract(
             self,
             upstream_annotation,
-            stored_annotations,
             validation_error_type,
         ):
-            del stored_annotations, validation_error_type
+            del validation_error_type
             left_annotation, right_annotation = expand_annotation_parts(upstream_annotation)
             return expand_annotation_parts(upstream_annotation), tuple[list[left_annotation], list[right_annotation]]
 
@@ -1046,10 +1043,9 @@ def test_project_input_annotation_from_output_template_returns_none_when_project
         def resolve_contract(
             self,
             upstream_annotation,
-            stored_annotations,
             validation_error_type,
         ):
-            del stored_annotations, validation_error_type
+            del validation_error_type
             return (upstream_annotation,), (str, upstream_annotation)
 
     boundary = _make_projection_boundary(
@@ -1071,10 +1067,9 @@ def test_project_input_annotation_from_output_template_returns_none_when_binding
         def resolve_contract(
             self,
             upstream_annotation,
-            stored_annotations,
             validation_error_type,
         ):
-            del stored_annotations, validation_error_type
+            del validation_error_type
             return (upstream_annotation,), (upstream_annotation, str)
 
     boundary = _make_projection_boundary(
@@ -1101,10 +1096,9 @@ def test_project_input_annotation_from_output_template_returns_none_when_placeho
         def resolve_contract(
             self,
             upstream_annotation,
-            stored_annotations,
             validation_error_type,
         ):
-            del stored_annotations, validation_error_type
+            del validation_error_type
             return (upstream_annotation,), (upstream_annotation, str)
 
     boundary = _make_projection_boundary(

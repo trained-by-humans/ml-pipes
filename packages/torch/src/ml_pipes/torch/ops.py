@@ -206,7 +206,7 @@ class ToDevice:
     def __init__(self, device: str):
         self.device = canonical_torch_device(device)
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+    def resolve_contract(self, upstream_annotation, error_type):
         if upstream_annotation is not Any and is_assignable(
             upstream_annotation,
             TorchTransferInput,
@@ -256,7 +256,7 @@ class ToDevice:
 
 @Operator
 class TorchSynchronizeTensors:
-    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+    def resolve_contract(self, upstream_annotation, error_type):
         if upstream_annotation is not Any and is_assignable(
             upstream_annotation,
             TorchTransferInput,
@@ -301,7 +301,7 @@ class TorchAsType(Generic[TorchAsTypeModeT]):
         self.src = src
         self.as_ = as_ or src
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+    def resolve_contract(self, upstream_annotation, error_type):
         if self.src is not None:
             return (TorchTensorRegistry,), TorchTensorRegistry
         if upstream_annotation is not Any and is_assignable(

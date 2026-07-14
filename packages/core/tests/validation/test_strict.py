@@ -202,7 +202,7 @@ def test_strict_rejects_dynamic_tuple_output_with_any():
         def __call__(self, value: int) -> tuple[int, Any]:
             return value, value
 
-        def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+        def resolve_contract(self, upstream_annotation, validation_error_type):
             return (int,), (int, Any)
 
     with pytest.raises(PipelineValidationError, match="output type is unresolved"):
@@ -214,7 +214,7 @@ def test_strict_rejects_partially_unresolved_transitive_tuple_output():
         def __call__(self, value: int) -> tuple[int, Any]:
             return value, value
 
-        def resolve_contract(self, upstream_annotation, stored_annotations, validation_error_type):
+        def resolve_contract(self, upstream_annotation, validation_error_type):
             return (int,), (upstream_annotation, Any)
 
     with pytest.raises(PipelineValidationError, match="output type is unresolved"):

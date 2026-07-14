@@ -190,7 +190,6 @@ class CollectItems(RegionCloser[ItemT, list[ItemT]]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         output_type = list_annotation(upstream_annotation)
@@ -485,10 +484,8 @@ class PerItem(RegionOpener[Iterable[ItemT], ItemT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         _require_item_iterable_boundary_annotation(
             upstream_annotation,
             operator_name=type(self).__name__,
@@ -506,10 +503,9 @@ class StreamItems(RegionCloser[ItemT, Iterable[ItemT]]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, validation_error_type
+        del validation_error_type
         output_type = iterable_annotation(upstream_annotation)
         return (Any,), output_type
 
@@ -546,10 +542,8 @@ class LazyPerItem(RegionOpener[Iterable[ItemT], ItemT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         _require_item_iterable_boundary_annotation(
             upstream_annotation,
             operator_name=type(self).__name__,
@@ -601,10 +595,8 @@ class WrapMappingInObject(Generic[StateT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         factory_annotations = resolve_callable_annotations(self.state_factory)
         input_type = upstream_annotation if is_mapping_annotation(upstream_annotation) else AnyMapping | None
         base_output = _require_callable_annotation(
@@ -650,7 +642,6 @@ class Map(Generic[ValueT, MappedT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         fn_annotations = resolve_callable_annotations(self.fn)
@@ -680,7 +671,7 @@ class Map(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
         )
 
-        del stored_annotations, validation_error_type
+        del validation_error_type
         return (input_type,), output_type
 
 
@@ -702,12 +693,10 @@ class MapNotNull(Generic[ValueT, MappedT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         input_types, mapped_output = self.map.resolve_contract(
             upstream_annotation,
-            stored_annotations,
             validation_error_type,
         )
         return (
@@ -775,7 +764,6 @@ class MapValue(Generic[ValueT, MappedT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         source_annotation = self._source.validate_read(
@@ -807,7 +795,7 @@ class MapValue(Generic[ValueT, MappedT]):
                 target_label=f"target {self._target!r}",
                 validation_error_type=validation_error_type,
             )
-        del stored_annotations, validation_error_type
+        del validation_error_type
         return (upstream_annotation,), upstream_annotation
 
 
@@ -858,10 +846,8 @@ class Filter(Generic[ValueT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         source_annotation = upstream_annotation
         source_label = "current value"
         if self._source:
@@ -914,7 +900,6 @@ class FilterNotNull:
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         source_annotation = self._source.validate_read(
@@ -928,7 +913,6 @@ class FilterNotNull:
             source_label=f"source {self._source!r}",
             validation_error_type=validation_error_type,
         )
-        del stored_annotations
         return (
             (upstream_annotation,),
             _require_non_none_annotation(
@@ -952,10 +936,8 @@ class DropNull:
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         return (
             (upstream_annotation,),
             _require_non_none_annotation(
@@ -998,7 +980,6 @@ class DistinctBy(Generic[ItemT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         _require_iterable_boundary_annotation(
@@ -1025,7 +1006,7 @@ class DistinctBy(Generic[ItemT]):
             target_label="fn return type",
             validation_error_type=validation_error_type,
         )
-        del stored_annotations, validation_error_type
+        del validation_error_type
         return (input_type,), list_annotation(item_type)
 
 
@@ -1053,7 +1034,6 @@ class Distinct(DistinctBy[ItemT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         _require_iterable_boundary_annotation(
@@ -1076,7 +1056,7 @@ class Distinct(DistinctBy[ItemT]):
             target_label="distinct key type",
             validation_error_type=validation_error_type,
         )
-        del stored_annotations, validation_error_type
+        del validation_error_type
         return (input_type,), list_annotation(item_type)
 
 
@@ -1100,10 +1080,8 @@ class Take:
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         _require_iterable_boundary_annotation(
             upstream_annotation,
             operator_name=type(self).__name__,
@@ -1138,10 +1116,8 @@ class TakeWhile(Generic[ItemT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         _require_iterable_boundary_annotation(
             upstream_annotation,
             operator_name=type(self).__name__,

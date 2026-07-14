@@ -384,11 +384,8 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
-
         concrete_objects = list[ObjectMapping]
         if self.at is None:
             if upstream_annotation is Any or _is_unresolved_object_list(upstream_annotation):

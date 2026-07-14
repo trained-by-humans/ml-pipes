@@ -407,7 +407,6 @@ class Embed(Generic[InputT, OutputT]):
     def resolve_contract(
         self,
         upstream_annotation: Any | None,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         try:

@@ -117,7 +117,7 @@ class AsType(Generic[AsTypeModeT]):
         self.src = src
         self.as_ = as_ or src
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+    def resolve_contract(self, upstream_annotation, error_type):
         if self.src is not None:
             return (TensorRegistry,), TensorRegistry
         if upstream_annotation is not Any and is_assignable(upstream_annotation, TensorLike):

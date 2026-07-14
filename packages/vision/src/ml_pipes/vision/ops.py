@@ -405,10 +405,8 @@ class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         if self.at is None:
             if upstream_annotation is not Any and is_assignable(upstream_annotation, Prediction):
                 return (upstream_annotation,), list[ObjectMapping]

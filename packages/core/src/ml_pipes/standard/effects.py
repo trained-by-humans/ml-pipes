@@ -25,8 +25,7 @@ class SideEffectOp(ABC, Generic[PayloadT]):
     def resolve_contract(
         self,
         upstream_annotation: Any | None,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, validation_error_type
+        del validation_error_type
         return (Any,), upstream_annotation

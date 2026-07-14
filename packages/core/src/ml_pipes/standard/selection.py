@@ -26,10 +26,8 @@ class Select:
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         if upstream_annotation is Any:
             return (Any,), Any
 
@@ -89,11 +87,8 @@ class Pick(Generic[PickIndexT]):
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
-
         if upstream_annotation is Any or upstream_annotation is tuple:
             return (tuple[Any, ...],), Any
 

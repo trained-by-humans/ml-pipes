@@ -257,7 +257,6 @@ class MyRegionEnd(RegionCloser[str, list[str]]):
     def resolve_contract(
         self,
         upstream_annotation: Any | None,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
         out = list[upstream_annotation] if upstream_annotation is not None else list[Any]

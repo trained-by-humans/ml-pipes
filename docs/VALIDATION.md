@@ -67,12 +67,26 @@ alone. `resolve_contract(...)` exists for those cases.
 Use it when the operator boundary depends on:
 
 - the upstream annotation
-- stored context annotations
+- stored context annotations for `ContextOp`
 - a transitive or passthrough relationship that static annotations cannot
   express cleanly
 
 `resolve_contract(...)` computes the contract for this exact pipeline
 position. It returns `(input_types, output_type)`.
+
+For ordinary dynamic operators:
+
+```python
+def resolve_contract(self, upstream_annotation, error_type):
+    ...
+```
+
+For `ContextOp`, which also depends on stored context state:
+
+```python
+def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+    ...
+```
 
 ```python
 from ml_pipes.context import Context, ContextOp
@@ -371,7 +385,7 @@ class ContractPassthrough:
     def __call__(self, value: Any) -> Any:
         return value
 
-    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+    def resolve_contract(self, upstream_annotation, error_type):
         return (Any,), upstream_annotation
 
 

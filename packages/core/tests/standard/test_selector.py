@@ -165,10 +165,8 @@ class SelectorProbe:
     def resolve_contract(
         self,
         upstream_annotation: Any,
-        stored_annotations: dict[str, Any],
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations
         selected = upstream_annotation
         if self.select_src is not None:
             selected = self.select_src.validate_read(
