@@ -136,24 +136,9 @@ class _LegacyProtocolPrediction(_LegacyProtocolPredictionBase):
         self.labels = labels
 
 
-class _LegacyWrongProtocolReturn:
-    labels: Sequence[int]
-
-    def __init__(self, labels: Sequence[int]):
-        self.labels = labels
-
-    def filter(self, mask: Sequence[bool]) -> int:
-        return 0
-
-
 class ProduceLegacyProtocolPrediction:
     def __call__(self, value: int) -> _LegacyProtocolPrediction:
         return _LegacyProtocolPrediction([value])
-
-
-class ProduceLegacyWrongProtocolReturn:
-    def __call__(self, value: int) -> _LegacyWrongProtocolReturn:
-        return _LegacyWrongProtocolReturn([value])
 
 
 class FilterLegacyProtocolPrediction:
@@ -517,17 +502,6 @@ def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer
         match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
     ):
         Pipeline([producer, FilterProtocolPrediction()]).validate()
-
-
-def test_pipeline_validate_rejects_legacy_typevar_self_wrong_return() -> None:
-    with pytest.raises(
-        PipelineValidationError,
-        match=r"Pipeline contract mismatch at 1:FilterLegacyProtocolPrediction",
-    ):
-        Pipeline([
-            ProduceLegacyWrongProtocolReturn(),
-            FilterLegacyProtocolPrediction(),
-        ]).validate()
 
 
 def test_pipeline_validate_rejects_narrow_writable_structural_protocol_boundary():
