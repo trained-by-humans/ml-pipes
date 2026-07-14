@@ -203,6 +203,44 @@ class _MixerWithReorderedParameters:
         return self
 
 
+class _StaticBuildProtocol(Protocol):
+    @staticmethod
+    def build(value: int) -> str:
+        ...
+
+
+class _StaticBuildWithIntArg:
+    @staticmethod
+    def build(value: int) -> str:
+        return str(value)
+
+
+class _StaticBuildWithStringArg:
+    @staticmethod
+    def build(value: str) -> str:
+        return value
+
+
+class _ClassBuildProtocol(Protocol):
+    @classmethod
+    def build(cls, value: int) -> str:
+        ...
+
+
+class _ClassBuildWithIntArg:
+    @classmethod
+    def build(cls, value: int) -> str:
+        del cls
+        return str(value)
+
+
+class _ClassBuildWithStringArg:
+    @classmethod
+    def build(cls, value: str) -> str:
+        del cls
+        return value
+
+
 @pytest.mark.parametrize(
     ("annotation", "expected"),
     [
@@ -522,6 +560,46 @@ def test_is_assignable_preserves_protocol_method_positional_parameter_order(
     expected_assignable: bool,
 ) -> None:
     assert is_assignable(implementation_annotation, _MixerProtocol) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _StaticBuildWithIntArg,
+            _StaticBuildProtocol,
+            True,
+            id="static-build-int-arg",
+        ),
+        pytest.param(
+            _StaticBuildWithStringArg,
+            _StaticBuildProtocol,
+            False,
+            id="static-build-string-arg",
+        ),
+        pytest.param(
+            _ClassBuildWithIntArg,
+            _ClassBuildProtocol,
+            True,
+            id="class-build-int-arg",
+        ),
+        pytest.param(
+            _ClassBuildWithStringArg,
+            _ClassBuildProtocol,
+            False,
+            id="class-build-string-arg",
+        ),
+    ],
+)
+def test_is_assignable_handles_protocol_static_and_class_methods(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
 
 
 @pytest.mark.parametrize(

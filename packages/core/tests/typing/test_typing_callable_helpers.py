@@ -91,6 +91,28 @@ def test_bind_method_call_parameter_names_hides_inspect_binding_details() -> Non
     }
 
 
+def test_bind_method_call_parameter_names_supports_static_methods_without_receiver() -> None:
+    class Builder:
+        @staticmethod
+        def build(value: int, *, prefix: str = "") -> str:
+            return prefix + str(value)
+
+    value_token = object()
+    prefix_token = object()
+
+    parameter_names = bind_method_call_parameter_names(
+        Builder.build,
+        (value_token,),
+        {"prefix": prefix_token},
+        include_receiver=False,
+    )
+
+    assert parameter_names == {
+        value_token: "value",
+        prefix_token: "prefix",
+    }
+
+
 def test_unary_callable_signature_reuses_public_callable_validation() -> None:
     def stringify(value: int) -> str:
         return str(value)

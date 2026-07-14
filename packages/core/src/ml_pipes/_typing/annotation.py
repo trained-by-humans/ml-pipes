@@ -641,6 +641,7 @@ def _is_structurally_assignable_to_protocol(
 ) -> bool:
     from ml_pipes._typing.inspection import (
         bind_method_call_parameter_names,
+        method_signature_includes_receiver,
         resolve_attribute_annotation_info,
         resolve_callable_signature_annotations,
     )
@@ -727,6 +728,7 @@ def _is_structurally_assignable_to_protocol(
                 member,
                 protocol_stack,
                 bind_method_call_parameter_names,
+                method_signature_includes_receiver,
                 resolve_callable_signature_annotations,
             ):
                 return False
@@ -742,6 +744,7 @@ def _is_protocol_method_member_assignable(
     member: str,
     protocol_stack: set[tuple[type, type]],
     bind_method_call_parameter_names: Callable[..., Any],
+    method_signature_includes_receiver: Callable[..., Any],
     resolve_callable_signature_annotations: Callable[..., Any],
 ) -> bool:
     source_member = getattr(source_owner, member, _MISSING_ANNOTATION)
@@ -760,8 +763,28 @@ def _is_protocol_method_member_assignable(
     if not source_annotations.is_inspectable or not target_annotations.is_inspectable:
         return False
 
-    source_value_parameters = source_annotations.parameters[1:]
-    target_value_parameters = target_annotations.parameters[1:]
+    source_includes_receiver = method_signature_includes_receiver(
+        source_owner,
+        member,
+    )
+    target_includes_receiver = method_signature_includes_receiver(
+        target_owner,
+        member,
+    )
+    if (
+        source_includes_receiver is None
+        or target_includes_receiver is None
+    ):
+        return False
+
+    if source_includes_receiver:
+        source_value_parameters = source_annotations.parameters[1:]
+    else:
+        source_value_parameters = source_annotations.parameters
+    if target_includes_receiver:
+        target_value_parameters = target_annotations.parameters[1:]
+    else:
+        target_value_parameters = target_annotations.parameters
     if any(
         parameter.annotation is None
         or parameter.parameter.kind in {
@@ -791,6 +814,7 @@ def _is_protocol_method_member_assignable(
             source_member,
             args,
             kwargs,
+            include_receiver=source_includes_receiver,
         )
         if source_parameter_bindings is None:
             return False

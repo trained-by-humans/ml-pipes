@@ -136,10 +136,15 @@ def bind_method_call_parameter_names(
     callable_: Callable[..., Any],
     args: tuple[object, ...],
     kwargs: dict[str, object],
+    *,
+    include_receiver: bool = True,
 ) -> dict[object, str] | None:
     synthetic_self = object()
     try:
-        bound_arguments = probe_callable(callable_, synthetic_self, *args, **kwargs)
+        if include_receiver:
+            bound_arguments = probe_callable(callable_, synthetic_self, *args, **kwargs)
+        else:
+            bound_arguments = probe_callable(callable_, *args, **kwargs)
     except (TypeError, ValueError):
         return None
 
@@ -148,6 +153,13 @@ def bind_method_call_parameter_names(
         for parameter_name, argument_value in bound_arguments.arguments.items()
         if argument_value is not synthetic_self
     }
+
+
+def method_signature_includes_receiver(owner: type, member: str) -> bool | None:
+    raw_member = inspect.getattr_static(owner, member, _MISSING_ANNOTATION)
+    if raw_member is _MISSING_ANNOTATION:
+        return None
+    return not isinstance(raw_member, (staticmethod, classmethod))
 
 
 def _resolve_callable_hints(callable_: Callable[..., Any]) -> dict[str, Any]:

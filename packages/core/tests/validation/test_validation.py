@@ -146,6 +146,84 @@ class FilterLegacyProtocolPrediction:
         return value.filter([True for _ in value.labels])
 
 
+class _StaticBuildContract(Protocol):
+    @staticmethod
+    def build(value: int) -> str:
+        ...
+
+
+_StaticBuildT = TypeVar("_StaticBuildT", bound=_StaticBuildContract)
+
+
+class _StaticBuilderWithIntArg:
+    @staticmethod
+    def build(value: int) -> str:
+        return str(value)
+
+
+class _StaticBuilderWithStringArg:
+    @staticmethod
+    def build(value: str) -> str:
+        return value
+
+
+class ProduceStaticBuilderWithIntArg:
+    def __call__(self, value: int) -> _StaticBuilderWithIntArg:
+        del value
+        return _StaticBuilderWithIntArg()
+
+
+class ProduceStaticBuilderWithStringArg:
+    def __call__(self, value: int) -> _StaticBuilderWithStringArg:
+        del value
+        return _StaticBuilderWithStringArg()
+
+
+class UseStaticBuilder:
+    def __call__(self, value: _StaticBuildT) -> str:
+        return value.build(1)
+
+
+class _ClassBuildContract(Protocol):
+    @classmethod
+    def build(cls, value: int) -> str:
+        ...
+
+
+_ClassBuildT = TypeVar("_ClassBuildT", bound=_ClassBuildContract)
+
+
+class _ClassBuilderWithIntArg:
+    @classmethod
+    def build(cls, value: int) -> str:
+        del cls
+        return str(value)
+
+
+class _ClassBuilderWithStringArg:
+    @classmethod
+    def build(cls, value: str) -> str:
+        del cls
+        return value
+
+
+class ProduceClassBuilderWithIntArg:
+    def __call__(self, value: int) -> _ClassBuilderWithIntArg:
+        del value
+        return _ClassBuilderWithIntArg()
+
+
+class ProduceClassBuilderWithStringArg:
+    def __call__(self, value: int) -> _ClassBuilderWithStringArg:
+        del value
+        return _ClassBuilderWithStringArg()
+
+
+class UseClassBuilder:
+    def __call__(self, value: _ClassBuildT) -> str:
+        return value.build(1)
+
+
 class _WritableValueContract(Protocol):
     value: object
 
@@ -489,6 +567,31 @@ def test_pipeline_validate_accepts_legacy_typevar_self_structural_protocol_bound
 
 
 @pytest.mark.parametrize(
+    ("producer", "consumer"),
+    [
+        pytest.param(
+            ProduceStaticBuilderWithIntArg(),
+            UseStaticBuilder(),
+            id="static-build",
+        ),
+        pytest.param(
+            ProduceClassBuilderWithIntArg(),
+            UseClassBuilder(),
+            id="class-build",
+        ),
+    ],
+)
+def test_pipeline_validate_accepts_protocol_static_and_class_methods(
+    producer,
+    consumer,
+):
+    contract = Pipeline([producer, consumer]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is str
+
+
+@pytest.mark.parametrize(
     "producer",
     [
         pytest.param(ProduceWrongProtocolPrediction(), id="wrong-attribute-type"),
@@ -502,6 +605,35 @@ def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer
         match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
     ):
         Pipeline([producer, FilterProtocolPrediction()]).validate()
+
+
+@pytest.mark.parametrize(
+    ("producer", "consumer", "label"),
+    [
+        pytest.param(
+            ProduceStaticBuilderWithStringArg(),
+            UseStaticBuilder(),
+            "UseStaticBuilder",
+            id="static-build",
+        ),
+        pytest.param(
+            ProduceClassBuilderWithStringArg(),
+            UseClassBuilder(),
+            "UseClassBuilder",
+            id="class-build",
+        ),
+    ],
+)
+def test_pipeline_validate_rejects_invalid_protocol_static_and_class_methods(
+    producer,
+    consumer,
+    label,
+):
+    with pytest.raises(
+        PipelineValidationError,
+        match=rf"Pipeline contract mismatch at 1:{label}",
+    ):
+        Pipeline([producer, consumer]).validate()
 
 
 def test_pipeline_validate_rejects_narrow_writable_structural_protocol_boundary():
