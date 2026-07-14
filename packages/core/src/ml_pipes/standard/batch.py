@@ -175,7 +175,6 @@ class UnBatch(RegionCloser[list[BatchItemT], BatchItemT]):
         self,
         current_output: Any | None,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
         if current_output is not None and get_origin(current_output) is list:
@@ -252,9 +251,8 @@ class Batch(RegionOpener[BatchItemT, list[BatchItemT]]):
         self,
         current_output: Any | None,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, validation_error_type
         out = list[current_output] if current_output is not None else list[Any]
         return (Any,), out

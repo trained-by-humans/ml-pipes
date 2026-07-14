@@ -408,7 +408,6 @@ class Embed(Generic[InputT, OutputT]):
         self,
         current_output: Any | None,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         try:

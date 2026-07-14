@@ -112,7 +112,6 @@ class _OperatorBoundary:
             return self.operator.resolve_contract(
                 probe_input,
                 probe_annotations,
-                expand_annotation_parts,
                 PipelineValidationError,
             )
         except Exception:
@@ -275,7 +274,6 @@ class PipelineValidator:
         input_types, output_type = operator.resolve_contract(
             previous_output_type,
             stored_annotations,
-            expand_annotation_parts,
             PipelineValidationError,
         )
         return _BoundarySignature(input_types=input_types, output_type=output_type)

@@ -26,8 +26,7 @@ class SideEffectOp(ABC, Generic[PayloadT]):
         self,
         current_output: Any | None,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, validation_error_type
         return (Any,), current_output

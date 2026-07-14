@@ -4,7 +4,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Mapping, TypeVar, overload
 
-from ml_pipes._typing.annotation import build_union_annotation_from_options, variadic_tuple_item_annotation
+from ml_pipes._typing.annotation import (
+    build_union_annotation_from_options,
+    expand_annotation_parts,
+    variadic_tuple_item_annotation,
+)
 from ml_pipes.operator import Operator
 from ml_pipes.selector import Selector, SelectorInput
 
@@ -75,7 +79,6 @@ class ContextOp(ABC, Generic[InputT, OutputT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         raise NotImplementedError
@@ -103,7 +106,6 @@ class Store(ContextOp[CurrentT, CurrentT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         stored_annotations[self.name] = self._selector.validate_read(
@@ -176,7 +178,6 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del validation_error_type
@@ -189,7 +190,7 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
             )
             return (Any,), tuple[merged_item_annotation, ...]
 
-        current_parts = expand_output_annotation(current_output)
+        current_parts = expand_annotation_parts(current_output)
         if self.index is None:
             result_parts = current_parts + (stored_annotation,)
         else:

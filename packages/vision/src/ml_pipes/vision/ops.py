@@ -406,10 +406,9 @@ class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         if self.at is None:
             if current_output is not Any and is_assignable(current_output, Prediction):
                 return (current_output,), list[ObjectMapping]

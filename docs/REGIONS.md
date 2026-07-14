@@ -258,7 +258,6 @@ class MyRegionEnd(RegionCloser[str, list[str]]):
         self,
         current_output: Any | None,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
         out = list[current_output] if current_output is not None else list[Any]

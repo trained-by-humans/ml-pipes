@@ -27,10 +27,9 @@ class Select:
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         if current_output is Any:
             return (Any,), Any
 
@@ -91,10 +90,9 @@ class Pick(Generic[PickIndexT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
 
         if current_output is Any or current_output is tuple:
             return (tuple[Any, ...],), Any

@@ -57,7 +57,7 @@ class ContextSnapshot(ContextOp):
         self.target.update(context.values)
         return current, context
 
-    def resolve_contract(self, current_output, stored_annotations, expand, err):
+    def resolve_contract(self, current_output, stored_annotations, err):
         return (Any,), Any if current_output is None else current_output
 
 

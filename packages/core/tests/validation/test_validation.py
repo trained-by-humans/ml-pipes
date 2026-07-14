@@ -6,6 +6,7 @@ import pytest
 from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
 
 from ml_pipes.core import Pipeline
+from ml_pipes._typing.annotation import expand_annotation_parts
 from ml_pipes.standard import (
     Batch,
     Gather,
@@ -219,7 +220,7 @@ class ContractPassthrough:
     def __call__(self, value: Any) -> Any:
         return value
 
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+    def resolve_contract(self, current_output, stored_annotations, validation_error_type):
         return (Any,), current_output
 
 
@@ -227,7 +228,7 @@ class DynamicFixedDictOutput:
     def __call__(self, value: Any) -> dict[str, int]:
         return {"x": 1}
 
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+    def resolve_contract(self, current_output, stored_annotations, validation_error_type):
         return (Any,), dict[str, int]
 
 
@@ -235,7 +236,7 @@ class PlainTupleProjection:
     def __call__(self, value: Any) -> tuple[Any, Any]:
         return value, value
 
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+    def resolve_contract(self, current_output, stored_annotations, validation_error_type):
         return (Any,), (current_output, current_output)
 
 
@@ -243,7 +244,7 @@ class PartiallyResolvedTupleOutput:
     def __call__(self, value: Any) -> tuple[Any, Any]:
         return value, value
 
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+    def resolve_contract(self, current_output, stored_annotations, validation_error_type):
         return (Any,), (current_output, Any)
 
 
@@ -354,7 +355,7 @@ def test_pipeline_validate_does_not_swallow_non_annotation_static_signature_erro
         def __call__(self, value: "MissingType") -> int:
             return 1
 
-        def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+        def resolve_contract(self, current_output, stored_annotations, validation_error_type):
             return (Any,), int
 
     pipeline = Pipeline([BrokenStaticButDynamic()])
@@ -975,10 +976,9 @@ def test_project_input_annotation_from_output_template_matches_plain_tuple_templ
             self,
             current_output,
             stored_annotations,
-            expand_output_annotation,
             validation_error_type,
         ):
-            del stored_annotations, expand_output_annotation, validation_error_type
+            del stored_annotations, validation_error_type
             return (current_output,), (current_output, str)
 
     boundary = _make_projection_boundary(
@@ -999,12 +999,11 @@ def test_project_input_annotation_from_output_template_supports_ordered_any_bind
             self,
             current_output,
             stored_annotations,
-            expand_output_annotation,
             validation_error_type,
         ):
             del stored_annotations, validation_error_type
-            left_annotation, right_annotation = expand_output_annotation(current_output)
-            return expand_output_annotation(current_output), tuple[list[left_annotation], list[right_annotation]]
+            left_annotation, right_annotation = expand_annotation_parts(current_output)
+            return expand_annotation_parts(current_output), tuple[list[left_annotation], list[right_annotation]]
 
     boundary = _make_projection_boundary(
         OrderedListProjectionContract(),
@@ -1024,12 +1023,11 @@ def test_project_input_annotation_from_output_template_rejects_placeholder_count
             self,
             current_output,
             stored_annotations,
-            expand_output_annotation,
             validation_error_type,
         ):
             del stored_annotations, validation_error_type
-            left_annotation, right_annotation = expand_output_annotation(current_output)
-            return expand_output_annotation(current_output), tuple[list[left_annotation], list[right_annotation]]
+            left_annotation, right_annotation = expand_annotation_parts(current_output)
+            return expand_annotation_parts(current_output), tuple[list[left_annotation], list[right_annotation]]
 
     boundary = _make_projection_boundary(
         OrderedListProjectionContract(),
@@ -1049,10 +1047,9 @@ def test_project_input_annotation_from_output_template_returns_none_when_project
             self,
             current_output,
             stored_annotations,
-            expand_output_annotation,
             validation_error_type,
         ):
-            del stored_annotations, expand_output_annotation, validation_error_type
+            del stored_annotations, validation_error_type
             return (current_output,), (str, current_output)
 
     boundary = _make_projection_boundary(
@@ -1075,10 +1072,9 @@ def test_project_input_annotation_from_output_template_returns_none_when_binding
             self,
             current_output,
             stored_annotations,
-            expand_output_annotation,
             validation_error_type,
         ):
-            del stored_annotations, expand_output_annotation, validation_error_type
+            del stored_annotations, validation_error_type
             return (current_output,), (current_output, str)
 
     boundary = _make_projection_boundary(
@@ -1106,10 +1102,9 @@ def test_project_input_annotation_from_output_template_returns_none_when_placeho
             self,
             current_output,
             stored_annotations,
-            expand_output_annotation,
             validation_error_type,
         ):
-            del stored_annotations, expand_output_annotation, validation_error_type
+            del stored_annotations, validation_error_type
             return (current_output,), (current_output, str)
 
     boundary = _make_projection_boundary(

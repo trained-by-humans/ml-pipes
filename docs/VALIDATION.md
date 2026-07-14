@@ -86,7 +86,7 @@ class AttachStored(ContextOp[Any, Any]):
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
         return (current, context.load(self.name)), context
 
-    def resolve_contract(self, current_output, stored_annotations, expand, error_type):
+    def resolve_contract(self, current_output, stored_annotations, error_type):
         stored_type = stored_annotations.get(self.name)
         if stored_type is None:
             raise error_type(f"{self.name!r} is not available in context")
@@ -371,7 +371,7 @@ class ContractPassthrough:
     def __call__(self, value: Any) -> Any:
         return value
 
-    def resolve_contract(self, current_output, stored_annotations, expand, error_type):
+    def resolve_contract(self, current_output, stored_annotations, error_type):
         return (Any,), current_output
 
 

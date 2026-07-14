@@ -191,7 +191,6 @@ class CollectItems(RegionCloser[ItemT, list[ItemT]]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         output_type = list_annotation(current_output)
@@ -487,10 +486,9 @@ class PerItem(RegionOpener[Iterable[ItemT], ItemT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         _require_item_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
@@ -509,10 +507,9 @@ class StreamItems(RegionCloser[ItemT, Iterable[ItemT]]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, validation_error_type
         output_type = iterable_annotation(current_output)
         return (Any,), output_type
 
@@ -550,10 +547,9 @@ class LazyPerItem(RegionOpener[Iterable[ItemT], ItemT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         _require_item_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
@@ -606,10 +602,9 @@ class WrapMappingInObject(Generic[StateT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         factory_annotations = resolve_callable_annotations(self.state_factory)
         input_type = current_output if is_mapping_annotation(current_output) else AnyMapping | None
         base_output = _require_callable_annotation(
@@ -656,7 +651,6 @@ class Map(Generic[ValueT, MappedT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         fn_annotations = resolve_callable_annotations(self.fn)
@@ -686,7 +680,7 @@ class Map(Generic[ValueT, MappedT]):
             validation_error_type=validation_error_type,
         )
 
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, validation_error_type
         return (input_type,), output_type
 
 
@@ -709,13 +703,11 @@ class MapNotNull(Generic[ValueT, MappedT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         input_types, mapped_output = self.map.resolve_contract(
             current_output,
             stored_annotations,
-            expand_output_annotation,
             validation_error_type,
         )
         return (
@@ -784,7 +776,6 @@ class MapValue(Generic[ValueT, MappedT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         source_annotation = self._source.validate_read(
@@ -816,7 +807,7 @@ class MapValue(Generic[ValueT, MappedT]):
                 target_label=f"target {self._target!r}",
                 validation_error_type=validation_error_type,
             )
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, validation_error_type
         return (current_output,), current_output
 
 
@@ -868,7 +859,6 @@ class Filter(Generic[ValueT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del stored_annotations
@@ -925,7 +915,6 @@ class FilterNotNull:
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         source_annotation = self._source.validate_read(
@@ -939,7 +928,7 @@ class FilterNotNull:
             source_label=f"source {self._source!r}",
             validation_error_type=validation_error_type,
         )
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         return (
             (current_output,),
             _require_non_none_annotation(
@@ -964,10 +953,9 @@ class DropNull:
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         return (
             (current_output,),
             _require_non_none_annotation(
@@ -1011,7 +999,6 @@ class DistinctBy(Generic[ItemT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         _require_iterable_boundary_annotation(
@@ -1038,7 +1025,7 @@ class DistinctBy(Generic[ItemT]):
             target_label="fn return type",
             validation_error_type=validation_error_type,
         )
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, validation_error_type
         return (input_type,), list_annotation(item_type)
 
 
@@ -1067,7 +1054,6 @@ class Distinct(DistinctBy[ItemT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         _require_iterable_boundary_annotation(
@@ -1090,7 +1076,7 @@ class Distinct(DistinctBy[ItemT]):
             target_label="distinct key type",
             validation_error_type=validation_error_type,
         )
-        del stored_annotations, expand_output_annotation, validation_error_type
+        del stored_annotations, validation_error_type
         return (input_type,), list_annotation(item_type)
 
 
@@ -1115,10 +1101,9 @@ class Take:
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         _require_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,
@@ -1154,10 +1139,9 @@ class TakeWhile(Generic[ItemT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         _require_iterable_boundary_annotation(
             current_output,
             operator_name=type(self).__name__,

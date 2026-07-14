@@ -385,10 +385,9 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
 
         concrete_objects = list[ObjectMapping]
         if self.at is None:

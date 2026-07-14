@@ -14,12 +14,9 @@ from ml_pipes.core import (
 from ml_pipes.standard import (
     Batch,
     Pick,
-    Recall,
-    Store,
     UnBatch,
 )
 from ml_pipes.validation import PipelineValidationError
-from ml_pipes._typing.annotation import expand_annotation_parts
 from ml_pipes.context import Recall, Store
 from ml_pipes.vision import ImagePayload
 
@@ -117,7 +114,6 @@ def test_recall_resolve_contract_keeps_variadic_tuple_item_type_when_store_match
     input_types, output_type = Recall("x").resolve_contract(
         tuple[int, ...],
         {"x": int},
-        expand_annotation_parts,
         PipelineValidationError,
     )
 
@@ -129,7 +125,6 @@ def test_recall_resolve_contract_widens_variadic_tuple_item_type_for_inserted_va
     input_types, output_type = Recall("x").resolve_contract(
         tuple[int, ...],
         {"x": tuple[int, ...]},
-        expand_annotation_parts,
         PipelineValidationError,
     )
 

@@ -166,10 +166,9 @@ class SelectorProbe:
         self,
         current_output: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
+        del stored_annotations
         selected = current_output
         if self.select_src is not None:
             selected = self.select_src.validate_read(
