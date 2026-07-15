@@ -39,6 +39,7 @@ _T = TypeVar("_T")
 _LegacySelf = TypeVar("Self")
 _SourceBoxT = TypeVar("_SourceBoxT")
 _InheritedBoxT = TypeVar("_InheritedBoxT")
+_ProtocolAliasT = TypeVar("_ProtocolAliasT")
 
 try:
     from typing import Self
@@ -79,6 +80,32 @@ class _IntValueProtocol(Protocol):
 class _IntGetterProtocol(Protocol):
     def get(self) -> int:
         ...
+
+
+class _GetterTemplateProtocol(Protocol[_ProtocolAliasT]):
+    def get(self) -> _ProtocolAliasT:
+        ...
+
+
+class _IntGetterAliasProtocol(_GetterTemplateProtocol[int], Protocol):
+    pass
+
+
+class _ValueTemplateProtocol(Protocol[_ProtocolAliasT]):
+    value: _ProtocolAliasT
+
+
+class _IntValueAliasProtocol(_ValueTemplateProtocol[int], Protocol):
+    pass
+
+
+class _ProcessTemplateProtocol(Protocol[_ProtocolAliasT]):
+    def process(self, value: _ProtocolAliasT) -> str:
+        ...
+
+
+class _IntProcessAliasProtocol(_ProcessTemplateProtocol[int], Protocol):
+    pass
 
 
 class _TypedDictIntValuePayload(TypedDict):
@@ -276,6 +303,16 @@ class _ClassBuildWithStringArg:
     @classmethod
     def build(cls, value: str) -> str:
         del cls
+        return value
+
+
+class _IntProcessImplementation:
+    def process(self, value: int) -> str:
+        return str(value)
+
+
+class _StringProcessImplementation:
+    def process(self, value: str) -> str:
         return value
 
 
@@ -706,6 +743,58 @@ def test_is_assignable_handles_protocol_static_and_class_methods(
     ],
 )
 def test_is_assignable_preserves_source_generic_specialization_for_protocols(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntGetterAliasProtocol,
+            True,
+            id="alias-method-return-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntGetterAliasProtocol,
+            False,
+            id="alias-method-return-str",
+        ),
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntValueAliasProtocol,
+            True,
+            id="alias-attribute-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntValueAliasProtocol,
+            False,
+            id="alias-attribute-str",
+        ),
+        pytest.param(
+            _IntProcessImplementation,
+            _IntProcessAliasProtocol,
+            True,
+            id="alias-method-parameter-int",
+        ),
+        pytest.param(
+            _StringProcessImplementation,
+            _IntProcessAliasProtocol,
+            False,
+            id="alias-method-parameter-str",
+        ),
+    ],
+)
+def test_is_assignable_specializes_inherited_target_protocol_members(
     implementation_annotation: Any,
     protocol_annotation: Any,
     expected_assignable: bool,

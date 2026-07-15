@@ -664,6 +664,9 @@ def _is_structurally_assignable_to_protocol(
         source_typevar_bindings = _resolve_annotation_typevar_bindings(
             source_annotation,
         )
+        target_typevar_bindings = _resolve_annotation_typevar_bindings(
+            target_annotation,
+        )
     except _UnboundTypevarBindingError:
         return False
 
@@ -695,14 +698,15 @@ def _is_structurally_assignable_to_protocol(
                     return False
                 if source_member_info.annotation is _MISSING_ANNOTATION:
                     return False
-                source_member_annotation = _specialize_source_protocol_annotation(
+                source_member_annotation = _specialize_protocol_annotation(
                     source_member_info.annotation,
                     source_owner,
                     source_typevar_bindings,
                 )
-                target_member_annotation = _replace_self_annotation(
+                target_member_annotation = _specialize_protocol_annotation(
                     target_member_info.annotation,
                     source_owner,
+                    target_typevar_bindings,
                 )
                 if target_member_info.is_writable:
                     if not source_member_info.is_writable:
@@ -713,14 +717,15 @@ def _is_structurally_assignable_to_protocol(
                         protocol_stack,
                     ):
                         return False
-                    source_write_annotation = _specialize_source_protocol_annotation(
+                    source_write_annotation = _specialize_protocol_annotation(
                         source_member_info.write_annotation,
                         source_owner,
                         source_typevar_bindings,
                     )
-                    target_write_annotation = _replace_self_annotation(
+                    target_write_annotation = _specialize_protocol_annotation(
                         target_member_info.write_annotation,
                         source_owner,
+                        target_typevar_bindings,
                     )
                     if (
                         source_write_annotation is _MISSING_ANNOTATION
@@ -747,6 +752,7 @@ def _is_structurally_assignable_to_protocol(
                 member,
                 protocol_stack,
                 source_typevar_bindings,
+                target_typevar_bindings,
                 bind_method_call_parameter_names,
                 method_signature_includes_receiver,
                 resolve_callable_signature_annotations,
@@ -764,6 +770,7 @@ def _is_protocol_method_member_assignable(
     member: str,
     protocol_stack: set[tuple[type, type]],
     source_typevar_bindings: dict[TypeVar, Any],
+    target_typevar_bindings: dict[TypeVar, Any],
     bind_method_call_parameter_names: Callable[..., Any],
     method_signature_includes_receiver: Callable[..., Any],
     resolve_callable_signature_annotations: Callable[..., Any],
@@ -777,14 +784,15 @@ def _is_protocol_method_member_assignable(
 
     source_annotations = resolve_callable_signature_annotations(source_member)
     target_annotations = resolve_callable_signature_annotations(target_member)
-    source_return_annotation = _specialize_source_protocol_annotation(
+    source_return_annotation = _specialize_protocol_annotation(
         source_annotations.return_annotation,
         source_owner,
         source_typevar_bindings,
     )
-    target_return_annotation = _replace_self_annotation(
+    target_return_annotation = _specialize_protocol_annotation(
         target_annotations.return_annotation,
         source_owner,
+        target_typevar_bindings,
     )
     if source_return_annotation is None or target_return_annotation is None:
         return False
@@ -830,7 +838,7 @@ def _is_protocol_method_member_assignable(
         return False
 
     source_parameters_by_name = {
-        parameter.parameter.name: _specialize_source_protocol_annotation(
+        parameter.parameter.name: _specialize_protocol_annotation(
             parameter.annotation,
             source_owner,
             source_typevar_bindings,
@@ -838,9 +846,10 @@ def _is_protocol_method_member_assignable(
         for parameter in source_value_parameters
     }
     target_parameters_by_name = {
-        parameter.parameter.name: _replace_self_annotation(
+        parameter.parameter.name: _specialize_protocol_annotation(
             parameter.annotation,
             source_owner,
+            target_typevar_bindings,
         )
         for parameter in target_value_parameters
     }
@@ -873,8 +882,8 @@ def _is_protocol_method_member_assignable(
                 return False
 
     return _is_assignable(
-        _replace_self_annotation(source_return_annotation, source_owner),
-        _replace_self_annotation(target_return_annotation, source_owner),
+        source_return_annotation,
+        target_return_annotation,
         protocol_stack,
     )
 
@@ -936,14 +945,14 @@ def _replace_self_annotation(annotation: Any, concrete_owner: type) -> Any:
     )
 
 
-def _specialize_source_protocol_annotation(
+def _specialize_protocol_annotation(
     annotation: Any,
-    source_owner: type,
-    source_typevar_bindings: dict[TypeVar, Any],
+    concrete_owner: type,
+    typevar_bindings: dict[TypeVar, Any],
 ) -> Any:
-    if source_typevar_bindings:
-        annotation = _apply_typevar_bindings(annotation, source_typevar_bindings)
-    return _replace_self_annotation(annotation, source_owner)
+    if typevar_bindings:
+        annotation = _apply_typevar_bindings(annotation, typevar_bindings)
+    return _replace_self_annotation(annotation, concrete_owner)
 
 
 def _is_self_annotation(annotation: Any) -> bool:

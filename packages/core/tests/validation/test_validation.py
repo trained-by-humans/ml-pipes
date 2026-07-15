@@ -26,6 +26,7 @@ _VariadicT = TypeVar("_VariadicT")
 _BoxT = TypeVar("_BoxT")
 _LegacySelf = TypeVar("Self")
 _GenericProtocolBoxT = TypeVar("_GenericProtocolBoxT")
+_ProtocolAliasT = TypeVar("_ProtocolAliasT")
 
 try:
     from typing import Self
@@ -246,11 +247,21 @@ class _IntGetterContract(Protocol):
         ...
 
 
+class _GetterAliasContract(Protocol[_ProtocolAliasT]):
+    def get(self) -> _ProtocolAliasT:
+        ...
+
+
+class _AliasedIntGetterContract(_GetterAliasContract[int], Protocol):
+    pass
+
+
 class _IntValueAttributeContract(Protocol):
     value: int
 
 
 _IntGetterT = TypeVar("_IntGetterT", bound=_IntGetterContract)
+_AliasedIntGetterT = TypeVar("_AliasedIntGetterT", bound=_AliasedIntGetterContract)
 _IntValueAttributeT = TypeVar("_IntValueAttributeT", bound=_IntValueAttributeContract)
 
 
@@ -276,6 +287,11 @@ class ProduceClosedStringProtocolBox:
 
 class UseIntGetter:
     def __call__(self, value: _IntGetterT) -> int:
+        return value.get() + 1
+
+
+class UseAliasedIntGetter:
+    def __call__(self, value: _AliasedIntGetterT) -> int:
         return value.get() + 1
 
 
@@ -684,6 +700,15 @@ def test_pipeline_validate_accepts_specialized_generic_source_for_protocol_bound
     assert contract.output_type is int
 
 
+def test_pipeline_validate_accepts_closed_protocol_alias_bound():
+    contract = Pipeline(
+        [ProduceGenericIntProtocolBox(), UseAliasedIntGetter()],
+    ).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is int
+
+
 @pytest.mark.parametrize(
     "producer",
     [
@@ -721,6 +746,14 @@ def test_pipeline_validate_rejects_wrong_specialized_generic_source_for_protocol
         match=r"Pipeline contract mismatch at 1:UseIntGetter",
     ):
         Pipeline([producer, UseIntGetter()]).validate()
+
+
+def test_pipeline_validate_rejects_wrong_closed_protocol_alias_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseAliasedIntGetter",
+    ):
+        Pipeline([ProduceGenericStringProtocolBox(), UseAliasedIntGetter()]).validate()
 
 
 def test_pipeline_validate_rejects_typed_dict_source_for_protocol_attribute_bound():
