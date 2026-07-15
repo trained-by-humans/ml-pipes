@@ -1194,13 +1194,25 @@ def _resolve_annotation_typevar_bindings(annotation: Any) -> dict[TypeVar, Any]:
     owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return {}
-    annotation_args = get_args(annotation)
-    if not annotation_args:
-        return _resolve_owner_base_typevar_bindings(owner, {})
-    return _resolve_owner_typevar_bindings(owner, annotation_args)
+    return _resolve_owner_typevar_bindings(owner, get_args(annotation))
 
 
 def _resolve_owner_typevar_bindings(
+    owner: type,
+    annotation_args: tuple[Any, ...],
+) -> dict[TypeVar, Any]:
+    owner_bindings = _resolve_direct_owner_typevar_bindings(
+        owner,
+        annotation_args,
+    )
+    inherited_bindings = _resolve_owner_inherited_typevar_bindings(
+        owner,
+        owner_bindings,
+    )
+    return _merge_typevar_bindings(owner_bindings, inherited_bindings)
+
+
+def _resolve_direct_owner_typevar_bindings(
     owner: type,
     annotation_args: tuple[Any, ...],
 ) -> dict[TypeVar, Any]:
@@ -1213,16 +1225,10 @@ def _resolve_owner_typevar_bindings(
         return {}
     if len(owner_parameters) != len(annotation_args):
         return {}
-
-    owner_bindings = dict(zip(owner_parameters, annotation_args, strict=True))
-    inherited_bindings = _resolve_owner_base_typevar_bindings(
-        owner,
-        owner_bindings,
-    )
-    return _merge_typevar_bindings(owner_bindings, inherited_bindings)
+    return dict(zip(owner_parameters, annotation_args, strict=True))
 
 
-def _resolve_owner_base_typevar_bindings(
+def _resolve_owner_inherited_typevar_bindings(
     owner: type,
     owner_bindings: dict[TypeVar, Any],
 ) -> dict[TypeVar, Any]:
