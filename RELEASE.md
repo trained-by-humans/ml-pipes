@@ -60,9 +60,9 @@ The release workflow runs this sequence:
 - publish to PyPI using trusted publishing
 
 > [!IMPORTANT]
-> If a publish is interrupted mid-run, rerunning the workflow is safe for
-> TestPyPI. PyPI stays strict on the first publish attempt for each workflow
-> run and only tolerates already-uploaded files on a rerun of that same run.
+> Reruns only skip uploads when the existing index artifacts exactly match the
+> current build. Missing files are still uploaded, and conflicting files for
+> the same version fail the workflow.
 
 The repository should configure both the `testpypi` and `pypi` environments
 as trusted publishers before the first public release. Do not upload with
