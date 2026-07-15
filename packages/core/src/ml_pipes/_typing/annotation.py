@@ -1192,9 +1192,11 @@ def _apply_typevar_bindings(
 
 def _resolve_annotation_typevar_bindings(annotation: Any) -> dict[TypeVar, Any]:
     owner = _resolve_annotation_owner(annotation)
-    annotation_args = get_args(annotation)
-    if not isinstance(owner, type) or not annotation_args:
+    if not isinstance(owner, type):
         return {}
+    annotation_args = get_args(annotation)
+    if not annotation_args:
+        return _resolve_owner_base_typevar_bindings(owner, {})
     return _resolve_owner_typevar_bindings(owner, annotation_args)
 
 
@@ -1213,6 +1215,17 @@ def _resolve_owner_typevar_bindings(
         return {}
 
     owner_bindings = dict(zip(owner_parameters, annotation_args, strict=True))
+    inherited_bindings = _resolve_owner_base_typevar_bindings(
+        owner,
+        owner_bindings,
+    )
+    return _merge_typevar_bindings(owner_bindings, inherited_bindings)
+
+
+def _resolve_owner_base_typevar_bindings(
+    owner: type,
+    owner_bindings: dict[TypeVar, Any],
+) -> dict[TypeVar, Any]:
     inherited_bindings: dict[TypeVar, Any] = {}
     for base_annotation in getattr(owner, "__orig_bases__", ()):
         base_origin = get_origin(base_annotation)
@@ -1223,18 +1236,16 @@ def _resolve_owner_typevar_bindings(
             owner_bindings,
         )
         base_owner = _resolve_annotation_owner(specialized_base_annotation)
-        base_args = get_args(specialized_base_annotation)
         if (
             not isinstance(base_owner, type)
             or base_owner in {Generic, Protocol}
-            or not base_args
         ):
             continue
         inherited_bindings = _merge_typevar_bindings(
             inherited_bindings,
-            _resolve_owner_typevar_bindings(base_owner, base_args),
+            _resolve_annotation_typevar_bindings(specialized_base_annotation),
         )
-    return _merge_typevar_bindings(owner_bindings, inherited_bindings)
+    return inherited_bindings
 
 
 def _build_union_annotation(*annotations: Any) -> Any:

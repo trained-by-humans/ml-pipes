@@ -64,6 +64,14 @@ class _InheritedGenericProtocolBox(
     pass
 
 
+class _ClosedIntProtocolBox(_GenericProtocolBox[int]):
+    pass
+
+
+class _ClosedStringProtocolBox(_GenericProtocolBox[str]):
+    pass
+
+
 class _IntValueProtocol(Protocol):
     value: int
 
@@ -682,6 +690,18 @@ def test_is_assignable_handles_protocol_static_and_class_methods(
             _IntGetterProtocol,
             False,
             id="inherited-generic-method-str",
+        ),
+        pytest.param(
+            _ClosedIntProtocolBox,
+            _IntGetterProtocol,
+            True,
+            id="closed-subclass-method-int",
+        ),
+        pytest.param(
+            _ClosedStringProtocolBox,
+            _IntGetterProtocol,
+            False,
+            id="closed-subclass-method-str",
         ),
     ],
 )

@@ -45,6 +45,14 @@ class _GenericProtocolBox(Generic[_GenericProtocolBoxT]):
         return self.value
 
 
+class _ClosedIntProtocolBox(_GenericProtocolBox[int]):
+    pass
+
+
+class _ClosedStringProtocolBox(_GenericProtocolBox[str]):
+    pass
+
+
 class _ProtocolPredictionContract(Protocol):
     labels: Sequence[int]
 
@@ -254,6 +262,16 @@ class ProduceGenericIntProtocolBox:
 class ProduceGenericStringProtocolBox:
     def __call__(self, value: int) -> _GenericProtocolBox[str]:
         return _GenericProtocolBox(str(value))
+
+
+class ProduceClosedIntProtocolBox:
+    def __call__(self, value: int) -> _ClosedIntProtocolBox:
+        return _ClosedIntProtocolBox(value)
+
+
+class ProduceClosedStringProtocolBox:
+    def __call__(self, value: int) -> _ClosedStringProtocolBox:
+        return _ClosedStringProtocolBox(str(value))
 
 
 class UseIntGetter:
@@ -642,9 +660,24 @@ def test_pipeline_validate_accepts_protocol_static_and_class_methods(
     assert contract.output_type is str
 
 
-def test_pipeline_validate_accepts_specialized_generic_source_for_protocol_bound():
+@pytest.mark.parametrize(
+    "producer",
+    [
+        pytest.param(
+            ProduceGenericIntProtocolBox(),
+            id="parameterized-source",
+        ),
+        pytest.param(
+            ProduceClosedIntProtocolBox(),
+            id="closed-subclass-source",
+        ),
+    ],
+)
+def test_pipeline_validate_accepts_specialized_generic_source_for_protocol_bound(
+    producer,
+):
     contract = Pipeline(
-        [ProduceGenericIntProtocolBox(), UseIntGetter()],
+        [producer, UseIntGetter()],
     ).validate()
 
     assert contract.input_type is int
@@ -667,12 +700,27 @@ def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer
         Pipeline([producer, FilterProtocolPrediction()]).validate()
 
 
-def test_pipeline_validate_rejects_wrong_specialized_generic_source_for_protocol_bound():
+@pytest.mark.parametrize(
+    "producer",
+    [
+        pytest.param(
+            ProduceGenericStringProtocolBox(),
+            id="parameterized-source",
+        ),
+        pytest.param(
+            ProduceClosedStringProtocolBox(),
+            id="closed-subclass-source",
+        ),
+    ],
+)
+def test_pipeline_validate_rejects_wrong_specialized_generic_source_for_protocol_bound(
+    producer,
+):
     with pytest.raises(
         PipelineValidationError,
         match=r"Pipeline contract mismatch at 1:UseIntGetter",
     ):
-        Pipeline([ProduceGenericStringProtocolBox(), UseIntGetter()]).validate()
+        Pipeline([producer, UseIntGetter()]).validate()
 
 
 def test_pipeline_validate_rejects_typed_dict_source_for_protocol_attribute_bound():
