@@ -331,6 +331,7 @@ def main() -> int:
             print(f"- {manifest.dist_name}: runtime deps -> {dependencies}", flush=True)
         return 0
 
+    validate_release_metadata()
     _ensure_release_tooling(include_upload=args.publish)
 
     outdir = args.outdir

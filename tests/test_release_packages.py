@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 from pathlib import Path
 import sys
@@ -223,3 +224,61 @@ def test_ensure_release_tooling_requires_twine_for_publish(monkeypatch: pytest.M
 
     with pytest.raises(RuntimeError, match="Missing modules: twine"):
         module._ensure_release_tooling(include_upload=True)
+
+
+@pytest.mark.parametrize("publish", [False, True], ids=["dry-run", "publish"])
+def test_main_validates_release_metadata_before_building(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    publish: bool,
+) -> None:
+    module = _load_release_packages_module()
+
+    args = argparse.Namespace(
+        publish=publish,
+        dry_run=not publish,
+        validate=False,
+        outdir=tmp_path,
+        repository_url="https://example.invalid/legacy/" if publish else None,
+        tag=None,
+    )
+    monkeypatch.setattr(module, "_parse_args", lambda: args)
+
+    events: list[tuple[str, object]] = []
+
+    def fake_validate_release_metadata(expected_tag: str | None = None) -> tuple[str, list[object]]:
+        events.append(("validate", expected_tag))
+        return ("0.2.0", [])
+
+    def fake_ensure_release_tooling(*, include_upload: bool) -> None:
+        events.append(("ensure_release_tooling", include_upload))
+
+    def fake_build_package(package_dir: Path, outdir: Path) -> None:
+        events.append(("build", package_dir.name))
+
+    def fake_artifacts_for(dist_name: str, outdir: Path) -> list[Path]:
+        return [outdir / f"{dist_name}.whl"]
+
+    def fake_publish_package(dist_name: str, outdir: Path, repository_url: str | None) -> None:
+        events.append(("publish", dist_name, repository_url))
+
+    monkeypatch.setattr(module, "validate_release_metadata", fake_validate_release_metadata)
+    monkeypatch.setattr(module, "_ensure_release_tooling", fake_ensure_release_tooling)
+    monkeypatch.setattr(module, "_build_package", fake_build_package)
+    monkeypatch.setattr(module, "_artifacts_for", fake_artifacts_for)
+    monkeypatch.setattr(module, "_publish_package", fake_publish_package)
+
+    assert module.main() == 0
+
+    assert events[0] == ("validate", None)
+    assert events[1] == ("ensure_release_tooling", publish)
+    assert [event for event in events if event[0] == "build"] == [
+        ("build", package_dir_name) for package_dir_name, _ in module.PACKAGE_ORDER
+    ]
+    if publish:
+        assert [event for event in events if event[0] == "publish"] == [
+            ("publish", dist_name, "https://example.invalid/legacy/")
+            for _, dist_name in module.PACKAGE_ORDER
+        ]
+    else:
+        assert not [event for event in events if event[0] == "publish"]
