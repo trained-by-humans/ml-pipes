@@ -40,6 +40,7 @@ _LegacySelf = TypeVar("Self")
 _SourceBoxT = TypeVar("_SourceBoxT")
 _InheritedBoxT = TypeVar("_InheritedBoxT")
 _ProtocolAliasT = TypeVar("_ProtocolAliasT")
+_MergeItemT = TypeVar("_MergeItemT")
 
 try:
     from typing import Self
@@ -106,6 +107,11 @@ class _ProcessTemplateProtocol(Protocol[_ProtocolAliasT]):
 
 class _IntProcessAliasProtocol(_ProcessTemplateProtocol[int], Protocol):
     pass
+
+
+class _SelfMergeProtocol(Protocol):
+    def merge(self, other: Self) -> Self:
+        ...
 
 
 class _TypedDictIntValuePayload(TypedDict):
@@ -304,6 +310,15 @@ class _ClassBuildWithStringArg:
     def build(cls, value: str) -> str:
         del cls
         return value
+
+
+class _GenericMergeBox(Generic[_MergeItemT]):
+    def __init__(self, value: _MergeItemT):
+        self.value = value
+
+    def merge(self, other: Self) -> Self:
+        del other
+        return self
 
 
 class _IntProcessImplementation:
@@ -803,6 +818,13 @@ def test_is_assignable_specializes_inherited_target_protocol_members(
         implementation_annotation,
         protocol_annotation,
     ) is expected_assignable
+
+
+def test_is_assignable_preserves_parameterized_source_self_specialization() -> None:
+    assert is_assignable(
+        _GenericMergeBox[int],
+        _SelfMergeProtocol,
+    ) is True
 
 
 def test_is_assignable_rejects_typed_dict_as_protocol_attribute_source() -> None:

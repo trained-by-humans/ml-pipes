@@ -700,12 +700,12 @@ def _is_structurally_assignable_to_protocol(
                     return False
                 source_member_annotation = _specialize_protocol_annotation(
                     source_member_info.annotation,
-                    source_owner,
+                    source_annotation,
                     source_typevar_bindings,
                 )
                 target_member_annotation = _specialize_protocol_annotation(
                     target_member_info.annotation,
-                    source_owner,
+                    source_annotation,
                     target_typevar_bindings,
                 )
                 if target_member_info.is_writable:
@@ -719,12 +719,12 @@ def _is_structurally_assignable_to_protocol(
                         return False
                     source_write_annotation = _specialize_protocol_annotation(
                         source_member_info.write_annotation,
-                        source_owner,
+                        source_annotation,
                         source_typevar_bindings,
                     )
                     target_write_annotation = _specialize_protocol_annotation(
                         target_member_info.write_annotation,
-                        source_owner,
+                        source_annotation,
                         target_typevar_bindings,
                     )
                     if (
@@ -751,6 +751,7 @@ def _is_structurally_assignable_to_protocol(
                 target_owner,
                 member,
                 protocol_stack,
+                source_annotation,
                 source_typevar_bindings,
                 target_typevar_bindings,
                 bind_method_call_parameter_names,
@@ -769,6 +770,7 @@ def _is_protocol_method_member_assignable(
     target_owner: type,
     member: str,
     protocol_stack: set[tuple[type, type]],
+    source_annotation: Any,
     source_typevar_bindings: dict[TypeVar, Any],
     target_typevar_bindings: dict[TypeVar, Any],
     bind_method_call_parameter_names: Callable[..., Any],
@@ -786,12 +788,12 @@ def _is_protocol_method_member_assignable(
     target_annotations = resolve_callable_signature_annotations(target_member)
     source_return_annotation = _specialize_protocol_annotation(
         source_annotations.return_annotation,
-        source_owner,
+        source_annotation,
         source_typevar_bindings,
     )
     target_return_annotation = _specialize_protocol_annotation(
         target_annotations.return_annotation,
-        source_owner,
+        source_annotation,
         target_typevar_bindings,
     )
     if source_return_annotation is None or target_return_annotation is None:
@@ -840,7 +842,7 @@ def _is_protocol_method_member_assignable(
     source_parameters_by_name = {
         parameter.parameter.name: _specialize_protocol_annotation(
             parameter.annotation,
-            source_owner,
+            source_annotation,
             source_typevar_bindings,
         )
         for parameter in source_value_parameters
@@ -848,7 +850,7 @@ def _is_protocol_method_member_assignable(
     target_parameters_by_name = {
         parameter.parameter.name: _specialize_protocol_annotation(
             parameter.annotation,
-            source_owner,
+            source_annotation,
             target_typevar_bindings,
         )
         for parameter in target_value_parameters
@@ -938,21 +940,21 @@ def _build_protocol_method_call(
     return tuple(args), kwargs, placeholder_tokens
 
 
-def _replace_self_annotation(annotation: Any, concrete_owner: type) -> Any:
+def _replace_self_annotation(annotation: Any, concrete_annotation: Any) -> Any:
     return _transform_annotation(
         annotation,
-        lambda part: concrete_owner if _is_self_annotation(part) else part,
+        lambda part: concrete_annotation if _is_self_annotation(part) else part,
     )
 
 
 def _specialize_protocol_annotation(
     annotation: Any,
-    concrete_owner: type,
+    concrete_annotation: Any,
     typevar_bindings: dict[TypeVar, Any],
 ) -> Any:
     if typevar_bindings:
         annotation = _apply_typevar_bindings(annotation, typevar_bindings)
-    return _replace_self_annotation(annotation, concrete_owner)
+    return _replace_self_annotation(annotation, concrete_annotation)
 
 
 def _is_self_annotation(annotation: Any) -> bool:

@@ -27,6 +27,7 @@ _BoxT = TypeVar("_BoxT")
 _LegacySelf = TypeVar("Self")
 _GenericProtocolBoxT = TypeVar("_GenericProtocolBoxT")
 _ProtocolAliasT = TypeVar("_ProtocolAliasT")
+_MergeItemT = TypeVar("_MergeItemT")
 
 try:
     from typing import Self
@@ -44,6 +45,15 @@ class _GenericProtocolBox(Generic[_GenericProtocolBoxT]):
 
     def get(self) -> _GenericProtocolBoxT:
         return self.value
+
+
+class _GenericMergeBox(Generic[_MergeItemT]):
+    def __init__(self, value: _MergeItemT):
+        self.value = value
+
+    def merge(self, other: Self) -> Self:
+        del other
+        return self
 
 
 class _ClosedIntProtocolBox(_GenericProtocolBox[int]):
@@ -256,6 +266,11 @@ class _AliasedIntGetterContract(_GetterAliasContract[int], Protocol):
     pass
 
 
+class _SelfMergeContract(Protocol):
+    def merge(self, other: Self) -> Self:
+        ...
+
+
 class _IntValueAttributeContract(Protocol):
     value: int
 
@@ -263,6 +278,7 @@ class _IntValueAttributeContract(Protocol):
 _IntGetterT = TypeVar("_IntGetterT", bound=_IntGetterContract)
 _AliasedIntGetterT = TypeVar("_AliasedIntGetterT", bound=_AliasedIntGetterContract)
 _IntValueAttributeT = TypeVar("_IntValueAttributeT", bound=_IntValueAttributeContract)
+_SelfMergeT = TypeVar("_SelfMergeT", bound=_SelfMergeContract)
 
 
 class ProduceGenericIntProtocolBox:
@@ -285,6 +301,11 @@ class ProduceClosedStringProtocolBox:
         return _ClosedStringProtocolBox(str(value))
 
 
+class ProduceGenericMergeIntBox:
+    def __call__(self, value: int) -> _GenericMergeBox[int]:
+        return _GenericMergeBox(value)
+
+
 class UseIntGetter:
     def __call__(self, value: _IntGetterT) -> int:
         return value.get() + 1
@@ -293,6 +314,11 @@ class UseIntGetter:
 class UseAliasedIntGetter:
     def __call__(self, value: _AliasedIntGetterT) -> int:
         return value.get() + 1
+
+
+class MergeValueWithSelf:
+    def __call__(self, value: _SelfMergeT) -> _SelfMergeT:
+        return value.merge(value)
 
 
 class _TypedDictIntValuePayload(TypedDict):
@@ -707,6 +733,15 @@ def test_pipeline_validate_accepts_closed_protocol_alias_bound():
 
     assert contract.input_type is int
     assert contract.output_type is int
+
+
+def test_pipeline_validate_accepts_parameterized_source_self_protocol_bound():
+    contract = Pipeline(
+        [ProduceGenericMergeIntBox(), MergeValueWithSelf()],
+    ).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type == _GenericMergeBox[int]
 
 
 @pytest.mark.parametrize(
