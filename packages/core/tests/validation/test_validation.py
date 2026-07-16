@@ -3,7 +3,7 @@ import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
+from typing import Any, Generic, Literal, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
 
 from ml_pipes.core import Pipeline
 from ml_pipes._typing.annotation import expand_annotation_parts
@@ -886,7 +886,7 @@ def test_validate_recursively_publishes_bound_inside_dynamic_tuple_output():
     class WrapTypeVarInList:
         def __call__(self, x: _T) -> list[_T]: ...  # type: ignore[empty-body]
 
-    typed_recall: Recall[list[_T], None] = Recall("saved")
+    typed_recall: Recall[list[_T], Literal[False]] = Recall("saved")
     contract = Pipeline([WrapTypeVarInList(), Store("saved"), typed_recall]).validate()
 
     assert contract.input_type is _Base

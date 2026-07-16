@@ -191,7 +191,7 @@ from ml_pipes.vision import DrawBoxes, SaveImage, ToDetections
 pipeline = Pipeline([
     ...,
     ToDetections(),
-    Recall("source_image", index=0),
+    Recall("source_image", prepend=True),
     DrawBoxes(),
     SaveImage(Path("result.jpg"), at=0),
 ])

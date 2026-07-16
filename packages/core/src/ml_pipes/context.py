@@ -48,7 +48,7 @@ CurrentT = TypeVar("CurrentT")
 InputT = TypeVar("InputT", contravariant=True)
 OutputT = TypeVar("OutputT", covariant=True)
 StoredT = TypeVar("StoredT")
-InsertIndexT = TypeVar("InsertIndexT", bound=int | None)
+PrependT = TypeVar("PrependT", bound=bool)
 
 
 class ContextOp(ABC, Generic[InputT, OutputT]):
@@ -112,8 +112,8 @@ class Store(ContextOp[CurrentT, CurrentT]):
 
 
 @Operator
-class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
-    """Recall a stored value and splice it into the current tuple shape.
+class Recall(ContextOp[Any, Any], Generic[StoredT, PrependT]):
+    """Recall a stored value and append or prepend it to the current tuple shape.
 
     The public boundary depends on both the stored value type and the incoming
     ``current`` shape, so the class declaration stays broad and the ``apply``
@@ -121,24 +121,20 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
     """
 
     @overload
-    def __init__(self: "Recall[StoredT, None]", name: str, index: None = None) -> None:
+    def __init__(self: "Recall[StoredT, Literal[False]]", name: str, prepend: Literal[False] = False) -> None:
         ...
 
     @overload
-    def __init__(self: "Recall[StoredT, Literal[0]]", name: str, index: Literal[0]) -> None:
+    def __init__(self: "Recall[StoredT, Literal[True]]", name: str, prepend: Literal[True]) -> None:
         ...
 
-    @overload
-    def __init__(self: "Recall[StoredT, int]", name: str, index: int) -> None:
-        ...
-
-    def __init__(self, name: str, index: int | None = None):
+    def __init__(self, name: str, prepend: bool = False):
         self.name = name
-        self.index = index
+        self.prepend = prepend
 
     @overload
     def apply(
-        self: "Recall[StoredT, None]",
+        self: "Recall[StoredT, Literal[False]]",
         current: CurrentT,
         context: Context,
     ) -> tuple[tuple[CurrentT, StoredT], Context]:
@@ -146,27 +142,19 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
 
     @overload
     def apply(
-        self: "Recall[StoredT, Literal[0]]",
+        self: "Recall[StoredT, Literal[True]]",
         current: CurrentT,
         context: Context,
     ) -> tuple[tuple[StoredT, CurrentT], Context]:
         ...
 
-    @overload
-    def apply(
-        self: "Recall[StoredT, int]",
-        current: CurrentT,
-        context: Context,
-    ) -> tuple[Any, Context]:
-        ...
-
     def apply(self, current: CurrentT, context: Context) -> tuple[Any, Context]:
         stored = context.load(self.name)
         current_tuple = current if isinstance(current, tuple) else (current,)
-        if self.index is None:
-            result = current_tuple + (stored,)
+        if self.prepend:
+            result = (stored,) + current_tuple
         else:
-            result = current_tuple[:self.index] + (stored,) + current_tuple[self.index:]
+            result = current_tuple + (stored,)
         return result, context
 
     def resolve_contract(
@@ -186,8 +174,8 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
             return (Any,), tuple[merged_item_annotation, ...]
 
         current_parts = expand_annotation_parts(upstream_annotation)
-        if self.index is None:
-            result_parts = current_parts + (stored_annotation,)
+        if self.prepend:
+            result_parts = (stored_annotation,) + current_parts
         else:
-            result_parts = current_parts[:self.index] + (stored_annotation,) + current_parts[self.index:]
+            result_parts = current_parts + (stored_annotation,)
         return (Any,), result_parts

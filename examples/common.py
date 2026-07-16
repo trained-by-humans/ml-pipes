@@ -135,7 +135,7 @@ def visualize_and_store(
     class_names: list[str] | None = None,
 ) -> Pipeline[Segmentations, tuple[ImagePayload, Segmentations]]:
     return Pipeline([
-        Recall("source_image", index=0),
+        Recall("source_image", prepend=True),
         DrawMasks(class_names=class_names),
         DrawBoxes(class_names=class_names),
         SaveImage(output_path, at=0),
@@ -147,7 +147,7 @@ def visualize_detections_and_store(
     class_names: list[str] | None = None,
 ) -> Pipeline[Detections, tuple[ImagePayload, Detections]]:
     return Pipeline([
-        Recall("source_image", index=0),
+        Recall("source_image", prepend=True),
         DrawBoxes(class_names=class_names),
         SaveImage(output_path, at=0),
     ])

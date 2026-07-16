@@ -146,6 +146,21 @@ def test_store_rejects_removed_index_keyword():
         Store("x", index=0)
 
 
+def test_recall_rejects_removed_index_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        Recall("x", index=0)
+
+
+def test_recall_prepend_places_stored_value_before_current_value():
+    pipeline = Pipeline([
+        Store("saved"),
+        IntToString(),
+        Recall("saved", prepend=True),
+    ])
+
+    assert pipeline(9) == (9, "9")
+
+
 # ---------------------------------------------------------------------------
 # Error detection — validate() must raise PipelineValidationError
 # ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@ def build_video_annotation_pipeline(model_path: Path) -> Pipeline[ImagePayload, 
     return Pipeline([
         Store("source_frame"),
         Embed(yolo8_inference_pipeline(model_path)),
-        Recall("source_frame", index=0),
+        Recall("source_frame", prepend=True),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0)
     ], auto_validate=True)

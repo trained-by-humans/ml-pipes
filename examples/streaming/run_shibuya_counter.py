@@ -115,7 +115,7 @@ def build_pipeline(
     post_process = Pipeline([
         FilterPredictionsByClass(_KEEP_CLASSES),
         FilterPredictionsByArea(max_area=_MAX_HUMAN_AREA),
-        Recall("source_frame", index=0),
+        Recall("source_frame", prepend=True),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
     ])

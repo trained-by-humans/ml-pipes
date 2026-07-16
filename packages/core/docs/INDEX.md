@@ -28,7 +28,7 @@ package catalogs, see
 | `Select(*selector)` | `T` -> selected value | Projects from tuples, mappings, objects, or attribute paths. |
 | `Pick(*indices)` | tuple -> selected element(s) | Tuple shorthand for routing one or more tuple outputs forward. |
 | `Store(name, source=...)` | `T` -> `T` | Saves the current value or a selected subvalue into context. |
-| `Recall(name, index=None)` | `T` -> tuple or tuple splice | Re-inserts a stored value into the flowing boundary. |
+| `Recall(name, prepend=False)` | `T` -> tuple with stored value appended or prepended | Re-inserts a stored value into the flowing boundary. |
 
 ## Regions And Parallelism
 

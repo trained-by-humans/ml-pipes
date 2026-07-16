@@ -464,6 +464,15 @@ def test_describe_renders_context_operators_with_captured_args():
     assert repr(description) == _pipeline_text("Store('saved')", "Recall('saved')")
 
 
+def test_describe_renders_recall_prepend_arg() -> None:
+    description = Pipeline([Recall("saved", prepend=True)]).describe()
+
+    assert [operator.passed_args for operator in description.operators] == [
+        {"name": "saved", "prepend": True},
+    ]
+    assert repr(description) == _pipeline_text("Recall('saved', prepend=True)")
+
+
 def test_describe_keeps_batch_region_operators_in_chain_order():
     description = Pipeline([Batch(size=2), ListIdentity(), UnBatch()]).describe()
 
