@@ -35,9 +35,8 @@ def _fake_release_pyprojects(version: str = "0.2.0") -> dict[str, dict[str, obje
                 ],
                 "optional-dependencies": {
                     "inspection": [
-                        f"ml-pipes-onnx=={version}",
-                        f"ml-pipes-tensor=={version}",
-                        f"ml-pipes-vision=={version}",
+                        "matplotlib>=3.8",
+                        "opencv-python>=4.9",
                     ],
                 },
             },
@@ -121,26 +120,46 @@ def _patch_pyprojects(
     return pyprojects
 
 
-def test_validate_release_metadata_accepts_current_manifests() -> None:
+def test_validate_release_metadata_accepts_valid_manifests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_release_packages_module()
-    _skip_without_toml_parser(module)
+    _patch_pyprojects(monkeypatch, module)
 
-    version, manifests = module.validate_release_metadata("v0.1.0")
+    version, manifests = module.validate_release_metadata("v0.2.0")
 
-    assert version == "0.1.0"
+    assert version == "0.2.0"
     assert [manifest.dist_name for manifest in manifests] == [
         dist_name for _, dist_name in module.PACKAGE_ORDER
     ]
     assert manifests[0].runtime_internal_dependencies == ()
     assert manifests[1].runtime_internal_dependencies == ("ml-pipes-core",)
     assert manifests[-1].runtime_internal_dependencies == ("ml-pipes-core",)
-    assert any(
+    assert not any(
         dependency.source == "project.optional-dependencies.inspection"
+        and dependency.dist_name in {"ml-pipes-onnx", "ml-pipes-tensor", "ml-pipes-vision"}
         for dependency in manifests[0].internal_dependency_requirements
     )
     assert any(
         dependency.source == "project.optional-dependencies.all"
         for dependency in manifests[-1].internal_dependency_requirements
+    )
+
+
+def test_package_manifest_captures_optional_internal_dependencies_on_current_manifests() -> None:
+    module = _load_release_packages_module()
+    _skip_without_toml_parser(module)
+
+    core_manifest = module._package_manifest("core", "ml-pipes-core")
+    meta_manifest = module._package_manifest("meta", "ml-pipes")
+
+    assert any(
+        dependency.source == "project.optional-dependencies.inspection"
+        for dependency in core_manifest.internal_dependency_requirements
+    )
+    assert any(
+        dependency.source == "project.optional-dependencies.all"
+        for dependency in meta_manifest.internal_dependency_requirements
     )
 
 
@@ -170,7 +189,24 @@ def test_validate_release_metadata_rejects_stale_optional_internal_pin(
     module = _load_release_packages_module()
     pyprojects = _patch_pyprojects(monkeypatch, module)
 
-    pyprojects["core"]["project"]["optional-dependencies"]["inspection"][0] = "ml-pipes-onnx==0.1.0"
+    pyprojects["meta"]["project"]["optional-dependencies"]["all"][0] = "ml-pipes-core[inspection]==0.1.0"
+
+    with pytest.raises(ValueError, match="project.optional-dependencies.all requirement"):
+        module.validate_release_metadata("v0.2.0")
+
+
+def test_validate_release_metadata_rejects_optional_internal_publish_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_release_packages_module()
+    pyprojects = _patch_pyprojects(monkeypatch, module)
+
+    pyprojects["core"]["project"]["optional-dependencies"]["inspection"] = [
+        "matplotlib>=3.8",
+        f"ml-pipes-onnx==0.2.0",
+        f"ml-pipes-tensor==0.2.0",
+        f"ml-pipes-vision==0.2.0",
+    ]
 
     with pytest.raises(ValueError, match="project.optional-dependencies.inspection requirement"):
         module.validate_release_metadata("v0.2.0")

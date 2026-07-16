@@ -10,10 +10,10 @@ Use a Python 3.11+ environment for local release validation when possible.
 If you run release validation under Python 3.10, install `tomli` because the
 standard-library `tomllib` module is not available there yet.
 
-Install the local release tooling you need:
+Install the pinned local release tooling used by the release workflow:
 
 ```bash
-python3 -m pip install -U build hatchling twine
+python3 -m pip install -r requirements-release.txt
 ```
 
 If you are using Python 3.10, also install:

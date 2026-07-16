@@ -25,6 +25,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTDIR = ROOT / "dist" / "release"
+RELEASE_REQUIREMENTS_FILE = "requirements-release.txt"
 PACKAGE_ORDER = [
     ("core", "ml-pipes-core"),
     ("tensor", "ml-pipes-tensor"),
@@ -73,8 +74,8 @@ def _load_pyproject(package_dir: Path) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
-def _pip_install_command(*packages: str) -> str:
-    return shlex.join([sys.executable, "-m", "pip", "install", "-U", *packages])
+def _pip_install_command(*args: str) -> str:
+    return shlex.join([sys.executable, "-m", "pip", "install", *args])
 
 
 def _ensure_release_tooling(*, include_upload: bool) -> None:
@@ -91,7 +92,7 @@ def _ensure_release_tooling(*, include_upload: bool) -> None:
     raise RuntimeError(
         f"{action} requires release tooling in this interpreter. "
         f"Missing modules: {missing}. "
-        f"Install them with: {_pip_install_command('build', 'hatchling', 'twine')}"
+        f"Install them with: {_pip_install_command('-r', RELEASE_REQUIREMENTS_FILE)}"
     )
 
 
@@ -175,13 +176,14 @@ def _validate_internal_dependency_pins(
                 )
 
 
-def _validate_runtime_publish_order(manifests: list[PackageManifest]) -> None:
+def _validate_publish_order(manifests: list[PackageManifest]) -> None:
     for manifest in manifests:
-        for dependency in manifest.runtime_internal_dependencies:
-            if PACKAGE_ORDER_INDEX[dependency] >= PACKAGE_ORDER_INDEX[manifest.dist_name]:
+        for dependency in manifest.internal_dependency_requirements:
+            if PACKAGE_ORDER_INDEX[dependency.dist_name] >= PACKAGE_ORDER_INDEX[manifest.dist_name]:
                 raise ValueError(
-                    f"Publish order is invalid: {manifest.dist_name} depends on {dependency}, "
-                    "but the dependency is not published earlier"
+                    f"Publish order is invalid: {manifest.dist_name} declares "
+                    f"{dependency.source} requirement {dependency.requirement!r}, "
+                    f"but the dependency {dependency.dist_name} is not published earlier"
                 )
 
 
@@ -234,7 +236,7 @@ def validate_release_metadata(expected_tag: str | None = None) -> tuple[str, lis
         )
 
     _validate_internal_dependency_pins(manifests, expected_version=version)
-    _validate_runtime_publish_order(manifests)
+    _validate_publish_order(manifests)
 
     return version, manifests
 
