@@ -350,7 +350,7 @@ def is_assignable(
 def _is_assignable(
     source_annotation: Any,
     target_annotation: Any,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     if isinstance(target_annotation, TypeVar):
         target_annotation = _typevar_constraint_annotation(target_annotation)
@@ -447,7 +447,7 @@ def is_concrete_assignable(source_annotation: Any, target_annotation: Any) -> bo
 def _is_concrete_assignable(
     source_annotation: Any,
     target_annotation: Any,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     if not isinstance(source_annotation, type) or not isinstance(target_annotation, type):
         return False
@@ -466,7 +466,7 @@ def _is_concrete_assignable(
 def _is_non_union_assignable(
     source_annotation: Any,
     target_annotation: Any,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     source_shape = _annotation_shape(source_annotation)
     target_shape = _annotation_shape(target_annotation)
@@ -506,7 +506,7 @@ def _is_concrete_source_assignable_to_default_generic_target(
     source_annotation: Any,
     *,
     target_shape: tuple[Any, tuple[Any, ...]],
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     if not isinstance(source_annotation, type):
         return False
@@ -525,7 +525,7 @@ def _is_parameterized_source_assignable_to_concrete_target(
     *,
     source_shape: tuple[Any, tuple[Any, ...]] | None = None,
     target_shape: tuple[Any, tuple[Any, ...]] | None = None,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     if source_shape is None:
         source_shape = _annotation_shape(source_annotation)
@@ -621,7 +621,7 @@ def _is_generic_assignable(
     *,
     source_shape: tuple[Any, tuple[Any, ...]] | None = None,
     target_shape: tuple[Any, tuple[Any, ...]] | None = None,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     arg_pairs = _generic_argument_pairs(
         source_annotation,
@@ -645,7 +645,7 @@ def _is_generic_assignable(
 def _is_structurally_assignable_to_protocol(
     source_annotation: Any,
     target_annotation: Any,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     from ml_pipes._typing.inspection import (
         resolve_attribute_annotation_info,
@@ -668,7 +668,7 @@ def _is_structurally_assignable_to_protocol(
     except _UnboundTypevarBindingError:
         return False
 
-    pair = (source_owner, target_owner)
+    pair = (source_annotation, target_annotation)
     if pair in protocol_stack:
         return True
 
@@ -764,7 +764,7 @@ def _is_protocol_method_member_assignable(
     source_owner: type,
     target_owner: type,
     member: str,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
     source_annotation: Any,
     source_typevar_bindings: dict[TypeVar, Any],
     target_typevar_bindings: dict[TypeVar, Any],
@@ -846,7 +846,7 @@ def _is_compatible_under_variance(
     source_annotation: Any,
     target_annotation: Any,
     variance: str,
-    protocol_stack: set[tuple[type, type]],
+    protocol_stack: set[tuple[Any, Any]],
 ) -> bool:
     if variance == _INVARIANT:
         return (

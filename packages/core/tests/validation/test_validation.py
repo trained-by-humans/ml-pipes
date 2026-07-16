@@ -313,6 +313,16 @@ class _IntValueAttributeContract(Protocol):
     value: int
 
 
+class _RecursiveNodeContract(Protocol):
+    @property
+    def value(self) -> int:
+        ...
+
+    @property
+    def child(self) -> "_RecursiveNodeContract":
+        ...
+
+
 _IntGetterT = TypeVar("_IntGetterT", bound=_IntGetterContract)
 _AliasedIntGetterT = TypeVar("_AliasedIntGetterT", bound=_AliasedIntGetterContract)
 _IntValueAttributeT = TypeVar("_IntValueAttributeT", bound=_IntValueAttributeContract)
@@ -342,6 +352,24 @@ class ProduceClosedStringProtocolBox:
 class ProduceGenericMergeIntBox:
     def __call__(self, value: int) -> _GenericMergeBox[int]:
         return _GenericMergeBox(value)
+
+
+class _RecursiveNodeBox(Generic[_BoxT]):
+    def __init__(self, value: _BoxT):
+        self._value = value
+        self._child: "_RecursiveNodeBox[str] | None" = None
+
+    def set_child(self, child: "_RecursiveNodeBox[str]") -> None:
+        self._child = child
+
+    @property
+    def value(self) -> _BoxT:
+        return self._value
+
+    @property
+    def child(self) -> "_RecursiveNodeBox[str]":
+        assert self._child is not None
+        return self._child
 
 
 class UseIntGetter:
@@ -386,6 +414,20 @@ class MutateIntValueAttribute:
     def __call__(self, value: _IntValueAttributeT) -> _IntValueAttributeT:
         value.value += 1
         return value
+
+
+class ProduceRecursiveNodeBox:
+    def __call__(self, value: int) -> _RecursiveNodeBox[int]:
+        child = _RecursiveNodeBox(str(value))
+        child.set_child(child)
+        root = _RecursiveNodeBox(value)
+        root.set_child(child)
+        return root
+
+
+class UseRecursiveNode:
+    def __call__(self, value: _RecursiveNodeContract) -> int:
+        return value.child.value + 1
 
 
 class _WritableValueContract(Protocol):
@@ -881,6 +923,17 @@ def test_pipeline_validate_rejects_namedtuple_source_for_writable_protocol_attri
         Pipeline([
             ProduceNamedTupleIntValuePayload(),
             MutateIntValueAttribute(),
+        ]).validate()
+
+
+def test_pipeline_validate_rejects_recursive_protocol_boundary_with_wrong_nested_specialization():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseRecursiveNode",
+    ):
+        Pipeline([
+            ProduceRecursiveNodeBox(),
+            UseRecursiveNode(),
         ]).validate()
 
 
