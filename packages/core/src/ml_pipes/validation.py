@@ -22,8 +22,10 @@ from ml_pipes._typing.annotation import (
     satisfies_annotation_constraint,
     tighten_annotation,
 )
-from ml_pipes._typing.inspection import resolve_callable_annotations
-from ml_pipes._typing.signatures import validate_operator_signature
+from ml_pipes._typing.signatures import (
+    resolve_callable_signature_annotations,
+    validate_operator_signature,
+)
 from ml_pipes.context import ContextOp, Recall, Store
 from ml_pipes.region import RegionCloser, RegionOpener
 
@@ -468,7 +470,7 @@ def require_operator_annotations(
     *,
     label: str,
 ) -> tuple[tuple[Any, ...], Any]:
-    annotations = resolve_callable_annotations(operator)
+    annotations = resolve_callable_signature_annotations(operator)
     if any(annotation is None for annotation in annotations.parameter_annotations):
         raise PipelineValidationError(
             f"Pipeline step {label} is missing a type annotation for __call__ input"
@@ -477,4 +479,7 @@ def require_operator_annotations(
         raise PipelineValidationError(
             f"Pipeline step {label} is missing a return type annotation for __call__"
         )
-    return tuple(annotations.parameter_annotations), annotations.return_annotation
+    return (
+        annotations.parameter_annotations,
+        annotations.return_annotation,
+    )

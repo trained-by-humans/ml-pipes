@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, get_type_hints
+from typing import Any, get_args, get_type_hints
 
 from ml_pipes._typing.annotation import (
     _MISSING_ANNOTATION,
@@ -13,7 +13,6 @@ from ml_pipes._typing.annotation import (
     is_union_annotation,
     is_unknown_annotation,
 )
-from ml_pipes._typing.signatures import _POSITIONAL_VALUE_PARAMETER_KINDS
 
 
 class AttributeResolutionError(Exception):
@@ -52,131 +51,10 @@ class AttributeInspectionError(AttributeResolutionError):
 
 
 @dataclass(frozen=True)
-class CallableAnnotations:
-    parameter_annotations: tuple[Any | None, ...]
-    return_annotation: Any | None
-
-
-@dataclass(frozen=True)
-class CallableParameterAnnotation:
-    parameter: inspect.Parameter
-    annotation: Any | None
-
-
-@dataclass(frozen=True)
-class CallableSignatureAnnotations:
-    parameters: tuple[CallableParameterAnnotation, ...]
-    return_annotation: Any | None
-    is_inspectable: bool
-
-
-@dataclass(frozen=True)
 class AttributeAnnotationInfo:
     annotation: Any
     is_writable: bool
     write_annotation: Any = _MISSING_ANNOTATION
-
-
-def resolve_callable_signature_annotations(
-    callable_: Callable[..., Any],
-) -> CallableSignatureAnnotations:
-    try:
-        signature = inspect.signature(callable_)
-    except (TypeError, ValueError):
-        return CallableSignatureAnnotations((), None, False)
-
-    parameters = tuple(signature.parameters.values())
-    try:
-        hints = _resolve_callable_hints(callable_)
-    except (TypeError, ValueError):
-        return CallableSignatureAnnotations(
-            tuple(
-                CallableParameterAnnotation(parameter, None)
-                for parameter in parameters
-            ),
-            None,
-            True,
-        )
-
-    return_annotation = callable_ if inspect.isclass(callable_) else hints.get("return")
-    return CallableSignatureAnnotations(
-        tuple(
-            CallableParameterAnnotation(parameter, hints.get(parameter.name))
-            for parameter in parameters
-        ),
-        return_annotation,
-        True,
-    )
-
-
-def resolve_callable_annotations(
-    callable_: Callable[..., Any],
-) -> CallableAnnotations:
-    signature_annotations = resolve_callable_signature_annotations(callable_)
-    return CallableAnnotations(
-        tuple(
-            parameter.annotation
-            for parameter in signature_annotations.parameters
-            if parameter.parameter.kind in _POSITIONAL_VALUE_PARAMETER_KINDS
-        ),
-        signature_annotations.return_annotation,
-    )
-
-
-def probe_callable(
-    callable_: Callable[..., Any],
-    /,
-    *args: Any,
-    **kwargs: Any,
-) -> inspect.BoundArguments:
-    return inspect.signature(callable_).bind(*args, **kwargs)
-
-
-def bind_method_call_parameter_names(
-    callable_: Callable[..., Any],
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-    *,
-    include_receiver: bool = True,
-) -> dict[object, str] | None:
-    synthetic_self = object()
-    try:
-        if include_receiver:
-            bound_arguments = probe_callable(callable_, synthetic_self, *args, **kwargs)
-        else:
-            bound_arguments = probe_callable(callable_, *args, **kwargs)
-    except (TypeError, ValueError):
-        return None
-
-    return {
-        argument_value: parameter_name
-        for parameter_name, argument_value in bound_arguments.arguments.items()
-        if argument_value is not synthetic_self
-    }
-
-
-def method_signature_includes_receiver(owner: type, member: str) -> bool | None:
-    raw_member = inspect.getattr_static(owner, member, _MISSING_ANNOTATION)
-    if raw_member is _MISSING_ANNOTATION:
-        return None
-    return not isinstance(raw_member, (staticmethod, classmethod))
-
-
-def _resolve_callable_hints(callable_: Callable[..., Any]) -> dict[str, Any]:
-    return get_type_hints(_resolve_callable_hints_target(callable_))
-
-
-def _resolve_callable_hints_target(callable_: Callable[..., Any]) -> Any:
-    if inspect.isclass(callable_):
-        return getattr(callable_, "__init__", callable_)
-    if (
-        inspect.isfunction(callable_)
-        or inspect.ismethod(callable_)
-        or inspect.isbuiltin(callable_)
-        or inspect.ismethoddescriptor(callable_)
-    ):
-        return callable_
-    return getattr(callable_, "__call__", callable_)
 
 
 def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:

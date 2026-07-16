@@ -188,6 +188,12 @@ are interchangeable.
 | Structural `Protocol`s | `Protocol` with annotated fields and methods | Supported when used as downstream expectations or `TypeVar` bounds. The current supported protocol shape is non-parameterized structural protocols, including annotated data members and `Self`-preserving methods. |
 | Other typing features | `Annotated`, `Literal`, generic `Protocol[T]`, `ParamSpec`, overload-oriented typing constructs | Not part of the current documented compatibility contract. Some cases may work incidentally, but they are not guaranteed. Prefer a simpler boundary annotation or use `resolve_contract(...)` when you need a more explicit contract. |
 
+For structural protocol methods, validation matches the callable surface
+strictly after the receiver (`self` / `cls`) is removed: parameter order,
+keyword-visible names, parameter kinds, and default values must match exactly.
+Once that surface matches, parameter annotations are still checked
+contravariantly and return annotations covariantly.
+
 For more information regarding call signatures and operator contracts, see
 [OPERATORS.md](OPERATORS.md).
 

@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover
     from typing_extensions import Self as _TypingSelf, get_protocol_members, is_protocol
 
 from typing_extensions import Self as _ExtensionSelf
+from ml_pipes._typing.signatures import match_method_signatures
 
 _UNBOUND = object()
 _NONE_TYPE = type(None)
@@ -647,10 +648,7 @@ def _is_structurally_assignable_to_protocol(
     protocol_stack: set[tuple[type, type]],
 ) -> bool:
     from ml_pipes._typing.inspection import (
-        bind_method_call_parameter_names,
-        method_signature_includes_receiver,
         resolve_attribute_annotation_info,
-        resolve_callable_signature_annotations,
     )
 
     source_owner = _resolve_annotation_owner(source_annotation)
@@ -754,9 +752,6 @@ def _is_structurally_assignable_to_protocol(
                 source_annotation,
                 source_typevar_bindings,
                 target_typevar_bindings,
-                bind_method_call_parameter_names,
-                method_signature_includes_receiver,
-                resolve_callable_signature_annotations,
             ):
                 return False
     finally:
@@ -773,171 +768,52 @@ def _is_protocol_method_member_assignable(
     source_annotation: Any,
     source_typevar_bindings: dict[TypeVar, Any],
     target_typevar_bindings: dict[TypeVar, Any],
-    bind_method_call_parameter_names: Callable[..., Any],
-    method_signature_includes_receiver: Callable[..., Any],
-    resolve_callable_signature_annotations: Callable[..., Any],
 ) -> bool:
-    source_member = getattr(source_owner, member, _MISSING_ANNOTATION)
-    target_member = getattr(target_owner, member, _MISSING_ANNOTATION)
-    if source_member is _MISSING_ANNOTATION or target_member is _MISSING_ANNOTATION:
+    matched_signatures = match_method_signatures(
+        source_owner,
+        target_owner,
+        member,
+    )
+    if matched_signatures is None:
         return False
-    if not callable(source_member) or not callable(target_member):
-        return False
+    source_signature, target_signature = matched_signatures
 
-    source_annotations = resolve_callable_signature_annotations(source_member)
-    target_annotations = resolve_callable_signature_annotations(target_member)
+    for source_parameter_annotation, target_parameter_annotation in zip(
+        source_signature.parameter_annotations,
+        target_signature.parameter_annotations,
+    ):
+        source_parameter_annotation = _specialize_protocol_annotation(
+            source_parameter_annotation,
+            source_annotation,
+            source_typevar_bindings,
+        )
+        target_parameter_annotation = _specialize_protocol_annotation(
+            target_parameter_annotation,
+            source_annotation,
+            target_typevar_bindings,
+        )
+        if not _is_assignable(
+            target_parameter_annotation,
+            source_parameter_annotation,
+            protocol_stack,
+        ):
+            return False
+
     source_return_annotation = _specialize_protocol_annotation(
-        source_annotations.return_annotation,
+        source_signature.return_annotation,
         source_annotation,
         source_typevar_bindings,
     )
     target_return_annotation = _specialize_protocol_annotation(
-        target_annotations.return_annotation,
+        target_signature.return_annotation,
         source_annotation,
         target_typevar_bindings,
     )
-    if source_return_annotation is None or target_return_annotation is None:
-        return False
-    if not source_annotations.is_inspectable or not target_annotations.is_inspectable:
-        return False
-
-    source_includes_receiver = method_signature_includes_receiver(
-        source_owner,
-        member,
-    )
-    target_includes_receiver = method_signature_includes_receiver(
-        target_owner,
-        member,
-    )
-    if (
-        source_includes_receiver is None
-        or target_includes_receiver is None
-    ):
-        return False
-
-    if source_includes_receiver:
-        source_value_parameters = source_annotations.parameters[1:]
-    else:
-        source_value_parameters = source_annotations.parameters
-    if target_includes_receiver:
-        target_value_parameters = target_annotations.parameters[1:]
-    else:
-        target_value_parameters = target_annotations.parameters
-    if any(
-        parameter.annotation is None
-        or parameter.parameter.kind in {
-            inspect.Parameter.VAR_POSITIONAL,
-            inspect.Parameter.VAR_KEYWORD,
-        }
-        for parameter in (*source_value_parameters, *target_value_parameters)
-    ):
-        return False
-
-    representative_calls = _representative_protocol_method_calls(
-        target_value_parameters,
-    )
-    if representative_calls is None:
-        return False
-
-    source_parameters_by_name = {
-        parameter.parameter.name: _specialize_protocol_annotation(
-            parameter.annotation,
-            source_annotation,
-            source_typevar_bindings,
-        )
-        for parameter in source_value_parameters
-    }
-    target_parameters_by_name = {
-        parameter.parameter.name: _specialize_protocol_annotation(
-            parameter.annotation,
-            source_annotation,
-            target_typevar_bindings,
-        )
-        for parameter in target_value_parameters
-    }
-    for args, kwargs, placeholder_tokens in representative_calls:
-        source_parameter_bindings = bind_method_call_parameter_names(
-            source_member,
-            args,
-            kwargs,
-            include_receiver=source_includes_receiver,
-        )
-        if source_parameter_bindings is None:
-            return False
-
-        for parameter_name, token in placeholder_tokens.items():
-            source_parameter_name = source_parameter_bindings.get(token)
-            source_parameter_annotation = source_parameters_by_name.get(
-                source_parameter_name,
-            )
-            target_parameter_annotation = target_parameters_by_name.get(parameter_name)
-            if (
-                source_parameter_annotation is None
-                or target_parameter_annotation is None
-            ):
-                return False
-            if not _is_assignable(
-                target_parameter_annotation,
-                source_parameter_annotation,
-                protocol_stack,
-            ):
-                return False
-
     return _is_assignable(
         source_return_annotation,
         target_return_annotation,
         protocol_stack,
     )
-
-
-def _representative_protocol_method_calls(
-    parameters: tuple[Any, ...],
-) -> list[tuple[tuple[object, ...], dict[str, object], dict[str, object]]] | None:
-    calls = [
-        _build_protocol_method_call(parameters, include_optional=False, prefer_keywords=False),
-        _build_protocol_method_call(parameters, include_optional=False, prefer_keywords=True),
-        _build_protocol_method_call(parameters, include_optional=True, prefer_keywords=False),
-        _build_protocol_method_call(parameters, include_optional=True, prefer_keywords=True),
-    ]
-    if any(call is None for call in calls):
-        return None
-    return [call for call in calls if call is not None]
-
-
-def _build_protocol_method_call(
-    parameters: tuple[Any, ...],
-    *,
-    include_optional: bool,
-    prefer_keywords: bool,
-) -> tuple[tuple[object, ...], dict[str, object], dict[str, object]] | None:
-    args: list[object] = []
-    kwargs: dict[str, object] = {}
-    placeholder_tokens: dict[str, object] = {}
-
-    for parameter in parameters:
-        if (
-            not include_optional
-            and parameter.parameter.default is not inspect.Parameter.empty
-        ):
-            continue
-
-        token = object()
-        placeholder_tokens[parameter.parameter.name] = token
-        if parameter.parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
-            args.append(token)
-            continue
-        if parameter.parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD:
-            if prefer_keywords:
-                kwargs[parameter.parameter.name] = token
-            else:
-                args.append(token)
-            continue
-        if parameter.parameter.kind is inspect.Parameter.KEYWORD_ONLY:
-            kwargs[parameter.parameter.name] = token
-            continue
-        return None
-
-    return tuple(args), kwargs, placeholder_tokens
 
 
 def _replace_self_annotation(annotation: Any, concrete_annotation: Any) -> Any:

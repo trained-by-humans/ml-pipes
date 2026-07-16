@@ -274,6 +274,21 @@ class _MixerWithReorderedParameters:
         return self
 
 
+class _MixedBindingMixerProtocol(Protocol):
+    def mix(self, left: int, right: int) -> int:
+        ...
+
+
+class _MatchingMixedBindingMixer:
+    def mix(self, left: int, right: int) -> int:
+        return left + right
+
+
+class _ReorderedMixedBindingMixer:
+    def mix(self, right: int, left: int) -> int:
+        return left + right
+
+
 class _StaticBuildProtocol(Protocol):
     @staticmethod
     def build(value: int) -> str:
@@ -610,8 +625,8 @@ def test_is_assignable_handles_protocol_attribute_shapes(
         ),
         pytest.param(
             _KeywordLimitFilterWithOptionalLimit,
-            True,
-            id="optional-limit",
+            False,
+            id="optional-limit-mismatch",
         ),
         pytest.param(
             _KeywordLimitFilterWithoutLimit,
@@ -620,7 +635,7 @@ def test_is_assignable_handles_protocol_attribute_shapes(
         ),
     ],
 )
-def test_is_assignable_handles_protocol_keyword_only_method_parameter(
+def test_is_assignable_requires_protocol_keyword_only_method_signature_to_match(
     implementation_annotation: Any,
     expected_assignable: bool,
 ) -> None:
@@ -650,6 +665,31 @@ def test_is_assignable_preserves_protocol_method_positional_parameter_order(
     expected_assignable: bool,
 ) -> None:
     assert is_assignable(implementation_annotation, _MixerProtocol) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _MatchingMixedBindingMixer,
+            True,
+            id="matching-parameter-names",
+        ),
+        pytest.param(
+            _ReorderedMixedBindingMixer,
+            False,
+            id="swapped-parameter-names",
+        ),
+    ],
+)
+def test_is_assignable_requires_protocol_method_keyword_visible_parameter_names_to_match(
+    implementation_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        _MixedBindingMixerProtocol,
+    ) is expected_assignable
 
 
 @pytest.mark.parametrize(

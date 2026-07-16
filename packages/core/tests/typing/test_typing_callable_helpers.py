@@ -3,12 +3,9 @@ from unittest.mock import patch
 
 import pytest
 
-from ml_pipes._typing.inspection import (
-    bind_method_call_parameter_names,
-    resolve_callable_annotations,
-    resolve_callable_signature_annotations,
-)
 from ml_pipes._typing.signatures import (
+    match_method_signatures,
+    resolve_callable_signature_annotations,
     validate_callable_signature,
     validate_nullary_callable_signature,
     validate_unary_callable_signature,
@@ -25,20 +22,23 @@ def test_callable_signature_helpers_share_variadic_positional_policy() -> None:
         argument_label="the current value",
         error_type=TypeError,
     )
-    annotations = resolve_callable_annotations(stringify)
+    annotations = resolve_callable_signature_annotations(stringify)
 
     assert parameter.kind is inspect.Parameter.VAR_POSITIONAL
     assert annotations.parameter_annotations == (int,)
     assert annotations.return_annotation is str
 
 
-def test_resolve_callable_annotations_orders_positional_annotations() -> None:
+def test_resolve_callable_signature_annotations_orders_parameters() -> None:
     def predicate(value: int, expected: str = "x") -> bool:
         return str(value) == expected
 
-    annotations = resolve_callable_annotations(predicate)
+    annotations = resolve_callable_signature_annotations(predicate)
 
-    assert annotations.parameter_annotations == (int, str)
+    assert annotations.parameter_annotations == (
+        int,
+        str,
+    )
     assert annotations.return_annotation is bool
 
 
@@ -57,7 +57,7 @@ def test_resolve_callable_signature_annotations_preserves_keyword_only_parameter
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
     )
-    assert tuple(parameter.annotation for parameter in annotations.parameters) == (
+    assert annotations.parameter_annotations == (
         int,
         str,
     )
@@ -71,46 +71,92 @@ def test_resolve_callable_signature_annotations_preserves_keyword_only_parameter
     assert annotations.return_annotation is bool
 
 
-def test_bind_method_call_parameter_names_hides_inspect_binding_details() -> None:
+def test_resolve_callable_signature_annotations_preserves_instance_method_receiver() -> None:
     class Filterable:
-        def filter(self, mask: list[bool], *, limit: int = 0) -> None:
-            del mask, limit
+        def filter(self, value: int) -> str:
+            return str(value)
 
-    mask_token = object()
-    limit_token = object()
+    annotations = resolve_callable_signature_annotations(Filterable.filter)
 
-    parameter_names = bind_method_call_parameter_names(
-        Filterable.filter,
-        (mask_token,),
-        {"limit": limit_token},
+    assert tuple(parameter.parameter.name for parameter in annotations.parameters) == (
+        "self",
+        "value",
+    )
+    assert annotations.parameter_annotations == (None, int)
+    assert annotations.return_annotation is str
+
+
+def test_match_method_signatures_accepts_exact_callable_surface() -> None:
+    class ProtocolLike:
+        def filter(self, value: int, *, limit: int = 0) -> str:
+            return str(value + limit)
+
+    class Implementation:
+        def filter(self, value: int, *, limit: int = 0) -> str:
+            return str(value + limit)
+
+    matched_signatures = match_method_signatures(
+        Implementation,
+        ProtocolLike,
+        "filter",
     )
 
-    assert parameter_names == {
-        mask_token: "mask",
-        limit_token: "limit",
-    }
+    assert matched_signatures is not None
+    source_signature, target_signature = matched_signatures
+    assert tuple(
+        parameter.parameter.name for parameter in source_signature.parameters
+    ) == ("value", "limit")
+    assert tuple(
+        parameter.parameter.name for parameter in target_signature.parameters
+    ) == ("value", "limit")
 
 
-def test_bind_method_call_parameter_names_supports_static_methods_without_receiver() -> None:
-    class Builder:
-        @staticmethod
-        def build(value: int, *, prefix: str = "") -> str:
-            return prefix + str(value)
+def test_match_method_signatures_rejects_keyword_visible_parameter_name_mismatch() -> None:
+    class ProtocolLike:
+        def mix(self, left: int, right: int) -> int:
+            return left + right
 
-    value_token = object()
-    prefix_token = object()
+    class Implementation:
+        def mix(self, right: int, left: int) -> int:
+            return left + right
 
-    parameter_names = bind_method_call_parameter_names(
-        Builder.build,
-        (value_token,),
-        {"prefix": prefix_token},
-        include_receiver=False,
-    )
+    assert match_method_signatures(
+        Implementation,
+        ProtocolLike,
+        "mix",
+    ) is None
 
-    assert parameter_names == {
-        value_token: "value",
-        prefix_token: "prefix",
-    }
+
+def test_match_method_signatures_rejects_default_value_mismatch() -> None:
+    class ProtocolLike:
+        def filter(self, value: int, *, limit: int = 0) -> str:
+            return str(value + limit)
+
+    class Implementation:
+        def filter(self, value: int, *, limit: int = 1) -> str:
+            return str(value + limit)
+
+    assert match_method_signatures(
+        Implementation,
+        ProtocolLike,
+        "filter",
+    ) is None
+
+
+def test_match_method_signatures_rejects_missing_return_annotation() -> None:
+    class ProtocolLike:
+        def filter(self, value: int) -> str:
+            return str(value)
+
+    class Implementation:
+        def filter(self, value: int):
+            return str(value)
+
+    assert match_method_signatures(
+        Implementation,
+        ProtocolLike,
+        "filter",
+    ) is None
 
 
 def test_unary_callable_signature_reuses_public_callable_validation() -> None:

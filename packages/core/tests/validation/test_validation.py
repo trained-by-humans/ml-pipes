@@ -174,6 +174,44 @@ class FilterLegacyProtocolPrediction:
         return value.filter([True for _ in value.labels])
 
 
+class _MixedBindingMixerContract(Protocol):
+    def mix(self, left: int, right: int) -> int:
+        ...
+
+
+_MixedBindingMixerT = TypeVar(
+    "_MixedBindingMixerT",
+    bound=_MixedBindingMixerContract,
+)
+
+
+class _MatchingMixedBindingMixer:
+    def mix(self, left: int, right: int) -> int:
+        return left + right
+
+
+class _ReorderedMixedBindingMixer:
+    def mix(self, right: int, left: int) -> int:
+        return left + right
+
+
+class ProduceMatchingMixedBindingMixer:
+    def __call__(self, value: int) -> _MatchingMixedBindingMixer:
+        del value
+        return _MatchingMixedBindingMixer()
+
+
+class ProduceReorderedMixedBindingMixer:
+    def __call__(self, value: int) -> _ReorderedMixedBindingMixer:
+        del value
+        return _ReorderedMixedBindingMixer()
+
+
+class UseMixedBindingMixer:
+    def __call__(self, value: _MixedBindingMixerT) -> int:
+        return value.mix(1, right=2)
+
+
 class _StaticBuildContract(Protocol):
     @staticmethod
     def build(value: int) -> str:
@@ -677,6 +715,16 @@ def test_pipeline_validate_accepts_legacy_typevar_self_structural_protocol_bound
     assert contract.output_type is _LegacyProtocolPrediction
 
 
+def test_pipeline_validate_accepts_protocol_method_with_matching_keyword_visible_parameters():
+    contract = Pipeline([
+        ProduceMatchingMixedBindingMixer(),
+        UseMixedBindingMixer(),
+    ]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is int
+
+
 @pytest.mark.parametrize(
     ("producer", "consumer"),
     [
@@ -758,6 +806,17 @@ def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer
         match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
     ):
         Pipeline([producer, FilterProtocolPrediction()]).validate()
+
+
+def test_pipeline_validate_rejects_protocol_method_with_swapped_keyword_visible_parameters():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseMixedBindingMixer",
+    ):
+        Pipeline([
+            ProduceReorderedMixedBindingMixer(),
+            UseMixedBindingMixer(),
+        ]).validate()
 
 
 @pytest.mark.parametrize(
