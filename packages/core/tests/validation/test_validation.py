@@ -3,7 +3,7 @@ import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, Protocol, TypedDict, TypeVar
+from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, NamedTuple, Protocol, TypedDict, TypeVar
 
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import (
@@ -363,14 +363,29 @@ class _TypedDictIntValuePayload(TypedDict):
     value: int
 
 
+class _NamedTupleIntValuePayload(NamedTuple):
+    value: int
+
+
 class ProduceTypedDictIntValuePayload:
     def __call__(self, value: int) -> _TypedDictIntValuePayload:
         return {"value": value}
 
 
+class ProduceNamedTupleIntValuePayload:
+    def __call__(self, value: int) -> _NamedTupleIntValuePayload:
+        return _NamedTupleIntValuePayload(value)
+
+
 class UseIntValueAttribute:
     def __call__(self, value: _IntValueAttributeT) -> int:
         return value.value + 1
+
+
+class MutateIntValueAttribute:
+    def __call__(self, value: _IntValueAttributeT) -> _IntValueAttributeT:
+        value.value += 1
+        return value
 
 
 class _WritableValueContract(Protocol):
@@ -856,6 +871,17 @@ def test_pipeline_validate_rejects_typed_dict_source_for_protocol_attribute_boun
         match=r"Pipeline contract mismatch at 1:UseIntValueAttribute",
     ):
         Pipeline([ProduceTypedDictIntValuePayload(), UseIntValueAttribute()]).validate()
+
+
+def test_pipeline_validate_rejects_namedtuple_source_for_writable_protocol_attribute_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:MutateIntValueAttribute",
+    ):
+        Pipeline([
+            ProduceNamedTupleIntValuePayload(),
+            MutateIntValueAttribute(),
+        ]).validate()
 
 
 @pytest.mark.parametrize(

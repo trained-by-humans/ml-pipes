@@ -138,6 +138,8 @@ def resolve_attribute_annotation_info(annotation: Any, attribute: str) -> Attrib
     except (NameError, TypeError, ValueError) as exc:
         raise AttributeInspectionError(annotation, attribute, "attribute annotations are unavailable") from exc
     if hint is not _MISSING_ANNOTATION:
+        if _is_readonly_class_field_descriptor(owner, descriptor):
+            return AttributeAnnotationInfo(hint, False)
         return AttributeAnnotationInfo(hint, True, hint)
     if descriptor is not _MISSING_ANNOTATION:
         return AttributeAnnotationInfo(_MISSING_ANNOTATION, False)
@@ -156,6 +158,18 @@ def _resolve_property_setter_annotation(descriptor: property) -> Any:
     return get_type_hints(descriptor.fset).get(
         setter_value_name,
         _MISSING_ANNOTATION,
+    )
+
+
+def _is_readonly_class_field_descriptor(owner: type, descriptor: Any) -> bool:
+    if descriptor is _MISSING_ANNOTATION:
+        return False
+
+    descriptor_type = type(descriptor)
+    return (
+        issubclass(owner, tuple)
+        and descriptor_type.__module__ == "collections"
+        and descriptor_type.__name__ == "_tuplegetter"
     )
 
 

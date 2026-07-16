@@ -1,4 +1,4 @@
-from typing import Any, TypedDict
+from typing import Any, NamedTuple, TypedDict
 
 import pytest
 
@@ -75,6 +75,10 @@ class _TypedDictAttributeOwner(TypedDict):
     value: int
 
 
+class _NamedTupleAttributeOwner(NamedTuple):
+    value: int
+
+
 class _BrokenTypedDictAttributeOwner(TypedDict):
     value: "MissingType"
 
@@ -136,6 +140,14 @@ def test_resolve_attribute_annotation(annotation: Any, attribute: str, expected:
             True,
             int,
             id="annotated-attribute",
+        ),
+        pytest.param(
+            _NamedTupleAttributeOwner,
+            "value",
+            int,
+            False,
+            _MISSING_ANNOTATION,
+            id="readonly-namedtuple-attribute",
         ),
         pytest.param(
             _PropertyAttributeOwner,
