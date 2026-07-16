@@ -3,6 +3,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Mapping, TypeVar, overload
+try:
+    from typing import TypeVarTuple, Unpack
+except ImportError:  # pragma: no cover - Python < 3.11
+    from typing_extensions import TypeVarTuple, Unpack
 
 from ml_pipes._typing.annotation import (
     build_union_annotation_from_options,
@@ -49,6 +53,8 @@ InputT = TypeVar("InputT", contravariant=True)
 OutputT = TypeVar("OutputT", covariant=True)
 StoredT = TypeVar("StoredT")
 PrependT = TypeVar("PrependT", bound=bool)
+TupleItemT = TypeVar("TupleItemT")
+TuplePartsT = TypeVarTuple("TuplePartsT")
 
 
 class ContextOp(ABC, Generic[InputT, OutputT]):
@@ -121,7 +127,11 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, PrependT]):
     """
 
     @overload
-    def __init__(self: "Recall[StoredT, Literal[False]]", name: str, prepend: Literal[False] = False) -> None:
+    def __init__(self: "Recall[StoredT, Literal[False]]", name: str) -> None:
+        ...
+
+    @overload
+    def __init__(self: "Recall[StoredT, Literal[False]]", name: str, prepend: Literal[False]) -> None:
         ...
 
     @overload
@@ -135,9 +145,41 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, PrependT]):
     @overload
     def apply(
         self: "Recall[StoredT, Literal[False]]",
+        current: tuple[Unpack[TuplePartsT]],
+        context: Context,
+    ) -> tuple[tuple[Unpack[TuplePartsT], StoredT], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[False]]",
+        current: tuple[TupleItemT, ...],
+        context: Context,
+    ) -> tuple[tuple[Unpack[tuple[TupleItemT, ...]], StoredT], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[False]]",
         current: CurrentT,
         context: Context,
     ) -> tuple[tuple[CurrentT, StoredT], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[True]]",
+        current: tuple[Unpack[TuplePartsT]],
+        context: Context,
+    ) -> tuple[tuple[StoredT, Unpack[TuplePartsT]], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[True]]",
+        current: tuple[TupleItemT, ...],
+        context: Context,
+    ) -> tuple[tuple[StoredT, Unpack[tuple[TupleItemT, ...]]], Context]:
         ...
 
     @overload

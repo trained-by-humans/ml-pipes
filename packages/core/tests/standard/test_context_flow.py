@@ -110,6 +110,48 @@ def test_store_select_type_flow_passes():
     Pipeline([Store("image_shape", source="spatial_shape"), Recall("image_shape")]).validate()
 
 
+def test_recall_appends_to_existing_tuple_current() -> None:
+    pipeline = Pipeline([
+        IntToPair(),
+        Store("saved_text", source=1),
+        Recall("saved_text"),
+    ])
+
+    assert pipeline(9) == (9, "9", "9")
+
+
+def test_recall_prepends_to_existing_tuple_current() -> None:
+    pipeline = Pipeline([
+        IntToPair(),
+        Store("saved_text", source=1),
+        Recall("saved_text", prepend=True),
+    ])
+
+    assert pipeline(9) == ("9", 9, "9")
+
+
+def test_recall_resolve_contract_appends_to_fixed_tuple_shape() -> None:
+    input_types, output_type = Recall("x").resolve_contract(
+        tuple[int, str],
+        {"x": float},
+        PipelineValidationError,
+    )
+
+    assert input_types == (Any,)
+    assert output_type == (int, str, float)
+
+
+def test_recall_resolve_contract_prepends_to_fixed_tuple_shape() -> None:
+    input_types, output_type = Recall("x", prepend=True).resolve_contract(
+        tuple[int, str],
+        {"x": float},
+        PipelineValidationError,
+    )
+
+    assert input_types == (Any,)
+    assert output_type == (float, int, str)
+
+
 def test_recall_resolve_contract_keeps_variadic_tuple_item_type_when_store_matches_it():
     input_types, output_type = Recall("x").resolve_contract(
         tuple[int, ...],
