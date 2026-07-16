@@ -41,6 +41,7 @@ _PINNED_REQUIREMENT_RE = re.compile(
     r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
     r"(?:\[[^\]]+\])?\s*==\s*(?P<version>[^;\s]+)\s*(?:;.*)?$"
 )
+_NORMALIZE_DIST_NAME_RE = re.compile(r"[-_.]+")
 
 
 @dataclass(frozen=True)
@@ -103,8 +104,12 @@ def _requirement_name(requirement: str) -> str:
     return match.group(1)
 
 
+def _normalize_dist_name(name: str) -> str:
+    return _NORMALIZE_DIST_NAME_RE.sub("-", name).lower()
+
+
 def _internal_dependency(requirement: str, *, source: str) -> InternalDependency | None:
-    name = _requirement_name(requirement)
+    name = _normalize_dist_name(_requirement_name(requirement))
     if name not in INTERNAL_DIST_NAMES:
         return None
 

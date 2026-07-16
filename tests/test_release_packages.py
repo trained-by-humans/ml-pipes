@@ -228,6 +228,18 @@ def test_validate_release_metadata_requires_exact_internal_pins(
         module.validate_release_metadata("v0.2.0")
 
 
+def test_validate_release_metadata_canonicalizes_internal_dependency_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_release_packages_module()
+    pyprojects = _patch_pyprojects(monkeypatch, module)
+
+    pyprojects["tensor"]["project"]["dependencies"][0] = "ml_pipes.core==0.1.0"
+
+    with pytest.raises(ValueError, match="project.dependencies requirement"):
+        module.validate_release_metadata("v0.2.0")
+
+
 def test_load_pyproject_requires_toml_parser(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_release_packages_module()
 
