@@ -211,7 +211,7 @@ output through formatters and renderers.
 
 Built on top of:
 
-- tracing, especially the captured span tree and `CaptureCollector`
+- tracing, especially the captured span tree and frozen trace snapshots
 - normal pipeline execution
 
 Main components:

@@ -256,6 +256,20 @@ def test_inspect_short_circuit_stops_downstream_and_round_trips() -> None:
     assert restored.spans[1].output_value is SHORT_CIRCUIT
 
 
+def test_inspect_ignores_active_trace_collector() -> None:
+    class _BrokenCollector(TraceCollector):
+        def on_trace(self, trace: InvocationTrace) -> None:
+            raise RuntimeError("collector is broken")
+
+    pipeline = Pipeline([_double])
+    pipeline.set_tracing(_BrokenCollector())
+
+    result = pipeline.inspect(3)
+
+    assert [span.label for span in result.spans] == ["0:_double"]
+    assert result.spans[0].output_value == 6
+
+
 def test_set_tracing_window():
     p = Pipeline([_double])
     cap = _Capture()

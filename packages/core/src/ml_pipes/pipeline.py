@@ -11,7 +11,6 @@ from ml_pipes._typing.annotation import (
     is_assignable,
 )
 from ml_pipes._typing.signatures import validate_operator_signature
-from ml_pipes.collectors import CaptureCollector
 from ml_pipes.context import Context, ContextOp
 from ml_pipes.control import SHORT_CIRCUIT
 from ml_pipes.inspection.artifacts import InspectionResult
@@ -139,15 +138,13 @@ class Pipeline(Generic[InputT, OutputT]):
 
     def inspect(self, value: InputT) -> InspectionResult:
         """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
-        collector = CaptureCollector()
-        cfg = TracingConfig(collector, capture_shapes=True, _capture_outputs=True, capture_config=True)
+        trace = InvocationTrace()
+        cfg = TracingConfig(capture_shapes=True, _capture_outputs=True, capture_config=True)
         try:
-            self._call_with_tracing(value, cfg)
+            self._execute(value, trace=trace, cfg=cfg)
         except Exception:
             pass
-        if collector.last_trace is None:
-            return InspectionResult([])
-        return InspectionResult(collector.last_trace.spans)
+        return InspectionResult(freeze_trace(trace).spans)
 
     def __repr__(self) -> str:
         return self._describe().render()
@@ -171,7 +168,7 @@ class Pipeline(Generic[InputT, OutputT]):
             result, trace = self._execute(value, trace=trace, cfg=cfg)
             return result
         finally:
-            if cfg is not None:
+            if cfg is not None and cfg.collector is not None:
                 try:
                     cfg.collector.on_trace(freeze_trace(trace))
                 except Exception:

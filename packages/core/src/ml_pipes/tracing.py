@@ -166,10 +166,11 @@ class TracingConfig:
 
     Pipeline.set_tracing() only exposes collector attachment. Richer capture
     flags stay internal so inspection can reuse tracing without widening the
-    public tracing surface.
+    public tracing surface. Some internal callers, such as inspect(), capture
+    spans directly and therefore leave collector unset.
     """
 
-    collector: TraceCollector
+    collector: TraceCollector | None = None
     capture_config: bool = False
     capture_shapes: bool = False
     _capture_outputs: bool = False  # used internally by Pipeline.inspect(); not exposed via set_tracing()
