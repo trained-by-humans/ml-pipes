@@ -11,7 +11,7 @@ from collections.abc import (
 )
 import inspect
 from types import UnionType
-from typing import Any, Callable, Generic, Protocol, TypeVar, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Generic, Protocol, TypeAlias, TypeVar, get_args, get_origin, get_type_hints
 
 try:
     from typing import Self as _TypingSelf, get_protocol_members, is_protocol
@@ -29,12 +29,18 @@ _INVARIANT = "invariant"
 _CONTRAVARIANT = "contravariant"
 _SELF_ANNOTATIONS = frozenset({_TypingSelf, _ExtensionSelf})
 
+# Runtime annotation values can be plain classes, generic aliases, unions,
+# TypeVars, sentinels, or the Any singleton.
+Annotation: TypeAlias = object
+AnnotationShape: TypeAlias = tuple[Annotation, tuple[Annotation, ...]]
+TypeVarBindings: TypeAlias = dict[TypeVar, Annotation]
+
 
 class _UnboundTypevarBindingError(Exception):
     pass
 
 
-def expand_annotation_parts(annotation: Any) -> tuple[Any, ...]:
+def expand_annotation_parts(annotation: Annotation) -> tuple[Annotation, ...]:
     """Expand an annotation into parts used for multi-parameter matching.
 
     Fixed tuples are expanded into one annotation per positional part.
@@ -56,15 +62,15 @@ def expand_annotation_parts(annotation: Any) -> tuple[Any, ...]:
     return (annotation,)
 
 
-def collapse_annotation_parts(annotation_parts: tuple[Any, ...]) -> Any:
+def collapse_annotation_parts(annotation_parts: tuple[Annotation, ...]) -> Annotation:
     if len(annotation_parts) == 1:
         return annotation_parts[0]
     return tuple[annotation_parts]
 
 
-def build_union_annotation_from_options(*annotations: Any) -> Any:
+def build_union_annotation_from_options(*annotations: Annotation) -> Annotation:
     """Build a union annotation for alternative options, falling back to Any."""
-    unique_annotations: list[Any] = []
+    unique_annotations: list[Annotation] = []
     for annotation in annotations:
         if annotation is Any:
             return Any
@@ -80,7 +86,7 @@ def build_union_annotation_from_options(*annotations: Any) -> Any:
         return Any
 
 
-def remove_none_annotation_options(annotation: Any) -> Any | None:
+def remove_none_annotation_options(annotation: Annotation) -> Annotation | None:
     if annotation in {None, _NONE_TYPE}:
         return None
     if not is_union_annotation(annotation):
@@ -96,17 +102,17 @@ def remove_none_annotation_options(annotation: Any) -> Any | None:
     return build_union_annotation_from_options(*remaining_options)
 
 
-def iterable_annotation(item_annotation: Any) -> Any:
+def iterable_annotation(item_annotation: Annotation) -> Annotation:
     item_annotation = _NONE_TYPE if item_annotation is None else item_annotation
     return Iterable[item_annotation]
 
 
-def list_annotation(item_annotation: Any) -> Any:
+def list_annotation(item_annotation: Annotation) -> Annotation:
     item_annotation = _NONE_TYPE if item_annotation is None else item_annotation
     return list[item_annotation]
 
 
-def describe_annotation(annotation: Any) -> str:
+def describe_annotation(annotation: Annotation) -> str:
     if annotation in {None, _NONE_TYPE}:
         return "None"
     if isinstance(annotation, type) and annotation.__module__ == "builtins":
@@ -114,16 +120,16 @@ def describe_annotation(annotation: Any) -> str:
     return repr(annotation)
 
 
-def is_unknown_annotation(annotation: Any) -> bool:
+def is_unknown_annotation(annotation: Annotation) -> bool:
     return annotation in {Any, object}
 
 
-def is_union_annotation(annotation: Any) -> bool:
+def is_union_annotation(annotation: Annotation) -> bool:
     origin = get_origin(annotation)
     return origin in (UnionType, getattr(__import__("typing"), "Union"))
 
 
-def is_iterable_annotation(annotation: Any) -> bool:
+def is_iterable_annotation(annotation: Annotation) -> bool:
     annotation = remove_none_annotation_options(annotation)
     if annotation in {Any, object, None}:
         return False
@@ -148,7 +154,7 @@ def is_iterable_annotation(annotation: Any) -> bool:
     return False
 
 
-def is_mapping_annotation(annotation: Any) -> bool:
+def is_mapping_annotation(annotation: Annotation) -> bool:
     annotation = remove_none_annotation_options(annotation)
     if annotation in {Any, object, None}:
         return False
@@ -170,7 +176,7 @@ def is_mapping_annotation(annotation: Any) -> bool:
     return False
 
 
-def is_typed_dict_annotation(annotation: Any) -> bool:
+def is_typed_dict_annotation(annotation: Annotation) -> bool:
     return (
         isinstance(annotation, type)
         and issubclass(annotation, dict)
@@ -179,7 +185,7 @@ def is_typed_dict_annotation(annotation: Any) -> bool:
     )
 
 
-def _resolve_annotation_owner(annotation: Any) -> type | None:
+def _resolve_annotation_owner(annotation: Annotation) -> type | None:
     origin = get_origin(annotation)
     if isinstance(origin, type):
         return origin
@@ -188,7 +194,7 @@ def _resolve_annotation_owner(annotation: Any) -> type | None:
     return None
 
 
-def resolve_mapping_annotation(annotation: Any) -> tuple[Any, Any] | None:
+def resolve_mapping_annotation(annotation: Annotation) -> tuple[Annotation, Annotation] | None:
     if is_typed_dict_annotation(annotation):
         return str, Any
 
@@ -207,7 +213,7 @@ def resolve_mapping_annotation(annotation: Any) -> tuple[Any, Any] | None:
     return Any, Any
 
 
-def resolve_typed_dict_key_annotation(annotation: Any, key: str) -> Any:
+def resolve_typed_dict_key_annotation(annotation: Annotation, key: str) -> Annotation:
     try:
         hints = get_type_hints(annotation)
     except Exception:
@@ -215,7 +221,7 @@ def resolve_typed_dict_key_annotation(annotation: Any, key: str) -> Any:
     return hints.get(key, _MISSING_ANNOTATION)
 
 
-def resolve_iterable_item_annotation(annotation: Any) -> Any:
+def resolve_iterable_item_annotation(annotation: Annotation) -> Annotation:
     annotation = remove_none_annotation_options(annotation)
     if annotation in {Any, object, None}:
         return Any
@@ -260,7 +266,7 @@ def resolve_iterable_item_annotation(annotation: Any) -> Any:
     return Any
 
 
-def resolve_sequence_item_annotation(annotation: Any) -> Any:
+def resolve_sequence_item_annotation(annotation: Annotation) -> Annotation:
     origin = get_origin(annotation)
     if origin in {list, Sequence, MutableSequence}:
         return resolve_iterable_item_annotation(annotation)
@@ -276,7 +282,7 @@ def resolve_sequence_item_annotation(annotation: Any) -> Any:
     return _MISSING_ANNOTATION
 
 
-def is_mutable_sequence_annotation(annotation: Any) -> bool:
+def is_mutable_sequence_annotation(annotation: Annotation) -> bool:
     owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return False
@@ -287,7 +293,7 @@ def is_mutable_sequence_annotation(annotation: Any) -> bool:
         return False
 
 
-def is_generic_indexable_annotation(annotation: Any) -> bool:
+def is_generic_indexable_annotation(annotation: Annotation) -> bool:
     owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return False
@@ -297,7 +303,7 @@ def is_generic_indexable_annotation(annotation: Any) -> bool:
         return False
 
 
-def is_generic_writable_indexable_annotation(annotation: Any) -> bool:
+def is_generic_writable_indexable_annotation(annotation: Annotation) -> bool:
     owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return False
@@ -308,9 +314,9 @@ def is_generic_writable_indexable_annotation(annotation: Any) -> bool:
 
 
 def align_source_annotation_to_target_annotations(
-    source_annotation: Any,
-    target_annotations: tuple[Any, ...],
-) -> tuple[Any, ...] | None:
+    source_annotation: Annotation,
+    target_annotations: tuple[Annotation, ...],
+) -> tuple[Annotation, ...] | None:
     if len(target_annotations) == 1:
         return (source_annotation,)
 
@@ -321,8 +327,8 @@ def align_source_annotation_to_target_annotations(
 
 
 def is_output_annotation_assignable_to_input_annotations(
-    source_output_annotation: Any,
-    target_input_annotations: tuple[Any, ...],
+    source_output_annotation: Annotation,
+    target_input_annotations: tuple[Annotation, ...],
 ) -> bool:
     aligned_source_annotations = align_source_annotation_to_target_annotations(
         source_output_annotation,
@@ -341,16 +347,16 @@ def is_output_annotation_assignable_to_input_annotations(
 
 
 def is_assignable(
-    source_annotation: Any,
-    target_annotation: Any,
+    source_annotation: Annotation,
+    target_annotation: Annotation,
 ) -> bool:
     return _is_assignable(source_annotation, target_annotation, set())
 
 
 def _is_assignable(
-    source_annotation: Any,
-    target_annotation: Any,
-    protocol_stack: set[tuple[Any, Any]],
+    source_annotation: Annotation,
+    target_annotation: Annotation,
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     if isinstance(target_annotation, TypeVar):
         target_annotation = _typevar_constraint_annotation(target_annotation)
@@ -380,18 +386,27 @@ def _is_assignable(
     )
 
 
-def tighten_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+def tighten_annotation(
+    current_annotation: Annotation,
+    candidate_annotation: Annotation,
+) -> Annotation:
     tightened_annotation = try_tighten_annotation(current_annotation, candidate_annotation)
     if tightened_annotation is not _UNBOUND:
         return tightened_annotation
     return current_annotation
 
 
-def satisfies_annotation_constraint(constraint_annotation: Any, annotation: Any) -> bool:
+def satisfies_annotation_constraint(
+    constraint_annotation: Annotation,
+    annotation: Annotation,
+) -> bool:
     return try_tighten_annotation(constraint_annotation, annotation) is not _UNBOUND
 
 
-def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+def try_tighten_annotation(
+    current_annotation: Annotation,
+    candidate_annotation: Annotation,
+) -> Annotation:
     if current_annotation is None or current_annotation is Any:
         return candidate_annotation
     if candidate_annotation is None or candidate_annotation is Any:
@@ -432,22 +447,25 @@ def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -
     return _rebuild_annotation_like(current_annotation, tuple(merged_args))
 
 
-def normalize_published_annotation(annotation: Any) -> Any:
+def normalize_published_annotation(annotation: Annotation) -> Annotation:
     return _transform_annotation(annotation, _normalize_published_annotation)
 
 
-def materialize_probe_annotation(annotation: Any) -> Any:
+def materialize_probe_annotation(annotation: Annotation) -> Annotation:
     return _transform_annotation(annotation, _materialize_probe_annotation)
 
 
-def is_concrete_assignable(source_annotation: Any, target_annotation: Any) -> bool:
+def is_concrete_assignable(
+    source_annotation: Annotation,
+    target_annotation: Annotation,
+) -> bool:
     return _is_concrete_assignable(source_annotation, target_annotation, set())
 
 
 def _is_concrete_assignable(
-    source_annotation: Any,
-    target_annotation: Any,
-    protocol_stack: set[tuple[Any, Any]],
+    source_annotation: Annotation,
+    target_annotation: Annotation,
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     if not isinstance(source_annotation, type) or not isinstance(target_annotation, type):
         return False
@@ -464,9 +482,9 @@ def _is_concrete_assignable(
 
 
 def _is_non_union_assignable(
-    source_annotation: Any,
-    target_annotation: Any,
-    protocol_stack: set[tuple[Any, Any]],
+    source_annotation: Annotation,
+    target_annotation: Annotation,
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     source_shape = _annotation_shape(source_annotation)
     target_shape = _annotation_shape(target_annotation)
@@ -503,10 +521,10 @@ def _is_non_union_assignable(
 
 
 def _is_concrete_source_assignable_to_default_generic_target(
-    source_annotation: Any,
+    source_annotation: Annotation,
     *,
-    target_shape: tuple[Any, tuple[Any, ...]],
-    protocol_stack: set[tuple[Any, Any]],
+    target_shape: AnnotationShape,
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     if not isinstance(source_annotation, type):
         return False
@@ -520,12 +538,12 @@ def _is_concrete_source_assignable_to_default_generic_target(
 
 
 def _is_parameterized_source_assignable_to_concrete_target(
-    source_annotation: Any,
-    target_annotation: Any,
+    source_annotation: Annotation,
+    target_annotation: Annotation,
     *,
-    source_shape: tuple[Any, tuple[Any, ...]] | None = None,
-    target_shape: tuple[Any, tuple[Any, ...]] | None = None,
-    protocol_stack: set[tuple[Any, Any]],
+    source_shape: AnnotationShape | None = None,
+    target_shape: AnnotationShape | None = None,
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     if source_shape is None:
         source_shape = _annotation_shape(source_annotation)
@@ -547,7 +565,7 @@ def _is_parameterized_source_assignable_to_concrete_target(
     return _is_concrete_assignable(source_origin, target_annotation, protocol_stack)
 
 
-def is_concrete_annotation(annotation: Any) -> bool:
+def is_concrete_annotation(annotation: Annotation) -> bool:
     if annotation is None or annotation is Any:
         return False
     shape = _annotation_shape(annotation)
@@ -557,21 +575,21 @@ def is_concrete_annotation(annotation: Any) -> bool:
     return all(is_concrete_annotation(child_annotation) for child_annotation in child_annotations)
 
 
-def format_annotation(annotation: Any) -> str:
+def format_annotation(annotation: Annotation) -> str:
     return str(annotation).replace("typing.", "")
 
 
-def format_parameter_annotations(annotations: tuple[Any, ...]) -> str:
+def format_parameter_annotations(annotations: tuple[Annotation, ...]) -> str:
     if len(annotations) == 1:
         return format_annotation(annotations[0])
     return "(" + ", ".join(format_annotation(annotation) for annotation in annotations) + ")"
 
 
 def specialize_output_annotation_from_aligned_input_annotations(
-    aligned_candidate_annotations: tuple[Any, ...],
-    input_template_annotations: tuple[Any, ...],
-    output_template_annotation: Any,
-) -> Any:
+    aligned_candidate_annotations: tuple[Annotation, ...],
+    input_template_annotations: tuple[Annotation, ...],
+    output_template_annotation: Annotation,
+) -> Annotation:
     try:
         bindings = _resolve_typevar_bindings(
             input_template_annotations,
@@ -582,7 +600,10 @@ def specialize_output_annotation_from_aligned_input_annotations(
         return output_template_annotation
 
 
-def _are_annotations_equivalent(left_annotation: Any, right_annotation: Any) -> bool:
+def _are_annotations_equivalent(
+    left_annotation: Annotation,
+    right_annotation: Annotation,
+) -> bool:
     if left_annotation == right_annotation:
         return True
     left_shape = _annotation_shape(left_annotation)
@@ -605,7 +626,7 @@ def _are_annotations_equivalent(left_annotation: Any, right_annotation: Any) -> 
     )
 
 
-def _all_annotations_equivalent(annotations: list[Any]) -> bool:
+def _all_annotations_equivalent(annotations: list[Annotation]) -> bool:
     if len(annotations) < 2:
         return True
     first_annotation = annotations[0]
@@ -616,12 +637,12 @@ def _all_annotations_equivalent(annotations: list[Any]) -> bool:
 
 
 def _is_generic_assignable(
-    source_annotation: Any,
-    target_annotation: Any,
+    source_annotation: Annotation,
+    target_annotation: Annotation,
     *,
-    source_shape: tuple[Any, tuple[Any, ...]] | None = None,
-    target_shape: tuple[Any, tuple[Any, ...]] | None = None,
-    protocol_stack: set[tuple[Any, Any]],
+    source_shape: AnnotationShape | None = None,
+    target_shape: AnnotationShape | None = None,
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     arg_pairs = _generic_argument_pairs(
         source_annotation,
@@ -643,9 +664,9 @@ def _is_generic_assignable(
 
 
 def _is_structurally_assignable_to_protocol(
-    source_annotation: Any,
-    target_annotation: Any,
-    protocol_stack: set[tuple[Any, Any]],
+    source_annotation: Annotation,
+    target_annotation: Annotation,
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     from ml_pipes._typing.inspection import (
         resolve_attribute_annotation_info,
@@ -764,10 +785,10 @@ def _is_protocol_method_member_assignable(
     source_owner: type,
     target_owner: type,
     member: str,
-    protocol_stack: set[tuple[Any, Any]],
-    source_annotation: Any,
-    source_typevar_bindings: dict[TypeVar, Any],
-    target_typevar_bindings: dict[TypeVar, Any],
+    protocol_stack: set[tuple[Annotation, Annotation]],
+    source_annotation: Annotation,
+    source_typevar_bindings: TypeVarBindings,
+    target_typevar_bindings: TypeVarBindings,
 ) -> bool:
     matched_signatures = match_method_signatures(
         source_owner,
@@ -816,7 +837,10 @@ def _is_protocol_method_member_assignable(
     )
 
 
-def _replace_self_annotation(annotation: Any, concrete_annotation: Any) -> Any:
+def _replace_self_annotation(
+    annotation: Annotation,
+    concrete_annotation: Annotation,
+) -> Annotation:
     return _transform_annotation(
         annotation,
         lambda part: concrete_annotation if _is_self_annotation(part) else part,
@@ -824,16 +848,16 @@ def _replace_self_annotation(annotation: Any, concrete_annotation: Any) -> Any:
 
 
 def _specialize_protocol_annotation(
-    annotation: Any,
-    concrete_annotation: Any,
-    typevar_bindings: dict[TypeVar, Any],
-) -> Any:
+    annotation: Annotation,
+    concrete_annotation: Annotation,
+    typevar_bindings: TypeVarBindings,
+) -> Annotation:
     if typevar_bindings:
         annotation = _apply_typevar_bindings(annotation, typevar_bindings)
     return _replace_self_annotation(annotation, concrete_annotation)
 
 
-def _is_self_annotation(annotation: Any) -> bool:
+def _is_self_annotation(annotation: Annotation) -> bool:
     return annotation in _SELF_ANNOTATIONS or (
         isinstance(annotation, TypeVar)
         and annotation.__name__ == "Self"
@@ -843,10 +867,10 @@ def _is_self_annotation(annotation: Any) -> bool:
 
 
 def _is_compatible_under_variance(
-    source_annotation: Any,
-    target_annotation: Any,
+    source_annotation: Annotation,
+    target_annotation: Annotation,
     variance: str,
-    protocol_stack: set[tuple[Any, Any]],
+    protocol_stack: set[tuple[Annotation, Annotation]],
 ) -> bool:
     if variance == _INVARIANT:
         return (
@@ -859,12 +883,12 @@ def _is_compatible_under_variance(
 
 
 def _generic_argument_pairs(
-    template_annotation,
-    candidate_annotation,
+    template_annotation: Annotation,
+    candidate_annotation: Annotation,
     *,
-    source_shape: tuple[Any, tuple[Any, ...]] | None = None,
-    target_shape: tuple[Any, tuple[Any, ...]] | None = None,
-) -> tuple[tuple[Any, Any, str], ...] | None:
+    source_shape: AnnotationShape | None = None,
+    target_shape: AnnotationShape | None = None,
+) -> tuple[tuple[Annotation, Annotation, str], ...] | None:
     if source_shape is None:
         try:
             source_shape = _annotation_shape(template_annotation)
@@ -919,9 +943,9 @@ def _generic_argument_pairs(
 
 
 def _tighten_generic_argument_pairs(
-    current_annotation: Any,
-    candidate_annotation: Any,
-) -> tuple[tuple[Any, Any, str], ...] | None:
+    current_annotation: Annotation,
+    candidate_annotation: Annotation,
+) -> tuple[tuple[Annotation, Annotation, str], ...] | None:
     try:
         current_shape = _annotation_shape(current_annotation)
         candidate_shape = _annotation_shape(candidate_annotation)
@@ -973,7 +997,10 @@ def _tighten_generic_argument_pairs(
     )
 
 
-def _generic_variances(origin: Any, args: tuple[Any, ...]) -> tuple[str, ...]:
+def _generic_variances(
+    origin: Annotation,
+    args: tuple[Annotation, ...],
+) -> tuple[str, ...]:
     if origin in {AbstractSet, Collection, Iterable, Sequence, frozenset, tuple, type}:
         return (_COVARIANT,) * len(args)
     if origin is Mapping and len(args) == 2:
@@ -981,7 +1008,7 @@ def _generic_variances(origin: Any, args: tuple[Any, ...]) -> tuple[str, ...]:
     return (_INVARIANT,) * len(args)
 
 
-def _typevar_constraint_annotation(typevar: TypeVar) -> Any:
+def _typevar_constraint_annotation(typevar: TypeVar) -> Annotation:
     if typevar.__bound__ is not None:
         return typevar.__bound__
     if typevar.__constraints__:
@@ -990,10 +1017,10 @@ def _typevar_constraint_annotation(typevar: TypeVar) -> Any:
 
 
 def _resolve_typevar_bindings(
-    template_annotations: tuple[Any, ...],
-    candidate_annotations: tuple[Any, ...],
-) -> dict[TypeVar, Any]:
-    bindings: dict[TypeVar, Any] = {}
+    template_annotations: tuple[Annotation, ...],
+    candidate_annotations: tuple[Annotation, ...],
+) -> TypeVarBindings:
+    bindings: TypeVarBindings = {}
     for template_annotation, candidate_annotation in zip(
         template_annotations,
         candidate_annotations,
@@ -1011,9 +1038,9 @@ def _resolve_typevar_bindings(
 
 
 def _resolve_typevar_bindings_from_match(
-    template_annotation: Any,
-    candidate_annotation: Any,
-) -> dict[TypeVar, Any]:
+    template_annotation: Annotation,
+    candidate_annotation: Annotation,
+) -> TypeVarBindings:
     if isinstance(template_annotation, TypeVar):
         if candidate_annotation is Any and _typevar_constraint_annotation(template_annotation) is not Any:
             return {}
@@ -1030,9 +1057,9 @@ def _resolve_typevar_bindings_from_match(
 
 
 def _merge_typevar_bindings(
-    current_bindings: dict[TypeVar, Any],
-    candidate_bindings: dict[TypeVar, Any],
-) -> dict[TypeVar, Any]:
+    current_bindings: TypeVarBindings,
+    candidate_bindings: TypeVarBindings,
+) -> TypeVarBindings:
     if not candidate_bindings:
         return current_bindings
 
@@ -1050,9 +1077,9 @@ def _merge_typevar_bindings(
 
 
 def _tighten_typevar_binding(
-    current_binding: Any,
-    candidate_binding: Any,
-) -> Any:
+    current_binding: Annotation,
+    candidate_binding: Annotation,
+) -> Annotation:
     if current_binding == candidate_binding:
         tightened_binding = current_binding
     elif is_assignable(candidate_binding, current_binding):
@@ -1066,9 +1093,9 @@ def _tighten_typevar_binding(
 
 
 def _apply_typevar_bindings(
-    template_annotation: Any,
-    bindings: dict[TypeVar, Any],
-) -> Any:
+    template_annotation: Annotation,
+    bindings: TypeVarBindings,
+) -> Annotation:
     return _transform_annotation(
         template_annotation,
         lambda template_part: bindings.get(template_part, template_part)
@@ -1077,7 +1104,7 @@ def _apply_typevar_bindings(
     )
 
 
-def _resolve_annotation_typevar_bindings(annotation: Any) -> dict[TypeVar, Any]:
+def _resolve_annotation_typevar_bindings(annotation: Annotation) -> TypeVarBindings:
     owner = _resolve_annotation_owner(annotation)
     if not isinstance(owner, type):
         return {}
@@ -1086,8 +1113,8 @@ def _resolve_annotation_typevar_bindings(annotation: Any) -> dict[TypeVar, Any]:
 
 def _resolve_owner_typevar_bindings(
     owner: type,
-    annotation_args: tuple[Any, ...],
-) -> dict[TypeVar, Any]:
+    annotation_args: tuple[Annotation, ...],
+) -> TypeVarBindings:
     owner_bindings = _resolve_direct_owner_typevar_bindings(
         owner,
         annotation_args,
@@ -1101,8 +1128,8 @@ def _resolve_owner_typevar_bindings(
 
 def _resolve_direct_owner_typevar_bindings(
     owner: type,
-    annotation_args: tuple[Any, ...],
-) -> dict[TypeVar, Any]:
+    annotation_args: tuple[Annotation, ...],
+) -> TypeVarBindings:
     owner_parameters = tuple(
         parameter
         for parameter in _generic_parameters(owner)
@@ -1117,9 +1144,9 @@ def _resolve_direct_owner_typevar_bindings(
 
 def _resolve_owner_inherited_typevar_bindings(
     owner: type,
-    owner_bindings: dict[TypeVar, Any],
-) -> dict[TypeVar, Any]:
-    inherited_bindings: dict[TypeVar, Any] = {}
+    owner_bindings: TypeVarBindings,
+) -> TypeVarBindings:
+    inherited_bindings: TypeVarBindings = {}
     for base_annotation in getattr(owner, "__orig_bases__", ()):
         base_origin = get_origin(base_annotation)
         if base_origin in {Generic, Protocol}:
@@ -1141,7 +1168,7 @@ def _resolve_owner_inherited_typevar_bindings(
     return inherited_bindings
 
 
-def _build_union_annotation(*annotations: Any) -> Any:
+def _build_union_annotation(*annotations: Annotation) -> Annotation:
     if not annotations:
         return Any
     combined = annotations[0]
@@ -1150,13 +1177,13 @@ def _build_union_annotation(*annotations: Any) -> Any:
     return combined
 
 
-def _union_options(annotation: Any) -> tuple[Any, ...]:
+def _union_options(annotation: Annotation) -> tuple[Annotation, ...]:
     if is_union_annotation(annotation):
         return get_args(annotation)
     return (annotation,)
 
 
-def _merge_typevar_annotation(typevar: TypeVar, candidate: Any) -> Any:
+def _merge_typevar_annotation(typevar: TypeVar, candidate: Annotation) -> Annotation:
     if candidate == typevar:
         return typevar
     if candidate is Any or candidate is None:
@@ -1175,7 +1202,10 @@ def _merge_typevar_annotation(typevar: TypeVar, candidate: Any) -> Any:
     return _UNBOUND
 
 
-def _try_tighten_invariant_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+def _try_tighten_invariant_annotation(
+    current_annotation: Annotation,
+    candidate_annotation: Annotation,
+) -> Annotation:
     if current_annotation is None or current_annotation is Any:
         return candidate_annotation
     if candidate_annotation is None or candidate_annotation is Any:
@@ -1189,7 +1219,10 @@ def _try_tighten_invariant_annotation(current_annotation: Any, candidate_annotat
     return _UNBOUND
 
 
-def _try_tighten_covariant_annotation(current_annotation: Any, candidate_annotation: Any) -> Any:
+def _try_tighten_covariant_annotation(
+    current_annotation: Annotation,
+    candidate_annotation: Annotation,
+) -> Annotation:
     tightened = try_tighten_annotation(current_annotation, candidate_annotation)
     if tightened is not _UNBOUND:
         return tightened
@@ -1200,13 +1233,13 @@ def _try_tighten_covariant_annotation(current_annotation: Any, candidate_annotat
     return _UNBOUND
 
 
-def _normalize_published_annotation(annotation: Any) -> Any:
+def _normalize_published_annotation(annotation: Annotation) -> Annotation:
     if not isinstance(annotation, TypeVar):
         return annotation
     return normalize_published_annotation(_typevar_constraint_annotation(annotation))
 
 
-def _materialize_probe_annotation(annotation: Any) -> Any:
+def _materialize_probe_annotation(annotation: Annotation) -> Annotation:
     if isinstance(annotation, TypeVar):
         return materialize_probe_annotation(
             normalize_published_annotation(_typevar_constraint_annotation(annotation))
@@ -1217,19 +1250,19 @@ def _materialize_probe_annotation(annotation: Any) -> Any:
 
 
 def _collect_any_placeholder_bindings(
-    template_annotation: Any,
-    value_annotation: Any,
-) -> list[Any] | None:
-    bindings: list[Any] = []
+    template_annotation: Annotation,
+    value_annotation: Annotation,
+) -> list[Annotation] | None:
+    bindings: list[Annotation] = []
     if not _collect_any_placeholder_bindings_into(template_annotation, value_annotation, bindings):
         return None
     return bindings
 
 
 def _collect_any_placeholder_bindings_into(
-    template_annotation: Any,
-    value_annotation: Any,
-    bindings: list[Any],
+    template_annotation: Annotation,
+    value_annotation: Annotation,
+    bindings: list[Annotation],
 ) -> bool:
     if template_annotation is Any:
         bindings.append(value_annotation)
@@ -1255,9 +1288,9 @@ def _collect_any_placeholder_bindings_into(
 
 
 def _replace_any_placeholders_in_order(
-    template_annotation: Any,
-    bindings: list[Any],
-) -> Any | None:
+    template_annotation: Annotation,
+    bindings: list[Annotation],
+) -> Annotation | None:
     replacement = _replace_any_placeholders_in_order_recursive(
         template_annotation,
         bindings,
@@ -1272,10 +1305,10 @@ def _replace_any_placeholders_in_order(
 
 
 def _replace_any_placeholders_in_order_recursive(
-    template_annotation: Any,
-    bindings: list[Any],
+    template_annotation: Annotation,
+    bindings: list[Annotation],
     binding_index: int,
-) -> tuple[Any, int] | None:
+) -> tuple[Annotation, int] | None:
     if template_annotation is Any:
         if binding_index >= len(bindings):
             return None
@@ -1300,7 +1333,7 @@ def _replace_any_placeholders_in_order_recursive(
     return _rebuild_annotation_like(template_annotation, tuple(replaced_children)), binding_index
 
 
-def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
+def _annotation_shape(annotation: Annotation) -> AnnotationShape | None:
     if _contains_ellipsize(annotation):
         if not _is_variadic(annotation):
             raise ValueError(
@@ -1339,7 +1372,7 @@ def _annotation_shape(annotation: Any) -> tuple[Any, tuple[Any, ...]] | None:
     return None
 
 
-def _bare_generic_args(annotation: Any) -> tuple[Any, ...] | None:
+def _bare_generic_args(annotation: Annotation) -> tuple[Annotation, ...] | None:
     if annotation in {
         AbstractSet,
         Collection,
@@ -1360,7 +1393,7 @@ def _bare_generic_args(annotation: Any) -> tuple[Any, ...] | None:
     return None
 
 
-def _generic_parameters(annotation: Any) -> tuple[Any, ...]:
+def _generic_parameters(annotation: Annotation) -> tuple[Annotation, ...]:
     type_parameters = getattr(annotation, "__type_params__", ())
     if type_parameters:
         return tuple(type_parameters)
@@ -1372,33 +1405,33 @@ def _generic_parameters(annotation: Any) -> tuple[Any, ...]:
     return ()
 
 
-def _contains_ellipsize(annotation: Any) -> bool:
+def _contains_ellipsize(annotation: Annotation) -> bool:
     if isinstance(annotation, tuple):
         return any(part is Ellipsis for part in annotation)
     origin = get_origin(annotation)
     return origin is tuple and any(part is Ellipsis for part in get_args(annotation))
 
 
-def _is_variadic(annotation: Any) -> bool:
+def _is_variadic(annotation: Annotation) -> bool:
     if isinstance(annotation, tuple):
         return _is_variadic_shaped(annotation)
     return _is_variadic_tuple(annotation)
 
 
-def _is_variadic_shaped(annotation: Any) -> bool:
+def _is_variadic_shaped(annotation: Annotation) -> bool:
     if not isinstance(annotation, tuple):
         return False
     return len(annotation) == 2 and annotation[1] is Ellipsis
 
 
-def _is_variadic_tuple(annotation: Any) -> bool:
+def _is_variadic_tuple(annotation: Annotation) -> bool:
     origin = get_origin(annotation)
     if origin is not tuple:
         return False
     return _is_variadic_shaped(get_args(annotation))
 
 
-def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
+def variadic_tuple_item_annotation(annotation: Annotation) -> Annotation | None:
     if isinstance(annotation, tuple):
         if not _is_variadic_shaped(annotation):
             return None
@@ -1408,7 +1441,10 @@ def variadic_tuple_item_annotation(annotation: Any) -> Any | None:
     return get_args(annotation)[0]
 
 
-def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> Any:
+def _transform_annotation(
+    annotation: Annotation,
+    transform: Callable[[Annotation], Annotation],
+) -> Annotation:
     shape = _annotation_shape(annotation)
     if shape is None:
         return transform(annotation)
@@ -1420,7 +1456,10 @@ def _transform_annotation(annotation: Any, transform: Callable[[Any], Any]) -> A
     return transform(rebuilt)
 
 
-def _rebuild_annotation_like(annotation: Any, args: tuple[Any, ...]) -> Any:
+def _rebuild_annotation_like(
+    annotation: Annotation,
+    args: tuple[Annotation, ...],
+) -> Annotation:
     if isinstance(annotation, tuple):
         return tuple(args)
     rebuilt_variadic_tuple = _rebuild_variadic_tuple_annotation(annotation, args)
@@ -1436,7 +1475,10 @@ def _rebuild_annotation_like(annotation: Any, args: tuple[Any, ...]) -> Any:
     return _rebuild_annotation(origin, args)
 
 
-def _rebuild_variadic_tuple_annotation(annotation: Any, args: tuple[Any, ...]) -> Any | None:
+def _rebuild_variadic_tuple_annotation(
+    annotation: Annotation,
+    args: tuple[Annotation, ...],
+) -> Annotation | None:
     if not _is_variadic_tuple(annotation):
         return None
     if len(args) == 1:
@@ -1446,7 +1488,10 @@ def _rebuild_variadic_tuple_annotation(annotation: Any, args: tuple[Any, ...]) -
     return tuple[args]
 
 
-def _rebuild_annotation(origin: Any, args: tuple[Any, ...]) -> Any:
+def _rebuild_annotation(
+    origin: Annotation,
+    args: tuple[Annotation, ...],
+) -> Annotation:
     if origin is UnionType:
         rebuilt = args[0]
         for arg in args[1:]:
