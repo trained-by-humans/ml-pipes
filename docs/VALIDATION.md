@@ -185,14 +185,8 @@ are interchangeable.
 | Fixed-length tuples | `tuple[int, str]` | Supported and can route positionally into multi-parameter operators. |
 | Variadic tuples | `tuple[int, ...]` | Supported as single values. They are not expanded into multiple pipeline inputs. |
 | Common built-in and `collections.abc` generics | `list[T]`, `set[T]`, `frozenset[T]`, `dict[K, V]`, `Iterable[T]`, `Collection[T]`, `Sequence[T]`, `Mapping[K, V]`, `MutableSequence[T]`, `MutableMapping[K, V]`, `MutableSet[T]`, `type[T]` | Supported with the variance rules implemented by the core annotation matcher. |
-| Structural `Protocol`s | `Protocol` with annotated fields and methods | Supported when used as downstream expectations or `TypeVar` bounds. The current supported protocol shape is non-parameterized structural protocols, including annotated data members and `Self`-preserving methods. |
+| Structural `Protocol`s | `Protocol` with annotated fields and methods | Supported when used as downstream expectations or `TypeVar` bounds. The current supported protocol shape is non-parameterized structural protocols, including annotated data members and `Self`-preserving methods.<br><br>Note: method matching strips the receiver first, then requires exact callable shape: order, keyword-visible names, kinds, and defaults. Parameter annotations are checked contravariantly; return annotations covariantly.<br><br>Not supported: class-object boundaries such as `type[Proto]`. |
 | Other typing features | `Annotated`, `Literal`, generic `Protocol[T]`, `ParamSpec`, overload-oriented typing constructs | Not part of the current documented compatibility contract. Some cases may work incidentally, but they are not guaranteed. Prefer a simpler boundary annotation or use `resolve_contract(...)` when you need a more explicit contract. |
-
-For structural protocol methods, validation matches the callable surface
-strictly after the receiver (`self` / `cls`) is removed: parameter order,
-keyword-visible names, parameter kinds, and default values must match exactly.
-Once that surface matches, parameter annotations are still checked
-contravariantly and return annotations covariantly.
 
 For more information regarding call signatures and operator contracts, see
 [OPERATORS.md](OPERATORS.md).
