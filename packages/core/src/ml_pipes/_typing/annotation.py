@@ -722,6 +722,10 @@ def _is_structurally_assignable_to_protocol(
                     source_annotation,
                     source_typevar_bindings,
                 )
+                if isinstance(source_annotation, type) and _contains_typevar(
+                    source_member_annotation,
+                ):
+                    return False
                 target_member_annotation = _specialize_protocol_annotation(
                     target_member_info.annotation,
                     source_annotation,
@@ -741,6 +745,10 @@ def _is_structurally_assignable_to_protocol(
                         source_annotation,
                         source_typevar_bindings,
                     )
+                    if isinstance(source_annotation, type) and _contains_typevar(
+                        source_write_annotation,
+                    ):
+                        return False
                     target_write_annotation = _specialize_protocol_annotation(
                         target_member_info.write_annotation,
                         source_annotation,
@@ -808,6 +816,10 @@ def _is_protocol_method_member_assignable(
             source_annotation,
             source_typevar_bindings,
         )
+        if isinstance(source_annotation, type) and _contains_typevar(
+            source_parameter_annotation,
+        ):
+            return False
         target_parameter_annotation = _specialize_protocol_annotation(
             target_parameter_annotation,
             source_annotation,
@@ -825,6 +837,10 @@ def _is_protocol_method_member_assignable(
         source_annotation,
         source_typevar_bindings,
     )
+    if isinstance(source_annotation, type) and _contains_typevar(
+        source_return_annotation,
+    ):
+        return False
     target_return_annotation = _specialize_protocol_annotation(
         target_signature.return_annotation,
         source_annotation,
@@ -855,6 +871,18 @@ def _specialize_protocol_annotation(
     if typevar_bindings:
         annotation = _apply_typevar_bindings(annotation, typevar_bindings)
     return _replace_self_annotation(annotation, concrete_annotation)
+
+
+def _contains_typevar(annotation: Annotation) -> bool:
+    if isinstance(annotation, TypeVar):
+        return True
+
+    shape = _annotation_shape(annotation)
+    if shape is None:
+        return False
+
+    _, child_annotations = shape
+    return any(_contains_typevar(child_annotation) for child_annotation in child_annotations)
 
 
 def _is_self_annotation(annotation: Annotation) -> bool:

@@ -64,6 +64,10 @@ class _ClosedStringProtocolBox(_GenericProtocolBox[str]):
     pass
 
 
+class _OpenGenericProtocolBoxChild(_GenericProtocolBox):
+    pass
+
+
 class _ProtocolPredictionContract(Protocol):
     labels: Sequence[int]
 
@@ -347,6 +351,11 @@ class ProduceClosedIntProtocolBox:
 class ProduceClosedStringProtocolBox:
     def __call__(self, value: int) -> _ClosedStringProtocolBox:
         return _ClosedStringProtocolBox(str(value))
+
+
+class ProduceOpenGenericStringProtocolBoxChild:
+    def __call__(self, value: int) -> _OpenGenericProtocolBoxChild:
+        return _OpenGenericProtocolBoxChild(str(value))
 
 
 class ProduceGenericMergeIntBox:
@@ -897,6 +906,17 @@ def test_pipeline_validate_rejects_wrong_specialized_generic_source_for_protocol
         match=r"Pipeline contract mismatch at 1:UseIntGetter",
     ):
         Pipeline([producer, UseIntGetter()]).validate()
+
+
+def test_pipeline_validate_rejects_open_generic_subclass_source_for_protocol_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseIntGetter",
+    ):
+        Pipeline([
+            ProduceOpenGenericStringProtocolBoxChild(),
+            UseIntGetter(),
+        ]).validate()
 
 
 def test_pipeline_validate_rejects_wrong_closed_protocol_alias_bound():
