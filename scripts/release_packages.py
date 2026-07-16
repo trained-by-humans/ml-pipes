@@ -176,14 +176,13 @@ def _validate_internal_dependency_pins(
                 )
 
 
-def _validate_publish_order(manifests: list[PackageManifest]) -> None:
+def _validate_runtime_publish_order(manifests: list[PackageManifest]) -> None:
     for manifest in manifests:
-        for dependency in manifest.internal_dependency_requirements:
-            if PACKAGE_ORDER_INDEX[dependency.dist_name] >= PACKAGE_ORDER_INDEX[manifest.dist_name]:
+        for dependency in manifest.runtime_internal_dependencies:
+            if PACKAGE_ORDER_INDEX[dependency] >= PACKAGE_ORDER_INDEX[manifest.dist_name]:
                 raise ValueError(
-                    f"Publish order is invalid: {manifest.dist_name} declares "
-                    f"{dependency.source} requirement {dependency.requirement!r}, "
-                    f"but the dependency {dependency.dist_name} is not published earlier"
+                    f"Publish order is invalid: {manifest.dist_name} depends on {dependency}, "
+                    "but the dependency is not published earlier"
                 )
 
 
@@ -236,7 +235,7 @@ def validate_release_metadata(expected_tag: str | None = None) -> tuple[str, lis
         )
 
     _validate_internal_dependency_pins(manifests, expected_version=version)
-    _validate_publish_order(manifests)
+    _validate_runtime_publish_order(manifests)
 
     return version, manifests
 

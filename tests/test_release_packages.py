@@ -195,7 +195,7 @@ def test_validate_release_metadata_rejects_stale_optional_internal_pin(
         module.validate_release_metadata("v0.2.0")
 
 
-def test_validate_release_metadata_rejects_optional_internal_publish_order(
+def test_validate_release_metadata_allows_optional_internal_publish_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_release_packages_module()
@@ -208,8 +208,12 @@ def test_validate_release_metadata_rejects_optional_internal_publish_order(
         f"ml-pipes-vision==0.2.0",
     ]
 
-    with pytest.raises(ValueError, match="project.optional-dependencies.inspection requirement"):
-        module.validate_release_metadata("v0.2.0")
+    version, manifests = module.validate_release_metadata("v0.2.0")
+
+    assert version == "0.2.0"
+    assert [manifest.dist_name for manifest in manifests] == [
+        dist_name for _, dist_name in module.PACKAGE_ORDER
+    ]
 
 
 def test_validate_release_metadata_requires_exact_internal_pins(
