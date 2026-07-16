@@ -41,9 +41,11 @@ jobs:
       - name: Run shared framework tests
         run: |
           python -m pytest -q \
+            tests/test_check_index_artifacts.py \
             tests/test_import_surfaces.py \
             tests/test_exports.py \
             tests/test_release_packages.py \
+            tests/test_stage_release_artifacts.py \
             packages/core/tests/validation/test_validation.py \
             packages/core/tests/cli/test_cli.py \
             packages/tensor/tests/test_registry_ops.py \
