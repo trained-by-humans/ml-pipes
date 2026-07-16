@@ -71,474 +71,142 @@ jobs:
     name: Publish TestPyPI Core
     if: ${{ github.event_name == 'push' }}
     needs: build
-    runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage core artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_core-* publish/
-
-      - name: Check core artifacts against TestPyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-core \
-            --index-url-base https://test.pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish core to TestPyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
-          repository-url: https://test.pypi.org/legacy/
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-core
 
   publish-testpypi-tensor:
     name: Publish TestPyPI Tensor
     if: ${{ github.event_name == 'push' }}
     needs: publish-testpypi-core
-    runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage tensor artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_tensor-* publish/
-
-      - name: Check tensor artifacts against TestPyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-tensor \
-            --index-url-base https://test.pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish tensor to TestPyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
-          repository-url: https://test.pypi.org/legacy/
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-tensor
 
   publish-testpypi-vision:
     name: Publish TestPyPI Vision
     if: ${{ github.event_name == 'push' }}
     needs: publish-testpypi-tensor
-    runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage vision artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_vision-* publish/
-
-      - name: Check vision artifacts against TestPyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-vision \
-            --index-url-base https://test.pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish vision to TestPyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
-          repository-url: https://test.pypi.org/legacy/
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-vision
 
   publish-testpypi-onnx:
     name: Publish TestPyPI ONNX
     if: ${{ github.event_name == 'push' }}
     needs: publish-testpypi-vision
-    runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage ONNX artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_onnx-* publish/
-
-      - name: Check ONNX artifacts against TestPyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-onnx \
-            --index-url-base https://test.pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish ONNX to TestPyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
-          repository-url: https://test.pypi.org/legacy/
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-onnx
 
   publish-testpypi-torch:
     name: Publish TestPyPI Torch
     if: ${{ github.event_name == 'push' }}
     needs: publish-testpypi-onnx
-    runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage torch artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_torch-* publish/
-
-      - name: Check torch artifacts against TestPyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-torch \
-            --index-url-base https://test.pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish torch to TestPyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
-          repository-url: https://test.pypi.org/legacy/
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-torch
 
   publish-testpypi-meta:
     name: Publish TestPyPI Meta
     if: ${{ github.event_name == 'push' }}
     needs: publish-testpypi-torch
-    runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage meta artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes-* publish/
-          rm -f publish/ml_pipes_core-* publish/ml_pipes_tensor-* publish/ml_pipes_vision-* publish/ml_pipes_onnx-* publish/ml_pipes_torch-*
-
-      - name: Check meta artifacts against TestPyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes \
-            --index-url-base https://test.pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish meta package to TestPyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
-          repository-url: https://test.pypi.org/legacy/
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes
 
   publish-pypi-core:
     name: Publish PyPI Core
     if: ${{ github.event_name == 'push' }}
     needs: publish-testpypi-meta
-    runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage core artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_core-* publish/
-
-      - name: Check core artifacts against PyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-core \
-            --index-url-base https://pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish core to PyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: pypi
+      dist_name: ml-pipes-core
 
   publish-pypi-tensor:
     name: Publish PyPI Tensor
     if: ${{ github.event_name == 'push' }}
     needs: publish-pypi-core
-    runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage tensor artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_tensor-* publish/
-
-      - name: Check tensor artifacts against PyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-tensor \
-            --index-url-base https://pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish tensor to PyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: pypi
+      dist_name: ml-pipes-tensor
 
   publish-pypi-vision:
     name: Publish PyPI Vision
     if: ${{ github.event_name == 'push' }}
     needs: publish-pypi-tensor
-    runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage vision artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_vision-* publish/
-
-      - name: Check vision artifacts against PyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-vision \
-            --index-url-base https://pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish vision to PyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: pypi
+      dist_name: ml-pipes-vision
 
   publish-pypi-onnx:
     name: Publish PyPI ONNX
     if: ${{ github.event_name == 'push' }}
     needs: publish-pypi-vision
-    runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage ONNX artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_onnx-* publish/
-
-      - name: Check ONNX artifacts against PyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-onnx \
-            --index-url-base https://pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish ONNX to PyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: pypi
+      dist_name: ml-pipes-onnx
 
   publish-pypi-torch:
     name: Publish PyPI Torch
     if: ${{ github.event_name == 'push' }}
     needs: publish-pypi-onnx
-    runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage torch artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes_torch-* publish/
-
-      - name: Check torch artifacts against PyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes-torch \
-            --index-url-base https://pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish torch to PyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: pypi
+      dist_name: ml-pipes-torch
 
   publish-pypi-meta:
     name: Publish PyPI Meta
     if: ${{ github.event_name == 'push' }}
     needs: publish-pypi-torch
-    runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read
       id-token: write
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-packages
-          path: dist/release
-
-      - name: Stage meta artifacts
-        run: |
-          mkdir publish
-          cp dist/release/ml_pipes-* publish/
-          rm -f publish/ml_pipes_core-* publish/ml_pipes_tensor-* publish/ml_pipes_vision-* publish/ml_pipes_onnx-* publish/ml_pipes_torch-*
-
-      - name: Check meta artifacts against PyPI
-        id: check_index_artifacts
-        run: |
-          python3 scripts/check_index_artifacts.py \
-            --packages-dir publish \
-            --dist-name ml-pipes \
-            --index-url-base https://pypi.org \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Publish meta package to PyPI
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: publish
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      publish_target: pypi
+      dist_name: ml-pipes

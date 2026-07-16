@@ -1,0 +1,77 @@
+name: Publish Package
+
+on:
+  workflow_call:
+    inputs:
+      publish_target:
+        description: Package index target to publish to.
+        required: true
+        type: string
+      dist_name:
+        description: Canonical distribution name to stage, check, and publish.
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.dist_name }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.publish_target }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Stage artifacts for distribution
+        run: |
+          python3 scripts/stage_release_artifacts.py \
+            --artifacts-dir dist/release \
+            --staging-dir publish \
+            --dist-name "${{ inputs.dist_name }}"
+
+      - name: Resolve publish target
+        id: resolve_publish_target
+        shell: bash
+        run: |
+          case "${{ inputs.publish_target }}" in
+            testpypi)
+              echo "index_url_base=https://test.pypi.org" >> "$GITHUB_OUTPUT"
+              ;;
+            pypi)
+              echo "index_url_base=https://pypi.org" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unsupported publish target: ${{ inputs.publish_target }}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Check staged artifacts against package index
+        id: check_index_artifacts
+        run: |
+          python3 scripts/check_index_artifacts.py \
+            --packages-dir publish \
+            --dist-name "${{ inputs.dist_name }}" \
+            --index-url-base "${{ steps.resolve_publish_target.outputs.index_url_base }}" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Publish package to TestPyPI
+        if: ${{ inputs.publish_target == 'testpypi' && steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish package to PyPI
+        if: ${{ inputs.publish_target == 'pypi' && steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: publish
