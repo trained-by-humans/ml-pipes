@@ -364,6 +364,11 @@ inspect, trace, and benchmark as standalone boundaries.
   small, short-lived, and positionally obvious to the next few steps. This
   pairs naturally with the multi-input pattern described in the input rules
   above.
+- Remember that a fixed-length tuple is structural in `ml-pipes`. Returning
+  `tuple[A, B]` publishes two positional pipeline values, and tuple-routing
+  operators such as `Pick` and `Recall` will act on that structure. If the
+  tuple is semantically one payload, wrap it in a dedicated object instead of
+  returning the raw tuple.
 - Use a dedicated dataclass when fields have high cohesion, represent one
   named result, and are usually used together by name.
 - A useful pattern is the carry-forward tuple: return the original value

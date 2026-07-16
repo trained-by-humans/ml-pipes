@@ -59,6 +59,9 @@ class CallableAnnotations:
 def resolve_callable_annotations(
     callable_: Callable[..., Any],
 ) -> CallableAnnotations:
+    # This inspects the concrete runtime callable target only. @overload stubs
+    # are erased here, so validation must rely on resolve_contract() whenever
+    # the implementation signature is broader than the intended boundary.
     positional_parameters = _resolve_positional_value_parameters(callable_)
     if positional_parameters is None:
         return CallableAnnotations((), None)

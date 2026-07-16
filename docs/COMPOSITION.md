@@ -149,6 +149,12 @@ pipeline.
 - Use `Store` / `Recall` when one derived value needs to be recovered later
   after several unrelated steps. This keeps the main flowing boundary focused
   on the value the next operators actually work on.
+- Treat fixed-length tuples as short-range routing boundaries, not as opaque
+  payload containers. For example, if one step returns `tuple[int, int]` and a
+  later `Recall("scale")` runs, the boundary becomes `(left, right, scale)`,
+  not `((left, right), scale)`. If you want a tuple-shaped value to stay one
+  semantic payload, wrap it in a dataclass, mapping, or another container
+  before returning it.
 - Use a registry-style workspace when one stage needs to accumulate many named
   intermediates and later steps read them by name rather than by tuple
   position. `TensorRegistry` is one example of this pattern, but the same idea

@@ -59,6 +59,15 @@ fails immediately.
 > at least one positional input parameter. `*args`, keyword-only parameters,
 > and `**kwargs` are rejected.
 
+> [!CAUTION]
+> Validation reads the concrete runtime `__call__` implementation. It does not
+> currently resolve `@overload` stubs when inferring operator contracts.
+> Overloads still help external type checkers, but if the real implementation
+> is broader than the boundary you want validation to enforce, implement
+> `resolve_contract(...)` for that operator. `Pick` is one example: its
+> overloads help type checkers, but validation still needs
+> `Pick.resolve_contract(...)` to use the configured index precisely.
+
 ### `resolve_contract(...)`
 
 Some operators cannot express their boundary precisely with a static signature
