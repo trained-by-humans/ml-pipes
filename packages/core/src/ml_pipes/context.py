@@ -43,11 +43,6 @@ class Context:
     def as_dict(self) -> dict[str, Any]:
         return dict(self.values)
 
-    def with_metadata(self, **metadata: Any) -> "Context":
-        merged = dict(self.values)
-        merged.update(metadata)
-        return Context(merged)
-
 
 CurrentT = TypeVar("CurrentT")
 InputT = TypeVar("InputT", contravariant=True)
