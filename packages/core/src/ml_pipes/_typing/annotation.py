@@ -591,7 +591,7 @@ def specialize_output_annotation_from_aligned_input_annotations(
     output_template_annotation: Annotation,
 ) -> Annotation:
     try:
-        bindings = _resolve_typevar_bindings(
+        bindings = _resolve_matching_typevar_bindings(
             input_template_annotations,
             aligned_candidate_annotations,
         )
@@ -1044,7 +1044,7 @@ def _typevar_constraint_annotation(typevar: TypeVar) -> Annotation:
     return Any
 
 
-def _resolve_typevar_bindings(
+def _resolve_matching_typevar_bindings(
     template_annotations: tuple[Annotation, ...],
     candidate_annotations: tuple[Annotation, ...],
 ) -> TypeVarBindings:
@@ -1057,31 +1057,34 @@ def _resolve_typevar_bindings(
         if not is_assignable(candidate_annotation, template_annotation):
             raise _UnboundTypevarBindingError
 
-        pair_bindings = _resolve_typevar_bindings_from_match(
-            template_annotation,
-            candidate_annotation,
-        )
+        if isinstance(template_annotation, TypeVar):
+            if (
+                candidate_annotation is Any
+                and _typevar_constraint_annotation(template_annotation) is not Any
+            ):
+                pair_bindings = {}
+            else:
+                pair_bindings = {template_annotation: candidate_annotation}
+        else:
+            arg_pairs = _generic_argument_pairs(
+                candidate_annotation,
+                template_annotation,
+            )
+            if arg_pairs is None:
+                pair_bindings = {}
+            else:
+                pair_bindings = _resolve_matching_typevar_bindings(
+                    tuple(
+                        template_child_annotation
+                        for _, template_child_annotation, _ in arg_pairs
+                    ),
+                    tuple(
+                        candidate_child_annotation
+                        for candidate_child_annotation, _, _ in arg_pairs
+                    ),
+                )
         bindings = _merge_typevar_bindings(bindings, pair_bindings)
     return bindings
-
-
-def _resolve_typevar_bindings_from_match(
-    template_annotation: Annotation,
-    candidate_annotation: Annotation,
-) -> TypeVarBindings:
-    if isinstance(template_annotation, TypeVar):
-        if candidate_annotation is Any and _typevar_constraint_annotation(template_annotation) is not Any:
-            return {}
-        return {template_annotation: candidate_annotation}
-
-    arg_pairs = _generic_argument_pairs(candidate_annotation, template_annotation)
-    if arg_pairs is None:
-        return {}
-
-    return _resolve_typevar_bindings(
-        tuple(template_child_annotation for _, template_child_annotation, _ in arg_pairs),
-        tuple(candidate_child_annotation for candidate_child_annotation, _, _ in arg_pairs),
-    )
 
 
 def _merge_typevar_bindings(
