@@ -3,7 +3,7 @@ import ml_pipes.validation as validation_module
 import warnings
 
 import pytest
-from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, TypeVar
+from typing import Any, Generic, MutableMapping as TypingMutableMapping, MutableSequence as TypingMutableSequence, NamedTuple, Protocol, TypedDict, TypeVar
 
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import (
@@ -24,10 +24,451 @@ from ml_pipes.validation import (
 
 _VariadicT = TypeVar("_VariadicT")
 _BoxT = TypeVar("_BoxT")
+_LegacySelf = TypeVar("Self")
+_GenericProtocolBoxT = TypeVar("_GenericProtocolBoxT")
+_ProtocolAliasT = TypeVar("_ProtocolAliasT")
+_MergeItemT = TypeVar("_MergeItemT")
+
+try:
+    from typing import Self
+except ImportError:  # pragma: no cover
+    from typing_extensions import Self
 
 
 class _Box(Generic[_BoxT]):
     pass
+
+
+class _GenericProtocolBox(Generic[_GenericProtocolBoxT]):
+    def __init__(self, value: _GenericProtocolBoxT):
+        self.value = value
+
+    def get(self) -> _GenericProtocolBoxT:
+        return self.value
+
+
+class _GenericMergeBox(Generic[_MergeItemT]):
+    def __init__(self, value: _MergeItemT):
+        self.value = value
+
+    def merge(self, other: Self) -> Self:
+        del other
+        return self
+
+
+class _ClosedIntProtocolBox(_GenericProtocolBox[int]):
+    pass
+
+
+class _ClosedStringProtocolBox(_GenericProtocolBox[str]):
+    pass
+
+
+class _OpenGenericProtocolBoxChild(_GenericProtocolBox):
+    pass
+
+
+class _ProtocolPredictionContract(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> Self:
+        ...
+
+
+_ProtocolPredictionT = TypeVar("_ProtocolPredictionT", bound=_ProtocolPredictionContract)
+
+
+class _ProtocolPredictionBase:
+    def filter(self, mask: Sequence[bool]) -> Self:
+        return self
+
+
+class _ProtocolPrediction(_ProtocolPredictionBase):
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+
+class _WrongProtocolPrediction(_ProtocolPredictionBase):
+    labels: Sequence[str]
+
+    def __init__(self, labels: Sequence[str]):
+        self.labels = labels
+
+
+class _WrongProtocolReturn:
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+    def filter(self, mask: Sequence[bool]) -> int:
+        return 0
+
+
+class _WrongProtocolKeywordOnly(_ProtocolPredictionBase):
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        del limit
+        return self
+
+
+class ProduceProtocolPrediction:
+    def __call__(self, value: int) -> _ProtocolPrediction:
+        return _ProtocolPrediction([value])
+
+
+class ProduceWrongProtocolPrediction:
+    def __call__(self, value: int) -> _WrongProtocolPrediction:
+        return _WrongProtocolPrediction([str(value)])
+
+
+class ProduceWrongProtocolReturn:
+    def __call__(self, value: int) -> _WrongProtocolReturn:
+        return _WrongProtocolReturn([value])
+
+
+class ProduceWrongProtocolKeywordOnly:
+    def __call__(self, value: int) -> _WrongProtocolKeywordOnly:
+        return _WrongProtocolKeywordOnly([value])
+
+
+class FilterProtocolPrediction:
+    def __call__(self, value: _ProtocolPredictionT) -> _ProtocolPredictionT:
+        return value.filter([True for _ in value.labels])
+
+
+class _LegacyProtocolPredictionContract(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        ...
+
+
+_LegacyProtocolPredictionT = TypeVar(
+    "_LegacyProtocolPredictionT",
+    bound=_LegacyProtocolPredictionContract,
+)
+
+
+class _LegacyProtocolPredictionBase:
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        return self
+
+
+class _LegacyProtocolPrediction(_LegacyProtocolPredictionBase):
+    labels: Sequence[int]
+
+    def __init__(self, labels: Sequence[int]):
+        self.labels = labels
+
+
+class ProduceLegacyProtocolPrediction:
+    def __call__(self, value: int) -> _LegacyProtocolPrediction:
+        return _LegacyProtocolPrediction([value])
+
+
+class FilterLegacyProtocolPrediction:
+    def __call__(self, value: _LegacyProtocolPredictionT) -> _LegacyProtocolPredictionT:
+        return value.filter([True for _ in value.labels])
+
+
+class _MixedBindingMixerContract(Protocol):
+    def mix(self, left: int, right: int) -> int:
+        ...
+
+
+_MixedBindingMixerT = TypeVar(
+    "_MixedBindingMixerT",
+    bound=_MixedBindingMixerContract,
+)
+
+
+class _MatchingMixedBindingMixer:
+    def mix(self, left: int, right: int) -> int:
+        return left + right
+
+
+class _ReorderedMixedBindingMixer:
+    def mix(self, right: int, left: int) -> int:
+        return left + right
+
+
+class ProduceMatchingMixedBindingMixer:
+    def __call__(self, value: int) -> _MatchingMixedBindingMixer:
+        del value
+        return _MatchingMixedBindingMixer()
+
+
+class ProduceReorderedMixedBindingMixer:
+    def __call__(self, value: int) -> _ReorderedMixedBindingMixer:
+        del value
+        return _ReorderedMixedBindingMixer()
+
+
+class UseMixedBindingMixer:
+    def __call__(self, value: _MixedBindingMixerT) -> int:
+        return value.mix(1, right=2)
+
+
+class _StaticBuildContract(Protocol):
+    @staticmethod
+    def build(value: int) -> str:
+        ...
+
+
+_StaticBuildT = TypeVar("_StaticBuildT", bound=_StaticBuildContract)
+
+
+class _StaticBuilderWithIntArg:
+    @staticmethod
+    def build(value: int) -> str:
+        return str(value)
+
+
+class _StaticBuilderWithStringArg:
+    @staticmethod
+    def build(value: str) -> str:
+        return value
+
+
+class ProduceStaticBuilderWithIntArg:
+    def __call__(self, value: int) -> _StaticBuilderWithIntArg:
+        del value
+        return _StaticBuilderWithIntArg()
+
+
+class ProduceStaticBuilderWithStringArg:
+    def __call__(self, value: int) -> _StaticBuilderWithStringArg:
+        del value
+        return _StaticBuilderWithStringArg()
+
+
+class UseStaticBuilder:
+    def __call__(self, value: _StaticBuildT) -> str:
+        return value.build(1)
+
+
+class _ClassBuildContract(Protocol):
+    @classmethod
+    def build(cls, value: int) -> str:
+        ...
+
+
+_ClassBuildT = TypeVar("_ClassBuildT", bound=_ClassBuildContract)
+
+
+class _ClassBuilderWithIntArg:
+    @classmethod
+    def build(cls, value: int) -> str:
+        del cls
+        return str(value)
+
+
+class _ClassBuilderWithStringArg:
+    @classmethod
+    def build(cls, value: str) -> str:
+        del cls
+        return value
+
+
+class ProduceClassBuilderWithIntArg:
+    def __call__(self, value: int) -> _ClassBuilderWithIntArg:
+        del value
+        return _ClassBuilderWithIntArg()
+
+
+class ProduceClassBuilderWithStringArg:
+    def __call__(self, value: int) -> _ClassBuilderWithStringArg:
+        del value
+        return _ClassBuilderWithStringArg()
+
+
+class UseClassBuilder:
+    def __call__(self, value: _ClassBuildT) -> str:
+        return value.build(1)
+
+
+class _IntGetterContract(Protocol):
+    def get(self) -> int:
+        ...
+
+
+class _GetterAliasContract(Protocol[_ProtocolAliasT]):
+    def get(self) -> _ProtocolAliasT:
+        ...
+
+
+class _AliasedIntGetterContract(_GetterAliasContract[int], Protocol):
+    pass
+
+
+class _SelfMergeContract(Protocol):
+    def merge(self, other: Self) -> Self:
+        ...
+
+
+class _IntValueAttributeContract(Protocol):
+    value: int
+
+
+class _RecursiveNodeContract(Protocol):
+    @property
+    def value(self) -> int:
+        ...
+
+    @property
+    def child(self) -> "_RecursiveNodeContract":
+        ...
+
+
+_IntGetterT = TypeVar("_IntGetterT", bound=_IntGetterContract)
+_AliasedIntGetterT = TypeVar("_AliasedIntGetterT", bound=_AliasedIntGetterContract)
+_IntValueAttributeT = TypeVar("_IntValueAttributeT", bound=_IntValueAttributeContract)
+_SelfMergeT = TypeVar("_SelfMergeT", bound=_SelfMergeContract)
+
+
+class ProduceGenericIntProtocolBox:
+    def __call__(self, value: int) -> _GenericProtocolBox[int]:
+        return _GenericProtocolBox(value)
+
+
+class ProduceGenericStringProtocolBox:
+    def __call__(self, value: int) -> _GenericProtocolBox[str]:
+        return _GenericProtocolBox(str(value))
+
+
+class ProduceClosedIntProtocolBox:
+    def __call__(self, value: int) -> _ClosedIntProtocolBox:
+        return _ClosedIntProtocolBox(value)
+
+
+class ProduceClosedStringProtocolBox:
+    def __call__(self, value: int) -> _ClosedStringProtocolBox:
+        return _ClosedStringProtocolBox(str(value))
+
+
+class ProduceOpenGenericStringProtocolBoxChild:
+    def __call__(self, value: int) -> _OpenGenericProtocolBoxChild:
+        return _OpenGenericProtocolBoxChild(str(value))
+
+
+class ProduceGenericMergeIntBox:
+    def __call__(self, value: int) -> _GenericMergeBox[int]:
+        return _GenericMergeBox(value)
+
+
+class _RecursiveNodeBox(Generic[_BoxT]):
+    def __init__(self, value: _BoxT):
+        self._value = value
+        self._child: "_RecursiveNodeBox[str] | None" = None
+
+    def set_child(self, child: "_RecursiveNodeBox[str]") -> None:
+        self._child = child
+
+    @property
+    def value(self) -> _BoxT:
+        return self._value
+
+    @property
+    def child(self) -> "_RecursiveNodeBox[str]":
+        assert self._child is not None
+        return self._child
+
+
+class UseIntGetter:
+    def __call__(self, value: _IntGetterT) -> int:
+        return value.get() + 1
+
+
+class UseAliasedIntGetter:
+    def __call__(self, value: _AliasedIntGetterT) -> int:
+        return value.get() + 1
+
+
+class MergeValueWithSelf:
+    def __call__(self, value: _SelfMergeT) -> _SelfMergeT:
+        return value.merge(value)
+
+
+class _TypedDictIntValuePayload(TypedDict):
+    value: int
+
+
+class _NamedTupleIntValuePayload(NamedTuple):
+    value: int
+
+
+class ProduceTypedDictIntValuePayload:
+    def __call__(self, value: int) -> _TypedDictIntValuePayload:
+        return {"value": value}
+
+
+class ProduceNamedTupleIntValuePayload:
+    def __call__(self, value: int) -> _NamedTupleIntValuePayload:
+        return _NamedTupleIntValuePayload(value)
+
+
+class UseIntValueAttribute:
+    def __call__(self, value: _IntValueAttributeT) -> int:
+        return value.value + 1
+
+
+class MutateIntValueAttribute:
+    def __call__(self, value: _IntValueAttributeT) -> _IntValueAttributeT:
+        value.value += 1
+        return value
+
+
+class ProduceRecursiveNodeBox:
+    def __call__(self, value: int) -> _RecursiveNodeBox[int]:
+        child = _RecursiveNodeBox(str(value))
+        child.set_child(child)
+        root = _RecursiveNodeBox(value)
+        root.set_child(child)
+        return root
+
+
+class UseRecursiveNode:
+    def __call__(self, value: _RecursiveNodeContract) -> int:
+        return value.child.value + 1
+
+
+class _WritableValueContract(Protocol):
+    value: object
+
+    def keep(self) -> Self:
+        ...
+
+
+_WritableValueT = TypeVar("_WritableValueT", bound=_WritableValueContract)
+
+
+class _WritableValueBase:
+    def keep(self) -> Self:
+        return self
+
+
+class _NarrowWritableValue(_WritableValueBase):
+    value: int
+
+    def __init__(self, value: int):
+        self.value = value
+
+
+class ProduceNarrowWritableValue:
+    def __call__(self, value: int) -> _NarrowWritableValue:
+        return _NarrowWritableValue(value)
+
+
+class KeepWritableValue:
+    def __call__(self, value: _WritableValueT) -> _WritableValueT:
+        return value.keep()
 
 
 class IntToString:
@@ -318,6 +759,242 @@ def test_pipeline_validate_rejects_incompatible_operator_chain():
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
         pipeline.validate()
+
+
+def test_pipeline_validate_accepts_structural_protocol_boundary():
+    contract = Pipeline([
+        ProduceProtocolPrediction(),
+        FilterProtocolPrediction(),
+    ]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is _ProtocolPrediction
+
+
+def test_pipeline_validate_accepts_legacy_typevar_self_structural_protocol_boundary():
+    contract = Pipeline([
+        ProduceLegacyProtocolPrediction(),
+        FilterLegacyProtocolPrediction(),
+    ]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is _LegacyProtocolPrediction
+
+
+def test_pipeline_validate_accepts_protocol_method_with_matching_keyword_visible_parameters():
+    contract = Pipeline([
+        ProduceMatchingMixedBindingMixer(),
+        UseMixedBindingMixer(),
+    ]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is int
+
+
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    [
+        pytest.param(
+            ProduceStaticBuilderWithIntArg(),
+            UseStaticBuilder(),
+            id="static-build",
+        ),
+        pytest.param(
+            ProduceClassBuilderWithIntArg(),
+            UseClassBuilder(),
+            id="class-build",
+        ),
+    ],
+)
+def test_pipeline_validate_accepts_protocol_static_and_class_methods(
+    producer,
+    consumer,
+):
+    contract = Pipeline([producer, consumer]).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is str
+
+
+@pytest.mark.parametrize(
+    "producer",
+    [
+        pytest.param(
+            ProduceGenericIntProtocolBox(),
+            id="parameterized-source",
+        ),
+        pytest.param(
+            ProduceClosedIntProtocolBox(),
+            id="closed-subclass-source",
+        ),
+    ],
+)
+def test_pipeline_validate_accepts_specialized_generic_source_for_protocol_bound(
+    producer,
+):
+    contract = Pipeline(
+        [producer, UseIntGetter()],
+    ).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is int
+
+
+def test_pipeline_validate_accepts_closed_protocol_alias_bound():
+    contract = Pipeline(
+        [ProduceGenericIntProtocolBox(), UseAliasedIntGetter()],
+    ).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type is int
+
+
+def test_pipeline_validate_accepts_parameterized_source_self_protocol_bound():
+    contract = Pipeline(
+        [ProduceGenericMergeIntBox(), MergeValueWithSelf()],
+    ).validate()
+
+    assert contract.input_type is int
+    assert contract.output_type == _GenericMergeBox[int]
+
+
+@pytest.mark.parametrize(
+    "producer",
+    [
+        pytest.param(ProduceWrongProtocolPrediction(), id="wrong-attribute-type"),
+        pytest.param(ProduceWrongProtocolReturn(), id="wrong-method-return"),
+        pytest.param(ProduceWrongProtocolKeywordOnly(), id="wrong-method-keyword-only"),
+    ],
+)
+def test_pipeline_validate_rejects_invalid_structural_protocol_boundary(producer):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:FilterProtocolPrediction",
+    ):
+        Pipeline([producer, FilterProtocolPrediction()]).validate()
+
+
+def test_pipeline_validate_rejects_protocol_method_with_swapped_keyword_visible_parameters():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseMixedBindingMixer",
+    ):
+        Pipeline([
+            ProduceReorderedMixedBindingMixer(),
+            UseMixedBindingMixer(),
+        ]).validate()
+
+
+@pytest.mark.parametrize(
+    "producer",
+    [
+        pytest.param(
+            ProduceGenericStringProtocolBox(),
+            id="parameterized-source",
+        ),
+        pytest.param(
+            ProduceClosedStringProtocolBox(),
+            id="closed-subclass-source",
+        ),
+    ],
+)
+def test_pipeline_validate_rejects_wrong_specialized_generic_source_for_protocol_bound(
+    producer,
+):
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseIntGetter",
+    ):
+        Pipeline([producer, UseIntGetter()]).validate()
+
+
+def test_pipeline_validate_rejects_open_generic_subclass_source_for_protocol_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseIntGetter",
+    ):
+        Pipeline([
+            ProduceOpenGenericStringProtocolBoxChild(),
+            UseIntGetter(),
+        ]).validate()
+
+
+def test_pipeline_validate_rejects_wrong_closed_protocol_alias_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseAliasedIntGetter",
+    ):
+        Pipeline([ProduceGenericStringProtocolBox(), UseAliasedIntGetter()]).validate()
+
+
+def test_pipeline_validate_rejects_typed_dict_source_for_protocol_attribute_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseIntValueAttribute",
+    ):
+        Pipeline([ProduceTypedDictIntValuePayload(), UseIntValueAttribute()]).validate()
+
+
+def test_pipeline_validate_rejects_namedtuple_source_for_writable_protocol_attribute_bound():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:MutateIntValueAttribute",
+    ):
+        Pipeline([
+            ProduceNamedTupleIntValuePayload(),
+            MutateIntValueAttribute(),
+        ]).validate()
+
+
+def test_pipeline_validate_rejects_recursive_protocol_boundary_with_wrong_nested_specialization():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:UseRecursiveNode",
+    ):
+        Pipeline([
+            ProduceRecursiveNodeBox(),
+            UseRecursiveNode(),
+        ]).validate()
+
+
+@pytest.mark.parametrize(
+    ("producer", "consumer", "label"),
+    [
+        pytest.param(
+            ProduceStaticBuilderWithStringArg(),
+            UseStaticBuilder(),
+            "UseStaticBuilder",
+            id="static-build",
+        ),
+        pytest.param(
+            ProduceClassBuilderWithStringArg(),
+            UseClassBuilder(),
+            "UseClassBuilder",
+            id="class-build",
+        ),
+    ],
+)
+def test_pipeline_validate_rejects_invalid_protocol_static_and_class_methods(
+    producer,
+    consumer,
+    label,
+):
+    with pytest.raises(
+        PipelineValidationError,
+        match=rf"Pipeline contract mismatch at 1:{label}",
+    ):
+        Pipeline([producer, consumer]).validate()
+
+
+def test_pipeline_validate_rejects_narrow_writable_structural_protocol_boundary():
+    with pytest.raises(
+        PipelineValidationError,
+        match=r"Pipeline contract mismatch at 1:KeepWritableValue",
+    ):
+        Pipeline([
+            ProduceNarrowWritableValue(),
+            KeepWritableValue(),
+        ]).validate()
 
 
 def test_pipeline_auto_validate_raises_during_initialization():
@@ -869,6 +1546,16 @@ def test_validate_publishes_bound_for_unresolved_typevar_boundary():
 
     assert contract.input_type is _Base
     assert contract.output_type is _Base
+
+
+def test_validate_publishes_specialized_output_for_resolved_typevar_boundary():
+    class IdentityTypeVar:
+        def __call__(self, x: _T) -> _T: ...  # type: ignore[empty-body]
+
+    contract = Pipeline([IdentityTypeVar()]).validate(pipeline_input_type=_Child)
+
+    assert contract.input_type is _Child
+    assert contract.output_type is _Child
 
 
 def test_validate_recursively_publishes_bound_inside_generic_output():

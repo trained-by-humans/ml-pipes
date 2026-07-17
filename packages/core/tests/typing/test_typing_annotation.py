@@ -17,6 +17,8 @@ from typing import (
     MutableMapping as TypingMutableMapping,
     MutableSequence as TypingMutableSequence,
     MutableSet as TypingMutableSet,
+    Protocol,
+    TypedDict,
     TypeVar,
 )
 
@@ -34,10 +36,86 @@ from ml_pipes._typing.annotation import (
 )
 
 _T = TypeVar("_T")
+_LegacySelf = TypeVar("Self")
+_SourceBoxT = TypeVar("_SourceBoxT")
+_InheritedBoxT = TypeVar("_InheritedBoxT")
+_ProtocolAliasT = TypeVar("_ProtocolAliasT")
+_MergeItemT = TypeVar("_MergeItemT")
+
+try:
+    from typing import Self
+except ImportError:  # pragma: no cover
+    from typing_extensions import Self
 
 
 class _Box(Generic[_T]):
     pass
+
+
+class _GenericProtocolBox(Generic[_SourceBoxT]):
+    value: _SourceBoxT
+
+    def get(self) -> _SourceBoxT:
+        raise NotImplementedError
+
+
+class _InheritedGenericProtocolBox(
+    Generic[_InheritedBoxT],
+    _GenericProtocolBox[_InheritedBoxT],
+):
+    pass
+
+
+class _ClosedIntProtocolBox(_GenericProtocolBox[int]):
+    pass
+
+
+class _ClosedStringProtocolBox(_GenericProtocolBox[str]):
+    pass
+
+
+class _IntValueProtocol(Protocol):
+    value: int
+
+
+class _IntGetterProtocol(Protocol):
+    def get(self) -> int:
+        ...
+
+
+class _GetterTemplateProtocol(Protocol[_ProtocolAliasT]):
+    def get(self) -> _ProtocolAliasT:
+        ...
+
+
+class _IntGetterAliasProtocol(_GetterTemplateProtocol[int], Protocol):
+    pass
+
+
+class _ValueTemplateProtocol(Protocol[_ProtocolAliasT]):
+    value: _ProtocolAliasT
+
+
+class _IntValueAliasProtocol(_ValueTemplateProtocol[int], Protocol):
+    pass
+
+
+class _ProcessTemplateProtocol(Protocol[_ProtocolAliasT]):
+    def process(self, value: _ProtocolAliasT) -> str:
+        ...
+
+
+class _IntProcessAliasProtocol(_ProcessTemplateProtocol[int], Protocol):
+    pass
+
+
+class _SelfMergeProtocol(Protocol):
+    def merge(self, other: Self) -> Self:
+        ...
+
+
+class _TypedDictIntValuePayload(TypedDict):
+    value: int
 
 
 class _Indexable:
@@ -48,6 +126,224 @@ class _Indexable:
 class _WritableIndexable(_Indexable):
     def __setitem__(self, index: int, value: object) -> None:
         pass
+
+
+class _FilterableLabelsProtocol(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> Self:
+        ...
+
+
+class _PredictionBase:
+    def filter(self, mask: Sequence[bool]) -> Self:
+        return self
+
+
+class _IntLabelsPrediction(_PredictionBase):
+    labels: Sequence[int]
+
+
+class _IntLabelsPredictionChild(_IntLabelsPrediction):
+    pass
+
+
+class _StringLabelsPrediction(_PredictionBase):
+    labels: Sequence[str]
+
+
+class _IntReturningFilterPrediction:
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> int:
+        return 0
+
+
+class _PredictionWithoutLabels(_PredictionBase):
+    pass
+
+
+class _PredictionWithRequiredFilterLimit(_PredictionBase):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        del limit
+        return self
+
+
+class _LegacySelfFilterableProtocol(Protocol):
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        ...
+
+
+class _LegacySelfPredictionBase:
+    def filter(self, mask: Sequence[bool]) -> _LegacySelf:
+        return self
+
+
+class _LegacySelfPreservingPrediction(_LegacySelfPredictionBase):
+    labels: Sequence[int]
+
+
+class _LegacySelfIntReturningPrediction:
+    labels: Sequence[int]
+
+    def filter(self, mask: Sequence[bool]) -> int:
+        return 0
+
+
+class _WritableObjectValueProtocol(Protocol):
+    value: object
+
+
+class _ReadonlyObjectValueProtocol(Protocol):
+    @property
+    def value(self) -> object:
+        ...
+
+
+class _IntValueField:
+    value: int
+
+
+class _ReadonlyIntValueProperty:
+    @property
+    def value(self) -> int:
+        return 1
+
+
+class _ObjectValueWithIntSetter:
+    @property
+    def value(self) -> object:
+        return 1
+
+    @value.setter
+    def value(self, value: int) -> None:
+        del value
+
+
+class _IntValueWithObjectSetter:
+    @property
+    def value(self) -> int:
+        return 1
+
+    @value.setter
+    def value(self, value: object) -> None:
+        del value
+
+
+class _KeywordLimitFilterProtocol(Protocol):
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        ...
+
+
+class _KeywordLimitFilterWithRequiredLimit:
+    def filter(self, mask: Sequence[bool], *, limit: int) -> Self:
+        del mask, limit
+        return self
+
+
+class _KeywordLimitFilterWithOptionalLimit:
+    def filter(self, mask: Sequence[bool], *, limit: int = 0) -> Self:
+        del mask, limit
+        return self
+
+
+class _KeywordLimitFilterWithoutLimit:
+    def filter(self, mask: Sequence[bool]) -> Self:
+        del mask
+        return self
+
+
+class _MixerProtocol(Protocol):
+    def mix(self, left: int, right: str) -> Self:
+        ...
+
+
+class _MixerWithMatchingOrder:
+    def mix(self, left: int, right: str) -> Self:
+        del left, right
+        return self
+
+
+class _MixerWithReorderedParameters:
+    def mix(self, right: str, left: int) -> Self:
+        del left, right
+        return self
+
+
+class _MixedBindingMixerProtocol(Protocol):
+    def mix(self, left: int, right: int) -> int:
+        ...
+
+
+class _MatchingMixedBindingMixer:
+    def mix(self, left: int, right: int) -> int:
+        return left + right
+
+
+class _ReorderedMixedBindingMixer:
+    def mix(self, right: int, left: int) -> int:
+        return left + right
+
+
+class _StaticBuildProtocol(Protocol):
+    @staticmethod
+    def build(value: int) -> str:
+        ...
+
+
+class _StaticBuildWithIntArg:
+    @staticmethod
+    def build(value: int) -> str:
+        return str(value)
+
+
+class _StaticBuildWithStringArg:
+    @staticmethod
+    def build(value: str) -> str:
+        return value
+
+
+class _ClassBuildProtocol(Protocol):
+    @classmethod
+    def build(cls, value: int) -> str:
+        ...
+
+
+class _ClassBuildWithIntArg:
+    @classmethod
+    def build(cls, value: int) -> str:
+        del cls
+        return str(value)
+
+
+class _ClassBuildWithStringArg:
+    @classmethod
+    def build(cls, value: str) -> str:
+        del cls
+        return value
+
+
+class _GenericMergeBox(Generic[_MergeItemT]):
+    def __init__(self, value: _MergeItemT):
+        self.value = value
+
+    def merge(self, other: Self) -> Self:
+        del other
+        return self
+
+
+class _IntProcessImplementation:
+    def process(self, value: int) -> str:
+        return str(value)
+
+
+class _StringProcessImplementation:
+    def process(self, value: str) -> str:
+        return value
 
 
 @pytest.mark.parametrize(
@@ -168,36 +464,25 @@ def test_is_assignable_accepts_bare_mutable_generic_aliases(
 
 
 @pytest.mark.parametrize(
-    ("source_annotation", "target_annotation"),
+    ("source_annotation", "target_annotation", "expected_assignable"),
     [
-        pytest.param(str, Iterable, id="str-to-Iterable"),
-        pytest.param(bytes, Iterable, id="bytes-to-Iterable"),
-        pytest.param(range, Iterable, id="range-to-Iterable"),
-        pytest.param(str, Sequence, id="str-to-Sequence"),
-        pytest.param(bytes, Sequence, id="bytes-to-Sequence"),
-        pytest.param(range, Collection, id="range-to-Collection"),
+        pytest.param(str, Iterable, True, id="str-to-Iterable"),
+        pytest.param(bytes, Iterable, True, id="bytes-to-Iterable"),
+        pytest.param(range, Iterable, True, id="range-to-Iterable"),
+        pytest.param(str, Sequence, True, id="str-to-Sequence"),
+        pytest.param(bytes, Sequence, True, id="bytes-to-Sequence"),
+        pytest.param(range, Collection, True, id="range-to-Collection"),
+        pytest.param(str, Iterable[int], False, id="str-to-Iterable[int]"),
+        pytest.param(bytes, Sequence[int], False, id="bytes-to-Sequence[int]"),
+        pytest.param(range, Collection[str], False, id="range-to-Collection[str]"),
     ],
 )
-def test_is_assignable_accepts_concrete_iterable_subtype_for_default_generic_target(
+def test_is_assignable_handles_concrete_iterable_subtype_targets(
     source_annotation: Any,
     target_annotation: Any,
+    expected_assignable: bool,
 ) -> None:
-    assert is_assignable(source_annotation, target_annotation)
-
-
-@pytest.mark.parametrize(
-    ("source_annotation", "target_annotation"),
-    [
-        pytest.param(str, Iterable[int], id="str-to-Iterable[int]"),
-        pytest.param(bytes, Sequence[int], id="bytes-to-Sequence[int]"),
-        pytest.param(range, Collection[str], id="range-to-Collection[str]"),
-    ],
-)
-def test_is_assignable_rejects_concrete_iterable_subtype_for_typed_generic_target(
-    source_annotation: Any,
-    target_annotation: Any,
-) -> None:
-    assert not is_assignable(source_annotation, target_annotation)
+    assert is_assignable(source_annotation, target_annotation) is expected_assignable
 
 
 @pytest.mark.parametrize(
@@ -240,6 +525,355 @@ def test_tighten_annotation_restores_missing_generic_arguments(
     expected: Any,
 ) -> None:
     assert tighten_annotation(current_annotation, candidate_annotation) == expected
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "expected_assignable"),
+    [
+        pytest.param(_IntLabelsPrediction, True, id="int-labels"),
+        pytest.param(_IntLabelsPredictionChild, True, id="int-labels-subclass"),
+        pytest.param(_StringLabelsPrediction, False, id="string-labels"),
+        pytest.param(_IntReturningFilterPrediction, False, id="int-returning-filter"),
+        pytest.param(
+            _PredictionWithRequiredFilterLimit,
+            False,
+            id="required-filter-limit",
+        ),
+        pytest.param(_PredictionWithoutLabels, False, id="missing-labels"),
+    ],
+)
+def test_is_assignable_checks_structural_protocol_implementation(
+    implementation_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        _FilterableLabelsProtocol,
+    ) is expected_assignable
+
+
+def test_tighten_annotation_prefers_concrete_protocol_implementation() -> None:
+    assert tighten_annotation(
+        _FilterableLabelsProtocol,
+        _IntLabelsPrediction,
+    ) is _IntLabelsPrediction
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _LegacySelfPreservingPrediction,
+            _LegacySelfFilterableProtocol,
+            True,
+            id="legacy-self-preserving",
+        ),
+        pytest.param(
+            _LegacySelfIntReturningPrediction,
+            _LegacySelfFilterableProtocol,
+            False,
+            id="legacy-self-int-return",
+        ),
+        pytest.param(
+            _IntValueField,
+            _WritableObjectValueProtocol,
+            False,
+            id="int-field-for-writable-object",
+        ),
+        pytest.param(
+            _ReadonlyIntValueProperty,
+            _ReadonlyObjectValueProtocol,
+            True,
+            id="readonly-int-property-for-readonly-object",
+        ),
+        pytest.param(
+            _ReadonlyIntValueProperty,
+            _WritableObjectValueProtocol,
+            False,
+            id="readonly-int-property-for-writable-object",
+        ),
+        pytest.param(
+            _ObjectValueWithIntSetter,
+            _WritableObjectValueProtocol,
+            False,
+            id="object-value-with-int-setter",
+        ),
+        pytest.param(
+            _IntValueWithObjectSetter,
+            _WritableObjectValueProtocol,
+            True,
+            id="int-value-with-object-setter",
+        ),
+    ],
+)
+def test_is_assignable_handles_protocol_attribute_shapes(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _KeywordLimitFilterWithRequiredLimit,
+            True,
+            id="required-limit",
+        ),
+        pytest.param(
+            _KeywordLimitFilterWithOptionalLimit,
+            False,
+            id="optional-limit-mismatch",
+        ),
+        pytest.param(
+            _KeywordLimitFilterWithoutLimit,
+            False,
+            id="missing-limit",
+        ),
+    ],
+)
+def test_is_assignable_requires_protocol_keyword_only_method_signature_to_match(
+    implementation_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        _KeywordLimitFilterProtocol,
+    ) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _MixerWithMatchingOrder,
+            True,
+            id="matching-order",
+        ),
+        pytest.param(
+            _MixerWithReorderedParameters,
+            False,
+            id="reordered-parameters",
+        ),
+    ],
+)
+def test_is_assignable_preserves_protocol_method_positional_parameter_order(
+    implementation_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(implementation_annotation, _MixerProtocol) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _MatchingMixedBindingMixer,
+            True,
+            id="matching-parameter-names",
+        ),
+        pytest.param(
+            _ReorderedMixedBindingMixer,
+            False,
+            id="swapped-parameter-names",
+        ),
+    ],
+)
+def test_is_assignable_requires_protocol_method_keyword_visible_parameter_names_to_match(
+    implementation_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        _MixedBindingMixerProtocol,
+    ) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _StaticBuildWithIntArg,
+            _StaticBuildProtocol,
+            True,
+            id="static-build-int-arg",
+        ),
+        pytest.param(
+            _StaticBuildWithStringArg,
+            _StaticBuildProtocol,
+            False,
+            id="static-build-string-arg",
+        ),
+        pytest.param(
+            _ClassBuildWithIntArg,
+            _ClassBuildProtocol,
+            True,
+            id="class-build-int-arg",
+        ),
+        pytest.param(
+            _ClassBuildWithStringArg,
+            _ClassBuildProtocol,
+            False,
+            id="class-build-string-arg",
+        ),
+    ],
+)
+def test_is_assignable_handles_protocol_static_and_class_methods(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntValueProtocol,
+            True,
+            id="generic-attr-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntValueProtocol,
+            False,
+            id="generic-attr-str",
+        ),
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntGetterProtocol,
+            True,
+            id="generic-method-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntGetterProtocol,
+            False,
+            id="generic-method-str",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[int],
+            _IntValueProtocol,
+            True,
+            id="inherited-generic-attr-int",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[str],
+            _IntValueProtocol,
+            False,
+            id="inherited-generic-attr-str",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[int],
+            _IntGetterProtocol,
+            True,
+            id="inherited-generic-method-int",
+        ),
+        pytest.param(
+            _InheritedGenericProtocolBox[str],
+            _IntGetterProtocol,
+            False,
+            id="inherited-generic-method-str",
+        ),
+        pytest.param(
+            _ClosedIntProtocolBox,
+            _IntGetterProtocol,
+            True,
+            id="closed-subclass-method-int",
+        ),
+        pytest.param(
+            _ClosedStringProtocolBox,
+            _IntGetterProtocol,
+            False,
+            id="closed-subclass-method-str",
+        ),
+    ],
+)
+def test_is_assignable_preserves_source_generic_specialization_for_protocols(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
+
+
+@pytest.mark.parametrize(
+    ("implementation_annotation", "protocol_annotation", "expected_assignable"),
+    [
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntGetterAliasProtocol,
+            True,
+            id="alias-method-return-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntGetterAliasProtocol,
+            False,
+            id="alias-method-return-str",
+        ),
+        pytest.param(
+            _GenericProtocolBox[int],
+            _IntValueAliasProtocol,
+            True,
+            id="alias-attribute-int",
+        ),
+        pytest.param(
+            _GenericProtocolBox[str],
+            _IntValueAliasProtocol,
+            False,
+            id="alias-attribute-str",
+        ),
+        pytest.param(
+            _IntProcessImplementation,
+            _IntProcessAliasProtocol,
+            True,
+            id="alias-method-parameter-int",
+        ),
+        pytest.param(
+            _StringProcessImplementation,
+            _IntProcessAliasProtocol,
+            False,
+            id="alias-method-parameter-str",
+        ),
+    ],
+)
+def test_is_assignable_specializes_inherited_target_protocol_members(
+    implementation_annotation: Any,
+    protocol_annotation: Any,
+    expected_assignable: bool,
+) -> None:
+    assert is_assignable(
+        implementation_annotation,
+        protocol_annotation,
+    ) is expected_assignable
+
+
+def test_is_assignable_preserves_parameterized_source_self_specialization() -> None:
+    assert is_assignable(
+        _GenericMergeBox[int],
+        _SelfMergeProtocol,
+    ) is True
+
+
+def test_is_assignable_rejects_typed_dict_as_protocol_attribute_source() -> None:
+    assert is_assignable(
+        _TypedDictIntValuePayload,
+        _IntValueProtocol,
+    ) is False
 
 
 @pytest.mark.parametrize(
