@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    tags-ignore:
+      - "v*"
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  detect-package-changes:
+    name: Detect Package Changes
+    runs-on: ubuntu-latest
+    outputs:
+      changed_packages: ${{ steps.package-filter.outputs.changed_packages }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed workspace packages
+        id: package-filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python scripts/detect_changed_packages.py \
+            --event-name "$EVENT_NAME" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
+  shared-framework:
+    name: Shared Framework (Py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test tooling
+        run: python -m pip install -U pip pytest tomli
+
+      - name: Install shared framework packages
+        run: |
+          python -m pip install \
+            -e packages/core \
+            -e packages/tensor \
+            -e packages/vision \
+            -e packages/onnx
+
+      - name: Run shared framework tests
+        run: |
+          python -m pytest -q \
+            tests/test_check_index_artifacts.py \
+            tests/test_detect_changed_packages.py \
+            tests/test_import_surfaces.py \
+            tests/test_exports.py \
+            tests/test_release_packages.py \
+            tests/test_stage_release_artifacts.py \
+            packages/core/tests/validation/test_validation.py \
+            packages/core/tests/cli/test_cli.py \
+            packages/tensor/tests/test_registry_ops.py \
+            packages/onnx/tests/test_runtime.py \
+            packages/vision/tests/test_image_ops.py
+
+      - name: Check tracked files for mutations
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+
+  core-latest-smoke:
+    name: Core Latest Smoke (Py3.14)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install test tooling
+        run: python -m pip install -U pip pytest
+
+      - name: Install core package
+        run: python -m pip install -e packages/core
+
+      - name: Run core smoke tests
+        run: |
+          python -c "from ml_pipes.core import Pipeline; print(Pipeline)"
+          python -m pytest -q \
+            tests/test_release_packages.py \
+            packages/core/tests/cli/test_cli.py \
+            packages/core/tests/validation/test_strict.py
+
+      - name: Check tracked files for mutations
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+
+  torch-smoke:
+    name: Torch Smoke (Py3.12)
+    needs: detect-package-changes
+    if: ${{ contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'core') || contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'torch') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test tooling
+        run: python -m pip install -U pip pytest
+
+      - name: Install torch package and inspection chain
+        run: |
+          python -m pip install \
+            -e "packages/core[inspection]" \
+            -e packages/tensor \
+            -e packages/vision \
+            -e packages/onnx \
+            -e packages/torch
+
+      - name: Run torch package smoke tests
+        env:
+          ML_PIPES_STRICT_OPTIONAL_IMPORTS: "1"
+        run: |
+          python -m pytest -q \
+            packages/torch/tests/test_exports.py \
+            packages/torch/tests/test_torch.py \
+            packages/torch/tests/test_integration.py \
+            packages/torch/tests/test_inspection.py
+
+      - name: Check tracked files for mutations
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code

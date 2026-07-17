@@ -1,116 +1,87 @@
 # Contributing
 
-This guide covers local contributor setup and a few repository-level
-maintenance tasks.
+This guide covers local contributor setup and everyday test runs.
 
 ## Local Setup
 
-`ml-pipes` is a multi-package repo. The repository root is a workspace, not an
-installable package, so do not run `pip install -e .` from the root.
+Contributor setup uses the repository `uv` workspace so local package
+dependencies resolve to workspace members instead of published packages.
 
-Contributor installs are local workspace installs. The package
-`pyproject.toml` files describe the published consumer dependency graph, so
-from a fresh clone do not rely on standalone editable installs for packages
-that depend on unpublished siblings.
-
-Create a virtual environment first:
+For most contributor work, from the repository root sync the
+`shared-framework` group:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip pytest
+uv sync --group shared-framework
 ```
 
-Install the smallest local package set that matches your work:
-
-Core-only work:
+If you need the full local workspace, sync `full-workspace`. That group also
+adds the umbrella package under `packages/meta/` for checking published
+install behavior:
 
 ```bash
-python -m pip install -e packages/core
+uv sync --group full-workspace
 ```
 
-Common shared-framework setup:
+> [!TIP]
+> For the full set of available groups, see `[dependency-groups]` in
+> [`pyproject.toml`](pyproject.toml).
 
-```bash
-python -m pip install \
-  -e packages/core \
-  -e packages/tensor \
-  -e packages/vision \
-  -e packages/onnx
-```
-
-Full workspace setup:
-
-```bash
-python -m pip install \
-  -e packages/core \
-  -e packages/tensor \
-  -e packages/vision \
-  -e packages/onnx \
-  -e packages/torch \
-  -e packages/meta
-```
-
-Add optional surfaces only when needed:
-
-Torch contributor setup:
-
-```bash
-python -m pip install \
-  -e packages/core \
-  -e packages/tensor \
-  -e packages/torch
-```
-
-Inspection and otel contributor setup:
-
-```bash
-python -m pip install \
-  -e "packages/core[inspection,otel]" \
-  -e packages/tensor \
-  -e packages/vision \
-  -e packages/onnx
-```
-
-The common shared-framework setup covers most contributor work and much of the
-test suite. The umbrella package under `packages/meta/` is mainly for checking
-published install behavior. Once the packages are published, consumer installs
-should use the published package names and profiles from the package docs
-rather than these local workspace commands.
+> [!NOTE]
+> These workspace commands are for local contributor development. Once the
+> packages are published, consumer installs should use the published package
+> names and profiles from the package docs instead.
 
 ## Run Tests
 
 From the repository root:
 
 ```bash
-python -m pytest
+uv run pytest
 ```
 
-Match your install profile to the surfaces you are testing. The common
-shared-framework setup covers many shared tests; add `packages/torch` when
-running Torch-specific tests.
+Match your synced groups to the surfaces you are testing. The
+`shared-framework` group covers many shared tests. When you run tests for a
+package-specific surface, sync that package group too.
 
-## Release Workflow
-
-Publish packages in dependency order:
-
-1. `ml-pipes-core`
-2. `ml-pipes-tensor`
-3. `ml-pipes-vision`
-4. `ml-pipes-onnx`
-5. `ml-pipes-torch`
-6. `ml-pipes`
-
-Run a release dry-run from the repository root with:
+For example, to run a Torch-specific test module:
 
 ```bash
-python scripts/release_packages.py --dry-run
+uv sync --group torch
+
+uv run pytest packages/torch/tests/test_torch.py
 ```
+
+Some test surfaces need more than one group. For example, the Torch
+inspection tests also need the inspection extras and the local ONNX and
+vision packages:
+
+```bash
+uv sync --group torch --group inspection-otel
+
+uv run pytest packages/torch/tests/test_inspection.py
+```
+
+## CI
+
+GitHub Actions CI covers normal development changes and is reused by the
+release workflow as a safety gate for tagged commits.
+
+CI focuses on the shared framework test path, smoke checks for key install
+shapes, and verification that the test runs do not leave tracked file
+mutations behind.
+
+> [!IMPORTANT]
+> Contributors should still run the relevant local tests before pushing.
+
+## Repository Maintenance
+
+Release-specific setup and package publishing workflow live in
+[RELEASE.md](RELEASE.md).
 
 ## IDE Setup
 
-If your editor still shows unresolved imports after the editable install,
-mark these directories as source roots and refresh indexing:
+If your editor still shows unresolved imports after `uv sync`, mark these
+directories as source roots and refresh indexing:
 
 - `packages/core/src`
 - `packages/tensor/src`
