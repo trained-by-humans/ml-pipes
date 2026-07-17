@@ -1,9 +1,10 @@
-from typing import Any, TypedDict
+from typing import Any, NamedTuple, TypedDict
 
 import pytest
 
 from ml_pipes._typing.annotation import _MISSING_ANNOTATION
 from ml_pipes._typing.inspection import (
+    resolve_attribute_annotation_info,
     AttributeInspectionError,
     MissingAttributeError,
     MissingTypedDictKeyError,
@@ -31,6 +32,36 @@ class _UntypedPropertyAttributeOwner:
         return ""
 
 
+class _WritablePropertyAttributeOwner:
+    @property
+    def value(self) -> str:
+        return ""
+
+    @value.setter
+    def value(self, value: str) -> None:
+        del value
+
+
+class _NarrowSetterPropertyAttributeOwner:
+    @property
+    def value(self) -> object:
+        return ""
+
+    @value.setter
+    def value(self, value: int) -> None:
+        del value
+
+
+class _UntypedSetterPropertyAttributeOwner:
+    @property
+    def value(self) -> str:
+        return ""
+
+    @value.setter
+    def value(self, value) -> None:
+        del value
+
+
 class _BrokenAttributeOwner:
     value: "MissingType"
 
@@ -41,6 +72,10 @@ class _PartiallyBrokenAttributeOwner:
 
 
 class _TypedDictAttributeOwner(TypedDict):
+    value: int
+
+
+class _NamedTupleAttributeOwner(NamedTuple):
     value: int
 
 
@@ -87,6 +122,79 @@ def test_resolve_attribute_annotation(annotation: Any, attribute: str, expected:
         assert result is _MISSING_ANNOTATION
         return
     assert result == expected
+
+
+@pytest.mark.parametrize(
+    (
+        "annotation",
+        "attribute",
+        "expected_annotation",
+        "expected_writable",
+        "expected_write_annotation",
+    ),
+    [
+        pytest.param(
+            _AnnotatedAttributeOwner,
+            "value",
+            int,
+            True,
+            int,
+            id="annotated-attribute",
+        ),
+        pytest.param(
+            _NamedTupleAttributeOwner,
+            "value",
+            int,
+            False,
+            _MISSING_ANNOTATION,
+            id="readonly-namedtuple-attribute",
+        ),
+        pytest.param(
+            _PropertyAttributeOwner,
+            "value",
+            str,
+            False,
+            _MISSING_ANNOTATION,
+            id="readonly-property",
+        ),
+        pytest.param(
+            _WritablePropertyAttributeOwner,
+            "value",
+            str,
+            True,
+            str,
+            id="writable-property",
+        ),
+        pytest.param(
+            _NarrowSetterPropertyAttributeOwner,
+            "value",
+            object,
+            True,
+            int,
+            id="narrow-setter-property",
+        ),
+        pytest.param(
+            _UntypedSetterPropertyAttributeOwner,
+            "value",
+            str,
+            True,
+            _MISSING_ANNOTATION,
+            id="untyped-setter-property",
+        ),
+    ],
+)
+def test_resolve_attribute_annotation_info(
+    annotation: Any,
+    attribute: str,
+    expected_annotation: Any,
+    expected_writable: bool,
+    expected_write_annotation: Any,
+) -> None:
+    result = resolve_attribute_annotation_info(annotation, attribute)
+
+    assert result.annotation == expected_annotation
+    assert result.is_writable is expected_writable
+    assert result.write_annotation == expected_write_annotation
 
 
 def test_resolve_attribute_annotation_raises_for_missing_attribute() -> None:

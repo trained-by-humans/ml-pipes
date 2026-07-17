@@ -45,7 +45,6 @@ from ml_pipes.torch import (
 )
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
 from ml_pipes.validation import PipelineValidationError
-from ml_pipes.vision import Normalize
 
 
 class _TorchIdentity:
@@ -57,6 +56,11 @@ class _TorchIncrementRegistry:
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         registry["scores"] = registry["scores"] + 1
         return registry
+
+
+class _TensorPayloadPassthrough:
+    def __call__(self, value: TensorPayload) -> TensorPayload:
+        return value
 
 
 class _EmptyDetectionModule(torch.nn.Module):
@@ -113,7 +117,7 @@ def test_numpy_torch_numpy_pipeline_composes() -> None:
 
 def test_validate_mixed_domains_fail_without_explicit_conversion() -> None:
     pipeline = Pipeline([
-        Normalize(),
+        _TensorPayloadPassthrough(),
         TorchInfer(torch.nn.Identity().eval()),
     ])
 

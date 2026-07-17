@@ -22,8 +22,10 @@ from ml_pipes._typing.annotation import (
     satisfies_annotation_constraint,
     tighten_annotation,
 )
-from ml_pipes._typing.inspection import resolve_callable_annotations
-from ml_pipes._typing.signatures import validate_operator_signature
+from ml_pipes._typing.signatures import (
+    resolve_callable_signature_annotations,
+    validate_operator_signature,
+)
 from ml_pipes.context import ContextOp, Recall, Store
 from ml_pipes.region import RegionCloser, RegionOpener
 
@@ -75,6 +77,7 @@ class _OperatorBoundary:
     context_inputs: dict[str, Any] | None
     dynamic_boundary: _BoundarySignature | None
     static_boundary: _BoundarySignature | None
+    resolved_output_type: Any | None = None
 
     @property
     def effective_boundary(self) -> _BoundarySignature:
@@ -86,6 +89,8 @@ class _OperatorBoundary:
 
     @property
     def effective_output_type(self) -> Any:
+        if self.resolved_output_type is not None:
+            return self.resolved_output_type
         return self.effective_boundary.output_type
 
     @property
@@ -350,6 +355,7 @@ class PipelineValidator:
                     current_boundary.effective_input_types,
                     current_boundary.effective_output_type,
                 )
+            current_boundary.resolved_output_type = previous_output_type
 
         return boundaries
 
@@ -479,7 +485,7 @@ def require_operator_annotations(
     *,
     label: str,
 ) -> tuple[tuple[Any, ...], Any]:
-    annotations = resolve_callable_annotations(operator)
+    annotations = resolve_callable_signature_annotations(operator)
     if any(annotation is None for annotation in annotations.parameter_annotations):
         raise PipelineValidationError(
             f"Pipeline step {label} is missing a type annotation for __call__ input"
@@ -488,4 +494,7 @@ def require_operator_annotations(
         raise PipelineValidationError(
             f"Pipeline step {label} is missing a return type annotation for __call__"
         )
-    return tuple(annotations.parameter_annotations), annotations.return_annotation
+    return (
+        annotations.parameter_annotations,
+        annotations.return_annotation,
+    )

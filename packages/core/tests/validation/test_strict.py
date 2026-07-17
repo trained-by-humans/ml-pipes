@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import pytest
 
 from ml_pipes.core import Pipeline
@@ -10,7 +11,7 @@ from ml_pipes.standard import (
 )
 from ml_pipes.validation import PipelineValidationError
 from ml_pipes.context import ContextOp, Context
-from typing import Any
+from typing import Any, get_origin
 
 
 class IntToString:
@@ -242,6 +243,36 @@ class RecordingEffect(SideEffectOp[str]):
         self.calls.append(payload)
 
 
+@dataclass(frozen=True)
+class ImageLikePayload:
+    pixels: object
+    color_space: str
+    layout: str
+
+
+class RecordingImageEffect(SideEffectOp[ImageLikePayload]):
+    def effect(self, payload: ImageLikePayload) -> None:
+        del payload
+
+
+def _is_unresolved_object_list(annotation: Any) -> bool:
+    return annotation is list or (get_origin(annotation) is list and annotation != list[dict[str, object]])
+
+
+class ObjectListLogger(SideEffectOp[Any]):
+    def effect(self, payload: Any) -> None:
+        del payload
+
+    def resolve_contract(self, upstream_annotation, validation_error_type):
+        del validation_error_type
+
+        concrete_objects = list[dict[str, object]]
+        if upstream_annotation is Any or _is_unresolved_object_list(upstream_annotation):
+            return (concrete_objects,), concrete_objects
+
+        return (upstream_annotation,), upstream_annotation
+
+
 def test_side_effect_op_rejects_call_override():
     with pytest.raises(TypeError, match="must not override __call__"):
         class BadEffect(SideEffectOp[str]):
@@ -266,31 +297,17 @@ def test_side_effect_op_returns_input_unchanged():
     assert op.calls == ["42"]
 
 
-def test_save_image_passes_strict_validation(tmp_path):
-    from ml_pipes.vision import SaveImage
-    from ml_pipes.vision import ImagePayload
-    import numpy as np
-
+def test_side_effect_op_accepts_structured_payload_in_strict_mode():
     class MakeImage:
-        def __call__(self, value: int) -> ImagePayload:
-            return ImagePayload(array=np.zeros((10, 10, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+        def __call__(self, value: int) -> ImageLikePayload:
+            return ImageLikePayload(pixels=value, color_space="BGR", layout="HWC")
 
-    op = SaveImage(tmp_path / "out.jpg")
-    Pipeline([MakeImage(), op]).validate(strict=True)
+    Pipeline([MakeImage(), RecordingImageEffect()]).validate(strict=True)
 
 
-def test_log_detections_passes_strict_validation(tmp_path):
-    import io
-    from ml_pipes.vision import LogDetections
-
+def test_side_effect_op_contract_override_passes_strict_validation():
     class MakeDetections:
         def __call__(self, value: int) -> list[dict[str, object]]:
             return []
 
-    op = LogDetections(
-        model_path="model.onnx",
-        image_path="img.jpg",
-        annotated_image_path="ann.jpg",
-        stream=io.StringIO(),
-    )
-    Pipeline([MakeDetections(), op]).validate(strict=True)
+    Pipeline([MakeDetections(), ObjectListLogger()]).validate(strict=True)

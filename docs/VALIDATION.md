@@ -1,14 +1,17 @@
 # Pipeline Validation
 
-Validation checks a pipeline before runtime. It verifies that operator
-boundaries line up, context access stays in scope, and regions are
-structurally valid. It also returns the resolved pipeline contract, so you can
-see what input and output types the pipeline currently exposes.
+## Overview
 
-Use it while building pipelines, after composition or extension, and before
-benchmarking or deployment checks.
+Validation checks a pipeline before runtime. In the current validation flow,
+it checks:
 
-## Quick Example
+1. region structure
+2. context scope
+3. operator compatibility
+4. strict-mode boundary concreteness, if `strict=True`
+
+Validation also returns the resolved pipeline contract so you can see what
+input and output types the pipeline currently exposes.
 
 ```python
 from ml_pipes.core import Pipeline
@@ -31,11 +34,49 @@ assert contract.input_type is int
 assert contract.output_type is float
 ```
 
-## How Validation Works
+## When Validation Runs
 
-Validation reasons from operator contracts.
+Validation never runs unless you ask for it.
 
-### `__call__` Signatures
+```python
+pipeline = Pipeline([...], auto_validate=True)  # validate during construction
+pipeline.extend([...])                          # re-validates if auto_validate=True
+pipeline.validate()                             # explicit validation
+```
+
+Use `auto_validate=True` when the pipeline is built incrementally, but note:
+
+- `auto_validate` runs the normal validation flow, not strict mode
+- if you want strict validation, call `pipeline.validate(strict=True)`
+- after composition or other pipeline changes, an explicit `validate()` call is
+  still the clearest checkpoint
+
+## Operator Compatibility
+
+Validation resolves each step's contract and checks that the previous step's
+output can feed the next step's input.
+
+Compatible boundaries:
+
+```text
+IntToString(value: int) -> str
+StringToFloat(value: str) -> float
+```
+
+Fixed-length tuple outputs are unpacked positionally when the next operator
+takes multiple positional inputs:
+
+```text
+IntToPair(value: int) -> tuple[int, str]
+PairToBool(number: int, text: str) -> bool
+```
+
+Compatible boundaries follow normal assignability intuition for the supported
+annotation shapes in this page: the previous step's output can be narrower
+than the next step's expected input, as long as it is assignable to that input
+boundary.
+
+### Call Signatures (`__call__`)
 
 For ordinary callable operators, the contract comes from the annotated
 `__call__` signature:
@@ -68,7 +109,7 @@ fails immediately.
 > overloads help type checkers, but validation still needs
 > `Pick.resolve_contract(...)` to use the configured index precisely.
 
-### `resolve_contract(...)`
+### Operator Contracts (`resolve_contract(...)`)
 
 Some operators cannot express their boundary precisely with a static signature
 alone. `resolve_contract(...)` exists for those cases.
@@ -117,49 +158,61 @@ class AttachStored(ContextOp[Any, Any]):
 ```
 
 Built-in operators such as `Store`, `Recall`, `Pick`, `Batch`, `UnBatch`,
-`Scatter`, and `Gather` participate in validation this way. 
+`Scatter`, and `Gather` participate in validation this way.
 
 > [!NOTE]
-> Broad static annotations while still validating, usually leave the
-> published contract looser. `resolve_contract(...)` become necessary when you
-> need a tighter contract than the static signature can express.
+> Broad static annotations can still validate, but they usually leave the
+> published contract looser. `resolve_contract(...)` becomes necessary when
+> you need a tighter contract than the static signature can express.
 
 > [!TIP]
 > Most of the time generic contracts do not need `resolve_contract(...)`.
-> If the contract is straightforward, using `TypeVar`s, a simple 
+> If the contract is straightforward, using `TypeVar`s, a simple
 > `T -> T` for type-preserving operators or `T -> M[T]` for simple
 > container-mapping operators is enough.
 
-For more information regarding `__call__` signatures and
-`resolve_contract(...)`, see [OPERATORS.md](OPERATORS.md).
+### How Compatibility Is Checked
 
-## What Validation Checks
+Validation resolves one contract per step:
 
-### Operator Compatibility
+- for ordinary operators, it extracts the annotated `__call__` boundary
+- for dynamic operators, it asks `resolve_contract(...)` for the boundary at
+  this exact pipeline position
+- while doing that, it specializes generics and `TypeVar`-based boundaries
+  against the current upstream type whenever it can
+- if a `TypeVar` cannot be fully resolved, the published contract falls back to
+  its bound or constraint, recursively inside containers
 
-Validation resolves each step's contract and checks that the previous step's
-output can feed the next step's input.
+Once those boundaries are resolved, validation matches them left to right:
 
-Compatible boundaries:
+- the previous step's output boundary is checked against the next step's input
+  boundary
+- fixed-length tuple outputs can be matched against multi-parameter inputs by
+  position
 
-```text
-IntToString(value: int) -> str
-StringToFloat(value: str) -> float
-```
+### Compatibility Coverage
 
-Fixed-length tuple outputs are unpacked positionally when the next operator
-takes multiple positional inputs:
+Validation is a contract checker over a scoped subset of Python's typing
+model. It is not a general-purpose replacement for a static type checker.
 
-```text
-IntToPair(value: int) -> tuple[int, str]
-PairToBool(number: int, text: str) -> bool
-```
+Compatibility is directional. Validation asks whether the previous step's
+output is assignable to the next step's input, not whether the two annotations
+are interchangeable.
 
-Broader downstream input types are allowed:
+| Annotation shape | Examples | Current compatibility coverage |
+|---|---|---|
+| Broad placeholders | `Any`, `object` | Accepted as broad contracts. In `strict=True`, unresolved `Any` is still rejected at the operator-boundary level. |
+| Concrete classes | `str`, `bytes`, `ImagePayload` | Supported through normal subclass compatibility. |
+| `TypeVar`s | `T`, `TypeVar("T", bound=Base)` | Supported with bounds and constraints. When the upstream type is concrete, validation specializes `TypeVar`-based boundaries where it can; otherwise the published contract falls back to the bound or constraint. |
+| Unions | `A \| B` | Supported directionally. Every produced option must be assignable to the downstream expectation. |
+| Fixed-length tuples | `tuple[int, str]` | Supported and can route positionally into multi-parameter operators. |
+| Variadic tuples | `tuple[int, ...]` | Supported as single values. They are not expanded into multiple pipeline inputs. |
+| Common built-in and `collections.abc` generics | `list[T]`, `set[T]`, `frozenset[T]`, `dict[K, V]`, `Iterable[T]`, `Collection[T]`, `Sequence[T]`, `Mapping[K, V]`, `MutableSequence[T]`, `MutableMapping[K, V]`, `MutableSet[T]`, `type[T]` | Supported with the variance rules implemented by the core annotation matcher. |
+| Structural `Protocol`s | `Protocol` with annotated fields and methods | Supported when used as downstream expectations or `TypeVar` bounds. The current supported protocol shape is non-parameterized structural protocols, including annotated data members and `Self`-preserving methods.<br><br>Note: method matching strips the receiver first, then requires exact callable shape: order, keyword-visible names, kinds, and defaults. Parameter annotations are checked contravariantly; return annotations covariantly.<br><br>Not supported: class-object boundaries such as `type[Proto]`. |
+| Other typing features | `Annotated`, `Literal`, generic `Protocol[T]`, `ParamSpec`, overload-oriented typing constructs | Not part of the current documented compatibility contract. Some cases may work incidentally, but they are not guaranteed. Prefer a simpler boundary annotation or use `resolve_contract(...)` when you need a more explicit contract. |
 
-```text
-str -> object
-```
+For more information regarding call signatures and operator contracts, see
+[OPERATORS.md](OPERATORS.md).
 
 If a boundary is incompatible, validation raises with the step label:
 
@@ -168,7 +221,7 @@ Pipeline contract mismatch at 1:PairToBool:
   IntToPair provides tuple[int, str] but PairToBool expects (int, float)
 ```
 
-### Context Scope
+## Context Scope
 
 Validation tracks stored keys in the same runtime scope. A `Recall("x")` is
 valid only if `"x"` was stored earlier in that scope.
@@ -195,7 +248,13 @@ Pipeline([Store("x"), Batch(size=2), UnBatch(), Recall("x")])   # valid
 When a recall fails, validation reports the operator label and the keys
 available at that point.
 
-### Region Structure
+A representative error looks like:
+
+```text
+Pipeline step 0:Recall references a key that was not stored: 'x'. Keys available at this point: (none)
+```
+
+## Region Structure
 
 Validation checks that region openers and closers are structurally valid. It
 rejects:
@@ -215,24 +274,13 @@ Scatter -> Batch -> Gather                  regions interleave
 Batch -> Batch -> UnBatch -> UnBatch        directly nested Batch forbidden
 ```
 
-For region semantics and built-in region pairs, see [REGIONS.md](REGIONS.md).
+A representative error looks like:
 
-## When Validation Runs
-
-Validation never runs unless you ask for it.
-
-```python
-pipeline = Pipeline([...], auto_validate=True)  # validate during construction
-pipeline.extend([...])                          # re-validates if auto_validate=True
-pipeline.validate()                             # explicit validation
+```text
+Pipeline step 0:Batch has no matching UnBatch
 ```
 
-Use `auto_validate=True` when the pipeline is built incrementally, but note:
-
-- `auto_validate` runs the normal validation flow, not strict mode
-- if you want strict validation, call `pipeline.validate(strict=True)`
-- after composition or other pipeline changes, an explicit `validate()` call is
-  still the clearest check point
+For region semantics and built-in region pairs, see [REGIONS.md](REGIONS.md).
 
 ## Strict Mode
 
@@ -269,47 +317,24 @@ concretely through `resolve_contract(...)`.
 > For a side-effect-only passthrough operator, prefer `SideEffectOp`. It
 > already threads the upstream type correctly for validation.
 
-## How Validation Works Internally
+A representative error looks like:
 
-### Boundary Resolution
+```text
+Strict mode violation at 0:VagueOp: input type is unresolved (Any).
+  Fix: annotate the parameter with a concrete type, or implement resolve_contract to accept and thread the upstream type dynamically.
+```
 
-Validation first resolves one contract per step.
+## Returned Contract and Input Modes
 
-- for ordinary operators, it extracts the annotated `__call__` boundary
-- for dynamic operators, it asks `resolve_contract(...)` for the boundary at
-  this exact pipeline position
-- while doing that, it specializes generics and `TypeVar`-based boundaries
-  against the current upstream type whenever it can
-- if a `TypeVar` cannot be fully resolved, the published contract falls back to
-  its bound or constraint, recursively inside containers
+Validation always runs the checks above. Once those checks succeed, it returns
+a `TypeContract(input_type=..., output_type=...)`. The returned output type
+comes from the last resolved operator boundary. The returned input type is
+tightened from the entry boundary, any declared `pipeline_input_type`, and
+optionally by backward inference. Strict mode is orthogonal; it adds
+validation on top of this flow but does not change how compatibility or input
+modes work.
 
-This is the phase that turns broad operator signatures into the concrete
-step-by-step boundaries the rest of validation can reason about.
-
-### Contract Validation
-
-Once those boundaries are resolved, validation matches them left to right.
-
-- the previous step's output boundary is checked against the next step's input
-  boundary
-- fixed-length tuple outputs can be matched against multi-parameter inputs by
-  position
-- context and region structure are validated against the same resolved step
-  boundaries
-
-This is the phase that produces contract mismatch errors when two adjacent
-steps cannot connect.
-
-### Boundary Tightening
-
-Validation always runs the structural and compatibility checks above. The
-different modes change how validation seeds and refines the pipeline input
-boundary, and therefore what input contract it returns. Declared input
-participates in forward compatibility checks and can surface mismatches.
-Backward inference does not; it only refines the returned input contract after
-forward compatibility has already succeeded.
-
-#### Default Mode
+### Default Mode
 
 ```python
 contract = pipeline.validate()
@@ -337,7 +362,7 @@ contract = Pipeline([VagueOp()]).validate()
 assert contract.input_type is Any
 ```
 
-#### Declared Input
+### Declared Input
 
 ```python
 contract = pipeline.validate(pipeline_input_type=...)
@@ -371,7 +396,7 @@ assert contract.input_type == tuple[int, str]
 assert contract.output_type is bool
 ```
 
-#### Backward Inference
+### Backward Inference
 
 ```python
 contract = pipeline.validate(inference=True)

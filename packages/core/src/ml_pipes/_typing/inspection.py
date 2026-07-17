@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, get_origin, get_type_hints
+from typing import Any, get_args, get_type_hints
 
 from ml_pipes._typing.annotation import (
     _MISSING_ANNOTATION,
+    _resolve_annotation_owner,
     build_union_annotation_from_options,
     describe_annotation,
     is_typed_dict_annotation,
     is_union_annotation,
     is_unknown_annotation,
 )
-from ml_pipes._typing.signatures import _POSITIONAL_VALUE_PARAMETER_KINDS
 
 
 class AttributeResolutionError(Exception):
@@ -49,80 +49,18 @@ class AttributeInspectionError(AttributeResolutionError):
             f"Cannot resolve attribute {attribute!r} for {describe_annotation(annotation)}: {reason}",
         )
 
-
 @dataclass(frozen=True)
-class CallableAnnotations:
-    parameter_annotations: tuple[Any | None, ...]
-    return_annotation: Any | None
-
-
-def resolve_callable_annotations(
-    callable_: Callable[..., Any],
-) -> CallableAnnotations:
-    # This inspects the concrete runtime callable target only. @overload stubs
-    # are erased here, so validation must rely on resolve_contract() whenever
-    # the implementation signature is broader than the intended boundary.
-    positional_parameters = _resolve_positional_value_parameters(callable_)
-    if positional_parameters is None:
-        return CallableAnnotations((), None)
-
-    try:
-        hints = _resolve_callable_hints(callable_)
-    except (TypeError, ValueError):
-        return CallableAnnotations(
-            tuple(None for _ in positional_parameters),
-            None,
-        )
-
-    return_annotation = callable_ if inspect.isclass(callable_) else hints.get("return")
-    return CallableAnnotations(
-        tuple(hints.get(parameter.name) for parameter in positional_parameters),
-        return_annotation,
-    )
-
-
-def probe_callable(
-    callable_: Callable[..., Any],
-    /,
-    *args: Any,
-    **kwargs: Any,
-) -> inspect.BoundArguments:
-    return inspect.signature(callable_).bind(*args, **kwargs)
-
-
-def _resolve_positional_value_parameters(
-    callable_: Callable[..., Any],
-) -> tuple[inspect.Parameter, ...] | None:
-    try:
-        signature = inspect.signature(callable_)
-    except (TypeError, ValueError):
-        return None
-
-    return tuple(
-        parameter
-        for parameter in signature.parameters.values()
-        if parameter.kind in _POSITIONAL_VALUE_PARAMETER_KINDS
-    )
-
-
-def _resolve_callable_hints(callable_: Callable[..., Any]) -> dict[str, Any]:
-    return get_type_hints(_resolve_callable_hints_target(callable_))
-
-
-def _resolve_callable_hints_target(callable_: Callable[..., Any]) -> Any:
-    if inspect.isclass(callable_):
-        return getattr(callable_, "__init__", callable_)
-    if (
-        inspect.isfunction(callable_)
-        or inspect.ismethod(callable_)
-        or inspect.isbuiltin(callable_)
-        or inspect.ismethoddescriptor(callable_)
-    ):
-        return callable_
-    return getattr(callable_, "__call__", callable_)
+class AttributeAnnotationInfo:
+    annotation: Any
+    is_writable: bool
+    write_annotation: Any = _MISSING_ANNOTATION
 
 
 def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
+    return resolve_attribute_annotation_info(annotation, attribute).annotation
+
+
+def resolve_attribute_annotation_info(annotation: Any, attribute: str) -> AttributeAnnotationInfo:
     if is_unknown_annotation(annotation):
         raise AttributeInspectionError(annotation, attribute, "owner annotation is unknown")
 
@@ -131,16 +69,32 @@ def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
 
     if is_union_annotation(annotation):
         resolved_options: list[Any] = []
+        resolved_write_annotations: list[Any] = []
+        is_writable = True
         saw_missing_annotation = False
+        saw_missing_write_annotation = False
         for option in get_args(annotation):
-            option_annotation = resolve_attribute_annotation(option, attribute)
-            if option_annotation is _MISSING_ANNOTATION:
+            option_info = resolve_attribute_annotation_info(option, attribute)
+            if option_info.annotation is _MISSING_ANNOTATION:
                 saw_missing_annotation = True
                 continue
-            resolved_options.append(option_annotation)
+            resolved_options.append(option_info.annotation)
+            is_writable = is_writable and option_info.is_writable
+            if option_info.is_writable:
+                if option_info.write_annotation is _MISSING_ANNOTATION:
+                    saw_missing_write_annotation = True
+                else:
+                    resolved_write_annotations.append(option_info.write_annotation)
         if not resolved_options or saw_missing_annotation:
-            return _MISSING_ANNOTATION
-        return build_union_annotation_from_options(*resolved_options)
+            return AttributeAnnotationInfo(_MISSING_ANNOTATION, False)
+        write_annotation = _MISSING_ANNOTATION
+        if is_writable and not saw_missing_write_annotation:
+            write_annotation = build_union_annotation_from_options(*resolved_write_annotations)
+        return AttributeAnnotationInfo(
+            build_union_annotation_from_options(*resolved_options),
+            is_writable,
+            write_annotation,
+        )
 
     if is_typed_dict_annotation(annotation):
         try:
@@ -149,11 +103,12 @@ def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
             raise AttributeInspectionError(annotation, attribute, "typed dict annotations are unavailable") from exc
         if hint is _MISSING_ANNOTATION:
             raise MissingTypedDictKeyError(annotation, attribute)
-        return hint
+        return AttributeAnnotationInfo(hint, True, hint)
 
     override = _resolve_attribute_override(annotation, attribute)
     if override is not _MISSING_ANNOTATION:
-        return override
+        # Framework-level attribute overrides model a readable surface only.
+        return AttributeAnnotationInfo(override, False)
 
     owner = _resolve_annotation_owner(annotation)
     if owner is None:
@@ -164,29 +119,57 @@ def resolve_attribute_annotation(annotation: Any, attribute: str) -> Any:
         if descriptor.fget is None:
             raise MissingAttributeError(annotation, attribute)
         try:
-            hints = get_type_hints(descriptor.fget)
+            getter_annotation = get_type_hints(descriptor.fget).get(
+                "return",
+                _MISSING_ANNOTATION,
+            )
+            setter_annotation = _resolve_property_setter_annotation(descriptor)
         except (NameError, TypeError, ValueError) as exc:
             raise AttributeInspectionError(annotation, attribute, "property annotations are unavailable") from exc
-        return hints.get("return", _MISSING_ANNOTATION)
+        return AttributeAnnotationInfo(
+            getter_annotation,
+            descriptor.fset is not None,
+            setter_annotation,
+        )
 
     try:
         hint = _resolve_class_field_annotation(owner, attribute)
     except (NameError, TypeError, ValueError) as exc:
         raise AttributeInspectionError(annotation, attribute, "attribute annotations are unavailable") from exc
     if hint is not _MISSING_ANNOTATION:
-        return hint
+        if _is_readonly_class_field_descriptor(owner, descriptor):
+            return AttributeAnnotationInfo(hint, False)
+        return AttributeAnnotationInfo(hint, True, hint)
     if descriptor is not _MISSING_ANNOTATION:
-        return _MISSING_ANNOTATION
+        return AttributeAnnotationInfo(_MISSING_ANNOTATION, False)
     raise MissingAttributeError(annotation, attribute)
 
 
-def _resolve_annotation_owner(annotation: Any) -> type | None:
-    origin = get_origin(annotation)
-    if isinstance(origin, type):
-        return origin
-    if isinstance(annotation, type):
-        return annotation
-    return None
+def _resolve_property_setter_annotation(descriptor: property) -> Any:
+    if descriptor.fset is None:
+        return _MISSING_ANNOTATION
+
+    parameters = tuple(inspect.signature(descriptor.fset).parameters.values())
+    if len(parameters) < 2:
+        return _MISSING_ANNOTATION
+
+    setter_value_name = parameters[1].name
+    return get_type_hints(descriptor.fset).get(
+        setter_value_name,
+        _MISSING_ANNOTATION,
+    )
+
+
+def _is_readonly_class_field_descriptor(owner: type, descriptor: Any) -> bool:
+    if descriptor is _MISSING_ANNOTATION:
+        return False
+
+    descriptor_type = type(descriptor)
+    return (
+        issubclass(owner, tuple)
+        and descriptor_type.__module__ in {"collections", "_collections"}
+        and descriptor_type.__name__ == "_tuplegetter"
+    )
 
 
 def _resolve_class_field_annotation(owner: type, attribute: str) -> Any:

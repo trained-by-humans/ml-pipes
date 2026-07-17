@@ -1,3 +1,36 @@
+[project]
+name = "ml-pipes-workspace"
+version = "0.0.0"
+requires-python = ">=3.10"
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+core = [
+    "ml-pipes-core",
+]
+shared-framework = [
+    "ml-pipes-onnx",
+    "ml-pipes-vision",
+]
+torch = [
+    "ml-pipes-torch",
+]
+inspection-otel = [
+    "ml-pipes-core[inspection,otel]",
+    "ml-pipes-onnx",
+    "ml-pipes-vision",
+]
+full-workspace = [
+    { include-group = "shared-framework" },
+    { include-group = "torch" },
+    "ml-pipes",
+]
+
+[tool.uv]
+package = false
+
 [tool.uv.workspace]
 members = [
     "packages/core",
