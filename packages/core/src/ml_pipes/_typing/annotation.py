@@ -385,7 +385,12 @@ def try_tighten_annotation(current_annotation: Any, candidate_annotation: Any) -
         return candidate_annotation
     if candidate_annotation is object:
         return current_annotation
-    if isinstance(current_annotation, type) and isinstance(candidate_annotation, type):
+    if (
+        get_origin(current_annotation) is None
+        and get_origin(candidate_annotation) is None
+        and isinstance(current_annotation, type)
+        and isinstance(candidate_annotation, type)
+    ):
         try:
             if issubclass(current_annotation, candidate_annotation):
                 return current_annotation
