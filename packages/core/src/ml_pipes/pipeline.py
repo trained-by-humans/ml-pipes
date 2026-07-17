@@ -91,6 +91,7 @@ class Pipeline(Generic[InputT, OutputT]):
         auto_validate: bool = False,
     ):
         self.operators = self._flatten(list(operators))
+        self._trace_collector: TraceCollector | None = None
         self._tracing_config: TracingConfig | None = None
         self._auto_validate = auto_validate
         if auto_validate:
@@ -101,10 +102,12 @@ class Pipeline(Generic[InputT, OutputT]):
         collector: TraceCollector | None,
     ) -> None:
         """Attach or replace tracing. Pass collector=None to disable."""
-        self._tracing_config = (
-            TracingConfig(collector)
-            if collector is not None else None
-        )
+        self._trace_collector = collector
+
+    @property
+    def trace_collector(self) -> TraceCollector | None:
+        """Return the currently attached trace collector, if any."""
+        return self._trace_collector
 
     def extend(self: PipelineT, operators: Iterable[OperatorLike]) -> PipelineT:
         """Append *operators* to this pipeline in place and return self."""
@@ -134,7 +137,11 @@ class Pipeline(Generic[InputT, OutputT]):
         return Pipeline([*self.operators, *other.operators])
 
     def __call__(self, value: InputT) -> OutputT:
-        return self._call_with_tracing(value, self._tracing_config)
+        return self._call_with_tracing(
+            value,
+            collector=self._trace_collector,
+            cfg=self._tracing_config,
+        )
 
     def inspect(self, value: InputT) -> InspectionResult:
         """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
@@ -162,15 +169,21 @@ class Pipeline(Generic[InputT, OutputT]):
             operators=[OperatorDescription.from_operator(operator) for operator in self.operators]
         )
 
-    def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
-        trace = InvocationTrace() if cfg is not None else _NoOpTrace()
+    def _call_with_tracing(
+        self,
+        value: Any,
+        *,
+        collector: TraceCollector | None,
+        cfg: TracingConfig | None,
+    ) -> Any:
+        trace = InvocationTrace() if (collector is not None or cfg is not None) else _NoOpTrace()
         try:
             result, trace = self._execute(value, trace=trace, cfg=cfg)
             return result
         finally:
-            if cfg is not None and cfg.collector is not None:
+            if collector is not None:
                 try:
-                    cfg.collector.on_trace(freeze_trace(trace))
+                    collector.on_trace(freeze_trace(trace))
                 except Exception:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
 

@@ -79,7 +79,8 @@ def _make_pipeline(ops: list[Any], **kw) -> tuple[Pipeline[Any, Any], _Capture]:
     cap = _Capture()
     p = Pipeline(ops)
     if kw:
-        p._tracing_config = TracingConfig(cap, **kw)
+        p._trace_collector = cap
+        p._tracing_config = TracingConfig(**kw)
     else:
         p.set_tracing(cap)
     return p, cap
@@ -220,6 +221,18 @@ def test_set_tracing_no_longer_accepts_capture_flags() -> None:
 
     with pytest.raises(TypeError, match="capture_config"):
         pipeline.set_tracing(collector, capture_config=True)
+
+
+def test_trace_collector_property_is_read_only() -> None:
+    pipeline = Pipeline([_double])
+    collector = _Capture()
+
+    pipeline.set_tracing(collector)
+
+    assert pipeline.trace_collector is collector
+
+    with pytest.raises(AttributeError):
+        setattr(pipeline, "trace_collector", None)
 
 
 def test_error_trace_delivered_to_collector():

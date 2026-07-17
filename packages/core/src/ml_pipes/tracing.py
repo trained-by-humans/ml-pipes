@@ -164,13 +164,11 @@ def _fmt_trace(trace: "InvocationTrace", indent: int = 0) -> str:
 class TracingConfig:
     """Internal trace-capture settings used by pipeline execution.
 
-    Pipeline.set_tracing() only exposes collector attachment. Richer capture
-    flags stay internal so inspection can reuse tracing without widening the
-    public tracing surface. Some internal callers, such as inspect(), capture
-    spans directly and therefore leave collector unset.
+    Collector attachment lives on Pipeline. This config only controls optional
+    capture policy so internal callers such as inspect() can reuse trace
+    machinery without widening the public tracing surface.
     """
 
-    collector: TraceCollector | None = None
     capture_config: bool = False
     capture_shapes: bool = False
     _capture_outputs: bool = False  # used internally by Pipeline.inspect(); not exposed via set_tracing()

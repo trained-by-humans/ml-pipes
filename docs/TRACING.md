@@ -73,6 +73,10 @@ from ml_pipes.collectors import PrintCollector
 pipeline.set_tracing(PrintCollector())
 ```
 
+The currently attached collector is exposed as `pipeline.trace_collector`.
+That property is read-only; attach or remove collectors through
+`set_tracing(...)`.
+
 Tracing stays focused on runtime step timing, failures, and region structure.
 If you need per-step outputs and richer debug snapshots, use
 `Pipeline.inspect()` instead.
