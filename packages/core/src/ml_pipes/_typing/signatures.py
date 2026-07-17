@@ -36,6 +36,9 @@ class CallableSignatureAnnotations:
 def resolve_callable_signature_annotations(
     callable_: Callable[..., Any],
 ) -> CallableSignatureAnnotations:
+    # This inspects the concrete runtime callable target only. @overload stubs
+    # are erased here, so validation must rely on resolve_contract() whenever
+    # the implementation signature is broader than the intended boundary.
     try:
         signature = inspect.signature(callable_)
     except (TypeError, ValueError):

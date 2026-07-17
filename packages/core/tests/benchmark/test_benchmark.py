@@ -257,25 +257,34 @@ def test_benchmark_run_returns_result():
     assert set(result.total.percentiles.keys()) == {0.50, 0.95}
 
 
-def test_benchmark_restores_prior_tracing_config():
+def test_benchmark_restores_prior_trace_collector():
     pipeline = _make_pipeline()
     prior_collector = PrintCollector()
     pipeline.set_tracing(prior_collector)
-    prior_config = pipeline._tracing_config
 
     config = MeasurementConfig(runs=5, warmup=2)
     Benchmark(pipeline, lambda: _static_input(1), measurement=config).run()
 
-    assert pipeline._tracing_config is prior_config
+    assert pipeline.trace_collector is prior_collector
 
 
-def test_benchmark_restores_none_tracing_config():
+def test_benchmark_restores_none_trace_collector():
     pipeline = _make_pipeline()
-    assert pipeline._tracing_config is None
+    assert pipeline.trace_collector is None
 
     Benchmark(pipeline, lambda: _static_input(1), measurement=MeasurementConfig(runs=3, warmup=1)).run()
 
-    assert pipeline._tracing_config is None
+    assert pipeline.trace_collector is None
+
+
+def test_benchmark_leaves_tracing_config_untouched():
+    pipeline = _make_pipeline()
+    pipeline._tracing_config = TracingConfig(capture_shapes=True)
+    prior_config = pipeline._tracing_config
+
+    Benchmark(pipeline, lambda: _static_input(1), measurement=MeasurementConfig(runs=3, warmup=1)).run()
+
+    assert pipeline._tracing_config is prior_config
 
 
 def test_benchmark_per_operator_spans_present():

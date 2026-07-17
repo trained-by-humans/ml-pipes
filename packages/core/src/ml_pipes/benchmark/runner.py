@@ -112,7 +112,8 @@ class Benchmark:
     input_fn must return (id, value, tag, metadata).
     tag and metadata are accepted but currently ignored; reserved for future features.
 
-    Saves and restores the pipeline's prior tracing config after run().
+    Saves and restores the pipeline's prior trace collector after run().
+    Existing tracing capture policy stays untouched.
     """
 
     def __init__(
@@ -130,7 +131,7 @@ class Benchmark:
         self._metadata = metadata or {}
 
     def run(self) -> BenchmarkResult:
-        prior_tracing = self._pipeline._tracing_config
+        prior_collector = self._pipeline.trace_collector
         collector = BenchmarkCollector(self._measurement)
         self._pipeline.set_tracing(collector)
         try:
@@ -140,7 +141,7 @@ class Benchmark:
                 self._pipeline(value)
         finally:
             collector.stop()
-            self._pipeline._tracing_config = prior_tracing
+            self._pipeline.set_tracing(prior_collector)
 
         return collector.report(label=self._label, metadata=self._metadata)
 

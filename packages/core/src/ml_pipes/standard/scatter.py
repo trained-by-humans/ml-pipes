@@ -74,13 +74,11 @@ ScatterItemT = TypeVar("ScatterItemT")
 class Gather(RegionCloser[ScatterItemT, list[ScatterItemT]]):
     def resolve_contract(
         self,
-        current_output: Any | None,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
+        upstream_annotation: Any | None,
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
-        out = list[current_output] if current_output is not None else list[Any]
+        del validation_error_type
+        out = list[upstream_annotation] if upstream_annotation is not None else list[Any]
         return (Any,), out
 
 
@@ -149,13 +147,11 @@ class Scatter(RegionOpener[list[ScatterItemT], ScatterItemT]):
 
     def resolve_contract(
         self,
-        current_output: Any | None,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
+        upstream_annotation: Any | None,
         validation_error_type: type[Exception],
     ) -> tuple[Any, Any]:
-        del stored_annotations, expand_output_annotation, validation_error_type
-        if current_output is not None and get_origin(current_output) is list:
-            args = get_args(current_output)
+        del validation_error_type
+        if upstream_annotation is not None and get_origin(upstream_annotation) is list:
+            args = get_args(upstream_annotation)
             return (list[Any],), args[0] if args else Any
         return (list[Any],), Any

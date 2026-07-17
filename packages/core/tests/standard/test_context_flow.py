@@ -14,12 +14,9 @@ from ml_pipes.core import (
 from ml_pipes.standard import (
     Batch,
     Pick,
-    Recall,
-    Store,
     UnBatch,
 )
 from ml_pipes.validation import PipelineValidationError
-from ml_pipes._typing.annotation import expand_annotation_parts
 from ml_pipes.context import Recall, Store
 from ml_pipes.vision import ImagePayload
 
@@ -113,11 +110,52 @@ def test_store_select_type_flow_passes():
     Pipeline([Store("image_shape", source="spatial_shape"), Recall("image_shape")]).validate()
 
 
+def test_recall_appends_to_existing_tuple_current() -> None:
+    pipeline = Pipeline([
+        IntToPair(),
+        Store("saved_text", source=1),
+        Recall("saved_text"),
+    ])
+
+    assert pipeline(9) == (9, "9", "9")
+
+
+def test_recall_prepends_to_existing_tuple_current() -> None:
+    pipeline = Pipeline([
+        IntToPair(),
+        Store("saved_text", source=1),
+        Recall("saved_text", prepend=True),
+    ])
+
+    assert pipeline(9) == ("9", 9, "9")
+
+
+def test_recall_resolve_contract_appends_to_fixed_tuple_shape() -> None:
+    input_types, output_type = Recall("x").resolve_contract(
+        tuple[int, str],
+        {"x": float},
+        PipelineValidationError,
+    )
+
+    assert input_types == (Any,)
+    assert output_type == (int, str, float)
+
+
+def test_recall_resolve_contract_prepends_to_fixed_tuple_shape() -> None:
+    input_types, output_type = Recall("x", prepend=True).resolve_contract(
+        tuple[int, str],
+        {"x": float},
+        PipelineValidationError,
+    )
+
+    assert input_types == (Any,)
+    assert output_type == (float, int, str)
+
+
 def test_recall_resolve_contract_keeps_variadic_tuple_item_type_when_store_matches_it():
     input_types, output_type = Recall("x").resolve_contract(
         tuple[int, ...],
         {"x": int},
-        expand_annotation_parts,
         PipelineValidationError,
     )
 
@@ -129,7 +167,6 @@ def test_recall_resolve_contract_widens_variadic_tuple_item_type_for_inserted_va
     input_types, output_type = Recall("x").resolve_contract(
         tuple[int, ...],
         {"x": tuple[int, ...]},
-        expand_annotation_parts,
         PipelineValidationError,
     )
 
@@ -149,6 +186,21 @@ def test_store_index_out_of_bounds_silent_on_vague_input():
 def test_store_rejects_removed_index_keyword():
     with pytest.raises(TypeError, match="unexpected keyword"):
         Store("x", index=0)
+
+
+def test_recall_rejects_removed_index_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        Recall("x", index=0)
+
+
+def test_recall_prepend_places_stored_value_before_current_value():
+    pipeline = Pipeline([
+        Store("saved"),
+        IntToString(),
+        Recall("saved", prepend=True),
+    ])
+
+    assert pipeline(9) == (9, "9")
 
 
 # ---------------------------------------------------------------------------

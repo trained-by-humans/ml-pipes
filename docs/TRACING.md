@@ -63,23 +63,23 @@ When tracing is enabled:
 That means a collector always receives one whole-call trace, not partial step
 events.
 
-You can enable or reconfigure tracing either at construction time with
-`TracingConfig(...)` or at runtime with `set_tracing(...)`.
+You enable or reconfigure tracing on an existing pipeline with
+`set_tracing(...)`.
 
 ```python
 from ml_pipes.collectors import PrintCollector
 
 
-pipeline.set_tracing(
-    PrintCollector(),
-    operator_labels=["strip", "lower", "split"],
-    capture_config=True,
-    capture_shapes=True,
-)
+pipeline.set_tracing(PrintCollector())
 ```
 
-`capture_config` and `capture_shapes` are mainly debugging aids. They make the
-trace richer without changing the pipeline itself.
+The currently attached collector is exposed as `pipeline.trace_collector`.
+That property is read-only; attach or remove collectors through
+`set_tracing(...)`.
+
+Tracing stays focused on runtime step timing, failures, and region structure.
+If you need per-step outputs and richer debug snapshots, use
+`Pipeline.inspect()` instead.
 
 > [!NOTE]
 > The trace delivered to the collector is a frozen snapshot, so collectors can

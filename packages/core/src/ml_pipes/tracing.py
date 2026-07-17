@@ -162,8 +162,13 @@ def _fmt_trace(trace: "InvocationTrace", indent: int = 0) -> str:
 
 @dataclass
 class TracingConfig:
-    collector: TraceCollector
-    operator_labels: list[str] | None = None
+    """Internal trace-capture settings used by pipeline execution.
+
+    Collector attachment lives on Pipeline. This config only controls optional
+    capture policy so internal callers such as inspect() can reuse trace
+    machinery without widening the public tracing surface.
+    """
+
     capture_config: bool = False
     capture_shapes: bool = False
     _capture_outputs: bool = False  # used internally by Pipeline.inspect(); not exposed via set_tracing()

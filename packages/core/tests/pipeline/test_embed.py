@@ -61,7 +61,7 @@ def test_embed_call_passes_value_through_full_inner_chain():
 def test_resolve_contract_returns_inner_input_and_output_types():
     op = embed(Pipeline([IntToString()]))
 
-    input_types, output_type = op.resolve_contract(int, {}, None, PipelineValidationError)
+    input_types, output_type = op.resolve_contract(int, PipelineValidationError)
 
     assert input_types == (int,)
     assert output_type is str
@@ -70,7 +70,7 @@ def test_resolve_contract_returns_inner_input_and_output_types():
 def test_resolve_contract_with_no_upstream_type_does_not_raise():
     op = embed(Pipeline([IntToString()]))
 
-    _, output_type = op.resolve_contract(None, {}, None, PipelineValidationError)
+    _, output_type = op.resolve_contract(None, PipelineValidationError)
 
     assert output_type is str
 
@@ -79,13 +79,13 @@ def test_resolve_contract_raises_on_incompatible_upstream_type():
     op = embed(Pipeline([IntToString()]))
 
     with pytest.raises(PipelineValidationError, match="contract mismatch"):
-        op.resolve_contract(float, {}, None, PipelineValidationError)
+        op.resolve_contract(float, PipelineValidationError)
 
 
 def test_resolve_contract_accepts_subclass_of_expected_input():
     op = embed(Pipeline([IntToString()]))
 
-    _, output_type = op.resolve_contract(bool, {}, None, PipelineValidationError)
+    _, output_type = op.resolve_contract(bool, PipelineValidationError)
 
     assert output_type is str
 
@@ -93,7 +93,7 @@ def test_resolve_contract_accepts_subclass_of_expected_input():
 def test_resolve_contract_propagates_output_type_of_multi_op_inner():
     op = embed(Pipeline([IntToString(), StringToFloat(), FloatToInt()]))
 
-    _, output_type = op.resolve_contract(int, {}, None, PipelineValidationError)
+    _, output_type = op.resolve_contract(int, PipelineValidationError)
 
     assert output_type is int
 

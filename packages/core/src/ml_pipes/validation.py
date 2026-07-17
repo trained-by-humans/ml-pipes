@@ -42,6 +42,23 @@ def _supports_non_call_runtime_entrypoint(operator: Any) -> bool:
     return isinstance(operator, (ContextOp, RegionOpener, RegionCloser))
 
 
+def _resolve_dynamic_contract(
+    operator: Any,
+    upstream_annotation: Any,
+    stored_annotations: dict[str, Any],
+) -> tuple[tuple[Any, ...], Any]:
+    if isinstance(operator, ContextOp):
+        return operator.resolve_contract(
+            upstream_annotation,
+            stored_annotations,
+            PipelineValidationError,
+        )
+    return operator.resolve_contract(
+        upstream_annotation,
+        PipelineValidationError,
+    )
+
+
 @dataclass(frozen=True)
 class TypeContract:
     input_type: Any
@@ -114,11 +131,10 @@ class _OperatorBoundary:
         if probe_annotations is None:
             probe_annotations = dict(self.context_inputs or {})
         try:
-            return self.operator.resolve_contract(
+            return _resolve_dynamic_contract(
+                self.operator,
                 probe_input,
                 probe_annotations,
-                expand_annotation_parts,
-                PipelineValidationError,
             )
         except Exception:
             return None
@@ -277,11 +293,10 @@ class PipelineValidator:
     ) -> _BoundarySignature | None:
         if not hasattr(operator, "resolve_contract"):
             return None
-        input_types, output_type = operator.resolve_contract(
+        input_types, output_type = _resolve_dynamic_contract(
+            operator,
             previous_output_type,
             stored_annotations,
-            expand_annotation_parts,
-            PipelineValidationError,
         )
         return _BoundarySignature(input_types=input_types, output_type=output_type)
 
@@ -462,7 +477,7 @@ class PipelineValidator:
                 raise PipelineValidationError(
                     f"Strict mode violation at {self._label_for(i, boundary.operator)}: output type is unresolved (Any).\n"
                     f"  Fix: annotate the return type with a concrete type, or implement resolve_contract "
-                    f"to return the upstream type (e.g. passthrough: return (Any,), current_output)."
+                    f"to return the upstream type (e.g. passthrough: return (Any,), upstream_annotation)."
                 )
 
 def require_operator_annotations(

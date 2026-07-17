@@ -100,6 +100,15 @@ fails immediately.
 > at least one positional input parameter. `*args`, keyword-only parameters,
 > and `**kwargs` are rejected.
 
+> [!CAUTION]
+> Validation reads the concrete runtime `__call__` implementation. It does not
+> currently resolve `@overload` stubs when inferring operator contracts.
+> Overloads still help external type checkers, but if the real implementation
+> is broader than the boundary you want validation to enforce, implement
+> `resolve_contract(...)` for that operator. `Pick` is one example: its
+> overloads help type checkers, but validation still needs
+> `Pick.resolve_contract(...)` to use the configured index precisely.
+
 ### Operator Contracts (`resolve_contract(...)`)
 
 Some operators cannot express their boundary precisely with a static signature
@@ -107,13 +116,27 @@ alone. `resolve_contract(...)` exists for those cases.
 
 Use it when the operator boundary depends on:
 
-- the current upstream type
-- stored context annotations
+- the upstream annotation
+- stored context annotations for `ContextOp`
 - a transitive or passthrough relationship that static annotations cannot
   express cleanly
 
 `resolve_contract(...)` computes the contract for this exact pipeline
 position. It returns `(input_types, output_type)`.
+
+For ordinary dynamic operators:
+
+```python
+def resolve_contract(self, upstream_annotation, error_type):
+    ...
+```
+
+For `ContextOp`, which also depends on stored context state:
+
+```python
+def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+    ...
+```
 
 ```python
 from ml_pipes.context import Context, ContextOp
@@ -127,11 +150,11 @@ class AttachStored(ContextOp[Any, Any]):
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
         return (current, context.load(self.name)), context
 
-    def resolve_contract(self, current_output, stored_annotations, expand, error_type):
+    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
         stored_type = stored_annotations.get(self.name)
         if stored_type is None:
             raise error_type(f"{self.name!r} is not available in context")
-        return (Any,), tuple[current_output, stored_type]
+        return (Any,), tuple[upstream_annotation, stored_type]
 ```
 
 Built-in operators such as `Store`, `Recall`, `Pick`, `Batch`, `UnBatch`,
@@ -396,8 +419,8 @@ class ContractPassthrough:
     def __call__(self, value: Any) -> Any:
         return value
 
-    def resolve_contract(self, current_output, stored_annotations, expand, error_type):
-        return (Any,), current_output
+    def resolve_contract(self, upstream_annotation, error_type):
+        return (Any,), upstream_annotation
 
 
 contract = Pipeline([ContractPassthrough(), IntToString()]).validate(

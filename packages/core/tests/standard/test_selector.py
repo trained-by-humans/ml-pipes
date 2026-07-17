@@ -164,27 +164,24 @@ class SelectorProbe:
 
     def resolve_contract(
         self,
-        current_output: Any,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
+        upstream_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        del stored_annotations, expand_output_annotation
-        selected = current_output
+        selected = upstream_annotation
         if self.select_src is not None:
             selected = self.select_src.validate_read(
-                current_output,
+                upstream_annotation,
                 validation_error_type=validation_error_type,
                 error_prefix=f"{type(self).__name__}(src={self.select_src.steps!r})",
             )
         if self.select_target is not None:
             self.select_target.validate_write(
-                current_output,
+                upstream_annotation,
                 validation_error_type=validation_error_type,
                 error_prefix=f"{type(self).__name__}(target={self.select_target.steps!r})",
             )
-            return (current_output,), current_output
-        return (current_output,), selected
+            return (upstream_annotation,), upstream_annotation
+        return (upstream_annotation,), selected
 
 
 def test_selector_normalizes_dotted_string() -> None:

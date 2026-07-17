@@ -43,8 +43,8 @@ class PassthroughOp(ContextOp):
     def apply(self, current: Any, context: Context) -> tuple[Any, Context]:
         return current, context
 
-    def resolve_contract(self, current_output, stored_annotations, expand, error_type):
-        return (Any,), current_output  # accept anything, promise to return what I received
+    def resolve_contract(self, upstream_annotation, stored_annotations, error_type):
+        return (Any,), upstream_annotation  # accept anything, promise to return what I received
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ def test_strict_rejects_dynamic_tuple_output_with_any():
         def __call__(self, value: int) -> tuple[int, Any]:
             return value, value
 
-        def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
+        def resolve_contract(self, upstream_annotation, validation_error_type):
             return (int,), (int, Any)
 
     with pytest.raises(PipelineValidationError, match="output type is unresolved"):
@@ -215,8 +215,8 @@ def test_strict_rejects_partially_unresolved_transitive_tuple_output():
         def __call__(self, value: int) -> tuple[int, Any]:
             return value, value
 
-        def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
-            return (int,), (current_output, Any)
+        def resolve_contract(self, upstream_annotation, validation_error_type):
+            return (int,), (upstream_annotation, Any)
 
     with pytest.raises(PipelineValidationError, match="output type is unresolved"):
         Pipeline([PartiallyResolvedDynamicTupleOutput()]).validate(strict=True)
@@ -263,14 +263,14 @@ class ObjectListLogger(SideEffectOp[Any]):
     def effect(self, payload: Any) -> None:
         del payload
 
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, validation_error_type):
-        del stored_annotations, expand_output_annotation, validation_error_type
+    def resolve_contract(self, upstream_annotation, validation_error_type):
+        del validation_error_type
 
         concrete_objects = list[dict[str, object]]
-        if current_output is Any or _is_unresolved_object_list(current_output):
+        if upstream_annotation is Any or _is_unresolved_object_list(upstream_annotation):
             return (concrete_objects,), concrete_objects
 
-        return (current_output,), current_output
+        return (upstream_annotation,), upstream_annotation
 
 
 def test_side_effect_op_rejects_call_override():

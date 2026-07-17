@@ -3,8 +3,16 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Generic, Literal, Mapping, TypeVar, overload
+try:
+    from typing import TypeVarTuple, Unpack
+except ImportError:  # pragma: no cover - Python < 3.11
+    from typing_extensions import TypeVarTuple, Unpack
 
-from ml_pipes._typing.annotation import build_union_annotation_from_options, variadic_tuple_item_annotation
+from ml_pipes._typing.annotation import (
+    build_union_annotation_from_options,
+    expand_annotation_parts,
+    variadic_tuple_item_annotation,
+)
 from ml_pipes.operator import Operator
 from ml_pipes.selector import Selector, SelectorInput
 
@@ -39,17 +47,14 @@ class Context:
     def as_dict(self) -> dict[str, Any]:
         return dict(self.values)
 
-    def with_metadata(self, **metadata: Any) -> "Context":
-        merged = dict(self.values)
-        merged.update(metadata)
-        return Context(merged)
-
 
 CurrentT = TypeVar("CurrentT")
 InputT = TypeVar("InputT", contravariant=True)
 OutputT = TypeVar("OutputT", covariant=True)
 StoredT = TypeVar("StoredT")
-InsertIndexT = TypeVar("InsertIndexT", bound=int | None)
+PrependT = TypeVar("PrependT", bound=bool)
+TupleItemT = TypeVar("TupleItemT")
+TuplePartsT = TypeVarTuple("TuplePartsT")
 
 
 class ContextOp(ABC, Generic[InputT, OutputT]):
@@ -73,9 +78,8 @@ class ContextOp(ABC, Generic[InputT, OutputT]):
     @abstractmethod
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         raise NotImplementedError
@@ -101,22 +105,21 @@ class Store(ContextOp[CurrentT, CurrentT]):
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         stored_annotations[self.name] = self._selector.validate_read(
-            current_output,
+            upstream_annotation,
             validation_error_type=validation_error_type,
             error_prefix=f"Store({self.name!r}, {self._selector!r})",
         )
-        return (Any,), current_output
+        return (Any,), upstream_annotation
 
 
 @Operator
-class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
-    """Recall a stored value and splice it into the current tuple shape.
+class Recall(ContextOp[Any, Any], Generic[StoredT, PrependT]):
+    """Recall a stored value and append or prepend it to the current tuple shape.
 
     The public boundary depends on both the stored value type and the incoming
     ``current`` shape, so the class declaration stays broad and the ``apply``
@@ -124,24 +127,40 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
     """
 
     @overload
-    def __init__(self: "Recall[StoredT, None]", name: str, index: None = None) -> None:
+    def __init__(self: "Recall[StoredT, Literal[False]]", name: str) -> None:
         ...
 
     @overload
-    def __init__(self: "Recall[StoredT, Literal[0]]", name: str, index: Literal[0]) -> None:
+    def __init__(self: "Recall[StoredT, Literal[False]]", name: str, prepend: Literal[False]) -> None:
         ...
 
     @overload
-    def __init__(self: "Recall[StoredT, int]", name: str, index: int) -> None:
+    def __init__(self: "Recall[StoredT, Literal[True]]", name: str, prepend: Literal[True]) -> None:
         ...
 
-    def __init__(self, name: str, index: int | None = None):
+    def __init__(self, name: str, prepend: bool = False):
         self.name = name
-        self.index = index
+        self.prepend = prepend
 
     @overload
     def apply(
-        self: "Recall[StoredT, None]",
+        self: "Recall[StoredT, Literal[False]]",
+        current: tuple[Unpack[TuplePartsT]],
+        context: Context,
+    ) -> tuple[tuple[Unpack[TuplePartsT], StoredT], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[False]]",
+        current: tuple[TupleItemT, ...],
+        context: Context,
+    ) -> tuple[tuple[Unpack[tuple[TupleItemT, ...]], StoredT], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[False]]",
         current: CurrentT,
         context: Context,
     ) -> tuple[tuple[CurrentT, StoredT], Context]:
@@ -149,39 +168,46 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
 
     @overload
     def apply(
-        self: "Recall[StoredT, Literal[0]]",
+        self: "Recall[StoredT, Literal[True]]",
+        current: tuple[Unpack[TuplePartsT]],
+        context: Context,
+    ) -> tuple[tuple[StoredT, Unpack[TuplePartsT]], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[True]]",
+        current: tuple[TupleItemT, ...],
+        context: Context,
+    ) -> tuple[tuple[StoredT, Unpack[tuple[TupleItemT, ...]]], Context]:
+        ...
+
+    @overload
+    def apply(
+        self: "Recall[StoredT, Literal[True]]",
         current: CurrentT,
         context: Context,
     ) -> tuple[tuple[StoredT, CurrentT], Context]:
         ...
 
-    @overload
-    def apply(
-        self: "Recall[StoredT, int]",
-        current: CurrentT,
-        context: Context,
-    ) -> tuple[Any, Context]:
-        ...
-
     def apply(self, current: CurrentT, context: Context) -> tuple[Any, Context]:
         stored = context.load(self.name)
         current_tuple = current if isinstance(current, tuple) else (current,)
-        if self.index is None:
-            result = current_tuple + (stored,)
+        if self.prepend:
+            result = (stored,) + current_tuple
         else:
-            result = current_tuple[:self.index] + (stored,) + current_tuple[self.index:]
+            result = current_tuple + (stored,)
         return result, context
 
     def resolve_contract(
         self,
-        current_output: Any,
+        upstream_annotation: Any,
         stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         del validation_error_type
         stored_annotation = stored_annotations.get(self.name, Any)
-        current_item_annotation = variadic_tuple_item_annotation(current_output)
+        current_item_annotation = variadic_tuple_item_annotation(upstream_annotation)
         if current_item_annotation is not None:
             merged_item_annotation = build_union_annotation_from_options(
                 current_item_annotation,
@@ -189,9 +215,9 @@ class Recall(ContextOp[Any, Any], Generic[StoredT, InsertIndexT]):
             )
             return (Any,), tuple[merged_item_annotation, ...]
 
-        current_parts = expand_output_annotation(current_output)
-        if self.index is None:
-            result_parts = current_parts + (stored_annotation,)
+        current_parts = expand_annotation_parts(upstream_annotation)
+        if self.prepend:
+            result_parts = (stored_annotation,) + current_parts
         else:
-            result_parts = current_parts[:self.index] + (stored_annotation,) + current_parts[self.index:]
+            result_parts = current_parts + (stored_annotation,)
         return (Any,), result_parts

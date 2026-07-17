@@ -77,7 +77,12 @@ def _failing(x: int) -> int:
 
 def _make_pipeline(ops: list[Any], **kw) -> tuple[Pipeline[Any, Any], _Capture]:
     cap = _Capture()
-    p = Pipeline(ops, tracing=TracingConfig(collector=cap, **kw))
+    p = Pipeline(ops)
+    if kw:
+        p._trace_collector = cap
+        p._tracing_config = TracingConfig(**kw)
+    else:
+        p.set_tracing(cap)
     return p, cap
 
 
@@ -183,13 +188,6 @@ def test_spans_ordered_and_labelled():
     assert [s.label for s in cap.traces[0].spans] == ["0:_double", "1:_add_one"]
 
 
-def test_custom_operator_labels():
-    p, cap = _make_pipeline([_double, _add_one],
-                             operator_labels=["double", "add_one"])
-    p(1)
-    assert [s.label for s in cap.traces[0].spans] == ["double", "add_one"]
-
-
 def test_error_span_flagged():
     p, cap = _make_pipeline([_double, _failing])
     with pytest.raises(ValueError, match="boom"):
@@ -204,8 +202,37 @@ def test_collector_error_does_not_crash_pipeline():
         def on_trace(self, trace: InvocationTrace) -> None:
             raise RuntimeError("collector is broken")
 
-    p = Pipeline([_double], tracing=TracingConfig(collector=_BrokenCollector()))
+    p = Pipeline([_double])
+    p.set_tracing(_BrokenCollector())
     assert p(3) == 6
+
+
+def test_pipeline_constructor_no_longer_accepts_tracing():
+    with pytest.raises(TypeError, match="tracing"):
+        Pipeline([_double], tracing=None)
+
+
+def test_set_tracing_no_longer_accepts_capture_flags() -> None:
+    pipeline = Pipeline([_double])
+    collector = _Capture()
+
+    with pytest.raises(TypeError, match="capture_shapes"):
+        pipeline.set_tracing(collector, capture_shapes=True)
+
+    with pytest.raises(TypeError, match="capture_config"):
+        pipeline.set_tracing(collector, capture_config=True)
+
+
+def test_trace_collector_property_is_read_only() -> None:
+    pipeline = Pipeline([_double])
+    collector = _Capture()
+
+    pipeline.set_tracing(collector)
+
+    assert pipeline.trace_collector is collector
+
+    with pytest.raises(AttributeError):
+        setattr(pipeline, "trace_collector", None)
 
 
 def test_error_trace_delivered_to_collector():
@@ -240,6 +267,20 @@ def test_inspect_short_circuit_stops_downstream_and_round_trips() -> None:
 
     assert [span.label for span in restored.spans] == ["0:_double", "1:_short_circuit"]
     assert restored.spans[1].output_value is SHORT_CIRCUIT
+
+
+def test_inspect_ignores_active_trace_collector() -> None:
+    class _BrokenCollector(TraceCollector):
+        def on_trace(self, trace: InvocationTrace) -> None:
+            raise RuntimeError("collector is broken")
+
+    pipeline = Pipeline([_double])
+    pipeline.set_tracing(_BrokenCollector())
+
+    result = pipeline.inspect(3)
+
+    assert [span.label for span in result.spans] == ["0:_double"]
+    assert result.spans[0].output_value == 6
 
 
 def test_set_tracing_window():
@@ -331,10 +372,9 @@ def _make_batch_pipeline(capture: _Capture) -> Pipeline[int, int]:
     def _identity_batch(x: list[int]) -> list[int]:
         return x
 
-    return Pipeline(
-        [Batch(size=2, timeout=1.0), _identity_batch, UnBatch(), _add_one],
-        tracing=TracingConfig(collector=capture),
-    )
+    pipeline = Pipeline([Batch(size=2, timeout=1.0), _identity_batch, UnBatch(), _add_one])
+    pipeline.set_tracing(capture)
+    return pipeline
 
 
 def _run_two_threads(pipeline: Pipeline[int, int]) -> list[int]:
@@ -419,10 +459,8 @@ def test_batch_follower_wait_span_present_on_leader_error():
         raise ValueError("batch boom")
 
     cap = _Capture()
-    p = Pipeline(
-        [Batch(size=2, timeout=1.0), _failing_batch, UnBatch(), _add_one],
-        tracing=TracingConfig(collector=cap),
-    )
+    p = Pipeline([Batch(size=2, timeout=1.0), _failing_batch, UnBatch(), _add_one])
+    p.set_tracing(cap)
     errors = [None, None]
 
     def run(idx, val):
@@ -540,7 +578,8 @@ def test_merge_traces_preserves_attributes_without_item_metric_synthesis():
 # ---------------------------------------------------------------------------
 
 def test_print_collector_does_not_raise(capsys):
-    p = Pipeline([_double, _add_one], tracing=TracingConfig(collector=PrintCollector()))
+    p = Pipeline([_double, _add_one])
+    p.set_tracing(PrintCollector())
     result = p(3)
     assert result == 7
     out = capsys.readouterr().out

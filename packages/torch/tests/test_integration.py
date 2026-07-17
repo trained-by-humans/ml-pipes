@@ -44,16 +44,7 @@ from ml_pipes.torch import (
     TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
-from ml_pipes.tracing import TraceCollector, TracingConfig
 from ml_pipes.validation import PipelineValidationError
-
-
-class _CaptureCollector(TraceCollector):
-    def __init__(self) -> None:
-        self.traces = []
-
-    def on_trace(self, trace) -> None:
-        self.traces.append(trace)
 
 
 class _TorchIdentity:
@@ -315,26 +306,22 @@ def test_torch_registry_conversion_handoff_back_to_numpy() -> None:
     assert np.array_equal(result["scores"], np.array([2.0, 3.0], dtype=np.float32))
 
 
-def test_torch_tracing_records_device_shapes_and_operator_config() -> None:
-    collector = _CaptureCollector()
-    pipeline = Pipeline(
-        [
-            ToTorch(device="cpu"),
-            ToDevice("cpu"),
-            TorchInfer(torch.nn.Identity().eval(), serialize=True),
-            TorchExtract("output_0", as_="scores"),
-        ],
-        tracing=TracingConfig(collector=collector, capture_shapes=True, capture_config=True),
-    )
+def test_torch_inspection_captures_device_shapes_and_operator_config() -> None:
+    pipeline = Pipeline([
+        ToTorch(device="cpu"),
+        ToDevice("cpu"),
+        TorchInfer(torch.nn.Identity().eval(), serialize=True),
+        TorchExtract("output_0", as_="scores"),
+    ])
     payload = TensorPayload(
         array=np.ones((1, 3, 2, 2), dtype=np.float32),
         layout="NCHW",
         dtype="float32",
     )
 
-    pipeline(payload)
+    result = pipeline.inspect(payload)
 
-    spans = collector.traces[0].spans
+    spans = result.spans
     assert spans[0].output_shape == "TorchTensorPayload (1, 3, 2, 2) @ cpu"
     assert spans[1].operator_config["device"] == "cpu"
     assert spans[2].output_shape == "TorchRuntimeOutputs {output_0: (1, 3, 2, 2) @ cpu}"

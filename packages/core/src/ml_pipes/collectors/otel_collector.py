@@ -45,10 +45,6 @@ class OtelCollector(ConcurrentCollector):
                     # Status(StatusCode) form required since opentelemetry-api 1.1;
                     # pyproject.toml pins >=1.20 so this is always safe.
                     s.set_status(self._otel_trace.Status(self._otel_trace.StatusCode.ERROR))
-                if span.input_shape is not None:
-                    s.set_attribute("input_shape", str(span.input_shape))
-                if span.output_shape is not None:
-                    s.set_attribute("output_shape", str(span.output_shape))
                 if span.child_trace is not None:
                     if span.child_trace.batch_size is not None:
                         s.set_attribute("batch_size", span.child_trace.batch_size)

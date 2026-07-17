@@ -11,7 +11,6 @@ from ml_pipes._typing.annotation import (
     is_assignable,
 )
 from ml_pipes._typing.signatures import validate_operator_signature
-from ml_pipes.collectors import CaptureCollector
 from ml_pipes.context import Context, ContextOp
 from ml_pipes.control import SHORT_CIRCUIT
 from ml_pipes.inspection.artifacts import InspectionResult
@@ -90,10 +89,10 @@ class Pipeline(Generic[InputT, OutputT]):
         self,
         operators: Iterable[OperatorLike],
         auto_validate: bool = False,
-        tracing: TracingConfig | None = None,
     ):
         self.operators = self._flatten(list(operators))
-        self._tracing_config = tracing
+        self._trace_collector: TraceCollector | None = None
+        self._tracing_config: TracingConfig | None = None
         self._auto_validate = auto_validate
         if auto_validate:
             self.validate()
@@ -101,15 +100,14 @@ class Pipeline(Generic[InputT, OutputT]):
     def set_tracing(
         self,
         collector: TraceCollector | None,
-        operator_labels: list[str] | None = None,
-        capture_config: bool = False,
-        capture_shapes: bool = False,
     ) -> None:
         """Attach or replace tracing. Pass collector=None to disable."""
-        self._tracing_config = (
-            TracingConfig(collector, operator_labels, capture_config, capture_shapes)
-            if collector is not None else None
-        )
+        self._trace_collector = collector
+
+    @property
+    def trace_collector(self) -> TraceCollector | None:
+        """Return the currently attached trace collector, if any."""
+        return self._trace_collector
 
     def extend(self: PipelineT, operators: Iterable[OperatorLike]) -> PipelineT:
         """Append *operators* to this pipeline in place and return self."""
@@ -139,19 +137,21 @@ class Pipeline(Generic[InputT, OutputT]):
         return Pipeline([*self.operators, *other.operators])
 
     def __call__(self, value: InputT) -> OutputT:
-        return self._call_with_tracing(value, self._tracing_config)
+        return self._call_with_tracing(
+            value,
+            collector=self._trace_collector,
+            cfg=self._tracing_config,
+        )
 
     def inspect(self, value: InputT) -> InspectionResult:
         """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
-        collector = CaptureCollector()
-        cfg = TracingConfig(collector, capture_shapes=True, _capture_outputs=True, capture_config=True)
+        trace = InvocationTrace()
+        cfg = TracingConfig(capture_shapes=True, _capture_outputs=True, capture_config=True)
         try:
-            self._call_with_tracing(value, cfg)
+            self._execute(value, trace=trace, cfg=cfg)
         except Exception:
             pass
-        if collector.last_trace is None:
-            return InspectionResult([])
-        return InspectionResult(collector.last_trace.spans)
+        return InspectionResult(freeze_trace(trace).spans)
 
     def __repr__(self) -> str:
         return self._describe().render()
@@ -169,15 +169,21 @@ class Pipeline(Generic[InputT, OutputT]):
             operators=[OperatorDescription.from_operator(operator) for operator in self.operators]
         )
 
-    def _call_with_tracing(self, value: Any, cfg: TracingConfig | None) -> Any:
-        trace = InvocationTrace() if cfg is not None else _NoOpTrace()
+    def _call_with_tracing(
+        self,
+        value: Any,
+        *,
+        collector: TraceCollector | None,
+        cfg: TracingConfig | None,
+    ) -> Any:
+        trace = InvocationTrace() if (collector is not None or cfg is not None) else _NoOpTrace()
         try:
             result, trace = self._execute(value, trace=trace, cfg=cfg)
             return result
         finally:
-            if cfg is not None:
+            if collector is not None:
                 try:
-                    cfg.collector.on_trace(freeze_trace(trace))
+                    collector.on_trace(freeze_trace(trace))
                 except Exception:
                     _log.exception("TraceCollector.on_trace raised; trace dropped")
 
@@ -256,7 +262,7 @@ class Pipeline(Generic[InputT, OutputT]):
         cfg: TracingConfig | None,
     ) -> tuple[Any, Context]:
         operator = self.operators[i]
-        label = self._label_for(i, cfg.operator_labels if cfg else None)
+        label = self._label_for(i)
         region_start = i + 1
         region_end = self._find_region_end(region_start, type(operator), operator.closing_type)
 
@@ -267,9 +273,7 @@ class Pipeline(Generic[InputT, OutputT]):
         result = operator.run_region(current, label, execute_region, trace, cfg)
         return result, context
 
-    def _label_for(self, i: int, custom_labels: list[str] | None = None) -> str:
-        if custom_labels and i < len(custom_labels):
-            return custom_labels[i]
+    def _label_for(self, i: int) -> str:
         op = self.operators[i]
         name = op.__name__ if inspect.isfunction(op) or inspect.ismethod(op) else type(op).__name__
         return f"{i}:{name}"
@@ -283,7 +287,7 @@ class Pipeline(Generic[InputT, OutputT]):
         cfg: TracingConfig | None,
     ) -> tuple[Any, Context]:
         operator = self.operators[i]
-        label = self._label_for(i, cfg.operator_labels if cfg else None)
+        label = self._label_for(i)
         capture = cfg.capture_shapes if cfg else False
         t = time.perf_counter()
         try:
@@ -412,9 +416,7 @@ class Embed(Generic[InputT, OutputT]):
 
     def resolve_contract(
         self,
-        current_output: Any | None,
-        stored_annotations: dict[str, Any],
-        expand_output_annotation: Any,
+        upstream_annotation: Any | None,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
         try:
@@ -425,15 +427,15 @@ class Embed(Generic[InputT, OutputT]):
             ) from exc
 
         if type_contract is None:
-            return (Any,), current_output
+            return (Any,), upstream_annotation
 
-        if current_output is not None and not is_assignable(
-            current_output,
+        if upstream_annotation is not None and not is_assignable(
+            upstream_annotation,
             type_contract.input_type,
         ):
             raise validation_error_type(
                 f"Pipeline contract mismatch: incoming type "
-                f"{format_annotation(current_output)} is incompatible with "
+                f"{format_annotation(upstream_annotation)} is incompatible with "
                 f"embed() input {format_annotation(type_contract.input_type)}"
             )
 

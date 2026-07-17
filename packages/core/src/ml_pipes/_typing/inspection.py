@@ -49,7 +49,6 @@ class AttributeInspectionError(AttributeResolutionError):
             f"Cannot resolve attribute {attribute!r} for {describe_annotation(annotation)}: {reason}",
         )
 
-
 @dataclass(frozen=True)
 class AttributeAnnotationInfo:
     annotation: Any

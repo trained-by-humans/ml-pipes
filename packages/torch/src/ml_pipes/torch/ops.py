@@ -206,12 +206,12 @@ class ToDevice:
     def __init__(self, device: str):
         self.device = canonical_torch_device(device)
 
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        if current_output is not Any and is_assignable(
-            current_output,
+    def resolve_contract(self, upstream_annotation, error_type):
+        if upstream_annotation is not Any and is_assignable(
+            upstream_annotation,
             TorchTransferInput,
         ):
-            return (current_output,), current_output
+            return (upstream_annotation,), upstream_annotation
         return (TorchTransferInput,), TorchTransferInput
 
     def __call__(self, value: TorchTransferInputT) -> TorchTransferInputT:
@@ -256,12 +256,12 @@ class ToDevice:
 
 @Operator
 class TorchSynchronizeTensors:
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
-        if current_output is not Any and is_assignable(
-            current_output,
+    def resolve_contract(self, upstream_annotation, error_type):
+        if upstream_annotation is not Any and is_assignable(
+            upstream_annotation,
             TorchTransferInput,
         ):
-            return (current_output,), current_output
+            return (upstream_annotation,), upstream_annotation
         return (TorchTransferInput,), TorchTransferInput
 
     def __call__(self, value: TorchTransferInputT) -> TorchTransferInputT:
@@ -301,14 +301,14 @@ class TorchAsType(Generic[TorchAsTypeModeT]):
         self.src = src
         self.as_ = as_ or src
 
-    def resolve_contract(self, current_output, stored_annotations, expand_output_annotation, error_type):
+    def resolve_contract(self, upstream_annotation, error_type):
         if self.src is not None:
             return (TorchTensorRegistry,), TorchTensorRegistry
-        if current_output is not Any and is_assignable(
-            current_output,
+        if upstream_annotation is not Any and is_assignable(
+            upstream_annotation,
             TorchTensorLike,
         ):
-            return (current_output,), current_output
+            return (upstream_annotation,), upstream_annotation
         return (TorchTensorLike,), TorchTensorLike
 
     @overload

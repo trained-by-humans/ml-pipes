@@ -25,11 +25,6 @@ from ml_pipes.standard import (
     UnBatch,
 )
 from ml_pipes.tensor import AsType
-from ml_pipes.tracing import (
-    InvocationTrace,
-    TraceCollector,
-    TracingConfig,
-)
 from ml_pipes.vision import (
     FilterPredictionsByClass,
     FilterPredictionsByScore,
@@ -77,11 +72,6 @@ class ReprOnlyLegacyOp:
 
     def __repr__(self) -> str:
         return "LegacyCustom"
-
-
-class _Capture(TraceCollector):
-    def on_trace(self, trace: InvocationTrace) -> None:
-        del trace
 
 
 def _named_identity(value: Any) -> Any:
@@ -474,6 +464,15 @@ def test_describe_renders_context_operators_with_captured_args():
     assert repr(description) == _pipeline_text("Store('saved')", "Recall('saved')")
 
 
+def test_describe_renders_recall_prepend_arg() -> None:
+    description = Pipeline([Recall("saved", prepend=True)]).describe()
+
+    assert [operator.passed_args for operator in description.operators] == [
+        {"name": "saved", "prepend": True},
+    ]
+    assert repr(description) == _pipeline_text("Recall('saved', prepend=True)")
+
+
 def test_describe_keeps_batch_region_operators_in_chain_order():
     description = Pipeline([Batch(size=2), ListIdentity(), UnBatch()]).describe()
 
@@ -522,20 +521,6 @@ def test_describe_verbose_expands_embed_pipeline(capsys):
         "FloatToBool()",
     )
     assert captured.out == description.render(verbose=True) + "\n"
-
-
-def test_describe_ignores_custom_operator_labels_when_present():
-    pipeline = Pipeline(
-        [ConfiguredIntToString(), StringToFloat()],
-        tracing=TracingConfig(collector=_Capture(), operator_labels=["to_str", "to_float"]),
-    )
-
-    description = pipeline.describe()
-
-    assert [operator.name for operator in description.operators] == [
-        "ConfiguredIntToString",
-        "StringToFloat",
-    ]
 
 
 @pytest.mark.parametrize(

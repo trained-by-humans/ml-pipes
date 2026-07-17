@@ -71,7 +71,7 @@ def test_empty_detection_pipeline_preserves_empty_outputs(tmp_path) -> None:
         FilterPredictionsByClass({0, 1}),
         FilterPredictionsByScore(min_score=0.1),
         FilterPredictionsByArea(min_area=1.0),
-        Recall("source_image", index=0),
+        Recall("source_image", prepend=True),
         DrawBoxes(class_names=["zero", "one"]),
         MapPredictionsToObjects(
             fields={
@@ -142,7 +142,7 @@ def test_empty_segmentation_pipeline_preserves_empty_outputs(tmp_path) -> None:
         FilterPredictionsByClass({0, 1}),
         FilterPredictionsByScore(min_score=0.1),
         FilterPredictionsByArea(min_area=1.0),
-        Recall("source_image", index=0),
+        Recall("source_image", prepend=True),
         DrawMasks(alpha=0.6),
         MapPredictionsToObjects(
             fields={
