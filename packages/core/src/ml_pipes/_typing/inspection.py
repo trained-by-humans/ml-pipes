@@ -168,7 +168,7 @@ def _is_readonly_class_field_descriptor(owner: type, descriptor: Any) -> bool:
     descriptor_type = type(descriptor)
     return (
         issubclass(owner, tuple)
-        and descriptor_type.__module__ == "collections"
+        and descriptor_type.__module__ in {"collections", "_collections"}
         and descriptor_type.__name__ == "_tuplegetter"
     )
 

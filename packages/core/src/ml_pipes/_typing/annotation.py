@@ -421,7 +421,12 @@ def try_tighten_annotation(
         return candidate_annotation
     if candidate_annotation is object:
         return current_annotation
-    if isinstance(current_annotation, type) and isinstance(candidate_annotation, type):
+    if (
+        get_origin(current_annotation) is None
+        and get_origin(candidate_annotation) is None
+        and isinstance(current_annotation, type)
+        and isinstance(candidate_annotation, type)
+    ):
         if is_assignable(current_annotation, candidate_annotation):
             return current_annotation
         if is_assignable(candidate_annotation, current_annotation):
