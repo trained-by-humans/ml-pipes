@@ -11,6 +11,30 @@ permissions:
   contents: read
 
 jobs:
+  detect-package-changes:
+    name: Detect Package Changes
+    runs-on: ubuntu-latest
+    outputs:
+      changed_packages: ${{ steps.package-filter.outputs.changed_packages }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed workspace packages
+        id: package-filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python scripts/detect_changed_packages.py \
+            --event-name "$EVENT_NAME" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
   shared-framework:
     name: Shared Framework (Py${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -42,6 +66,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_check_index_artifacts.py \
+            tests/test_detect_changed_packages.py \
             tests/test_import_surfaces.py \
             tests/test_exports.py \
             tests/test_release_packages.py \
@@ -90,6 +115,8 @@ jobs:
 
   torch-smoke:
     name: Torch Smoke (Py3.12)
+    needs: detect-package-changes
+    if: ${{ contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'core') || contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'torch') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
