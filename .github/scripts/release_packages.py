@@ -25,7 +25,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTDIR = ROOT / "dist" / "release"
-RELEASE_REQUIREMENTS_FILE = "requirements-release.txt"
+RELEASE_REQUIREMENTS_FILE = ROOT / ".github" / "requirements-release.txt"
 PACKAGE_ORDER = [
     ("core", "ml-pipes-core"),
     ("tensor", "ml-pipes-tensor"),
@@ -93,7 +93,7 @@ def _ensure_release_tooling(*, include_upload: bool) -> None:
     raise RuntimeError(
         f"{action} requires release tooling in this interpreter. "
         f"Missing modules: {missing}. "
-        f"Install them with: {_pip_install_command('-r', RELEASE_REQUIREMENTS_FILE)}"
+        f"Install them with: {_pip_install_command('-r', str(RELEASE_REQUIREMENTS_FILE))}"
     )
 
 

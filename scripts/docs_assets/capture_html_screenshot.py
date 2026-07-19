@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 _DEFAULT_MAX_DIMENSION = 16_384
 _URL_SCHEMES = {"about", "data", "file", "http", "https"}
+_DOCS_ASSET_REQUIREMENTS_FILE = Path(__file__).resolve().with_name("requirements.txt")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -181,7 +182,7 @@ def _require_playwright():
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "HTML screenshot capture requires Playwright. "
-            "Install it with: python -m pip install playwright "
+            f"Install the docs-asset dependencies with: python -m pip install -r {_DOCS_ASSET_REQUIREMENTS_FILE} "
             "and then run: python -m playwright install chromium"
         ) from exc
 

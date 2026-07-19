@@ -39,3 +39,6 @@ examples/.example_assets/
 *.png
 *.mp4
 *.pkl
+
+# Tracked GitHub-facing promo/docs assets
+!.github/assets/**

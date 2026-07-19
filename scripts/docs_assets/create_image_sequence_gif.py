@@ -5,6 +5,8 @@ import importlib
 from pathlib import Path
 import sys
 
+_DOCS_ASSET_REQUIREMENTS_FILE = Path(__file__).resolve().with_name("requirements.txt")
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -122,7 +124,7 @@ def _require_pillow():
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "Image-sequence GIF creation requires Pillow. "
-            "Install it with: python -m pip install pillow"
+            f"Install the docs-asset dependencies with: python -m pip install -r {_DOCS_ASSET_REQUIREMENTS_FILE}"
         ) from exc
 
 

@@ -8,6 +8,7 @@ import sys
 _DEFAULT_HORIZONTAL_VIEWPORT_WIDTH = 1600
 _DEFAULT_VERTICAL_VIEWPORT_HEIGHT = 900
 _DIRECTIONS = ("horizontal", "vertical")
+_DOCS_ASSET_REQUIREMENTS_FILE = Path(__file__).resolve().with_name("requirements.txt")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -165,7 +166,7 @@ def _require_pillow():
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "Scrolling GIF creation requires Pillow. "
-            "Install it with: python -m pip install pillow"
+            f"Install the docs-asset dependencies with: python -m pip install -r {_DOCS_ASSET_REQUIREMENTS_FILE}"
         ) from exc
 
 

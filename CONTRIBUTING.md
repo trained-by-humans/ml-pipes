@@ -75,8 +75,29 @@ mutations behind.
 
 ## Repository Maintenance
 
+### Release Maintenance
+
 Release-specific setup and package publishing workflow live in
 [RELEASE.md](RELEASE.md).
+
+GitHub workflow helpers under `.github/scripts/` are workflow-owned
+maintenance scripts. Run them locally only when you need to reproduce or
+debug CI/release behavior.
+
+### Docs Asset Generation
+
+README and docs-media generation scripts under `scripts/docs_assets/` use a
+separate local requirements file instead of the `uv` workspace groups:
+
+```bash
+python3 -m pip install -r scripts/docs_assets/requirements.txt
+```
+
+If you use the HTML screenshot helper, also install the browser runtime once:
+
+```bash
+python3 -m playwright install chromium
+```
 
 ## IDE Setup
 

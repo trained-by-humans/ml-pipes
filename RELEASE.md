@@ -7,19 +7,13 @@ and test runs.
 ## Release-Specific Setup
 
 Use a Python 3.11+ environment for local release validation when possible.
-If you run release validation under Python 3.10, install `tomli` because the
-standard-library `tomllib` module is not available there yet.
+If you run release validation under Python 3.10, the pinned release
+requirements file below also installs `tomli`.
 
 Install the pinned local release tooling used by the release workflow:
 
 ```bash
-python3 -m pip install -r requirements-release.txt
-```
-
-If you are using Python 3.10, also install:
-
-```bash
-python3 -m pip install -U tomli
+python3 -m pip install -r .github/requirements-release.txt
 ```
 
 ## Validate Release Metadata
