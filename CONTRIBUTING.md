@@ -77,12 +77,8 @@ mutations behind.
 
 ### Release Maintenance
 
-Release-specific setup and package publishing workflow live in
-[RELEASE.md](RELEASE.md).
-
-GitHub workflow helpers under `.github/scripts/` are workflow-owned
-maintenance scripts. Run them locally only when you need to reproduce or
-debug CI/release behavior.
+See [RELEASE.md](RELEASE.md) for release-specific setup, local validation,
+and package publishing.
 
 ### Docs Asset Generation
 
