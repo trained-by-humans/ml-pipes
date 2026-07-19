@@ -84,14 +84,16 @@ example-specific setup.
 
 ## Why ml-pipes
 
-- **Keep the whole flow visible.** Preprocessing, model calls, postprocessing,
-  and downstream application logic stay in one explicit pipeline.
-- **Use one tooling model everywhere.** Validation, inspection, tracing, and
-  benchmarking all read the same operator boundaries.
-- **Adapt different model families.** Wrap ONNX, Torch, or your own runtime
-  without changing the surrounding scaffolding pattern.
-- **Compose larger systems.** Merge or embed pipelines to build services,
-  endpoints, data-preparation flows, and larger ML applications.
+- **Build explicit pipelines.** Keep preprocessing, model execution,
+  postprocessing, and application logic in one composable pipeline.
+- **Compose reusable building blocks.** Combine operators and pipelines into
+  larger systems without changing how they're built.
+- **Make computation inspectable.** Validate, trace, benchmark, and debug
+  using the same explicit execution model.
+- **Stay implementation agnostic.** Swap runtimes, models, or services
+  without changing the surrounding pipeline.
+- **Optimize incrementally.** Introduce batching, fan-out parallelism, and
+  other execution strategies without rewriting pipeline logic.
 
 For the design rationale and internal structure behind this model, see
 [docs/DESIGN.md](docs/DESIGN.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
