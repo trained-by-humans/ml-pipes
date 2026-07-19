@@ -242,7 +242,6 @@ Try it: [examples/benchmarks/run_yolo8_benchmark.py](examples/benchmarks/run_yol
 ## Where To Go Next
 
 - **Browse the documentation** in [docs/README.md](docs/README.md).
-- **Set up a local contributor environment** with [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Start from runnable examples** in [examples/README.md](examples/README.md).
 - **Run a baseline vision pipeline** with [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py).
 - **Inspect and debug one run** with
