@@ -145,17 +145,47 @@ Try it: [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py)
 Inspection runs the pipeline once and gives you a step-by-step view of what
 each operator produced.
 
+The same explicit operator boundaries drive the inspection report, starting
+with a pipeline-wide overview and extending into step-level interactions.
+
 ```python
+from ml_pipes.inspection import PipelineInspector
+
 result = pipeline.inspect(sample)
-print(result)
+result.dump("inspection.pkl")
+PipelineInspector().show_in_browser(result, orientation="horizontal")
 ```
 
-```text
-InspectionResult:
-  0:strip_text                         str
-  1:Lowercase                          str
-  2:split_words                        list [2]
-```
+You can store the inspection result, or show it in a browser:
+
+<p align="center">
+  <img
+    src=".github/assets/yolo8_tiled_inspection_overview.png"
+    alt="Full static overview of a tiled inspection report"
+    width="100%">
+</p>
+
+Inspection also supports larger outputs and drill-down interactions:
+
+<table width="100%">
+  <tr>
+    <td width="59%" align="center" valign="top">
+      <img
+        src=".github/assets/yolo8_tiled_inspection_overview_scroll.gif"
+        alt="Scrolling overview of a tiled inspection report">
+      <br>
+      <sub>Scrollable overview</sub>
+    </td>
+    <td width="41%" align="center" valign="top">
+      <img
+        src=".github/assets/yolo8_tiled_tiles_click.gif"
+        alt="Before and after tile click in the inspection report">
+      <br>
+      <sub>Tile drill-down</sub>
+    </td>
+  </tr>
+</table>
+
 
 Try it: [examples/run_inspect.py](examples/run_inspect.py)
 
