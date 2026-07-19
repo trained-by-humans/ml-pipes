@@ -9,7 +9,7 @@ import pytest
 
 
 def _load_release_packages_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "release_packages.py"
+    module_path = Path(__file__).resolve().parents[3] / ".github" / "scripts" / "release_packages.py"
     spec = importlib.util.spec_from_file_location("release_packages", module_path)
     assert spec is not None
     assert spec.loader is not None

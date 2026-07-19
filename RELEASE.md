@@ -27,14 +27,14 @@ python3 -m pip install -U tomli
 Before cutting a release, validate release metadata from the repository root:
 
 ```bash
-python3 scripts/release_packages.py --validate --tag v0.1.0
+python3 .github/scripts/release_packages.py --validate --tag v0.1.0
 ```
 
 This checks that all published package versions stay aligned, internal
 `ml-pipes` pins stay aligned across runtime dependencies and extras, and the
 release tag matches that shared version.
 
-Publish packages in dependency order. `scripts/release_packages.py`
+Publish packages in dependency order. `.github/scripts/release_packages.py`
 validates the current publish order before building or publishing.
 
 ## Local Dry-Run
@@ -42,7 +42,7 @@ validates the current publish order before building or publishing.
 Run a release dry-run from the repository root with:
 
 ```bash
-python3 scripts/release_packages.py --dry-run
+python3 .github/scripts/release_packages.py --dry-run
 ```
 
 This command builds the distributions locally and requires the release

@@ -7,7 +7,7 @@ import sys
 
 
 def _load_detect_changed_packages_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "detect_changed_packages.py"
+    module_path = Path(__file__).resolve().parents[3] / ".github" / "scripts" / "detect_changed_packages.py"
     spec = importlib.util.spec_from_file_location("detect_changed_packages", module_path)
     assert spec is not None
     assert spec.loader is not None

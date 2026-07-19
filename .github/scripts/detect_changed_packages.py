@@ -7,7 +7,7 @@ import subprocess
 import sys
 from typing import Callable
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ZERO_GIT_SHA = "0" * 40
 
 ChangedFilesResolver = Callable[[str | None, str | None, Path], tuple[str, ...]]

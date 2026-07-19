@@ -32,7 +32,7 @@ jobs:
 
       - name: Stage artifacts for distribution
         run: |
-          python3 scripts/stage_release_artifacts.py \
+          python3 .github/scripts/stage_release_artifacts.py \
             --artifacts-dir dist/release \
             --staging-dir publish \
             --dist-name "${{ inputs.dist_name }}"
@@ -57,7 +57,7 @@ jobs:
       - name: Check staged artifacts against package index
         id: check_index_artifacts
         run: |
-          python3 scripts/check_index_artifacts.py \
+          python3 .github/scripts/check_index_artifacts.py \
             --packages-dir publish \
             --dist-name "${{ inputs.dist_name }}" \
             --index-url-base "${{ steps.resolve_publish_target.outputs.index_url_base }}" \

@@ -23,7 +23,7 @@ except ModuleNotFoundError:
 else:
     _TOML_IMPORT_ERROR = None
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTDIR = ROOT / "dist" / "release"
 RELEASE_REQUIREMENTS_FILE = "requirements-release.txt"
 PACKAGE_ORDER = [

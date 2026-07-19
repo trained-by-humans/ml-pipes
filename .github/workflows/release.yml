@@ -32,7 +32,7 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             args+=(--tag "${GITHUB_REF_NAME}")
           fi
-          python scripts/release_packages.py "${args[@]}"
+          python .github/scripts/release_packages.py "${args[@]}"
 
   build:
     name: Build Release Artifacts
@@ -51,7 +51,7 @@ jobs:
         run: python -m pip install -r requirements-release.txt
 
       - name: Build packages
-        run: python scripts/release_packages.py --dry-run --outdir dist/release
+        run: python .github/scripts/release_packages.py --dry-run --outdir dist/release
 
       - name: Check built metadata
         run: python -m twine check dist/release/*
