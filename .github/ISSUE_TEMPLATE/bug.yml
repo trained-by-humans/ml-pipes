@@ -42,14 +42,12 @@ body:
         - other / not sure
     validations:
       required: true
-  - type: textarea
-    id: checkout_or_install_context
+  - type: input
+    id: version_or_commit
     attributes:
-      label: Checkout or install context
-      description: If using local source, give the branch or commit. If using an installed package, give the install command or extras used to reproduce.
-      placeholder: |
-        local source: main @ abc1234
-        installed package: pip install 'ml-pipes[onnx,vision]'
+      label: Version or commit
+      description: Use the published package version if you installed packages, or the commit for local source.
+      placeholder: "0.1.0 or abc1234"
     validations:
       required: true
   - type: textarea
