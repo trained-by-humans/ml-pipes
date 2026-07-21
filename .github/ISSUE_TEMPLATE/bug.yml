@@ -1,0 +1,102 @@
+name: Bug / Regression
+description: Report incorrect or regressed behavior in validation, runtime execution, tooling, packaging, or examples.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when `ml-pipes` behaves incorrectly or regresses.
+
+        Prefer the smallest reproducible pipeline or example command. Call out where the problem first appears, then describe the expected behavior and what happens instead.
+
+        Use the Docs form for page-level documentation issues. If repository behavior contradicts the docs, file a bug here and cite the page as evidence.
+  - type: dropdown
+    id: affected_area
+    attributes:
+      label: Affected area
+      description: Where do you first see the problem?
+      options:
+        - runtime execution
+        - validation
+        - inspection
+        - tracing
+        - benchmarking
+        - packaging / install
+        - examples
+        - other / not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: suspected_owner
+    attributes:
+      label: Suspected owner
+      description: Best guess only. Choose the narrowest owner you can.
+      options:
+        - core
+        - tensor
+        - vision
+        - onnx
+        - torch
+        - meta
+        - examples
+        - other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: checkout_or_install_context
+    attributes:
+      label: Checkout or install context
+      description: If using local source, give the branch or commit. If using an installed package, give the install command or extras used to reproduce.
+      placeholder: |
+        local source: main @ abc1234
+        installed package: pip install 'ml-pipes[onnx,vision]'
+    validations:
+      required: true
+  - type: textarea
+    id: minimal_repro
+    attributes:
+      label: Minimal repro
+      description: Paste the smallest pipeline snippet, example command, or test shape that reproduces the issue.
+      placeholder: |
+        from ml_pipes.core import Pipeline
+
+        pipeline = Pipeline([...])
+        pipeline.validate()
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: What should happen?
+      placeholder: |
+        pipeline.validate() should succeed
+        or
+        Pipeline.inspect() should render the report without error
+    validations:
+      required: true
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+      description: What happens instead? Include the full error, traceback, or incorrect output when possible.
+      placeholder: |
+        pipeline.validate() raises ...
+        or
+        Pipeline.inspect() fails with ...
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and context
+      description: Include Python version, OS, runtime/library versions, model details, and anything else needed to reproduce.
+      placeholder: |
+        Python 3.12
+        macOS / Linux
+        onnxruntime 1.x
+        model: ...
+    validations:
+      required: true

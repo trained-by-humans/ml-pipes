@@ -1,0 +1,56 @@
+name: Docs
+description: Report incorrect, unclear, missing, or outdated documentation.
+title: "[Docs] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for docs-only issues, including incorrect wording, missing topics, broken links, outdated examples, or documentation you expected to find but could not.
+
+        Point to the page or section you read when it exists. If the docs are missing entirely, describe the topic or page you expected to find.
+
+        If repository behavior or a shared public surface should change, use the Bug or Proposal form instead and cite the relevant page or missing topic.
+  - type: input
+    id: doc_page
+    attributes:
+      label: Doc page, section, or missing area
+      description: Paste the page URL or repo path if one exists. If the docs are missing entirely, describe the topic or page you expected to find.
+      placeholder: "https://github.com/.../blob/main/docs/VALIDATION.md, docs/VALIDATION.md#operator-compatibility, or missing page for package ownership"
+    validations:
+      required: true
+  - type: input
+    id: version_context
+    attributes:
+      label: Version or branch context
+      description: Optional. If the page was not from current main, include the branch, commit, tag, or package version.
+      placeholder: "branch: release/0.1, commit: abc1234, package: ml-pipes 0.1.0"
+  - type: textarea
+    id: current_problem
+    attributes:
+      label: Current problem
+      description: What is wrong, unclear, or missing in the current docs?
+      placeholder: |
+        The docs currently say ...
+        I expected ...
+        What is unclear or missing is ...
+    validations:
+      required: true
+  - type: textarea
+    id: suggested_change
+    attributes:
+      label: Suggested correction
+      description: Optional. If you know the better wording, structure, or example, suggest it here.
+      placeholder: |
+        Replace ... with ...
+        or
+        Add a short section that explains ...
+  - type: textarea
+    id: references
+    attributes:
+      label: Supporting references
+      description: Optional. Add references that help explain the current problem or support a suggested correction, especially external examples such as similar docs in another repo, standards, or papers.
+      placeholder: |
+        https://github.com/<org>/<repo>/blob/main/docs/<page>.md
+        https://arxiv.org/abs/<paper-id>
+        docs/PACKAGES.md
+        PR #123
