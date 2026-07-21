@@ -1,0 +1,128 @@
+name: Proposal / Improvement
+description: Propose a new package, operator, or tooling improvement.
+title: "[Proposal] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for concrete feature requests.
+
+        Keep proposals scoped. If the idea is still vague, it will usually work better as backlog notes than as a GitHub issue.
+  - type: dropdown
+    id: proposal_type
+    attributes:
+      label: Proposal type
+      options:
+        - new package
+        - new operator
+        - tooling feature
+    validations:
+      required: true
+  - type: dropdown
+    id: proposed_owner
+    attributes:
+      label: Proposed owner
+      description: Best guess only. Choose the narrowest shared surface that should own this.
+      options:
+        - core
+        - tensor
+        - vision
+        - onnx
+        - torch
+        - meta
+        - new package
+        - docs
+        - examples
+        - unsure
+    validations:
+      required: true
+  - type: textarea
+    id: problem_use_case
+    attributes:
+      label: Problem or use case
+      description: What concrete workflow or pipeline gap is this solving?
+      placeholder: |
+        I want to build a pipeline that ...
+        The current package surfaces are missing ...
+    validations:
+      required: true
+  - type: input
+    id: proposed_surface
+    attributes:
+      label: Proposed public surface
+      description: Import path, operator name, CLI surface, report output, or similar.
+      placeholder: '"ml_pipes.vision.SomeOperator" or "python -m ml_pipes benchmark ..."'
+    validations:
+      required: true
+  - type: textarea
+    id: boundary_impact
+    attributes:
+      label: Boundary or contract impact
+      description: Describe the pipeline boundary, validation contract, or tooling output affected.
+      placeholder: |
+        ImagePayload -> Detections
+        or
+        Inspection HTML should show ...
+    validations:
+      required: true
+  - type: textarea
+    id: why_shared
+    attributes:
+      label: Why this should be shared
+      description: Explain why this belongs in a package or framework surface instead of staying example-local.
+    validations:
+      required: true
+  - type: textarea
+    id: current_workaround
+    attributes:
+      label: Current workaround or gap in existing surface
+      description: What have you tried, and why is the current surface not enough?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: What would make this issue done?
+      placeholder: |
+        - add ...
+        - document ...
+        - cover with ...
+    validations:
+      required: true
+  - type: textarea
+    id: docs_examples_checked
+    attributes:
+      label: Relevant docs or examples checked
+      description: List the repo docs, package docs, examples, or tests you already checked.
+      placeholder: "docs/PACKAGES.md, docs/OPERATORS.md, examples/run_yolo8_onnx.py"
+    validations:
+      required: true
+  - type: textarea
+    id: package_details
+    attributes:
+      label: If this is a new package
+      description: Optional. Describe the domain, expected dependencies, install profile, and a representative pipeline.
+      placeholder: |
+        domain:
+        depends on:
+        install profile:
+        representative pipeline:
+  - type: textarea
+    id: operator_details
+    attributes:
+      label: If this is a new operator
+      description: Optional. Describe the owning package, signature sketch, and where it fits in a pipeline.
+      placeholder: |
+        owning package:
+        signature sketch:
+        pipeline placement:
+  - type: textarea
+    id: tooling_details
+    attributes:
+      label: If this is a tooling feature
+      description: Optional. Describe the tool area and the current vs desired artifact or output.
+      placeholder: |
+        tool area: validation / tracing / inspection / benchmarking / CLI
+        current behavior:
+        desired behavior:

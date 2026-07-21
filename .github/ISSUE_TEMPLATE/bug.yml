@@ -1,0 +1,105 @@
+name: Bug / Regression
+description: Report incorrect behavior in validation, runtime execution, tooling, packaging, docs, or examples.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for incorrect or regressed behavior.
+
+        Prefer the smallest reproducible pipeline or example command. If the problem first appears in `validate()`, `inspect()`, tracing, or benchmarking, say so explicitly.
+  - type: dropdown
+    id: affected_area
+    attributes:
+      label: Affected area
+      description: Where do you first see the problem?
+      options:
+        - validation
+        - runtime execution
+        - inspection
+        - tracing
+        - benchmarking
+        - packaging / install
+        - docs / examples
+        - unsure
+    validations:
+      required: true
+  - type: dropdown
+    id: suspected_owner
+    attributes:
+      label: Suspected owner
+      description: Best guess only. Choose the narrowest owner you can.
+      options:
+        - core
+        - tensor
+        - vision
+        - onnx
+        - torch
+        - meta
+        - examples
+        - docs
+        - unsure
+    validations:
+      required: true
+  - type: input
+    id: checkout
+    attributes:
+      label: Install or checkout
+      description: Package version, branch, or commit if you are working from source.
+      placeholder: "main @ abc1234"
+    validations:
+      required: true
+  - type: input
+    id: install_profile
+    attributes:
+      label: Install profile
+      description: Smallest install that reproduces the problem.
+      placeholder: '"ml-pipes[onnx,vision]" or "-e packages/core[inspection]"'
+    validations:
+      required: true
+  - type: textarea
+    id: minimal_repro
+    attributes:
+      label: Minimal repro
+      description: Paste the smallest pipeline snippet, example command, or test shape that reproduces the issue.
+      placeholder: |
+        from ml_pipes.core import Pipeline
+
+        pipeline = Pipeline([...])
+        pipeline.validate()
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+      description: Include the full error, traceback, or incorrect output when possible.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and context
+      description: Include Python version, OS, runtime/library versions, model details, and anything else needed to reproduce.
+      placeholder: |
+        Python 3.12
+        macOS / Linux
+        onnxruntime 1.x
+        model: ...
+    validations:
+      required: true
+  - type: textarea
+    id: docs_examples_checked
+    attributes:
+      label: Relevant docs or examples checked
+      description: Optional, but useful when the issue may be a docs or example mismatch.
+      placeholder: "docs/VALIDATION.md, examples/run_yolo8_onnx.py"
