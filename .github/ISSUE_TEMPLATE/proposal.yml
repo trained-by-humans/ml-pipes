@@ -8,10 +8,13 @@ body:
         Use this form for concrete feature requests.
 
         Keep proposals scoped. If the idea is still vague, it will usually work better as backlog notes than as a GitHub issue.
+
+        Use the Docs form for docs-only improvements. If the docs reveal a missing shared feature or wrong behavior, use this form and cite the relevant page.
   - type: dropdown
     id: proposal_type
     attributes:
       label: Proposal type
+      description: Choose the closest kind of shared feature you are proposing.
       options:
         - new package
         - new operator
@@ -31,45 +34,18 @@ body:
         - torch
         - meta
         - new package
-        - docs
-        - examples
-        - unsure
+        - other / not sure
     validations:
       required: true
   - type: textarea
     id: problem_use_case
     attributes:
-      label: Problem or use case
-      description: What concrete workflow or pipeline gap is this solving?
+      label: Problem and use case
+      description: What are you trying to do, what is missing today, and where would this be useful? Start with "I want to do X, so I need Y."
       placeholder: |
         I want to build a pipeline that ...
-        The current package surfaces are missing ...
-    validations:
-      required: true
-  - type: input
-    id: proposed_surface
-    attributes:
-      label: Proposed public surface
-      description: Import path, operator name, CLI surface, report output, or similar.
-      placeholder: '"ml_pipes.vision.SomeOperator" or "python -m ml_pipes benchmark ..."'
-    validations:
-      required: true
-  - type: textarea
-    id: boundary_impact
-    attributes:
-      label: Boundary or contract impact
-      description: Describe the pipeline boundary, validation contract, or tooling output affected.
-      placeholder: |
-        ImagePayload -> Detections
-        or
-        Inspection HTML should show ...
-    validations:
-      required: true
-  - type: textarea
-    id: why_shared
-    attributes:
-      label: Why this should be shared
-      description: Explain why this belongs in a package or framework surface instead of staying example-local.
+        Today the existing surface is missing ...
+        This would be useful in ...
     validations:
       required: true
   - type: textarea
@@ -77,6 +53,25 @@ body:
     attributes:
       label: Current workaround or gap in existing surface
       description: What have you tried, and why is the current surface not enough?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_surface
+    attributes:
+      label: Proposed public surface
+      description: Describe the import path, operator name, CLI surface, report output, or similar. For operator proposals, include a minimal pipeline snippet and highlight the affected boundary or contract.
+      placeholder: |
+        from ml_pipes.core import Pipeline
+        from ml_pipes.vision import Decode, Resize, SomeOperator
+
+        pipeline = Pipeline([
+            Decode(),
+            SomeOperator(...),
+            Resize((640, 640)),
+        ])
+
+        proposed surface: ml_pipes.vision.SomeOperator
+        boundary: ImagePayload -> ImagePayload
     validations:
       required: true
   - type: textarea
@@ -90,39 +85,3 @@ body:
         - cover with ...
     validations:
       required: true
-  - type: textarea
-    id: docs_examples_checked
-    attributes:
-      label: Relevant docs or examples checked
-      description: List the repo docs, package docs, examples, or tests you already checked.
-      placeholder: "docs/PACKAGES.md, docs/OPERATORS.md, examples/run_yolo8_onnx.py"
-    validations:
-      required: true
-  - type: textarea
-    id: package_details
-    attributes:
-      label: If this is a new package
-      description: Optional. Describe the domain, expected dependencies, install profile, and a representative pipeline.
-      placeholder: |
-        domain:
-        depends on:
-        install profile:
-        representative pipeline:
-  - type: textarea
-    id: operator_details
-    attributes:
-      label: If this is a new operator
-      description: Optional. Describe the owning package, signature sketch, and where it fits in a pipeline.
-      placeholder: |
-        owning package:
-        signature sketch:
-        pipeline placement:
-  - type: textarea
-    id: tooling_details
-    attributes:
-      label: If this is a tooling feature
-      description: Optional. Describe the tool area and the current vs desired artifact or output.
-      placeholder: |
-        tool area: validation / tracing / inspection / benchmarking / CLI
-        current behavior:
-        desired behavior:
