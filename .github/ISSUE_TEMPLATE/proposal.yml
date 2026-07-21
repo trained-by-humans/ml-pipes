@@ -5,9 +5,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this form for concrete feature requests.
+        Use this form for concrete shared-feature proposals.
 
-        Keep proposals scoped. If the idea is still vague, it will usually work better as backlog notes than as a GitHub issue.
+        Start with the problem and use case, then explain the current gap, the proposed public surface, and what done looks like. Keep proposals scoped.
+
+        If the idea is still vague or exploratory, it will usually work better as backlog notes than as a GitHub issue.
 
         Use the Docs form for docs-only improvements. If the docs reveal a missing shared feature or wrong behavior, use this form and cite the relevant page.
   - type: dropdown
@@ -43,9 +45,9 @@ body:
       label: Problem and use case
       description: What are you trying to do, what is missing today, and where would this be useful? Start with "I want to do X, so I need Y."
       placeholder: |
-        I want to build a pipeline that ...
-        Today the existing surface is missing ...
-        This would be useful in ...
+        I want to build a pipeline that runs ...
+        To do that, I need ...
+        This would be useful in pipelines that ...
     validations:
       required: true
   - type: textarea
@@ -53,6 +55,10 @@ body:
     attributes:
       label: Current workaround or gap in existing surface
       description: What have you tried, and why is the current surface not enough?
+      placeholder: |
+        I tried composing ...
+        Today the closest surface is ...
+        It is not enough because ...
     validations:
       required: true
   - type: textarea

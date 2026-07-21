@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this form for incorrect or regressed behavior.
+        Use this form when `ml-pipes` behaves incorrectly or regresses.
 
-        Prefer the smallest reproducible pipeline or example command. If the problem first appears in `validate()`, `inspect()`, tracing, or benchmarking, say so explicitly.
+        Prefer the smallest reproducible pipeline or example command. Call out where the problem first appears, then describe the expected behavior and what happens instead.
 
         Use the Docs form for page-level documentation issues. If repository behavior contradicts the docs, file a bug here and cite the page as evidence.
   - type: dropdown
@@ -70,6 +70,10 @@ body:
     attributes:
       label: Expected behavior
       description: What should happen?
+      placeholder: |
+        pipeline.validate() should succeed
+        or
+        Pipeline.inspect() should render the report without error
     validations:
       required: true
   - type: textarea
@@ -77,6 +81,10 @@ body:
     attributes:
       label: Actual behavior
       description: What happens instead? Include the full error, traceback, or incorrect output when possible.
+      placeholder: |
+        pipeline.validate() raises ...
+        or
+        Pipeline.inspect() fails with ...
       render: shell
     validations:
       required: true

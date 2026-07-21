@@ -5,9 +5,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this form for docs-only issues: unclear wording, missing explanation, broken links, or outdated examples in documentation.
+        Use this form for docs-only issues, including incorrect wording, missing topics, broken links, outdated examples, or documentation you expected to find but could not.
 
-        If repository behavior should change because the docs reveal a real bug or missing feature, use the Bug or Proposal form instead and cite the relevant page.
+        Point to the page or section you read when it exists. If the docs are missing entirely, describe the topic or page you expected to find.
+
+        If repository behavior or a shared public surface should change, use the Bug or Proposal form instead and cite the relevant page or missing topic.
   - type: input
     id: doc_page
     attributes:
@@ -27,6 +29,10 @@ body:
     attributes:
       label: Current problem
       description: What is wrong, unclear, or missing in the current docs?
+      placeholder: |
+        The docs currently say ...
+        I expected ...
+        What is unclear or missing is ...
     validations:
       required: true
   - type: textarea
@@ -34,6 +40,10 @@ body:
     attributes:
       label: Suggested correction
       description: Optional. If you know the better wording, structure, or example, suggest it here.
+      placeholder: |
+        Replace ... with ...
+        or
+        Add a short section that explains ...
   - type: textarea
     id: references
     attributes:
