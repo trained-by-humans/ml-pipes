@@ -7,19 +7,13 @@ and test runs.
 ## Release-Specific Setup
 
 Use a Python 3.11+ environment for local release validation when possible.
-If you run release validation under Python 3.10, install `tomli` because the
-standard-library `tomllib` module is not available there yet.
+If you run release validation under Python 3.10, the pinned release
+requirements file below also installs `tomli`.
 
 Install the pinned local release tooling used by the release workflow:
 
 ```bash
-python3 -m pip install -r requirements-release.txt
-```
-
-If you are using Python 3.10, also install:
-
-```bash
-python3 -m pip install -U tomli
+python3 -m pip install -r .github/requirements-release.txt
 ```
 
 ## Validate Release Metadata
@@ -27,14 +21,14 @@ python3 -m pip install -U tomli
 Before cutting a release, validate release metadata from the repository root:
 
 ```bash
-python3 scripts/release_packages.py --validate --tag v0.1.0
+python3 .github/scripts/release_packages.py --validate --tag v0.1.0
 ```
 
 This checks that all published package versions stay aligned, internal
 `ml-pipes` pins stay aligned across runtime dependencies and extras, and the
 release tag matches that shared version.
 
-Publish packages in dependency order. `scripts/release_packages.py`
+Publish packages in dependency order. `.github/scripts/release_packages.py`
 validates the current publish order before building or publishing.
 
 ## Local Dry-Run
@@ -42,7 +36,7 @@ validates the current publish order before building or publishing.
 Run a release dry-run from the repository root with:
 
 ```bash
-python3 scripts/release_packages.py --dry-run
+python3 .github/scripts/release_packages.py --dry-run
 ```
 
 This command builds the distributions locally and requires the release

@@ -8,7 +8,7 @@ import pytest
 
 
 def _load_check_index_artifacts_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "check_index_artifacts.py"
+    module_path = Path(__file__).resolve().parents[3] / ".github" / "scripts" / "check_index_artifacts.py"
     spec = importlib.util.spec_from_file_location("check_index_artifacts", module_path)
     assert spec is not None
     assert spec.loader is not None
