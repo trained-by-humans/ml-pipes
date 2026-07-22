@@ -350,13 +350,22 @@ Try it: [examples/benchmarks/run_yolo8_benchmark.py](examples/benchmarks/run_yol
 
 ## Where To Go Next
 
-- **Browse the documentation** in [docs/README.md](docs/README.md).
 - **Start from runnable examples** in [examples/README.md](examples/README.md).
-- **Run a baseline vision pipeline** with [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py).
 - **Inspect and debug one run** with
   [examples/run_inspect.py](examples/run_inspect.py).
-- **Build a service or larger app** with
-  [examples/run_yolo8_endpoint.py](examples/run_yolo8_endpoint.py) and
-  [docs/COMPOSITION.md](docs/COMPOSITION.md).
+- **Browse the documentation** in [docs/README.md](docs/README.md).
 - **Wrap your own model** with
   [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
+
+## Help Shape ml-pipes
+
+> [!TIP]
+> Join the [GitHub Discussions](https://github.com/trained-by-humans/ml-pipes/discussions)
+> to help guide our development efforts by sharing what you're building and
+> your feedback.
+>
+> Whether you're already using `ml-pipes` or just exploring explicit ML
+> pipelines, your input is useful.
+>
+> If you hit a problem or want to request a feature, open an
+> [issue](https://github.com/trained-by-humans/ml-pipes/issues).
