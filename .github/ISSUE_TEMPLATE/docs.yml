@@ -47,8 +47,8 @@ body:
   - type: textarea
     id: references
     attributes:
-      label: Supporting references
-      description: Optional. Add references that help explain the current problem or support a suggested correction, especially external examples such as similar docs in another repo, standards, or papers.
+      label: Relevant references
+      description: Optional. Add repo pages, PRs, external docs, examples, or standards that help frame the issue or the suggested correction.
       placeholder: |
         https://github.com/<org>/<repo>/blob/main/docs/<page>.md
         https://arxiv.org/abs/<paper-id>
