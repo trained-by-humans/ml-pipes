@@ -11,11 +11,11 @@ permissions:
 
 jobs:
   ci:
+    needs: validate-release
     uses: ./.github/workflows/ci.yml
 
   validate-release:
     name: Validate Release Metadata
-    needs: ci
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -36,7 +36,7 @@ jobs:
 
   build:
     name: Build Release Artifacts
-    needs: validate-release
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
