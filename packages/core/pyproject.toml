@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-pipes-core"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "Core runtime, validation, tracing, inspection, and standard operators for ml-pipes"
 readme = "README.md"
 license = "Apache-2.0"
@@ -43,9 +43,9 @@ Changelog = "https://github.com/trained-by-humans/ml-pipes/releases"
 
 [project.optional-dependencies]
 inspection = [
-    "ml-pipes-onnx==0.1.0",
-    "ml-pipes-tensor==0.1.0",
-    "ml-pipes-vision==0.1.0",
+    "ml-pipes-onnx==0.1.0rc1",
+    "ml-pipes-tensor==0.1.0rc1",
+    "ml-pipes-vision==0.1.0rc1",
     "matplotlib>=3.8",
     "opencv-python>=4.9",
 ]
