@@ -139,10 +139,24 @@ jobs:
       publish_target: testpypi
       dist_name: ml-pipes
 
+  confirm-pypi-release:
+    name: Confirm PyPI Release
+    if: ${{ github.event_name == 'push' }}
+    needs: publish-testpypi-meta
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-approval
+      deployment: false
+    steps:
+      - name: Await manual approval
+        run: |
+          echo "TestPyPI publishing completed."
+          echo "Approve the pypi-approval environment to continue with PyPI publishing."
+
   publish-pypi-core:
     name: Publish PyPI Core
     if: ${{ github.event_name == 'push' }}
-    needs: publish-testpypi-meta
+    needs: confirm-pypi-release
     permissions:
       contents: read
       id-token: write
