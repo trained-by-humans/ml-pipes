@@ -73,7 +73,6 @@ jobs:
     needs: build
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: testpypi
@@ -85,7 +84,6 @@ jobs:
     needs: publish-testpypi-core
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: testpypi
@@ -97,7 +95,6 @@ jobs:
     needs: publish-testpypi-tensor
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: testpypi
@@ -109,7 +106,6 @@ jobs:
     needs: publish-testpypi-vision
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: testpypi
@@ -121,7 +117,6 @@ jobs:
     needs: publish-testpypi-onnx
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: testpypi
@@ -133,7 +128,6 @@ jobs:
     needs: publish-testpypi-torch
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: testpypi
@@ -159,7 +153,6 @@ jobs:
     needs: confirm-pypi-release
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: pypi
@@ -171,7 +164,6 @@ jobs:
     needs: publish-pypi-core
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: pypi
@@ -183,7 +175,6 @@ jobs:
     needs: publish-pypi-tensor
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: pypi
@@ -195,7 +186,6 @@ jobs:
     needs: publish-pypi-vision
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: pypi
@@ -207,7 +197,6 @@ jobs:
     needs: publish-pypi-onnx
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: pypi
@@ -219,7 +208,6 @@ jobs:
     needs: publish-pypi-torch
     permissions:
       contents: read
-      id-token: write
     uses: ./.github/workflows/publish-package.yml
     with:
       publish_target: pypi

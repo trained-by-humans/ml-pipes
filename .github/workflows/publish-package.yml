@@ -19,7 +19,6 @@ jobs:
     environment: ${{ inputs.publish_target }}
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -67,6 +66,8 @@ jobs:
         if: ${{ inputs.publish_target == 'testpypi' && steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          user: __token__
+          password: ${{ secrets.PACKAGE_INDEX_API_TOKEN }}
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
 
@@ -74,4 +75,6 @@ jobs:
         if: ${{ inputs.publish_target == 'pypi' && steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          user: __token__
+          password: ${{ secrets.PACKAGE_INDEX_API_TOKEN }}
           packages-dir: publish
