@@ -78,13 +78,15 @@ jobs:
       - name: Run shared framework tests
         run: |
           python -m pytest -q \
-            tests/scripts/github/test_check_index_artifacts.py \
-            tests/scripts/github/test_release_asset_manifest.py \
+            tests/scripts/github/test_check_package_index_artifacts.py \
+            tests/scripts/github/test_build_release_artifacts.py \
+            tests/scripts/github/test_release_artifact_manifest.py \
             tests/scripts/github/test_detect_changed_packages.py \
+            tests/scripts/github/test_release_plan.py \
             tests/scripts/github/test_verify_published_package_installs.py \
             tests/test_import_surfaces.py \
             tests/test_exports.py \
-            tests/scripts/github/test_release_packages.py \
+            tests/scripts/github/test_validate_release_metadata.py \
             tests/scripts/github/test_stage_release_artifacts.py \
             packages/core/tests/validation/test_validation.py \
             packages/core/tests/cli/test_cli.py \
@@ -119,8 +121,10 @@ jobs:
         run: |
           python -c "from ml_pipes.core import Pipeline; print(Pipeline)"
           python -m pytest -q \
-            tests/scripts/github/test_release_asset_manifest.py \
-            tests/scripts/github/test_release_packages.py \
+            tests/scripts/github/test_release_artifact_manifest.py \
+            tests/scripts/github/test_build_release_artifacts.py \
+            tests/scripts/github/test_release_plan.py \
+            tests/scripts/github/test_validate_release_metadata.py \
             packages/core/tests/cli/test_cli.py \
             packages/core/tests/validation/test_strict.py
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import importlib.util
 from pathlib import Path
 import shlex
 import subprocess
@@ -11,20 +10,15 @@ import tempfile
 import venv
 
 
-def _load_release_packages_module():
-    module_path = Path(__file__).resolve().with_name("release_packages.py")
-    spec = importlib.util.spec_from_file_location("release_packages", module_path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import validate_release_metadata as validate_release_metadata_module
 
 
-_RELEASE_PACKAGES = _load_release_packages_module()
-PackageManifest = _RELEASE_PACKAGES.PackageManifest
-validate_release_metadata = _RELEASE_PACKAGES.validate_release_metadata
+PackageManifest = validate_release_metadata_module.PackageManifest
+validate_release_metadata = validate_release_metadata_module.validate_release_metadata
 UMBRELLA_SMOKE_PROFILE = "all"
 
 

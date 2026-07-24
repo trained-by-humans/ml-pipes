@@ -7,9 +7,14 @@ import sys
 import pytest
 
 
-def _load_check_index_artifacts_module():
-    module_path = Path(__file__).resolve().parents[3] / ".github" / "scripts" / "check_index_artifacts.py"
-    spec = importlib.util.spec_from_file_location("check_index_artifacts", module_path)
+def _load_check_package_index_artifacts_module():
+    module_path = (
+        Path(__file__).resolve().parents[3]
+        / ".github"
+        / "scripts"
+        / "check_package_index_artifacts.py"
+    )
+    spec = importlib.util.spec_from_file_location("check_package_index_artifacts", module_path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -23,24 +28,24 @@ def _write_artifact(path: Path, content: str) -> None:
 
 
 def _stage_core_artifacts(tmp_path: Path) -> Path:
-    packages_dir = tmp_path / "publish"
-    packages_dir.mkdir()
-    _write_artifact(packages_dir / "ml_pipes_core-0.2.0-py3-none-any.whl", "wheel-0.2.0")
-    _write_artifact(packages_dir / "ml_pipes_core-0.2.0.tar.gz", "sdist-0.2.0")
-    return packages_dir
+    artifacts_dir = tmp_path / "publish"
+    artifacts_dir.mkdir()
+    _write_artifact(artifacts_dir / "ml_pipes_core-0.2.0-py3-none-any.whl", "wheel-0.2.0")
+    _write_artifact(artifacts_dir / "ml_pipes_core-0.2.0.tar.gz", "sdist-0.2.0")
+    return artifacts_dir
 
 
-def test_check_index_artifacts_reports_all_missing_when_version_is_missing(
+def test_check_package_index_artifacts_reports_all_missing_when_version_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    module = _load_check_index_artifacts_module()
-    packages_dir = _stage_core_artifacts(tmp_path)
+    module = _load_check_package_index_artifacts_module()
+    artifacts_dir = _stage_core_artifacts(tmp_path)
 
     monkeypatch.setattr(module, "_fetch_existing_artifacts", lambda *_args, **_kwargs: None)
 
-    artifact_check = module.check_index_artifacts(
-        packages_dir,
+    artifact_check = module.check_package_index_artifacts(
+        artifacts_dir,
         dist_name="ml-pipes-core",
         index_url_base="https://test.pypi.org",
     )
@@ -54,18 +59,18 @@ def test_check_index_artifacts_reports_all_missing_when_version_is_missing(
     assert artifact_check.artifacts_missing is True
 
 
-def test_check_index_artifacts_prunes_matching_files_when_all_artifacts_match(
+def test_check_package_index_artifacts_prunes_matching_files_when_all_artifacts_match(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    module = _load_check_index_artifacts_module()
-    packages_dir = _stage_core_artifacts(tmp_path)
-    _, local_artifacts = module._local_artifacts(packages_dir, "ml-pipes-core")
+    module = _load_check_package_index_artifacts_module()
+    artifacts_dir = _stage_core_artifacts(tmp_path)
+    _, local_artifacts = module._local_artifacts(artifacts_dir, "ml-pipes-core")
 
     monkeypatch.setattr(module, "_fetch_existing_artifacts", lambda *_args, **_kwargs: local_artifacts)
 
-    artifact_check = module.check_index_artifacts(
-        packages_dir,
+    artifact_check = module.check_package_index_artifacts(
+        artifacts_dir,
         dist_name="ml-pipes-core",
         index_url_base="https://test.pypi.org",
     )
@@ -76,24 +81,24 @@ def test_check_index_artifacts_prunes_matching_files_when_all_artifacts_match(
     )
     assert artifact_check.missing_filenames == ()
     assert artifact_check.artifacts_missing is False
-    assert list(packages_dir.iterdir()) == []
+    assert list(artifacts_dir.iterdir()) == []
 
 
-def test_check_index_artifacts_prunes_matching_files_and_reports_missing_ones(
+def test_check_package_index_artifacts_prunes_matching_files_and_reports_missing_ones(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    module = _load_check_index_artifacts_module()
-    packages_dir = _stage_core_artifacts(tmp_path)
-    _, local_artifacts = module._local_artifacts(packages_dir, "ml-pipes-core")
+    module = _load_check_package_index_artifacts_module()
+    artifacts_dir = _stage_core_artifacts(tmp_path)
+    _, local_artifacts = module._local_artifacts(artifacts_dir, "ml-pipes-core")
     existing = {
         "ml_pipes_core-0.2.0-py3-none-any.whl": local_artifacts["ml_pipes_core-0.2.0-py3-none-any.whl"]
     }
 
     monkeypatch.setattr(module, "_fetch_existing_artifacts", lambda *_args, **_kwargs: existing)
 
-    artifact_check = module.check_index_artifacts(
-        packages_dir,
+    artifact_check = module.check_package_index_artifacts(
+        artifacts_dir,
         dist_name="ml-pipes-core",
         index_url_base="https://test.pypi.org",
     )
@@ -101,16 +106,16 @@ def test_check_index_artifacts_prunes_matching_files_and_reports_missing_ones(
     assert artifact_check.matching_filenames == ("ml_pipes_core-0.2.0-py3-none-any.whl",)
     assert artifact_check.missing_filenames == ("ml_pipes_core-0.2.0.tar.gz",)
     assert artifact_check.artifacts_missing is True
-    assert sorted(path.name for path in packages_dir.iterdir()) == ["ml_pipes_core-0.2.0.tar.gz"]
+    assert sorted(path.name for path in artifacts_dir.iterdir()) == ["ml_pipes_core-0.2.0.tar.gz"]
 
 
-def test_check_index_artifacts_rejects_conflicting_duplicate_filenames(
+def test_check_package_index_artifacts_rejects_conflicting_duplicate_filenames(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    module = _load_check_index_artifacts_module()
-    packages_dir = _stage_core_artifacts(tmp_path)
-    _, local_artifacts = module._local_artifacts(packages_dir, "ml-pipes-core")
+    module = _load_check_package_index_artifacts_module()
+    artifacts_dir = _stage_core_artifacts(tmp_path)
+    _, local_artifacts = module._local_artifacts(artifacts_dir, "ml-pipes-core")
     existing = {
         "ml_pipes_core-0.2.0-py3-none-any.whl": module.ArtifactRecord(
             filename="ml_pipes_core-0.2.0-py3-none-any.whl",
@@ -122,24 +127,24 @@ def test_check_index_artifacts_rejects_conflicting_duplicate_filenames(
     monkeypatch.setattr(module, "_fetch_existing_artifacts", lambda *_args, **_kwargs: existing)
 
     with pytest.raises(RuntimeError, match="conflicting artifacts"):
-        module.check_index_artifacts(
-            packages_dir,
+        module.check_package_index_artifacts(
+            artifacts_dir,
             dist_name="ml-pipes-core",
             index_url_base="https://test.pypi.org",
         )
-    assert sorted(path.name for path in packages_dir.iterdir()) == [
+    assert sorted(path.name for path in artifacts_dir.iterdir()) == [
         "ml_pipes_core-0.2.0-py3-none-any.whl",
         "ml_pipes_core-0.2.0.tar.gz",
     ]
 
 
-def test_check_index_artifacts_rejects_unexpected_existing_artifacts(
+def test_check_package_index_artifacts_rejects_unexpected_existing_artifacts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    module = _load_check_index_artifacts_module()
-    packages_dir = _stage_core_artifacts(tmp_path)
-    _, local_artifacts = module._local_artifacts(packages_dir, "ml-pipes-core")
+    module = _load_check_package_index_artifacts_module()
+    artifacts_dir = _stage_core_artifacts(tmp_path)
+    _, local_artifacts = module._local_artifacts(artifacts_dir, "ml-pipes-core")
     existing = dict(local_artifacts)
     existing["ml_pipes_core-0.2.0-extra.whl"] = module.ArtifactRecord(
         filename="ml_pipes_core-0.2.0-extra.whl",
@@ -149,12 +154,12 @@ def test_check_index_artifacts_rejects_unexpected_existing_artifacts(
     monkeypatch.setattr(module, "_fetch_existing_artifacts", lambda *_args, **_kwargs: existing)
 
     with pytest.raises(RuntimeError, match="unexpected artifacts"):
-        module.check_index_artifacts(
-            packages_dir,
+        module.check_package_index_artifacts(
+            artifacts_dir,
             dist_name="ml-pipes-core",
             index_url_base="https://test.pypi.org",
         )
-    assert sorted(path.name for path in packages_dir.iterdir()) == [
+    assert sorted(path.name for path in artifacts_dir.iterdir()) == [
         "ml_pipes_core-0.2.0-py3-none-any.whl",
         "ml_pipes_core-0.2.0.tar.gz",
     ]

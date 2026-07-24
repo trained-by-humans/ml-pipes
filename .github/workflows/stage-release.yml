@@ -31,11 +31,11 @@ jobs:
 
       - name: Validate package versions and publish order
         run: |
-          args=(--validate)
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            args+=(--tag "${GITHUB_REF_NAME}")
+            python .github/scripts/validate_release_metadata.py --tag "${GITHUB_REF_NAME}"
+          else
+            python .github/scripts/validate_release_metadata.py
           fi
-          python .github/scripts/release_packages.py "${args[@]}"
 
   build:
     name: Build and Stage Release Assets
@@ -56,14 +56,14 @@ jobs:
         run: python -m pip install -r .github/requirements-release.txt
 
       - name: Build packages
-        run: python .github/scripts/release_packages.py --dry-run --outdir dist/release
+        run: python .github/scripts/build_release_artifacts.py --outdir dist/release
 
       - name: Check built metadata
         run: python -m twine check dist/release/*
 
-      - name: Write release asset manifest
+      - name: Write release artifact manifest
         run: |
-          python .github/scripts/release_asset_manifest.py write \
+          python .github/scripts/release_artifact_manifest.py write \
             --artifacts-dir dist/release \
             --output dist/release/release-artifact-manifest.json \
             --tag "${GITHUB_REF_NAME}"

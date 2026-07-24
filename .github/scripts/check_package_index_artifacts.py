@@ -36,7 +36,7 @@ def _parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument(
-        "--packages-dir",
+        "--artifacts-dir",
         type=Path,
         required=True,
         help="Directory containing the wheel and sdist for one staged distribution check.",
@@ -84,10 +84,10 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _local_artifacts(packages_dir: Path, expected_dist_name: str) -> tuple[str, dict[str, ArtifactRecord]]:
-    artifacts = sorted(path for path in packages_dir.iterdir() if path.is_file())
+def _local_artifacts(artifacts_dir: Path, expected_dist_name: str) -> tuple[str, dict[str, ArtifactRecord]]:
+    artifacts = sorted(path for path in artifacts_dir.iterdir() if path.is_file())
     if not artifacts:
-        raise ValueError(f"No artifacts found in {packages_dir}")
+        raise ValueError(f"No artifacts found in {artifacts_dir}")
 
     expected_dist_token = expected_dist_name.replace("-", "_")
     version: str | None = None
@@ -102,7 +102,7 @@ def _local_artifacts(packages_dir: Path, expected_dist_name: str) -> tuple[str, 
             version = artifact_version
         elif artifact_version != version:
             raise ValueError(
-                f"Artifacts in {packages_dir} do not share one version: {version!r} and {artifact_version!r}"
+                f"Artifacts in {artifacts_dir} do not share one version: {version!r} and {artifact_version!r}"
             )
         records[artifact.name] = ArtifactRecord(filename=artifact.name, sha256=_sha256(artifact))
 
@@ -151,13 +151,13 @@ def _fetch_existing_artifacts(
     return records
 
 
-def check_index_artifacts(
-    packages_dir: Path,
+def check_package_index_artifacts(
+    artifacts_dir: Path,
     *,
     dist_name: str,
     index_url_base: str,
 ) -> IndexArtifactCheck:
-    version, local_artifacts = _local_artifacts(packages_dir, dist_name)
+    version, local_artifacts = _local_artifacts(artifacts_dir, dist_name)
     existing_artifacts = _fetch_existing_artifacts(index_url_base, dist_name, version)
     if existing_artifacts is None:
         return IndexArtifactCheck(
@@ -194,7 +194,7 @@ def check_index_artifacts(
         )
 
     for filename in matching_filenames:
-        (packages_dir / filename).unlink()
+        (artifacts_dir / filename).unlink()
 
     return IndexArtifactCheck(
         version=version,
@@ -213,8 +213,8 @@ def _write_github_output(output_path: Path, artifact_check: IndexArtifactCheck) 
 
 def main() -> int:
     args = _parse_args()
-    artifact_check = check_index_artifacts(
-        args.packages_dir,
+    artifact_check = check_package_index_artifacts(
+        args.artifacts_dir,
         dist_name=args.dist_name,
         index_url_base=args.index_url_base,
     )

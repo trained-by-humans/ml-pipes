@@ -29,7 +29,7 @@ jobs:
           python-version: "3.12"
 
       - name: Validate package versions and publish order
-        run: python .github/scripts/release_packages.py --validate --tag "${{ inputs.tag }}"
+        run: python .github/scripts/validate_release_metadata.py --tag "${{ inputs.tag }}"
 
   prepare-release-assets:
     name: Fetch Staged Release Assets
@@ -53,9 +53,9 @@ jobs:
           mkdir -p dist/release
           gh release download "${{ inputs.tag }}" --dir dist/release --clobber
 
-      - name: Verify staged release asset manifest
+      - name: Verify staged release artifact manifest
         run: |
-          python .github/scripts/release_asset_manifest.py verify \
+          python .github/scripts/release_artifact_manifest.py verify \
             --artifacts-dir dist/release \
             --manifest dist/release/release-artifact-manifest.json \
             --tag "${{ inputs.tag }}"

@@ -9,12 +9,12 @@ from pathlib import Path
 import sys
 
 
-MANIFEST_FILENAME = "release-artifact-manifest.json"
+ARTIFACT_MANIFEST_FILENAME = "release-artifact-manifest.json"
 _ARCHIVE_SUFFIXES = (".whl", ".tar.gz", ".zip")
 
 
 @dataclass(frozen=True)
-class ReleaseAssetRecord:
+class ReleaseArtifactRecord:
     filename: str
     sha256: str
     size: int
@@ -22,7 +22,7 @@ class ReleaseAssetRecord:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Write or verify a release-asset manifest for built package artifacts."
+        description="Write or verify a release artifact manifest for built package artifacts."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -62,7 +62,7 @@ def _parse_args() -> argparse.Namespace:
         "--manifest",
         type=Path,
         required=True,
-        help="Path to a previously written release-asset manifest.",
+        help="Path to a previously written release artifact manifest.",
     )
     verify_parser.add_argument(
         "--tag",
@@ -81,34 +81,34 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _is_release_asset(path: Path) -> bool:
+def _is_release_artifact(path: Path) -> bool:
     return path.is_file() and any(path.name.endswith(suffix) for suffix in _ARCHIVE_SUFFIXES)
 
 
-def collect_release_assets(artifacts_dir: Path) -> tuple[ReleaseAssetRecord, ...]:
+def collect_release_artifacts(artifacts_dir: Path) -> tuple[ReleaseArtifactRecord, ...]:
     if not artifacts_dir.is_dir():
         raise ValueError(f"Artifacts directory does not exist: {artifacts_dir}")
 
     records = tuple(
-        ReleaseAssetRecord(
+        ReleaseArtifactRecord(
             filename=artifact.name,
             sha256=_sha256(artifact),
             size=artifact.stat().st_size,
         )
-        for artifact in sorted(path for path in artifacts_dir.iterdir() if _is_release_asset(path))
+        for artifact in sorted(path for path in artifacts_dir.iterdir() if _is_release_artifact(path))
     )
     if not records:
         raise ValueError(f"No release artifacts were found in {artifacts_dir}")
     return records
 
 
-def write_release_manifest(
+def write_release_artifact_manifest(
     artifacts_dir: Path,
     output_path: Path,
     *,
     tag: str | None = None,
-) -> tuple[ReleaseAssetRecord, ...]:
-    records = collect_release_assets(artifacts_dir)
+) -> tuple[ReleaseArtifactRecord, ...]:
+    records = collect_release_artifacts(artifacts_dir)
     payload: dict[str, object] = {
         "artifacts": [asdict(record) for record in records],
     }
@@ -123,7 +123,9 @@ def write_release_manifest(
     return records
 
 
-def _load_release_manifest(manifest_path: Path) -> tuple[str | None, tuple[ReleaseAssetRecord, ...]]:
+def _load_release_artifact_manifest(
+    manifest_path: Path,
+) -> tuple[str | None, tuple[ReleaseArtifactRecord, ...]]:
     with manifest_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
@@ -138,7 +140,7 @@ def _load_release_manifest(manifest_path: Path) -> tuple[str | None, tuple[Relea
     if not isinstance(raw_artifacts, list) or not raw_artifacts:
         raise ValueError(f"Manifest must contain a non-empty artifacts list: {manifest_path}")
 
-    records: list[ReleaseAssetRecord] = []
+    records: list[ReleaseArtifactRecord] = []
     seen_filenames: set[str] = set()
     for entry in raw_artifacts:
         if not isinstance(entry, dict):
@@ -154,22 +156,22 @@ def _load_release_manifest(manifest_path: Path) -> tuple[str | None, tuple[Relea
             raise ValueError(f"Manifest artifact sha256 must be a 64-character string: {filename}")
         if not isinstance(size, int) or size < 0:
             raise ValueError(f"Manifest artifact size must be a non-negative integer: {filename}")
-        records.append(ReleaseAssetRecord(filename=filename, sha256=sha256, size=size))
+        records.append(ReleaseArtifactRecord(filename=filename, sha256=sha256, size=size))
         seen_filenames.add(filename)
 
     return raw_tag, tuple(records)
 
 
-def verify_release_manifest(
+def verify_release_artifact_manifest(
     artifacts_dir: Path,
     manifest_path: Path,
     *,
     expected_tag: str | None = None,
-) -> tuple[ReleaseAssetRecord, ...]:
+) -> tuple[ReleaseArtifactRecord, ...]:
     if not artifacts_dir.is_dir():
         raise ValueError(f"Artifacts directory does not exist: {artifacts_dir}")
 
-    manifest_tag, expected_records = _load_release_manifest(manifest_path)
+    manifest_tag, expected_records = _load_release_artifact_manifest(manifest_path)
     if expected_tag is not None and manifest_tag != expected_tag:
         raise ValueError(
             f"Manifest tag {manifest_tag!r} does not match expected tag {expected_tag!r}"
@@ -177,7 +179,7 @@ def verify_release_manifest(
 
     local_artifacts = {
         artifact.name: artifact
-        for artifact in sorted(path for path in artifacts_dir.iterdir() if _is_release_asset(path))
+        for artifact in sorted(path for path in artifacts_dir.iterdir() if _is_release_artifact(path))
     }
     expected_filenames = {record.filename for record in expected_records}
     local_filenames = set(local_artifacts)
@@ -208,12 +210,22 @@ def verify_release_manifest(
 def main() -> int:
     args = _parse_args()
     if args.command == "write":
-        records = write_release_manifest(args.artifacts_dir, args.output, tag=args.tag)
-        print(f"Wrote release manifest for {len(records)} artifacts to {args.output}", flush=True)
+        records = write_release_artifact_manifest(args.artifacts_dir, args.output, tag=args.tag)
+        print(
+            f"Wrote release artifact manifest for {len(records)} artifacts to {args.output}",
+            flush=True,
+        )
         return 0
     if args.command == "verify":
-        records = verify_release_manifest(args.artifacts_dir, args.manifest, expected_tag=args.tag)
-        print(f"Verified release manifest for {len(records)} artifacts from {args.manifest}", flush=True)
+        records = verify_release_artifact_manifest(
+            args.artifacts_dir,
+            args.manifest,
+            expected_tag=args.tag,
+        )
+        print(
+            f"Verified release artifact manifest for {len(records)} artifacts from {args.manifest}",
+            flush=True,
+        )
         return 0
     raise AssertionError(f"Unsupported command: {args.command!r}")
 

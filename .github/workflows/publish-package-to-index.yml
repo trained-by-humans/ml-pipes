@@ -59,16 +59,16 @@ jobs:
             --dist-name "${{ inputs.dist_name }}"
 
       - name: Check staged artifacts against package index
-        id: check_index_artifacts
+        id: check_package_index_artifacts
         run: |
-          python3 .github/scripts/check_index_artifacts.py \
-            --packages-dir publish \
+          python3 .github/scripts/check_package_index_artifacts.py \
+            --artifacts-dir publish \
             --dist-name "${{ inputs.dist_name }}" \
             --index-url-base "${{ inputs.index_url_base }}" \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Publish package
-        if: ${{ steps.check_index_artifacts.outputs.artifacts_missing == 'true' }}
+        if: ${{ steps.check_package_index_artifacts.outputs.artifacts_missing == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__

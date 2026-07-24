@@ -8,11 +8,11 @@ import sys
 import pytest
 
 
-def _load_release_asset_manifest_module():
+def _load_release_artifact_manifest_module():
     module_path = (
-        Path(__file__).resolve().parents[3] / ".github" / "scripts" / "release_asset_manifest.py"
+        Path(__file__).resolve().parents[3] / ".github" / "scripts" / "release_artifact_manifest.py"
     )
-    spec = importlib.util.spec_from_file_location("release_asset_manifest", module_path)
+    spec = importlib.util.spec_from_file_location("release_artifact_manifest", module_path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -33,12 +33,16 @@ def _release_directory(tmp_path: Path) -> Path:
     return artifacts_dir
 
 
-def test_write_release_manifest_records_expected_artifacts(tmp_path: Path) -> None:
-    module = _load_release_asset_manifest_module()
+def test_write_release_artifact_manifest_records_expected_artifacts(tmp_path: Path) -> None:
+    module = _load_release_artifact_manifest_module()
     artifacts_dir = _release_directory(tmp_path)
-    manifest_path = artifacts_dir / module.MANIFEST_FILENAME
+    manifest_path = artifacts_dir / module.ARTIFACT_MANIFEST_FILENAME
 
-    records = module.write_release_manifest(artifacts_dir, manifest_path, tag="v0.2.0rc1")
+    records = module.write_release_artifact_manifest(
+        artifacts_dir,
+        manifest_path,
+        tag="v0.2.0rc1",
+    )
 
     assert [record.filename for record in records] == [
         "ml_pipes_core-0.2.0-py3-none-any.whl",
@@ -52,13 +56,13 @@ def test_write_release_manifest_records_expected_artifacts(tmp_path: Path) -> No
     ]
 
 
-def test_verify_release_manifest_accepts_matching_artifacts(tmp_path: Path) -> None:
-    module = _load_release_asset_manifest_module()
+def test_verify_release_artifact_manifest_accepts_matching_artifacts(tmp_path: Path) -> None:
+    module = _load_release_artifact_manifest_module()
     artifacts_dir = _release_directory(tmp_path)
-    manifest_path = artifacts_dir / module.MANIFEST_FILENAME
-    module.write_release_manifest(artifacts_dir, manifest_path, tag="v0.2.0rc1")
+    manifest_path = artifacts_dir / module.ARTIFACT_MANIFEST_FILENAME
+    module.write_release_artifact_manifest(artifacts_dir, manifest_path, tag="v0.2.0rc1")
 
-    records = module.verify_release_manifest(
+    records = module.verify_release_artifact_manifest(
         artifacts_dir,
         manifest_path,
         expected_tag="v0.2.0rc1",
@@ -70,23 +74,31 @@ def test_verify_release_manifest_accepts_matching_artifacts(tmp_path: Path) -> N
     ]
 
 
-def test_verify_release_manifest_rejects_unexpected_artifacts(tmp_path: Path) -> None:
-    module = _load_release_asset_manifest_module()
+def test_verify_release_artifact_manifest_rejects_unexpected_artifacts(tmp_path: Path) -> None:
+    module = _load_release_artifact_manifest_module()
     artifacts_dir = _release_directory(tmp_path)
-    manifest_path = artifacts_dir / module.MANIFEST_FILENAME
-    module.write_release_manifest(artifacts_dir, manifest_path, tag="v0.2.0rc1")
+    manifest_path = artifacts_dir / module.ARTIFACT_MANIFEST_FILENAME
+    module.write_release_artifact_manifest(artifacts_dir, manifest_path, tag="v0.2.0rc1")
     _write_artifact(artifacts_dir / "ml_pipes_tensor-0.2.0-py3-none-any.whl", "tensor-wheel")
 
     with pytest.raises(ValueError, match="Unexpected release artifacts"):
-        module.verify_release_manifest(artifacts_dir, manifest_path, expected_tag="v0.2.0rc1")
+        module.verify_release_artifact_manifest(
+            artifacts_dir,
+            manifest_path,
+            expected_tag="v0.2.0rc1",
+        )
 
 
-def test_verify_release_manifest_rejects_hash_mismatch(tmp_path: Path) -> None:
-    module = _load_release_asset_manifest_module()
+def test_verify_release_artifact_manifest_rejects_hash_mismatch(tmp_path: Path) -> None:
+    module = _load_release_artifact_manifest_module()
     artifacts_dir = _release_directory(tmp_path)
-    manifest_path = artifacts_dir / module.MANIFEST_FILENAME
-    module.write_release_manifest(artifacts_dir, manifest_path, tag="v0.2.0rc1")
+    manifest_path = artifacts_dir / module.ARTIFACT_MANIFEST_FILENAME
+    module.write_release_artifact_manifest(artifacts_dir, manifest_path, tag="v0.2.0rc1")
     _write_artifact(artifacts_dir / "ml_pipes_core-0.2.0.tar.gz", "changed")
 
     with pytest.raises(ValueError, match="did not match the manifest"):
-        module.verify_release_manifest(artifacts_dir, manifest_path, expected_tag="v0.2.0rc1")
+        module.verify_release_artifact_manifest(
+            artifacts_dir,
+            manifest_path,
+            expected_tag="v0.2.0rc1",
+        )
