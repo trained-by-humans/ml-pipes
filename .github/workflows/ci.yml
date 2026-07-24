@@ -1,6 +1,6 @@
-name: CI
+name: Integration Checks
 
-run-name: "CI: ${{ github.head_ref || github.ref_name }}"
+run-name: "Integration Checks: ${{ github.head_ref || github.ref_name }}"
 
 on:
   pull_request:
@@ -68,6 +68,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/scripts/github/test_check_index_artifacts.py \
+            tests/scripts/github/test_release_asset_manifest.py \
             tests/scripts/github/test_detect_changed_packages.py \
             tests/test_import_surfaces.py \
             tests/test_exports.py \
@@ -106,6 +107,7 @@ jobs:
         run: |
           python -c "from ml_pipes.core import Pipeline; print(Pipeline)"
           python -m pytest -q \
+            tests/scripts/github/test_release_asset_manifest.py \
             tests/scripts/github/test_release_packages.py \
             packages/core/tests/cli/test_cli.py \
             packages/core/tests/validation/test_strict.py

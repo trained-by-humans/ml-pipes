@@ -1,0 +1,169 @@
+name: Release Candidate Staging
+
+run-name: "Release Candidate Staging: ${{ github.ref_name }}"
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    needs: validate-release
+    uses: ./.github/workflows/ci.yml
+
+  validate-release:
+    name: Validate Release Metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate package versions and publish order
+        run: |
+          args=(--validate)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            args+=(--tag "${GITHUB_REF_NAME}")
+          fi
+          python .github/scripts/release_packages.py "${args[@]}"
+
+  build:
+    name: Build and Stage Release Assets
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install release tooling
+        run: python -m pip install -r .github/requirements-release.txt
+
+      - name: Build packages
+        run: python .github/scripts/release_packages.py --dry-run --outdir dist/release
+
+      - name: Check built metadata
+        run: python -m twine check dist/release/*
+
+      - name: Write release asset manifest
+        run: |
+          python .github/scripts/release_asset_manifest.py write \
+            --artifacts-dir dist/release \
+            --output dist/release/release-artifact-manifest.json \
+            --tag "${GITHUB_REF_NAME}"
+
+      - name: Check tracked files for mutations
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Create GitHub release when missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            exit 0
+          fi
+          notes_path="$(mktemp)"
+          printf 'Staged release assets for %s.\n' "${GITHUB_REF_NAME}" > "${notes_path}"
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file "${notes_path}"
+
+      - name: Upload staged assets to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/release/* --clobber
+
+  publish-testpypi-core:
+    name: Publish TestPyPI Core
+    needs: build
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/publish-package-to-index.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-core
+      checkout_ref: ${{ github.ref }}
+
+  publish-testpypi-tensor:
+    name: Publish TestPyPI Tensor
+    needs: publish-testpypi-core
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/publish-package-to-index.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-tensor
+      checkout_ref: ${{ github.ref }}
+
+  publish-testpypi-vision:
+    name: Publish TestPyPI Vision
+    needs: publish-testpypi-tensor
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/publish-package-to-index.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-vision
+      checkout_ref: ${{ github.ref }}
+
+  publish-testpypi-onnx:
+    name: Publish TestPyPI ONNX
+    needs: publish-testpypi-vision
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/publish-package-to-index.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-onnx
+      checkout_ref: ${{ github.ref }}
+
+  publish-testpypi-torch:
+    name: Publish TestPyPI Torch
+    needs: publish-testpypi-onnx
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/publish-package-to-index.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes-torch
+      checkout_ref: ${{ github.ref }}
+
+  publish-testpypi-meta:
+    name: Publish TestPyPI Meta
+    needs: publish-testpypi-torch
+    permissions:
+      contents: read
+    secrets: inherit
+    uses: ./.github/workflows/publish-package-to-index.yml
+    with:
+      publish_target: testpypi
+      dist_name: ml-pipes
+      checkout_ref: ${{ github.ref }}

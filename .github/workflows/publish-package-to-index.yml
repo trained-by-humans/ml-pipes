@@ -11,27 +11,48 @@ on:
         description: Canonical distribution name to stage, check, and publish.
         required: true
         type: string
+      checkout_ref:
+        description: Git ref to check out while staging and publishing artifacts.
+        required: false
+        type: string
 
 jobs:
   publish:
     name: Publish ${{ inputs.dist_name }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.publish_target }}
     permissions:
       contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref != '' && inputs.checkout_ref || github.ref }}
 
       - name: Check package index token
         env:
-          PACKAGE_INDEX_API_TOKEN: ${{ secrets.PACKAGE_INDEX_API_TOKEN }}
+          TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          if [ -z "${PACKAGE_INDEX_API_TOKEN}" ]; then
-            echo "Missing PACKAGE_INDEX_API_TOKEN on environment '${{ inputs.publish_target }}'." >&2
-            echo "Add PACKAGE_INDEX_API_TOKEN as an environment secret on '${{ inputs.publish_target }}'." >&2
-            exit 1
-          fi
+          case "${{ inputs.publish_target }}" in
+            testpypi)
+              if [ -z "${TEST_PYPI_API_TOKEN}" ]; then
+                echo "Missing repository secret TEST_PYPI_API_TOKEN." >&2
+                echo "Add TEST_PYPI_API_TOKEN under Settings -> Secrets and variables -> Actions." >&2
+                exit 1
+              fi
+              ;;
+            pypi)
+              if [ -z "${PYPI_API_TOKEN}" ]; then
+                echo "Missing repository secret PYPI_API_TOKEN." >&2
+                echo "Add PYPI_API_TOKEN under Settings -> Secrets and variables -> Actions." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported publish target: ${{ inputs.publish_target }}" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Download release artifacts
         uses: actions/download-artifact@v4
@@ -77,7 +98,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__
-          password: ${{ secrets.PACKAGE_INDEX_API_TOKEN }}
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           packages-dir: publish
           repository-url: https://test.pypi.org/legacy/
 
@@ -86,5 +107,5 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__
-          password: ${{ secrets.PACKAGE_INDEX_API_TOKEN }}
+          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: publish
