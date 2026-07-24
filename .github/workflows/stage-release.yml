@@ -181,3 +181,16 @@ jobs:
       checkout_ref: ${{ github.ref }}
     secrets:
       package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
+
+  verify-testpypi:
+    name: Verify TestPyPI Packages
+    needs: publish-testpypi-meta
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-published-packages.yml
+    with:
+      target_name: TestPyPI
+      index_url: https://test.pypi.org/simple/
+      extra_index_url: https://pypi.org/simple/
+      checkout_ref: ${{ github.ref }}
+      tag: ${{ github.ref_name }}

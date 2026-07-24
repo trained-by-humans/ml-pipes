@@ -1,0 +1,57 @@
+name: Verify Published Packages
+
+on:
+  workflow_call:
+    inputs:
+      target_name:
+        description: Display name for the package index being verified.
+        required: true
+        type: string
+      index_url:
+        description: Simple package index URL used for installs.
+        required: true
+        type: string
+      extra_index_url:
+        description: Optional fallback simple package index URL used for dependency resolution.
+        required: false
+        type: string
+      checkout_ref:
+        description: Git ref to check out while verifying published packages.
+        required: false
+        type: string
+      tag:
+        description: Release tag whose package metadata should be validated.
+        required: true
+        type: string
+
+jobs:
+  verify:
+    name: Verify ${{ inputs.target_name }} Packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref != '' && inputs.checkout_ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke published packages
+        env:
+          INDEX_URL: ${{ inputs.index_url }}
+          EXTRA_INDEX_URL: ${{ inputs.extra_index_url }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          args=(
+            --index-url "${INDEX_URL}"
+            --tag "${RELEASE_TAG}"
+          )
+          if [ -n "${EXTRA_INDEX_URL}" ]; then
+            args+=(--extra-index-url "${EXTRA_INDEX_URL}")
+          fi
+          python .github/scripts/verify_published_package_installs.py "${args[@]}"

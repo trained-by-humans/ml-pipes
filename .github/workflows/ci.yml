@@ -81,6 +81,7 @@ jobs:
             tests/scripts/github/test_check_index_artifacts.py \
             tests/scripts/github/test_release_asset_manifest.py \
             tests/scripts/github/test_detect_changed_packages.py \
+            tests/scripts/github/test_verify_published_package_installs.py \
             tests/test_import_surfaces.py \
             tests/test_exports.py \
             tests/scripts/github/test_release_packages.py \

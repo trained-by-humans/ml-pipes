@@ -154,3 +154,15 @@ jobs:
       checkout_ref: ${{ inputs.tag }}
     secrets:
       package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+
+  verify-pypi:
+    name: Verify PyPI Packages
+    needs: publish-pypi-meta
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-published-packages.yml
+    with:
+      target_name: PyPI
+      index_url: https://pypi.org/simple/
+      checkout_ref: ${{ inputs.tag }}
+      tag: ${{ inputs.tag }}
