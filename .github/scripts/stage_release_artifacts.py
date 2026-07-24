@@ -5,6 +5,8 @@ from pathlib import Path
 import shutil
 import sys
 
+_ARTIFACT_SUFFIXES = (".whl", ".tar.gz", ".zip")
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -46,6 +48,10 @@ def _artifact_identity(filename: str) -> tuple[str, str]:
     raise ValueError(f"Unsupported artifact filename: {filename!r}")
 
 
+def _is_release_artifact(path: Path) -> bool:
+    return path.is_file() and any(path.name.endswith(suffix) for suffix in _ARTIFACT_SUFFIXES)
+
+
 def stage_release_artifacts(
     artifacts_dir: Path,
     *,
@@ -65,7 +71,7 @@ def stage_release_artifacts(
 
     expected_dist_token = dist_name.replace("-", "_")
     staged_filenames: list[str] = []
-    for artifact in sorted(path for path in artifacts_dir.iterdir() if path.is_file()):
+    for artifact in sorted(path for path in artifacts_dir.iterdir() if _is_release_artifact(path)):
         dist_token, _version = _artifact_identity(artifact.name)
         if dist_token != expected_dist_token:
             continue
