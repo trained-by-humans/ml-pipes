@@ -1,6 +1,6 @@
 name: Release Promotion
 
-run-name: "Release Promotion: ${{ inputs.tag }}"
+run-name: "Release: ${{ inputs.tag }}"
 
 on:
   workflow_dispatch:
@@ -76,69 +76,81 @@ jobs:
     needs: prepare-release-assets
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: pypi
+      index_url_base: https://pypi.org
+      repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-core
       checkout_ref: ${{ inputs.tag }}
+    secrets:
+      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
 
   publish-pypi-tensor:
     name: Publish PyPI Tensor
     needs: publish-pypi-core
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: pypi
+      index_url_base: https://pypi.org
+      repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-tensor
       checkout_ref: ${{ inputs.tag }}
+    secrets:
+      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
 
   publish-pypi-vision:
     name: Publish PyPI Vision
     needs: publish-pypi-tensor
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: pypi
+      index_url_base: https://pypi.org
+      repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-vision
       checkout_ref: ${{ inputs.tag }}
+    secrets:
+      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
 
   publish-pypi-onnx:
     name: Publish PyPI ONNX
     needs: publish-pypi-vision
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: pypi
+      index_url_base: https://pypi.org
+      repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-onnx
       checkout_ref: ${{ inputs.tag }}
+    secrets:
+      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
 
   publish-pypi-torch:
     name: Publish PyPI Torch
     needs: publish-pypi-onnx
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: pypi
+      index_url_base: https://pypi.org
+      repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-torch
       checkout_ref: ${{ inputs.tag }}
+    secrets:
+      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
 
   publish-pypi-meta:
     name: Publish PyPI Meta
     needs: publish-pypi-torch
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: pypi
+      index_url_base: https://pypi.org
+      repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes
       checkout_ref: ${{ inputs.tag }}
+    secrets:
+      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}

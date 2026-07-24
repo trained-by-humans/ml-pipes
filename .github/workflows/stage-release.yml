@@ -1,6 +1,6 @@
 name: Release Candidate Staging
 
-run-name: "Release Candidate Staging: ${{ github.ref_name }}"
+run-name: "Stage: ${{ github.ref_name }}"
 
 on:
   push:
@@ -101,69 +101,81 @@ jobs:
     needs: build
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: testpypi
+      index_url_base: https://test.pypi.org
+      repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-core
       checkout_ref: ${{ github.ref }}
+    secrets:
+      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
   publish-testpypi-tensor:
     name: Publish TestPyPI Tensor
     needs: publish-testpypi-core
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: testpypi
+      index_url_base: https://test.pypi.org
+      repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-tensor
       checkout_ref: ${{ github.ref }}
+    secrets:
+      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
   publish-testpypi-vision:
     name: Publish TestPyPI Vision
     needs: publish-testpypi-tensor
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: testpypi
+      index_url_base: https://test.pypi.org
+      repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-vision
       checkout_ref: ${{ github.ref }}
+    secrets:
+      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
   publish-testpypi-onnx:
     name: Publish TestPyPI ONNX
     needs: publish-testpypi-vision
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: testpypi
+      index_url_base: https://test.pypi.org
+      repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-onnx
       checkout_ref: ${{ github.ref }}
+    secrets:
+      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
   publish-testpypi-torch:
     name: Publish TestPyPI Torch
     needs: publish-testpypi-onnx
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: testpypi
+      index_url_base: https://test.pypi.org
+      repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-torch
       checkout_ref: ${{ github.ref }}
+    secrets:
+      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
   publish-testpypi-meta:
     name: Publish TestPyPI Meta
     needs: publish-testpypi-torch
     permissions:
       contents: read
-    secrets: inherit
     uses: ./.github/workflows/publish-package-to-index.yml
     with:
-      publish_target: testpypi
+      index_url_base: https://test.pypi.org
+      repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes
       checkout_ref: ${{ github.ref }}
+    secrets:
+      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
