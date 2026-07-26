@@ -83,22 +83,41 @@ Once the environment is active and dependencies are installed, run it from the
 repository root:
 
 ```bash
-# Bundled starter image + bundled starter model
-python examples/run_yolo8_onnx.py
+# Published package setup
+python -m pip install 'ml-pipes[onnx,vision]'
 
+# Local workspace setup
+python -m pip install uv
+uv sync --group shared-framework
+
+# Run the bundled starter example
+python examples/run_yolo8_onnx.py
+```
+
+A successful default run writes the annotated image to
+`examples/.example_assets/coco_000000039769_yolov8n.jpg`.
+
+## Common Args
+
+Many file-oriented examples follow the same CLI pattern. The exact flags still
+depend on the script, so check `python path/to/example.py --help` when in
+doubt.
+
+| Arg | Common in | Meaning |
+|---|---|---|
+| `--model-path path/to/model.onnx` | file-based inference, streaming | Use your own local model instead of the bundled or downloaded default model. |
+| `--input path/to/input-file` | file-based inference, endpoint calls | Use your own image or video instead of the bundled sample input. |
+| `--output path/to/output-file` | file-based inference, inspection, video | Write the result to an explicit location instead of the example's default output path. |
+
+Examples:
+
+```bash
 # Your own image + bundled starter model
 python examples/run_yolo8_onnx.py --input path/to/photo.jpg
 
 # Your own image + your own local ONNX model
 python examples/run_yolo8_onnx.py --input path/to/photo.jpg --model-path path/to/model.onnx
 ```
-
-A successful default run writes the annotated image to
-`examples/.example_assets/coco_000000039769_yolov8n.jpg`.
-
-If you pass your own image or model, the default output still goes under
-`examples/.example_assets/` and uses the input and model names to build the
-filename.
 
 ## Inference On Files
 
@@ -119,12 +138,10 @@ model on first run:
 python -m pip install ultralytics
 ```
 
+Example command:
+
 ```bash
-python examples/run_yolo8_onnx.py
-python examples/run_yolo11n_seg.py
-python examples/run_rfdetr_nano.py
-python examples/run_maskrcnn.py
-python examples/run_yolo8_tile.py
+python examples/run_yolo8_tile.py --input path/to/photo.jpg --slice-wh 320 320 --overlap-wh 80 80
 ```
 
 ## Inspection, Tracing, And Benchmarking
@@ -140,6 +157,18 @@ python examples/run_yolo8_tile.py
 | `benchmarks/run_yolo8_benchmark_sweep_axis.py` | axis sweep | sweeps `slice_wh x overlap_wh` combinations |
 | `benchmarks/run_yolo8_benchmark_variants.py` | variant sweep | compares multiple YOLOv8 model sizes |
 | `benchmarks/run_yolo8_benchmark_cli.py` | CLI benchmark target | target for `python -m ml_pipes benchmark` |
+
+Common args in this section:
+
+| Arg | Common in | Meaning |
+|---|---|---|
+| `--save path/to/report-or-results` | inspection, benchmarks | Save the generated report or benchmark results instead of only printing or opening them. |
+| `--runs N` | tracing, benchmarks | Control how many repeated runs an example executes. |
+| `--warmup N` | benchmarks | Discard warmup iterations before measurement. |
+| `--pipeline <name>` | `run_inspect.py` | Choose which inspection pipeline to run, such as `simple`, `batched`, or `tiled`. |
+| `--print-only` | inspection | Print the inspection result to the terminal instead of opening a browser window. |
+| `--plot path/to/plot.png` | `run_inspect.py` | Save a static inspection plot instead of opening the browser UI. |
+| `--dump path/to/result.pkl` / `--load path/to/result.pkl` | `run_inspect.py` | Save or reload serialized inspection results for later analysis. |
 
 Extra setup for the inspection entries (`run_inspect.py` and
 `run_inspect_errors.py`):
@@ -163,11 +192,23 @@ python -m pip install ultralytics
 `run_inspect.py` also accepts `--output` to override the annotated image path
 for the simple and tiled pipelines.
 
+Example command:
+
+```bash
+python examples/run_inspect.py --pipeline tiled --save report.html
+```
+
 ## Data Preparation
 
 | Example | Domain | Notes |
 |---|---|---|
 | `run_sms_spam_prepare.py` | tabular / text preparation | non-vision example built from data operators |
+
+Example command:
+
+```bash
+python examples/run_sms_spam_prepare.py --inspect-html report.html
+```
 
 ## Streaming And Live Inference
 
@@ -178,6 +219,16 @@ for the simple and tiled pipelines.
 | `streaming/run_shibuya_counter.py` | CSRNet + detector | crowd counting pipeline |
 | `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation |
 | `streaming/run_shibuya_rf.py` | DETR-style detector | streaming detector pipeline |
+
+Common args in this section:
+
+| Arg | Common in | Meaning |
+|---|---|---|
+| `--url <stream-url>` | live stream examples | Override the default stream source. |
+| `--workers N` | live stream examples | Control how many inference workers run in parallel. |
+| `--stride N` | live stream examples | Process every `N`th frame instead of every frame. |
+| `--target-fps N` | throughput-measured stream examples | Set the target or fallback FPS used by throughput reporting. |
+| `--tile` | `run_shibuya_counter.py`, `run_shibuya_rf.py` | Enable tiled inference for better small-object recall at lower throughput. |
 
 Extra setup for specific streaming entries:
 
@@ -190,13 +241,10 @@ need the same Torch setup described in [Torch And Domain Handoff](#torch-and-dom
 python -m pip install supervision
 ```
 
-```bash
-# Live webcam — press Q to quit
-python examples/streaming/run_yolo8_webcam.py
+Example command:
 
-# Video file — uses bundled sample, or pass --input clip.mp4
-python examples/run_yolo8_video.py
-python examples/run_yolo8_video.py --input clip.mp4 --output annotated.mp4
+```bash
+python examples/streaming/run_shibuya_rf.py --workers 2 --stride 2 --tile
 ```
 
 ## Torch And Domain Handoff
@@ -217,6 +265,12 @@ python -m pip install 'ml-pipes[torch,vision]'
 
 # Model-specific dependencies for the Mask2Former weights
 python -m pip install transformers safetensors
+```
+
+Example command:
+
+```bash
+python examples/torch/run_mask2former_torch_postprocess.py --task panoptic --output mask2former.png
 ```
 
 ## Inference Endpoint
