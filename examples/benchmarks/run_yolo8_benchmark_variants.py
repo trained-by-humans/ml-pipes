@@ -33,7 +33,7 @@ from examples.common import (
     resolve_input_path,
     visualize_detections_and_store,
 )
-from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant_path
+from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant
 from examples.run_yolo8_onnx import yolo8_inference_pipeline
 
 from ml_pipes.core import Pipeline
@@ -76,11 +76,7 @@ def main() -> int:
         if variant not in YOLO8_MODELS:
             print(f"warning: unknown variant {variant!r}, skipping", file=sys.stderr)
             continue
-        model_name, model_url = YOLO8_MODELS[variant]
-        model_path = resolve_model_variant_path(model_name, model_url, variant)
-        if model_path is None:
-            print(f"warning: model file for variant {variant!r} not found, skipping", file=sys.stderr)
-            continue
+        model_name, model_path = resolve_model_variant(variant)
         output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
         configs.append({"model_path": model_path, "output_path": output_path})
 
