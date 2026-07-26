@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -180,6 +181,40 @@ def add_model_arg(parser: argparse.ArgumentParser, choices: list[str], default: 
     )
 
 
+def resolve_local_model_path(
+    model_path: Path | None,
+    assets_dir: Path,
+    default_name: str,
+) -> Path:
+    resolved_model_path = model_path or assets_dir / default_name
+    if resolved_model_path.exists():
+        return resolved_model_path
+
+    print(f"Error: model file not found: {resolved_model_path}", file=sys.stderr)
+    if model_path is None:
+        print(
+            "The bundled default model is expected under the assets directory. "
+            "Pass --model-path path/to/model-file to use a different local model.",
+            file=sys.stderr,
+        )
+    raise SystemExit(1)
+
+
+def resolve_input_path(
+    input_path: Path | None,
+    default_path: Path,
+    default_url: str | None = None,
+) -> Path:
+    resolved_input_path = input_path or default_path
+    if input_path is None and default_url is not None:
+        download_if_missing(default_url, resolved_input_path)
+    if resolved_input_path.exists():
+        return resolved_input_path
+
+    print(f"Error: input file not found: {resolved_input_path}", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def resolve_model_path(
     assets_dir: Path,
     model_name: str,
@@ -194,7 +229,6 @@ def resolve_model_path(
     if model_url:
         download_if_missing(model_url, model_path)
     elif not model_path.exists():
-        import sys
         print(
             f"Model not found at {model_path}. "
             f"Export with: yolo export model=yolov8{variant}.pt format=onnx",
