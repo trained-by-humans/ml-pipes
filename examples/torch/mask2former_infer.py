@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from examples.common import COCO_IMAGE_NAME, build_output_path
+from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, build_output_path
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import (
     Select,
@@ -110,11 +110,10 @@ def resolve_task_list(task: str) -> list[str]:
 
 def resolve_output_path(
     requested_output: Path | None,
-    assets_dir: Path,
     task: str,
     domain: str,
 ) -> Path:
     if requested_output is not None:
         stem = requested_output.stem
         return requested_output.with_name(f"{stem}_{task}_{domain}{requested_output.suffix}")
-    return build_output_path(assets_dir, COCO_IMAGE_NAME, f"mask2former_{task}_{domain}.png")
+    return build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, f"mask2former_{task}_{domain}.png")

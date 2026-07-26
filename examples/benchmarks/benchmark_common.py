@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-from examples.common import download_if_missing
+from examples.common import ASSETS_DIR, download_if_missing
 
 YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
     "n": ("yolov8n.onnx", "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"),
@@ -15,13 +14,12 @@ YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
 
 
 def resolve_model_variant_path(
-    assets_dir: Path,
     model_name: str,
     model_url: str | None,
     variant: str,
 ) -> Path | None:
     """Return the model path, downloading it if a URL is provided."""
-    model_path = assets_dir / model_name
+    model_path = ASSETS_DIR / model_name
     if model_url:
         download_if_missing(model_url, model_path)
     elif not model_path.exists():

@@ -122,12 +122,12 @@ def unwrap_state_dict(checkpoint: Any) -> dict[str, Any]:
     raise ValueError("Checkpoint did not contain any weights")
 
 
-def resolve_weights_path(assets_dir: Path, weights_path: Path | None) -> Path:
+def resolve_weights_path(weights_path: Path | None) -> Path:
     if weights_path is not None:
         if not weights_path.is_file():
             raise FileNotFoundError(f"CSRNet weights not found: {weights_path}")
         return weights_path
-    resolved = assets_dir / CSRNET_MODEL_NAME
+    resolved = ASSETS_DIR / CSRNET_MODEL_NAME
     try:
         download_if_missing(CSRNET_MODEL_URL, resolved)
     except (OSError, urllib.error.URLError) as exc:
@@ -229,7 +229,6 @@ def build_frame_pipeline(
 
 def run(
     url: str,
-    assets_dir: Path,
     target_fps: float,
     workers: int,
     stride: int,
@@ -237,7 +236,7 @@ def run(
     device: str,
 ) -> int:
     try:
-        resolved_weights = resolve_weights_path(assets_dir, weights)
+        resolved_weights = resolve_weights_path(weights)
         resolved_device = choose_device(device)
         model, torch = load_model(resolved_weights, resolved_device)
     except (FileNotFoundError, RuntimeError, ValueError, TypeError) as exc:
@@ -304,12 +303,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stream Shibuya crossing with CSRNet crowd counting.")
     add_streaming_args(parser)
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--target-fps",
         type=float,
         default=25.0,
@@ -334,7 +327,6 @@ def main() -> int:
     args = parse_args()
     return run(
         url=args.url,
-        assets_dir=args.assets_dir,
         target_fps=args.target_fps,
         workers=args.workers,
         stride=args.stride,

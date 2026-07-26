@@ -67,6 +67,11 @@ python -m pip install 'ml-pipes[onnx,vision]'             # most vision + ONNX e
 > All commands and file paths below are shown relative to the repository root
 > unless noted otherwise. If you run commands from `examples/`, adjust paths
 > accordingly.
+>
+> The built-in example assets always resolve under `examples/.example_assets`,
+> regardless of your current working directory. Relative paths that you pass
+> to flags such as `--input`, `--output`, or `--model-path` are still resolved
+> from the directory where you run the command.
 
 ## Run The Bundled Starter Example
 

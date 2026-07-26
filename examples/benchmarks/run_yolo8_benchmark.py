@@ -31,7 +31,7 @@ from examples.common import (
     COCO_IMAGE_URL,
     build_output_path,
     decode,
-    download_if_missing,
+    resolve_input_path,
     visualize_detections_and_store,
 )
 from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant_path
@@ -51,12 +51,6 @@ def _input_fn(image_path: Path):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model",
         choices=list(YOLO8_MODELS),
         default="n",
@@ -67,15 +61,12 @@ def main() -> int:
     parser.add_argument("--save", type=Path, default=None, help="Directory to save result JSON files.")
     args = parser.parse_args()
 
-    assets_dir: Path = args.assets_dir
     model_name, model_url = YOLO8_MODELS[args.model]
-    model_path = resolve_model_variant_path(assets_dir, model_name, model_url, args.model)
+    model_path = resolve_model_variant_path(model_name, model_url, args.model)
     if model_path is None:
         return 1
 
-    image_path = assets_dir / COCO_IMAGE_NAME
-    print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    image_path = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
 
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
     input_fn = _input_fn(image_path)
@@ -84,7 +75,7 @@ def main() -> int:
     # 1. Single pipeline — full breakdown
     # ------------------------------------------------------------------
     print("\n=== 1. Single pipeline benchmark ===\n")
-    output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
+    output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
     full_pipeline = (
         decode()
         + yolo8_inference_pipeline(model_path)

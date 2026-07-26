@@ -94,12 +94,6 @@ def run_call(image_path: Path) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="YOLOv8 inference endpoint.")
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         default=None,
@@ -121,14 +115,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    assets_dir = args.assets_dir
-
     if args.call:
-        image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
+        image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
         run_call(image_path)
         return 0
 
-    model_path = resolve_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
     run_server(model_path)
     return 0
 

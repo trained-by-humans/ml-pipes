@@ -7,7 +7,7 @@ and a simple aggregate over multiple runs.
 
 Usage:
     python run_yolo8_tracing.py
-    python run_yolo8_tracing.py --runs 10 --assets-dir /tmp/assets
+    python run_yolo8_tracing.py --runs 10
     python run_yolo8_tracing.py --model-path path/to/model.onnx
     python run_yolo8_tracing.py --input path/to/photo.jpg
 """
@@ -38,12 +38,6 @@ from ml_pipes.collectors import (
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         default=None,
@@ -54,10 +48,9 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=5, help="Number of inference runs for aggregate stats.")
     args = parser.parse_args()
 
-    assets_dir: Path = args.assets_dir
-    model_path = resolve_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
-    image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
-    output_path = args.output or build_output_path(assets_dir, image_path.name, model_path.name)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
 
     infer_pipe = yolo8_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)

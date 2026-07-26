@@ -43,12 +43,6 @@ def build_pipeline(model_path: Path) -> Pipeline[ImagePayload, ImagePayload]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Live webcam inference with YOLOv8.")
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         default=None,
@@ -56,7 +50,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    model_path = resolve_model_path(args.model_path, args.assets_dir, BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
 
     pipeline = build_pipeline(model_path)
     pipeline.validate()

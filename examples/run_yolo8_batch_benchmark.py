@@ -29,7 +29,6 @@ from run_yolo8_batch import _ensure_yolov8n_dynamic_model, build_pipeline
 #   --lock        on|off [...]    serialize inference?    (default: on)
 #   --images      N               images per run          (default: 16)
 #   --repeats     N               runs per config, median (default: 3)
-#   --assets-dir  PATH
 
 
 def _run_once(pipeline, image_paths: list[Path], workers: int) -> float:
@@ -79,21 +78,14 @@ def parse_args() -> argparse.Namespace:
         "--repeats", type=int, default=3, metavar="N",
         help="Repetitions per config — median is reported (default: 3).",
     )
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    assets_dir = args.assets_dir
-    model_path = _ensure_yolov8n_dynamic_model(assets_dir)
+    model_path = _ensure_yolov8n_dynamic_model()
 
-    sample = resolve_input_path(None, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    sample = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
     image_paths = [sample] * args.images
 
     configs: list[tuple[int, int, str]] = list(

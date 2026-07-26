@@ -21,7 +21,7 @@ from ml_pipes.vision import (
     Segmentations,
 )
 
-ASSETS_DIR = Path(__file__).parent / ".example_assets"
+ASSETS_DIR = Path(__file__).resolve().parent / ".example_assets"
 
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
 COCO_IMAGE_NAME = "coco_000000039769.jpg"
@@ -155,11 +155,10 @@ def visualize_detections_and_store(
 
 def resolve_model_path(
     model_path: Path | None,
-    assets_dir: Path,
-    default_name: str,
+    default_path: Path,
     default_url: str | None = None,
 ) -> Path:
-    resolved_model_path = model_path or assets_dir / default_name
+    resolved_model_path = model_path or default_path
     if model_path is None and default_url is not None:
         download_if_missing(default_url, resolved_model_path)
     if resolved_model_path.exists():
@@ -184,11 +183,10 @@ def resolve_model_path(
 
 def resolve_input_path(
     input_path: Path | None,
-    assets_dir: Path,
-    default_name: str,
+    default_path: Path,
     default_url: str | None = None,
 ) -> Path:
-    resolved_input_path = input_path or assets_dir / default_name
+    resolved_input_path = input_path or default_path
     if input_path is None and default_url is not None:
         download_if_missing(default_url, resolved_input_path)
     if resolved_input_path.exists():
@@ -199,11 +197,11 @@ def resolve_input_path(
 
 
 def build_output_path(
-    assets_dir: Path,
+    output_dir: Path,
     image_name: str | Path,
     model_name: str | Path,
 ) -> Path:
     image_path = Path(image_name)
     model_path = Path(model_name)
     suffix = model_path.stem.replace(".", "_")
-    return assets_dir / f"{image_path.stem}_{suffix}{image_path.suffix}"
+    return output_dir / f"{image_path.stem}_{suffix}{image_path.suffix}"

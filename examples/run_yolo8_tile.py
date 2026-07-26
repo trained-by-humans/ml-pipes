@@ -78,12 +78,6 @@ def yolo8_tiled_pipeline(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         default=None,
@@ -100,11 +94,10 @@ def main() -> int:
                         help="Max parallel tile inference workers (default: 4).")
     args = parser.parse_args()
 
-    assets_dir = args.assets_dir
-    model_path = resolve_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
-    image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
     tiled_model_name = f"{model_path.stem}_tile{model_path.suffix}"
-    output_path = args.output or build_output_path(assets_dir, image_path.name, tiled_model_name)
+    output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, tiled_model_name)
 
     pipeline = (
         decode()

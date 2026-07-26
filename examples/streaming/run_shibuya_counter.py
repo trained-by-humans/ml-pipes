@@ -184,12 +184,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stream Shibuya crossing with live YOLOv8 detections.")
     add_streaming_args(parser)
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--target-fps",
         type=float,
         default=25.0,
@@ -217,7 +211,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    model_path = resolve_model_path(args.model_path, args.assets_dir, BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
     return run_pipeline(
         url=args.url,
         model_path=model_path,

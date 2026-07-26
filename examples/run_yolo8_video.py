@@ -48,12 +48,6 @@ def parse_args() -> argparse.Namespace:
         description="Sequential YOLOv8 inference on a video file.",
     )
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         default=None,
@@ -71,8 +65,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    model_path = resolve_model_path(args.model_path, args.assets_dir, BUNDLED_MODEL_NAME)
-    input_path = resolve_input_path(args.input, args.assets_dir, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    input_path = resolve_input_path(args.input, ASSETS_DIR / SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL)
 
     output_path = args.output or input_path.with_stem(input_path.stem + "_annotated").with_suffix(".mp4")
 

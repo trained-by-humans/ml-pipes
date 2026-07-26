@@ -65,9 +65,9 @@ from ml_pipes.vision import (
 MODEL_NAME = "yolov8n_dynamic.onnx"
 
 
-def _ensure_yolov8n_dynamic_model(assets_dir: Path) -> Path:
+def _ensure_yolov8n_dynamic_model() -> Path:
     """Ensure the dynamic-batch YOLOv8n ONNX export exists and return its path."""
-    dst = assets_dir / MODEL_NAME
+    dst = ASSETS_DIR / MODEL_NAME
     if dst.exists():
         return dst
 
@@ -145,12 +145,6 @@ def parse_args() -> argparse.Namespace:
         help="Seconds to wait before running a partial batch (default: 0.05).",
     )
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--no-serialize",
         action="store_true",
         help="Disable the inference lock (allows concurrent session.run() calls).",
@@ -160,13 +154,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    assets_dir = args.assets_dir
-    model_path = _ensure_yolov8n_dynamic_model(assets_dir)
+    model_path = _ensure_yolov8n_dynamic_model()
 
     if args.images is not None:
         image_paths = args.images
     else:
-        sample = resolve_input_path(None, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
+        sample = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
         # Repeat the sample image to fill the thread pool and demonstrate batching.
         image_paths = [sample] * args.workers
 

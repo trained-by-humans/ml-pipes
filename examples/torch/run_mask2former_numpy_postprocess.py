@@ -191,12 +191,6 @@ def parse_args() -> argparse.Namespace:
             "post-processing crosses into NumPy immediately after raw outputs."
         )
     )
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
     parser.add_argument("--output", type=Path, default=None, help="Optional output path prefix for annotated images.")
     parser.add_argument("--task", choices=("panoptic", "instance", "both"), default="both",
                         help="Which segmentation tasks to run (default: both).")
@@ -217,12 +211,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    image_path = args.assets_dir / COCO_IMAGE_NAME
+    image_path = ASSETS_DIR / COCO_IMAGE_NAME
     download_if_missing(COCO_IMAGE_URL, image_path)
 
     for task in resolve_task_list(args.task):
         bundle = LoadedMask2Former.load(task=task, device=args.device)
-        output_path = resolve_output_path(args.output, args.assets_dir, task, "numpy")
+        output_path = resolve_output_path(args.output, task, "numpy")
         record_fields = {
             "index": lambda p: list(range(len(p.classes))),
             "class_id": "classes",

@@ -30,7 +30,7 @@ from examples.common import (
     COCO_IMAGE_URL,
     build_output_path,
     decode,
-    download_if_missing,
+    resolve_input_path,
     visualize_detections_and_store,
 )
 from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant_path
@@ -67,12 +67,6 @@ def _input_fn(image_path: Path):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--variants", nargs="+", default=list(YOLO8_MODELS),
         metavar="VARIANT", help=f"Model variants to benchmark (default: {' '.join(YOLO8_MODELS)}).",
     )
@@ -81,11 +75,7 @@ def main() -> int:
     parser.add_argument("--save", type=Path, default=None, help="Directory to save per-variant result JSON files.")
     args = parser.parse_args()
 
-    assets_dir: Path = args.assets_dir
-
-    image_path = assets_dir / COCO_IMAGE_NAME
-    print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    image_path = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
 
     configs = []
     for variant in args.variants:
@@ -93,11 +83,11 @@ def main() -> int:
             print(f"warning: unknown variant {variant!r}, skipping", file=sys.stderr)
             continue
         model_name, model_url = YOLO8_MODELS[variant]
-        model_path = resolve_model_variant_path(assets_dir, model_name, model_url, variant)
+        model_path = resolve_model_variant_path(model_name, model_url, variant)
         if model_path is None:
             print(f"warning: model file for variant {variant!r} not found, skipping", file=sys.stderr)
             continue
-        output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
+        output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
         configs.append({"model_path": model_path, "output_path": output_path})
 
     if not configs:

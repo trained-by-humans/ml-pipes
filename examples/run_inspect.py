@@ -94,10 +94,10 @@ def run_inspection_simple(model_path: Path, image_path: Path, output_path: Path)
     return result
 
 
-def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResult:
+def run_inspection_batched(image_path: Path) -> InspectionResult:
     from run_yolo8_batch import _ensure_yolov8n_dynamic_model
 
-    model_path = _ensure_yolov8n_dynamic_model(assets_dir)
+    model_path = _ensure_yolov8n_dynamic_model()
     inference_pipeline = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
     pipeline = Pipeline([
         Scatter(max_concurrency=4),
@@ -153,14 +153,13 @@ def load_or_run_result(args: argparse.Namespace) -> InspectionResult:
         print(result)
         return result
 
-    assets_dir: Path = args.assets_dir
-    image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
 
     if args.pipeline == "batched":
-        return run_inspection_batched(assets_dir, image_path)
+        return run_inspection_batched(image_path)
 
-    model_path = resolve_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
-    output_path = args.output or build_output_path(assets_dir, image_path.name, model_path.name)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
     if args.pipeline == "tiled":
         return run_inspection_tiled(model_path, image_path, output_path)
     return run_inspection_simple(model_path, image_path, output_path)
@@ -168,12 +167,6 @@ def load_or_run_result(args: argparse.Namespace) -> InspectionResult:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
     parser.add_argument(
         "--model-path",
         type=Path,

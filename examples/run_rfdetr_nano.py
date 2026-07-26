@@ -78,12 +78,6 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detecti
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a DETR-style ONNX demo on a public COCO image.")
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         default=None,
@@ -93,10 +87,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")
     args = parser.parse_args()
 
-    assets_dir = args.assets_dir
-    model_path = resolve_model_path(args.model_path, assets_dir, MODEL_NAME, MODEL_URL)
-    image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
-    output_path = args.output or build_output_path(assets_dir, image_path.name, model_path.name)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / MODEL_NAME, MODEL_URL)
+    image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
 
     infer_pipe = build_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path)

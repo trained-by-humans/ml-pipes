@@ -108,12 +108,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Shibuya crossing stream with ml_pipes ONNX + Supervision.")
     add_streaming_args(parser)
     parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         default=None,
@@ -135,7 +129,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    model_path = resolve_model_path(args.model_path, args.assets_dir, BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
     return run(
         url=args.url,
         model_path=model_path,
