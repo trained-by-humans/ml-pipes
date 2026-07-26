@@ -17,18 +17,13 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_variant_path
-from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_path
+from ..run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes.vision import ImagePayload
 
 
-def run(url: str, assets_dir: Path, model: str, workers: int, stride: int, tile: bool, conf_threshold: float = 0.25) -> int:
-    model_name, model_url = YOLO8_MODELS[model]
-    model_path = resolve_model_variant_path(assets_dir, model_name, model_url, model)
-    if model_path is None:
-        return 1
-
+def run(url: str, model_path: Path, workers: int, stride: int, tile: bool, conf_threshold: float = 0.25) -> int:
     pipeline = yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
 
     box_annotator = sv.BoxAnnotator()
@@ -119,10 +114,10 @@ def parse_args() -> argparse.Namespace:
         help="Directory used to cache downloaded models and sample assets.",
     )
     parser.add_argument(
-        "--model",
-        choices=list(YOLO8_MODELS),
-        default="x",
-        help=f"Model variant ({' → '.join(YOLO8_MODELS)}).",
+        "--model-path",
+        type=Path,
+        default=None,
+        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
     )
     parser.add_argument(
         "--conf-threshold",
@@ -140,10 +135,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    model_path = resolve_model_path(args.model_path, args.assets_dir, BUNDLED_MODEL_NAME)
     return run(
         url=args.url,
-        assets_dir=args.assets_dir,
-        model=args.model,
+        model_path=model_path,
         workers=args.workers,
         stride=args.stride,
         tile=args.tile,

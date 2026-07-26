@@ -32,10 +32,10 @@ from examples.common import (
     build_output_path,
     decode,
     download_if_missing,
-    resolve_model_variant_path,
     visualize_detections_and_store,
 )
-from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant_path
+from examples.run_yolo8_onnx import yolo8_inference_pipeline
 from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
 from ml_pipes.core import Pipeline

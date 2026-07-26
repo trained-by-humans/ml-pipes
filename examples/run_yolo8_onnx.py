@@ -43,15 +43,6 @@ from ml_pipes.vision import (
     ToDetections,
 )
 
-# Shared by the multi-variant YOLOv8 examples.
-YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
-    "n": ("yolov8n.onnx", "https://huggingface.co/webml/yolov8n/resolve/main/onnx/yolov8n.onnx"),
-    "s": ("yolov8s.onnx", None),
-    "m": ("yolov8m.onnx", None),
-    "l": ("yolov8l.onnx", None),
-    "x": ("yolov8x.onnx", None),
-}
-
 BUNDLED_MODEL_NAME = "yolov8n.onnx"
 
 

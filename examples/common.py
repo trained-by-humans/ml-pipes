@@ -198,29 +198,6 @@ def resolve_input_path(
     raise SystemExit(1)
 
 
-def resolve_model_variant_path(
-    assets_dir: Path,
-    model_name: str,
-    model_url: str | None,
-    variant: str,
-) -> Path | None:
-    """Return the model path, downloading it if a URL is provided.
-
-    Returns None and prints an error if the model is missing and has no URL.
-    """
-    model_path = assets_dir / model_name
-    if model_url:
-        download_if_missing(model_url, model_path)
-    elif not model_path.exists():
-        print(
-            f"Model not found at {model_path}. "
-            f"Export with: yolo export model=yolov8{variant}.pt format=onnx",
-            file=sys.stderr,
-        )
-        return None
-    return model_path
-
-
 def build_output_path(
     assets_dir: Path,
     image_name: str | Path,

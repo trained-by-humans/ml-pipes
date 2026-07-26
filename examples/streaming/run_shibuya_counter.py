@@ -14,8 +14,8 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.streaming"
 
 import cv2
-from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_variant_path
-from ..run_yolo8_onnx import YOLO8_MODELS
+from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_path
+from ..run_yolo8_onnx import BUNDLED_MODEL_NAME
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes.collectors import ThroughputCollector
 from ml_pipes.core import (
@@ -123,13 +123,8 @@ def build_pipeline(
     return pre_process + pipeline + post_process
 
 
-def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool,
+def run_pipeline(url: str, model_path: Path, target_fps: float, workers: int, stride: int, tile: bool,
                  conf_threshold: float) -> int:
-    model_name, model_url = YOLO8_MODELS[model]
-    model_path = resolve_model_variant_path(assets_dir, model_name, model_url, model)
-    if model_path is None:
-        return 1
-
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
     pipeline = build_pipeline(model_path, conf_threshold, tile, workers=workers)
     pipeline.validate()
@@ -201,10 +196,10 @@ def parse_args() -> argparse.Namespace:
         help="Target FPS for throughput reporting.",
     )
     parser.add_argument(
-        "--model",
-        choices=list(YOLO8_MODELS),
-        default="x",
-        help=f"Model variant ({' → '.join(YOLO8_MODELS)}).",
+        "--model-path",
+        type=Path,
+        default=None,
+        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
     )
     parser.add_argument(
         "--conf-threshold",
@@ -222,13 +217,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    model_path = resolve_model_path(args.model_path, args.assets_dir, BUNDLED_MODEL_NAME)
     return run_pipeline(
         url=args.url,
-        assets_dir=args.assets_dir,
+        model_path=model_path,
         target_fps=args.target_fps,
         workers=args.workers,
         stride=args.stride,
-        model=args.model,
         tile=args.tile,
         conf_threshold=args.conf_threshold,
     )

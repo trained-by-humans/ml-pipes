@@ -173,7 +173,7 @@ for the simple and tiled pipelines.
 | `run_yolo8_video.py` | YOLOv8 | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
 | `streaming/run_shibuya_counter.py` | CSRNet + detector | crowd counting pipeline |
 | `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation |
-| `streaming/run_shibuya_rf.py` | DETR-style detector | streaming detector variant |
+| `streaming/run_shibuya_rf.py` | DETR-style detector | streaming detector pipeline |
 
 Extra setup for specific streaming entries:
 
