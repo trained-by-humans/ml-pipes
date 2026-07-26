@@ -41,13 +41,6 @@ from ml_pipes.core import Pipeline
 from ml_pipes.benchmark import Benchmark, BenchmarkResult, MeasurementConfig
 
 
-def _input_fn(image_path: Path):
-    """Returns a fixed input driver: always feeds the same image."""
-    def fn():
-        return (image_path.name, image_path, None, None)
-    return fn
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -69,7 +62,7 @@ def main() -> int:
     image_path = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
 
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
-    input_fn = _input_fn(image_path)
+    input_fn = lambda: (image_path.name, image_path, None, None)
 
     # ------------------------------------------------------------------
     # 1. Single pipeline — full breakdown

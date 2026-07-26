@@ -57,13 +57,6 @@ def yolo8_variant_pipeline(
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
 
-
-def _input_fn(image_path: Path):
-    def fn():
-        return image_path.name, image_path, None, None
-    return fn
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -76,6 +69,7 @@ def main() -> int:
     args = parser.parse_args()
 
     image_path = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    input_fn = lambda: (image_path.name, image_path, None, None)
 
     configs = []
     for variant in args.variants:
@@ -97,7 +91,7 @@ def main() -> int:
     results = (
         BenchmarkBuilder.factory(yolo8_variant_pipeline)
         .pipeline_config_set(configs)
-        .data_input(_input_fn(image_path))
+        .data_input(input_fn)
         .runs(args.runs)
         .warmup(args.warmup)
         .run(verbose=True)

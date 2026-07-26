@@ -87,14 +87,6 @@ def yolo8_tiled_benchmark_pipeline(
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
 
-
-def _input_fn(image_path: Path, label: str | None = None):
-    name = label or image_path.name
-    def fn():
-        return (name, image_path, None, None)
-    return fn
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -117,12 +109,12 @@ def main() -> int:
 
     output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
 
-    data_input = _input_fn(image_path)
+    input_fn = lambda: (image_path.name, image_path, None, None)
 
     plain_results = (
         BenchmarkBuilder.factory(yolo8_plain_benchmark_pipeline)
         .pipeline_config(model_path=model_path, output_path=output_path)
-        .data_input(data_input)
+        .data_input(input_fn)
         .runs(args.runs).warmup(args.warmup)
         .run(verbose=False)
     )
@@ -134,7 +126,7 @@ def main() -> int:
             {"slice_wh": (320, 320)},
             {"slice_wh": (480, 480), "overlap_wh": (120, 120)},
         ])
-        .data_input(data_input)
+        .data_input(input_fn)
         .runs(args.runs).warmup(args.warmup)
         .run(verbose=False)
     )
