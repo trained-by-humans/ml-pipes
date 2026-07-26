@@ -58,7 +58,7 @@ from common import (
     resolve_model_path,
     visualize_detections_and_store,
 )
-from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from run_yolo8_batch import build_pipeline as build_batch_pipeline
 from run_yolo8_tile import yolo8_tiled_pipeline
 from ml_pipes.core import (
@@ -158,7 +158,7 @@ def load_or_run_result(args: argparse.Namespace) -> InspectionResult:
     if args.pipeline == "batched":
         return run_inspection_batched(image_path)
 
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
     if args.pipeline == "tiled":
         return run_inspection_tiled(model_path, image_path, output_path)

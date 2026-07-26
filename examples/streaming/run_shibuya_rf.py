@@ -17,8 +17,8 @@ import cv2
 import numpy as np
 import supervision as sv
 
-from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_path
-from ..run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
+from ..common import COCO_CLASSES, resolve_model_path
+from ..run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes.vision import ImagePayload
 
@@ -129,7 +129,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     return run(
         url=args.url,
         model_path=model_path,

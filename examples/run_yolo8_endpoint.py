@@ -13,7 +13,7 @@ from common import (
     resolve_input_path,
     resolve_model_path,
 )
-from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from ml_pipes.core import (
     Embed,
     Pipeline,
@@ -120,7 +120,7 @@ def main() -> int:
         run_call(image_path)
         return 0
 
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     run_server(model_path)
     return 0
 

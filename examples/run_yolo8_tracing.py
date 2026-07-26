@@ -28,7 +28,7 @@ from common import (
     resolve_model_path,
     visualize_detections_and_store,
 )
-from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from ml_pipes.collectors import (
     AggregateCollector,
     PrintCollector,
@@ -48,7 +48,7 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=5, help="Number of inference runs for aggregate stats.")
     args = parser.parse_args()
 
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
     output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
 

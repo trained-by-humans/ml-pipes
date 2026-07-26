@@ -28,7 +28,7 @@ from common import (
     resolve_model_path,
     visualize_detections_and_store,
 )
-from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 
 from ml_pipes.core import (
     Inline,
@@ -94,7 +94,7 @@ def main() -> int:
                         help="Max parallel tile inference workers (default: 4).")
     args = parser.parse_args()
 
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
     tiled_model_name = f"{model_path.stem}_tile{model_path.suffix}"
     output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, tiled_model_name)

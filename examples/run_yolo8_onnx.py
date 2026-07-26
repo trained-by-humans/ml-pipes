@@ -43,7 +43,7 @@ from ml_pipes.vision import (
     ToDetections,
 )
 
-BUNDLED_MODEL_NAME = "yolov8n.onnx"
+BUNDLED_MODEL_PATH = ASSETS_DIR / "yolov8n.onnx"
 
 
 def yolo8_inference_pipeline(
@@ -86,7 +86,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")
     args = parser.parse_args()
 
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
     output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
 

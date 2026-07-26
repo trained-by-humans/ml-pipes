@@ -12,8 +12,8 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     __package__ = "examples.streaming"
 
-from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_path
-from ..run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
+from ..common import COCO_CLASSES, resolve_model_path
+from ..run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from .stream_common import FrameReader
 from ml_pipes.core import (
     Embed,
@@ -50,7 +50,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
 
     pipeline = build_pipeline(model_path)
     pipeline.validate()

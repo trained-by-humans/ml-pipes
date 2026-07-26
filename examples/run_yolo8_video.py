@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 
 from common import ASSETS_DIR, COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, resolve_input_path, resolve_model_path
-from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from ml_pipes.core import (
     Pipeline,
     Embed,
@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     input_path = resolve_input_path(args.input, ASSETS_DIR / SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL)
 
     output_path = args.output or input_path.with_stem(input_path.stem + "_annotated").with_suffix(".mp4")

@@ -14,8 +14,8 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.streaming"
 
 import cv2
-from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_path
-from ..run_yolo8_onnx import BUNDLED_MODEL_NAME
+from ..common import COCO_CLASSES, resolve_model_path
+from ..run_yolo8_onnx import BUNDLED_MODEL_PATH
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes.collectors import ThroughputCollector
 from ml_pipes.core import (
@@ -211,7 +211,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    model_path = resolve_model_path(args.model_path, ASSETS_DIR / BUNDLED_MODEL_NAME)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     return run_pipeline(
         url=args.url,
         model_path=model_path,
