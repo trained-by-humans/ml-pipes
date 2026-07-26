@@ -104,7 +104,6 @@ filename.
 
 | Example | Model | Task | Notable pipeline features |
 |---|---|---|---|
-| `run_detection.py` | any YOLOv8-compatible | detection | generic, bring your own model |
 | `run_yolo8_onnx.py` | YOLOv8 | detection | baseline YOLO pipeline |
 | `run_yolo11n_fp16.py` | YOLO11n FP16 | detection | `Cast` for FP16, letterbox resize |
 | `run_rfdetr_nano.py` | DETR-style detector | detection | `Scale` for normalized boxes, softmax logits |

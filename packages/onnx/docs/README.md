@@ -124,7 +124,6 @@ pipeline = Pipeline([
 ```
 
 This is the shape used in
-[`examples/run_detection.py`](../../../examples/run_detection.py) and
 [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py).
 
 ### Batched Inference
@@ -175,5 +174,5 @@ The main expectations are:
 - [`INDEX.md`](./INDEX.md) for the full surface catalog
 - [`docs/README.md`](../../../docs/README.md) for the shared framework docs index
 - [`examples/README.md`](../../../examples/README.md) for runnable pipeline entry points
-  - [`examples/run_detection.py`](../../../examples/run_detection.py)
+  - [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py)
   - [`examples/run_yolo8_batch.py`](../../../examples/run_yolo8_batch.py)
