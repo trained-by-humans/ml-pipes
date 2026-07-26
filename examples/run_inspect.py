@@ -29,6 +29,9 @@ Usage:
     # Save a matplotlib figure to a PNG
     python run_inspect.py --plot inspect.png
 
+    # Save the annotated image for the simple or tiled pipeline
+    python run_inspect.py --output annotated.jpg
+
     # Serialize result to disk for later analysis
     python run_inspect.py --dump result.pkl
 
@@ -45,18 +48,17 @@ import sys
 from pathlib import Path
 
 from common import (
+    ASSETS_DIR,
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
-    add_assets_dir_arg,
-    add_model_arg,
     build_output_path,
     decode,
-    download_if_missing,
+    resolve_input_path,
     resolve_model_path,
     visualize_detections_and_store,
 )
-from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
 from run_yolo8_batch import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
 from run_yolo8_tile import yolo8_tiled_pipeline
 from ml_pipes.core import (
@@ -97,9 +99,8 @@ def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResu
 
     model_path = assets_dir / BATCH_MODEL_NAME
     if not model_path.exists():
-        print(f"Exporting dynamic-batch model → {model_path}", file=sys.stderr)
+        print(f"Exporting dynamic-batch model -> {model_path}", file=sys.stderr)
         _export_dynamic_model(model_path)
-
     inference_pipeline = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
     pipeline = Pipeline([
         Scatter(max_concurrency=4),
@@ -149,10 +150,42 @@ def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
-def _build_parser() -> argparse.ArgumentParser:
+def load_or_run_result(args: argparse.Namespace) -> InspectionResult:
+    if args.load:
+        result = InspectionResult.load(args.load)
+        print(result)
+        return result
+
+    assets_dir: Path = args.assets_dir
+    image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
+
+    if args.pipeline == "batched":
+        return run_inspection_batched(assets_dir, image_path)
+
+    model_path = resolve_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
+    output_path = args.output or build_output_path(assets_dir, image_path.name, model_path.name)
+    if args.pipeline == "tiled":
+        return run_inspection_tiled(model_path, image_path, output_path)
+    return run_inspection_simple(model_path, image_path, output_path)
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_assets_dir_arg(parser)
-    add_model_arg(parser, list(YOLO8_MODELS))
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
+    parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=None,
+        help="Path to a local ONNX model for the simple and tiled pipelines. Defaults to the bundled yolov8n model.",
+    )
+    parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="Output image path for the simple and tiled pipelines. Defaults to a file under the assets directory.")
     parser.add_argument("--pipeline", choices=["simple", "batched", "tiled"], default="simple",
                         help="Which pipeline to inspect (default: simple).")
     parser.add_argument("--load", metavar="PATH", type=Path, default=None,
@@ -166,35 +199,9 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Serialize the InspectionResult to PATH for later analysis.")
     group.add_argument("--print-only", action="store_true",
                        help="Print step labels and shapes to stdout; do not open any window.")
-    return parser
+    args = parser.parse_args()
 
-
-def main() -> int:
-    args = _build_parser().parse_args()
-
-    if args.load:
-        result = InspectionResult.load(args.load)
-        print(result)
-        show_result(result, args)
-        return 0
-
-    assets_dir: Path = args.assets_dir
-    model_name, model_url = YOLO8_MODELS[args.model]
-    output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
-    model_path = resolve_model_path(assets_dir, model_name, model_url, args.model)
-    if model_path is None:
-        return 1
-
-    image_path = assets_dir / COCO_IMAGE_NAME
-    print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(COCO_IMAGE_URL, image_path)
-
-    if args.pipeline == "batched":
-        result = run_inspection_batched(assets_dir, image_path)
-    elif args.pipeline == "tiled":
-        result = run_inspection_tiled(model_path, image_path, output_path)
-    else:
-        result = run_inspection_simple(model_path, image_path, output_path)
+    result = load_or_run_result(args)
     show_result(result, args)
     return 0
 

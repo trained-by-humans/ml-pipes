@@ -12,7 +12,7 @@ from common import (
     build_output_path,
     decode,
     resolve_input_path,
-    resolve_local_model_path,
+    resolve_model_path,
     visualize_detections_and_store,
 )
 from ml_pipes.core import Pipeline
@@ -97,8 +97,8 @@ def main() -> int:
     args = parser.parse_args()
 
     assets_dir = args.assets_dir
-    model_path = resolve_local_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
-    image_path = resolve_input_path(args.input, assets_dir / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    model_path = resolve_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
+    image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
     output_path = args.output or build_output_path(assets_dir, image_path.name, model_path.name)
 
     infer_pipe = yolo8_inference_pipeline(model_path)

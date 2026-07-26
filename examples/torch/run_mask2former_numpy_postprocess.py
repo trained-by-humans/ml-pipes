@@ -11,7 +11,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     __package__ = "examples.torch"
 
-from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
+from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing, visualize_and_store
 from ml_pipes.core import (
     Pipeline,
     inline,
@@ -191,13 +191,22 @@ def parse_args() -> argparse.Namespace:
             "post-processing crosses into NumPy immediately after raw outputs."
         )
     )
-    add_assets_dir_arg(parser)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
     parser.add_argument("--output", type=Path, default=None, help="Optional output path prefix for annotated images.")
-    parser.add_argument("--task", choices=("panoptic", "instance", "both"), default="both")
+    parser.add_argument("--task", choices=("panoptic", "instance", "both"), default="both",
+                        help="Which segmentation tasks to run (default: both).")
     parser.add_argument("--top-k", type=int, default=100, help="Top-k query/class pairs kept for instance mode.")
-    parser.add_argument("--score-threshold", type=float, default=0.5)
-    parser.add_argument("--mask-threshold", type=float, default=0.5)
-    parser.add_argument("--overlap-threshold", type=float, default=0.8)
+    parser.add_argument("--score-threshold", type=float, default=0.5,
+                        help="Minimum query score kept for segmentation (default: 0.5).")
+    parser.add_argument("--mask-threshold", type=float, default=0.5,
+                        help="Binary mask threshold for panoptic segments (default: 0.5).")
+    parser.add_argument("--overlap-threshold", type=float, default=0.8,
+                        help="Minimum retained overlap for panoptic segments (default: 0.8).")
     parser.add_argument(
         "--device",
         default="cuda:0" if torch.cuda.is_available() else "cpu",

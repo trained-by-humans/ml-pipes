@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import json
-import sys
+from pathlib import Path
 
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import (
@@ -34,12 +35,31 @@ from ml_pipes.vision import (
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("Usage: python examples/run_detection.py path/to/model.onnx path/to/image.jpg")
+    parser = argparse.ArgumentParser(
+        description="Run a minimal YOLOv8-compatible ONNX detection pipeline on a local image.",
+    )
+    parser.add_argument(
+        "--model-path",
+        type=Path,
+        required=True,
+        help="Path to a local YOLOv8-compatible ONNX model.",
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="Input image path.",
+    )
+    args = parser.parse_args()
+
+    if not args.model_path.exists():
+        print(f"Error: model file not found: {args.model_path}")
+        return 1
+    if not args.input.exists():
+        print(f"Error: input file not found: {args.input}")
         return 1
 
-    model_path, image_path = sys.argv[1], sys.argv[2]
-    pipeline: Pipeline[str, Detections] = Pipeline(
+    pipeline: Pipeline[str | Path, Detections] = Pipeline(
         [
             LoadFile(),
             Decode(),
@@ -47,7 +67,7 @@ def main() -> int:
             Store("resize_transform", source=1),
             Pick(0),
             Normalize(),
-            Infer(model_path),
+            Infer(args.model_path),
             Extract("output0", as_="preds"),
             Squeeze("preds"),
             Transpose("preds"),
@@ -64,7 +84,7 @@ def main() -> int:
         auto_validate=True,
     )
 
-    result = pipeline(image_path)
+    result = pipeline(args.input)
     print(
         json.dumps(
             {

@@ -32,7 +32,7 @@ from examples.common import (
     build_output_path,
     decode,
     download_if_missing,
-    resolve_model_path,
+    resolve_model_variant_path,
     visualize_detections_and_store,
 )
 from examples.run_yolo8_onnx import YOLO8_MODELS
@@ -51,7 +51,7 @@ from ml_pipes.benchmark import InputFn
 
 _DEFAULT_MODEL_VARIANT = "n"
 _model_name, _model_url = YOLO8_MODELS[_DEFAULT_MODEL_VARIANT]
-_DEFAULT_MODEL_PATH = resolve_model_path(ASSETS_DIR, _model_name, _model_url, _DEFAULT_MODEL_VARIANT)
+_DEFAULT_MODEL_PATH = resolve_model_variant_path(ASSETS_DIR, _model_name, _model_url, _DEFAULT_MODEL_VARIANT)
 _DEFAULT_IMAGE_PATH = ASSETS_DIR / COCO_IMAGE_NAME
 _DEFAULT_OUTPUT_PATH = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, _model_name)
 

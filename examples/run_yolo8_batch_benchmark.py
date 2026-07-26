@@ -8,7 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
-from common import add_assets_dir_arg, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
+from common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path
 from run_yolo8_batch import MODEL_NAME, _export_dynamic_model, build_pipeline
 
 
@@ -79,7 +79,12 @@ def parse_args() -> argparse.Namespace:
         "--repeats", type=int, default=3, metavar="N",
         help="Repetitions per config — median is reported (default: 3).",
     )
-    add_assets_dir_arg(parser)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
     return parser.parse_args()
 
 
@@ -92,8 +97,7 @@ def main() -> int:
         print(f"Exporting YOLOv8n nano (dynamic batch) → {model_path}", file=sys.stderr)
         _export_dynamic_model(model_path)
 
-    sample = assets_dir / COCO_IMAGE_NAME
-    download_if_missing(COCO_IMAGE_URL, sample)
+    sample = resolve_input_path(None, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
     image_paths = [sample] * args.images
 
     configs: list[tuple[int, int, str]] = list(

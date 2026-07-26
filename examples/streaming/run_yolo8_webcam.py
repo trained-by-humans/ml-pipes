@@ -12,7 +12,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     __package__ = "examples.streaming"
 
-from ..common import COCO_CLASSES, add_assets_dir_arg, add_model_arg, resolve_model_path
+from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_variant_path
 from ..run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 from .stream_common import FrameReader
 from ml_pipes.core import (
@@ -42,12 +42,22 @@ def build_pipeline(model_path: Path) -> Pipeline[ImagePayload, ImagePayload]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Live webcam inference with YOLOv8.")
-    add_assets_dir_arg(parser)
-    add_model_arg(parser, list(YOLO8_MODELS))
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
+    parser.add_argument(
+        "--model",
+        choices=list(YOLO8_MODELS),
+        default="n",
+        help=f"Model variant ({' → '.join(YOLO8_MODELS)}).",
+    )
     args = parser.parse_args()
 
     model_name, model_url = YOLO8_MODELS[args.model]
-    model_path = resolve_model_path(args.assets_dir, model_name, model_url, args.model)
+    model_path = resolve_model_variant_path(args.assets_dir, model_name, model_url, args.model)
     if model_path is None:
         return 1
 

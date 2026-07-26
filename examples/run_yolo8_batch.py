@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from common import add_assets_dir_arg, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
+from common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path
 from ml_pipes.collectors import PrintCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import (
@@ -138,7 +138,12 @@ def parse_args() -> argparse.Namespace:
         default=0.05,
         help="Seconds to wait before running a partial batch (default: 0.05).",
     )
-    add_assets_dir_arg(parser)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
     parser.add_argument(
         "--no-serialize",
         action="store_true",
@@ -159,9 +164,7 @@ def main() -> int:
     if args.images is not None:
         image_paths = args.images
     else:
-        sample = assets_dir / COCO_IMAGE_NAME
-        print(f"Downloading sample image to {sample} if needed...", file=sys.stderr)
-        download_if_missing(COCO_IMAGE_URL, sample)
+        sample = resolve_input_path(None, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
         # Repeat the sample image to fill the thread pool and demonstrate batching.
         image_paths = [sample] * args.workers
 

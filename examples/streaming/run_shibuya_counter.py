@@ -14,7 +14,7 @@ if __name__ == "__main__" and __package__ is None:
     __package__ = "examples.streaming"
 
 import cv2
-from ..common import COCO_CLASSES, add_assets_dir_arg, add_conf_threshold_arg, add_model_arg, resolve_model_path
+from ..common import ASSETS_DIR, COCO_CLASSES, resolve_model_variant_path
 from ..run_yolo8_onnx import YOLO8_MODELS
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes.collectors import ThroughputCollector
@@ -126,7 +126,7 @@ def build_pipeline(
 def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, stride: int, model: str, tile: bool,
                  conf_threshold: float) -> int:
     model_name, model_url = YOLO8_MODELS[model]
-    model_path = resolve_model_path(assets_dir, model_name, model_url, model)
+    model_path = resolve_model_variant_path(assets_dir, model_name, model_url, model)
     if model_path is None:
         return 1
 
@@ -188,15 +188,30 @@ def run_pipeline(url: str, assets_dir: Path, target_fps: float, workers: int, st
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stream Shibuya crossing with live YOLOv8 detections.")
     add_streaming_args(parser)
-    add_assets_dir_arg(parser)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
     parser.add_argument(
         "--target-fps",
         type=float,
         default=25.0,
         help="Target FPS for throughput reporting.",
     )
-    add_model_arg(parser, list(YOLO8_MODELS), default="x")
-    add_conf_threshold_arg(parser)
+    parser.add_argument(
+        "--model",
+        choices=list(YOLO8_MODELS),
+        default="x",
+        help=f"Model variant ({' → '.join(YOLO8_MODELS)}).",
+    )
+    parser.add_argument(
+        "--conf-threshold",
+        type=float,
+        default=0.25,
+        help="Minimum confidence score for detections (default: 0.25).",
+    )
     parser.add_argument(
         "--tile",
         action="store_true",

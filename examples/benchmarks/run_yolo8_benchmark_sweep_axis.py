@@ -28,12 +28,10 @@ from examples.common import (
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
-    add_assets_dir_arg,
-    add_model_arg,
     build_output_path,
     decode,
     download_if_missing,
-    resolve_model_path,
+    resolve_model_variant_path,
     visualize_detections_and_store,
 )
 from examples.run_yolo8_onnx import YOLO8_MODELS
@@ -50,7 +48,7 @@ from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 _DEFAULT_MODEL_VARIANT = "n"
 _model_name, _model_url = YOLO8_MODELS[_DEFAULT_MODEL_VARIANT]
-_DEFAULT_MODEL_PATH = resolve_model_path(ASSETS_DIR, _model_name, _model_url, _DEFAULT_MODEL_VARIANT)
+_DEFAULT_MODEL_PATH = resolve_model_variant_path(ASSETS_DIR, _model_name, _model_url, _DEFAULT_MODEL_VARIANT)
 _DEFAULT_OUTPUT_PATH = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, _model_name)
 
 
@@ -76,8 +74,18 @@ def _input_fn(image_path: Path):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_assets_dir_arg(parser)
-    add_model_arg(parser, list(YOLO8_MODELS))
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
+    parser.add_argument(
+        "--model",
+        choices=list(YOLO8_MODELS),
+        default="n",
+        help=f"Model variant ({' → '.join(YOLO8_MODELS)}).",
+    )
     parser.add_argument("--runs", type=int, default=20, help="Measured runs per cell (default: 20).")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup runs per cell (default: 3).")
     parser.add_argument("--save", type=Path, default=None, help="Directory to save per-cell result JSON files.")
@@ -85,7 +93,7 @@ def main() -> int:
 
     assets_dir: Path = args.assets_dir
     model_name, model_url = YOLO8_MODELS[args.model]
-    model_path = resolve_model_path(assets_dir, model_name, model_url, args.model)
+    model_path = resolve_model_variant_path(assets_dir, model_name, model_url, args.model)
     if model_path is None:
         return 1
 

@@ -28,11 +28,10 @@ from examples.common import (
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
-    add_assets_dir_arg,
     build_output_path,
     decode,
     download_if_missing,
-    resolve_model_path,
+    resolve_model_variant_path,
     visualize_detections_and_store,
 )
 from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
@@ -67,7 +66,12 @@ def _input_fn(image_path: Path):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_assets_dir_arg(parser)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
     parser.add_argument(
         "--variants", nargs="+", default=list(YOLO8_MODELS),
         metavar="VARIANT", help=f"Model variants to benchmark (default: {' '.join(YOLO8_MODELS)}).",
@@ -89,7 +93,7 @@ def main() -> int:
             print(f"warning: unknown variant {variant!r}, skipping", file=sys.stderr)
             continue
         model_name, model_url = YOLO8_MODELS[variant]
-        model_path = resolve_model_path(assets_dir, model_name, model_url, variant)
+        model_path = resolve_model_variant_path(assets_dir, model_name, model_url, variant)
         if model_path is None:
             print(f"warning: model file for variant {variant!r} not found, skipping", file=sys.stderr)
             continue

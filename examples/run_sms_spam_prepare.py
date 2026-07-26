@@ -37,7 +37,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     __package__ = "examples"
 
-from examples.common import ASSETS_DIR, add_assets_dir_arg
+from examples.common import ASSETS_DIR
 from ml_pipes.collectors import CaptureCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.factory import (
@@ -670,7 +670,12 @@ def _write_sms_spam_lineage_artifacts(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_assets_dir_arg(parser)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,

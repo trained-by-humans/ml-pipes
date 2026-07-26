@@ -18,7 +18,7 @@ if __name__ == "__main__" and __package__ is None:
 import cv2
 import numpy as np
 
-from ..common import add_assets_dir_arg, download_if_missing
+from ..common import ASSETS_DIR, download_if_missing
 from .stream_common import FrameReader, add_streaming_args, get_stream_url
 from ml_pipes.collectors import ThroughputCollector
 from ml_pipes.core import Pipeline
@@ -303,7 +303,12 @@ def run(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stream Shibuya crossing with CSRNet crowd counting.")
     add_streaming_args(parser)
-    add_assets_dir_arg(parser)
+    parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
     parser.add_argument(
         "--target-fps",
         type=float,

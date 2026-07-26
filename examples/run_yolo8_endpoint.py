@@ -7,13 +7,13 @@ import urllib.request
 from pathlib import Path
 
 from common import (
-    add_assets_dir_arg,
+    ASSETS_DIR,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
-    download_if_missing,
+    resolve_input_path,
     resolve_model_path,
 )
-from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
 from ml_pipes.core import (
     Embed,
     Pipeline,
@@ -94,6 +94,18 @@ def run_call(image_path: Path) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="YOLOv8 inference endpoint.")
     parser.add_argument(
+        "--assets-dir",
+        type=Path,
+        default=ASSETS_DIR,
+        help="Directory used to cache downloaded models and sample assets.",
+    )
+    parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=None,
+        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
+    )
+    parser.add_argument(
         "--call",
         action="store_true",
         help="Send a test request to the running server and print the response.",
@@ -104,7 +116,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Image to send with --call. Defaults to the sample COCO image.",
     )
-    add_assets_dir_arg(parser)
     return parser.parse_args()
 
 
@@ -113,17 +124,11 @@ def main() -> int:
     assets_dir = args.assets_dir
 
     if args.call:
-        image_path = args.input or assets_dir / COCO_IMAGE_NAME
-        if args.input is None:
-            print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
-            download_if_missing(COCO_IMAGE_URL, image_path)
+        image_path = resolve_input_path(args.input, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
         run_call(image_path)
         return 0
 
-    model_name, model_url = YOLO8_MODELS["n"]
-    model_path = resolve_model_path(assets_dir, model_name, model_url, "n")
-    if model_path is None:
-        return 1
+    model_path = resolve_model_path(args.model_path, assets_dir, BUNDLED_MODEL_NAME)
     run_server(model_path)
     return 0
 

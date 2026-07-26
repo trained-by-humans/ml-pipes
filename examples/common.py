@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import shutil
 import sys
 import urllib.request
@@ -154,58 +153,42 @@ def visualize_detections_and_store(
     ])
 
 
-def add_assets_dir_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-
-
-def add_conf_threshold_arg(parser: argparse.ArgumentParser, default: float = 0.25) -> None:
-    parser.add_argument(
-        "--conf-threshold",
-        type=float,
-        default=default,
-        help="Minimum confidence score for detections (default: 0.25).",
-    )
-
-
-def add_model_arg(parser: argparse.ArgumentParser, choices: list[str], default: str = "n") -> None:
-    parser.add_argument(
-        "--model",
-        choices=choices,
-        default=default,
-        help=f"Model variant ({' → '.join(choices)}).",
-    )
-
-
-def resolve_local_model_path(
+def resolve_model_path(
     model_path: Path | None,
     assets_dir: Path,
     default_name: str,
+    default_url: str | None = None,
 ) -> Path:
     resolved_model_path = model_path or assets_dir / default_name
+    if model_path is None and default_url is not None:
+        download_if_missing(default_url, resolved_model_path)
     if resolved_model_path.exists():
         return resolved_model_path
 
     print(f"Error: model file not found: {resolved_model_path}", file=sys.stderr)
     if model_path is None:
-        print(
-            "The bundled default model is expected under the assets directory. "
-            "Pass --model-path path/to/model-file to use a different local model.",
-            file=sys.stderr,
-        )
+        if default_url is None:
+            print(
+                "The bundled default model is expected under the assets directory. "
+                "Pass --model-path path/to/model-file to use a different local model.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "The default example model could not be found after the download attempt. "
+                "Pass --model-path path/to/model-file to use a different local model.",
+                file=sys.stderr,
+            )
     raise SystemExit(1)
 
 
 def resolve_input_path(
     input_path: Path | None,
-    default_path: Path,
+    assets_dir: Path,
+    default_name: str,
     default_url: str | None = None,
 ) -> Path:
-    resolved_input_path = input_path or default_path
+    resolved_input_path = input_path or assets_dir / default_name
     if input_path is None and default_url is not None:
         download_if_missing(default_url, resolved_input_path)
     if resolved_input_path.exists():
@@ -215,7 +198,7 @@ def resolve_input_path(
     raise SystemExit(1)
 
 
-def resolve_model_path(
+def resolve_model_variant_path(
     assets_dir: Path,
     model_name: str,
     model_url: str | None,
@@ -238,22 +221,10 @@ def resolve_model_path(
     return model_path
 
 
-def parse_input_and_output_args(description: str) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=description)
-    add_assets_dir_arg(parser)
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Where to save the annotated image. Defaults to the input image name with the model name as suffix.",
-    )
-    return parser.parse_args()
-
-
 def build_output_path(
-        assets_dir: Path,
-        image_name: str | Path,
-        model_name: str | Path,
+    assets_dir: Path,
+    image_name: str | Path,
+    model_name: str | Path,
 ) -> Path:
     image_path = Path(image_name)
     model_path = Path(model_name)
