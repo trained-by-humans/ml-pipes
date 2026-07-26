@@ -59,7 +59,7 @@ from common import (
     visualize_detections_and_store,
 )
 from run_yolo8_onnx import BUNDLED_MODEL_NAME, yolo8_inference_pipeline
-from run_yolo8_batch import MODEL_NAME as BATCH_MODEL_NAME, build_pipeline as build_batch_pipeline
+from run_yolo8_batch import build_pipeline as build_batch_pipeline
 from run_yolo8_tile import yolo8_tiled_pipeline
 from ml_pipes.core import (
     Inline,
@@ -95,12 +95,9 @@ def run_inspection_simple(model_path: Path, image_path: Path, output_path: Path)
 
 
 def run_inspection_batched(assets_dir: Path, image_path: Path) -> InspectionResult:
-    from run_yolo8_batch import _export_dynamic_model
+    from run_yolo8_batch import _ensure_yolov8n_dynamic_model
 
-    model_path = assets_dir / BATCH_MODEL_NAME
-    if not model_path.exists():
-        print(f"Exporting dynamic-batch model -> {model_path}", file=sys.stderr)
-        _export_dynamic_model(model_path)
+    model_path = _ensure_yolov8n_dynamic_model(assets_dir)
     inference_pipeline = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
     pipeline = Pipeline([
         Scatter(max_concurrency=4),

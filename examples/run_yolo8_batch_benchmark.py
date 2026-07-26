@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 from common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path
-from run_yolo8_batch import MODEL_NAME, _export_dynamic_model, build_pipeline
+from run_yolo8_batch import _ensure_yolov8n_dynamic_model, build_pipeline
 
 
 # Throughput benchmark for the Batch/UnBatch pipeline.
@@ -91,11 +91,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     assets_dir = args.assets_dir
-    model_path = assets_dir / MODEL_NAME
-
-    if not model_path.exists():
-        print(f"Exporting YOLOv8n nano (dynamic batch) → {model_path}", file=sys.stderr)
-        _export_dynamic_model(model_path)
+    model_path = _ensure_yolov8n_dynamic_model(assets_dir)
 
     sample = resolve_input_path(None, assets_dir, COCO_IMAGE_NAME, COCO_IMAGE_URL)
     image_paths = [sample] * args.images

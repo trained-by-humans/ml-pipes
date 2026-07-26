@@ -65,8 +65,13 @@ from ml_pipes.vision import (
 MODEL_NAME = "yolov8n_dynamic.onnx"
 
 
-def _export_dynamic_model(dst: Path) -> None:
-    """Export YOLOv8n (nano) with a dynamic batch axis using Ultralytics."""
+def _ensure_yolov8n_dynamic_model(assets_dir: Path) -> Path:
+    """Ensure the dynamic-batch YOLOv8n ONNX export exists and return its path."""
+    dst = assets_dir / MODEL_NAME
+    if dst.exists():
+        return dst
+
+    print(f"Exporting YOLOv8n nano (dynamic batch) -> {dst}", file=sys.stderr)
     from ultralytics import YOLO
 
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -75,6 +80,7 @@ def _export_dynamic_model(dst: Path) -> None:
     exported = model.export(format="onnx", dynamic=True, imgsz=640, simplify=False)
     Path(exported).rename(dst)
     pt_path.unlink(missing_ok=True)
+    return dst
 
 
 def build_pipeline(model_path: Path, batch_size: int, timeout: float,
@@ -155,11 +161,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     assets_dir = args.assets_dir
-    model_path = assets_dir / MODEL_NAME
-
-    if not model_path.exists():
-        print(f"Exporting YOLOv8n nano (dynamic batch) → {model_path}", file=sys.stderr)
-        _export_dynamic_model(model_path)
+    model_path = _ensure_yolov8n_dynamic_model(assets_dir)
 
     if args.images is not None:
         image_paths = args.images
