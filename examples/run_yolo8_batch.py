@@ -71,9 +71,17 @@ def _ensure_yolov8n_dynamic_model() -> Path:
     if dst.exists():
         return dst
 
-    print(f"Exporting YOLOv8n nano (dynamic batch) -> {dst}", file=sys.stderr)
-    from ultralytics import YOLO
+    try:
+        from ultralytics import YOLO
+    except ImportError:
+        print(
+            "Ultralytics is required to export the dynamic-batch YOLOv8 model: "
+            "python -m pip install ultralytics",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
+    print(f"Exporting YOLOv8n nano (dynamic batch) -> {dst}", file=sys.stderr)
     dst.parent.mkdir(parents=True, exist_ok=True)
     pt_path = dst.parent / "yolov8n.pt"
     model = YOLO(str(pt_path))
