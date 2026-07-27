@@ -17,7 +17,7 @@ if __name__ == "__main__" and __package__ is None:
 import cv2
 from ..common import COCO_CLASSES, resolve_model_path
 from ..run_yolo8_onnx import BUNDLED_MODEL_PATH
-from .stream_common import FrameReader, add_streaming_args, resolve_stream_source
+from .stream_common import DrawCount, FrameReader, add_streaming_args, resolve_stream_source
 from ml_pipes.collectors import ThroughputCollector
 from ml_pipes.core import (
     Pipeline,
@@ -29,6 +29,7 @@ from ml_pipes.onnx import (
 )
 from ml_pipes.standard import (
     Gather,
+    Map,
     Pick,
     Recall,
     Scatter,
@@ -59,8 +60,12 @@ from ml_pipes.vision import (
     ToDetections,
 )
 
-_KEEP_CLASSES = {0, 2, 25}  # COCO: 0=person, 2=car, 25=umbrella
-_MAX_HUMAN_AREA = 1_000  # px² — filters out cars and other large objects
+_PERSON_CLASS_IDS = {0}  # COCO: 0=person
+_MAX_PERSON_AREA = 1_000  # px² — keeps the count focused on smaller pedestrians in the crowd
+
+
+def _count_detections(detections: Detections) -> int:
+    return len(detections.boxes)
 
 
 def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePayload, Detections]:
@@ -81,7 +86,7 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePa
             "boxes",
             "scores",
             "classes",
-            keep_classes=_KEEP_CLASSES,
+            keep_classes=_PERSON_CLASS_IDS,
         ),
         ConvertBoxFormat(from_="cxcywh"),
         NMS(conf_threshold=conf_threshold),
@@ -113,11 +118,18 @@ def build_pipeline(
     ], auto_validate=True) if tile else _infer_pipeline(model_path, conf_threshold)
 
     postprocess = Pipeline([
-        FilterPredictionsByClass(_KEEP_CLASSES),
-        FilterPredictionsByArea(max_area=_MAX_HUMAN_AREA),
+        FilterPredictionsByClass(_PERSON_CLASS_IDS),
+        FilterPredictionsByArea(max_area=_MAX_PERSON_AREA),
+        Store("filtered_detections"),
+        Map(_count_detections),
+        Store("count"),
+        Recall("filtered_detections", prepend=True),
+        Pick(0),
         Recall("source_frame", prepend=True),
         DrawBoxes(class_names=COCO_CLASSES),
         Pick(0),
+        Recall("count"),
+        DrawCount(counter="People"),
     ])
 
     return preprocess + core_pipeline + postprocess
@@ -174,9 +186,9 @@ def run_stream(
 
             future = pending[0]
             try:
-                result = future.result(timeout=0.05)
+                annotated = future.result(timeout=0.05)
                 pending.popleft()
-                cv2.imshow(window_title, result.array)
+                cv2.imshow(window_title, annotated.array)
             except TimeoutError:
                 pass
 

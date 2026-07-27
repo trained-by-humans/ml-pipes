@@ -25,18 +25,14 @@ except ImportError:
     nn = None
 
 from ..common import ASSETS_DIR, download_if_missing
-from .stream_common import FrameReader, add_streaming_args, resolve_stream_source
+from .stream_common import DrawCount, FrameReader, add_streaming_args, resolve_stream_source
 from ml_pipes.collectors import ThroughputCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import (
     Extract,
     RuntimeOutputs,
 )
-from ml_pipes.standard import (
-    Pick,
-    Recall,
-    Store,
-)
+from ml_pipes.standard import Pick, Recall, Store
 from ml_pipes.tensor import (
     AsType,
     Squeeze,
@@ -175,7 +171,7 @@ class CSRNetInfer:
 def build_pipeline(
     model: Any,
     device: str,
-) -> Pipeline[ImagePayload, tuple[ImagePayload, float]]:
+) -> Pipeline[ImagePayload, ImagePayload]:
     return Pipeline([
         Store("source_frame"),
         Normalize(
@@ -200,12 +196,13 @@ def build_pipeline(
         DensityToHeatmap(),
         BlendImages(),
         Recall("count"),
+        DrawCount(counter="People", decimals=1),
     ], auto_validate=True)
 
 
 def run_stream(
     url: str,
-    pipeline: Pipeline[ImagePayload, tuple[ImagePayload, float]],
+    pipeline: Pipeline[ImagePayload, ImagePayload],
     target_fps: float,
     workers: int,
     stride: int,
@@ -222,7 +219,7 @@ def run_stream(
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
     pipeline.set_tracing(throughput)
-    pending: collections.deque[Future[tuple[ImagePayload, float]]] = collections.deque()
+    pending: collections.deque[Future[ImagePayload]] = collections.deque()
     stopped = False
     throughput.target_fps = reader.stream_fps
     status = f"device={device}"
@@ -234,7 +231,7 @@ def run_stream(
         file=sys.stderr,
     )
 
-    def infer(frame: np.ndarray) -> tuple[ImagePayload, float]:
+    def infer(frame: np.ndarray) -> ImagePayload:
         return pipeline(ImagePayload(array=frame))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -254,7 +251,7 @@ def run_stream(
 
             future = pending[0]
             try:
-                annotated, _ = future.result(timeout=0.05)
+                annotated = future.result(timeout=0.05)
                 pending.popleft()
                 cv2.imshow(window_title, annotated.array)
             except TimeoutError:
