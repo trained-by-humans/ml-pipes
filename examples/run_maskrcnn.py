@@ -66,7 +66,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segment
                 output_color_space="BGR",
                 add_batch_dim=False,
             ),
-            Infer(model_path, input_layout="CHW", dtype="float32", providers=("CPUExecutionProvider",)),
+            Infer(model_path, input_layout="CHW", dtype="float32"),
             Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             FilterTensorsByScore("boxes", "labels", "masks", score="scores", min_score=CONF_THRESHOLD),
             MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes"),
