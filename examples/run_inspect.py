@@ -5,13 +5,12 @@ Three pipelines are demonstrated:
 
   Simple   — single image through the full YOLOv8 detection pipeline.
 
-  Batched  — 8 image paths in, Scatter decodes them concurrently,
-             Batch groups them into batches of 4 for inference,
-             UnBatch/Gather collect per-image detections.
-
   Tiled    — single image tiled into overlapping 200×200 patches,
              each tile inferred independently via Scatter, results
              stitched back and deduplicated with NMM.
+
+  Error    — synthetic mid-pipeline failure; prior steps render normally,
+             the failing step is highlighted, and later steps are absent.
 
 Usage:
     # Open result in the default web browser (default behavior)
@@ -20,8 +19,8 @@ Usage:
     # Use the tiled pipeline
     python run_inspect.py --pipeline tiled
 
-    # Use the batched pipeline
-    python run_inspect.py --pipeline batched
+    # Inspect a synthetic mid-pipeline failure
+    python run_inspect.py --pipeline error
 
     # Save HTML report to a file (does not open browser)
     python run_inspect.py --save-html report.html
@@ -46,6 +45,9 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TypeVar
+
+import numpy as np
 
 from common import (
     ASSETS_DIR,
@@ -59,21 +61,40 @@ from common import (
     visualize_detections_and_store,
 )
 from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
-from run_yolo8_batch import build_pipeline as build_batch_pipeline
 from run_yolo8_tile import yolo8_tiled_pipeline
-from ml_pipes.core import (
-    Inline,
-    Pipeline,
-)
 from ml_pipes.inspection import (
     InspectionResult,
     InspectionSerializer,
     PipelineInspector,
 )
-from ml_pipes.standard import (
-    Gather,
-    Scatter,
-)
+
+ValueT = TypeVar("ValueT")
+
+
+class MakeArray:
+    def __call__(self, value: int) -> np.ndarray:
+        return np.full((4, 4, 3), value, dtype=np.uint8)
+
+
+class ScaleArray:
+    def __init__(self, factor: float) -> None:
+        self.factor = factor
+
+    def __call__(self, array: np.ndarray) -> np.ndarray:
+        return (array.astype(np.float32) * self.factor).astype(np.uint8)
+
+
+class Fail:
+    def __init__(self, message: str = "intentional failure") -> None:
+        self.message = message
+
+    def __call__(self, value: ValueT) -> ValueT:
+        raise RuntimeError(self.message)
+
+
+class AddOne:
+    def __call__(self, array: np.ndarray) -> np.ndarray:
+        return np.clip(array.astype(np.int32) + 1, 0, 255).astype(np.uint8)
 
 
 # ---------------------------------------------------------------------------
@@ -94,24 +115,6 @@ def run_inspection_simple(model_path: Path, image_path: Path, output_path: Path)
     return result
 
 
-def run_inspection_batched(image_path: Path) -> InspectionResult:
-    from run_yolo8_batch import _ensure_yolov8n_dynamic_model
-
-    model_path = _ensure_yolov8n_dynamic_model()
-    inference_pipeline = build_batch_pipeline(model_path, batch_size=4, timeout=1.0)
-    pipeline = Pipeline([
-        Scatter(max_concurrency=4),
-        Inline(inference_pipeline),
-        Gather(),
-    ])
-    pipeline.validate()
-    pipeline.describe()
-    print("Running batched inspection...", file=sys.stderr)
-    result = pipeline.inspect([image_path] * 8)
-    print(result)
-    return result
-
-
 def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) -> InspectionResult:
     pipeline = (
         decode()
@@ -122,6 +125,15 @@ def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) 
     pipeline.describe()
     print("Running tiled inspection...", file=sys.stderr)
     result = pipeline.inspect(image_path)
+    print(result)
+    return result
+
+
+def run_inspection_error() -> InspectionResult:
+    pipeline = Pipeline([MakeArray(), ScaleArray(2.0), Fail(), AddOne()])
+    pipeline.describe()
+    print("Running error inspection...", file=sys.stderr)
+    result = pipeline.inspect(100)
     print(result)
     return result
 
@@ -153,11 +165,10 @@ def load_or_run_result(args: argparse.Namespace) -> InspectionResult:
         print(result)
         return result
 
+    if args.pipeline == "error":
+        return run_inspection_error()
+
     image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
-
-    if args.pipeline == "batched":
-        return run_inspection_batched(image_path)
-
     model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
     if args.pipeline == "tiled":
@@ -176,7 +187,7 @@ def main() -> int:
     parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
     parser.add_argument("--output", type=Path, default=None,
                         help="Output image path for the simple and tiled pipelines. Defaults to a file under the assets directory.")
-    parser.add_argument("--pipeline", choices=["simple", "batched", "tiled"], default="simple",
+    parser.add_argument("--pipeline", choices=["simple", "tiled", "error"], default="simple",
                         help="Which pipeline to inspect (default: simple).")
     parser.add_argument("--load", metavar="PATH", type=Path, default=None,
                         help="Load a previously serialized result instead of running the pipeline.")

@@ -1,9 +1,12 @@
 """
-Scripted `BenchmarkBuilder` sweep for plain vs tiled YOLOv8 inference.
+`BenchmarkBuilder` sweep example for plain vs tiled YOLOv8 inference.
 
-This example focuses on comparing two pipeline structures side by side in one
-script. It is the best reference for a handpicked config sweep built with
-reusable decorated factories plus a plain dynamic input callable.
+This script keeps the sweep intentionally small:
+- one plain baseline result
+- one tiled parameter sweep over `slice_wh`
+
+Use it when you want one comparison table without jumping between separate
+sweep scripts.
 
 Run from the repo root:
     python examples/benchmarks/run_yolo8_benchmark_sweep.py --model n --runs 20
@@ -56,11 +59,10 @@ _DEFAULT_OUTPUT_PATH = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, _DEFAULT_M
 def yolo8_plain_benchmark_pipeline(
     model_path: Path = _DEFAULT_MODEL_PATH,
     output_path: Path = _DEFAULT_OUTPUT_PATH,
-    conf_threshold: float = 0.25,
 ) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
     return (
         decode()
-        + yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
+        + yolo8_inference_pipeline(model_path)
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
 
@@ -69,19 +71,15 @@ def yolo8_plain_benchmark_pipeline(
 def yolo8_tiled_benchmark_pipeline(
     model_path: Path = _DEFAULT_MODEL_PATH,
     output_path: Path = _DEFAULT_OUTPUT_PATH,
-    conf_threshold: float = 0.25,
     slice_wh: tuple[int, int] = (320, 320),
     overlap_wh: tuple[int, int] = (80, 80),
-    max_concurrency: int = 4,
 ) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
     return (
         decode()
         + yolo8_tiled_pipeline(
             model_path,
-            conf_threshold=conf_threshold,
             slice_wh=slice_wh,
             overlap_wh=overlap_wh,
-            max_concurrency=max_concurrency,
         )
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
@@ -119,10 +117,7 @@ def main() -> int:
     tiled_results = (
         BenchmarkBuilder.factory(yolo8_tiled_benchmark_pipeline)
         .pipeline_config(model_path=model_path, output_path=output_path)
-        .pipeline_config_set([
-            {"slice_wh": (320, 320)},
-            {"slice_wh": (480, 480), "overlap_wh": (120, 120)},
-        ])
+        .pipeline_config_axis("slice_wh", (320, 320), (480, 480))
         .data_input(input_fn)
         .runs(args.runs).warmup(args.warmup)
         .run(verbose=False)

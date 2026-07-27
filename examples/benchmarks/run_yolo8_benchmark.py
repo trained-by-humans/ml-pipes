@@ -2,8 +2,9 @@
 Lowest-level benchmarking example for YOLOv8.
 
 This script uses `Benchmark` directly rather than `BenchmarkBuilder` or the
-CLI. It is the best reference when you want to inspect a single measured run
-and compare the resulting `BenchmarkResult` objects with `diff()`.
+CLI. It is the best reference when you want to inspect one measured run,
+then compare it directly against a second result with `diff()` before moving
+on to the higher-level sweep or CLI examples.
 
 Run from the repo root:
     python examples/benchmarks/run_yolo8_benchmark.py --model n --runs 30
@@ -37,8 +38,7 @@ from examples.common import (
 from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant
 from examples.run_yolo8_onnx import yolo8_inference_pipeline
 
-from ml_pipes.core import Pipeline
-from ml_pipes.benchmark import Benchmark, BenchmarkResult, MeasurementConfig
+from ml_pipes.benchmark import Benchmark, MeasurementConfig
 
 
 def main() -> int:
@@ -61,10 +61,6 @@ def main() -> int:
     config = MeasurementConfig(runs=args.runs, warmup=args.warmup, percentiles=(0.50, 0.95, 0.99))
     input_fn = lambda: (image_path.name, image_path, None, None)
 
-    # ------------------------------------------------------------------
-    # 1. Single pipeline — full breakdown
-    # ------------------------------------------------------------------
-    print("\n=== 1. Single pipeline benchmark ===\n")
     output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
     full_pipeline = (
         decode()
@@ -82,56 +78,19 @@ def main() -> int:
 
     print(result_full.to_table())
 
-    # ------------------------------------------------------------------
-    # 2. Config comparison — low vs high confidence threshold
-    # ------------------------------------------------------------------
-    print("\n=== 2. Config comparison: conf_threshold=0.10 vs 0.50 ===\n")
-    pipeline_low_conf = (
-        decode()
-        + yolo8_inference_pipeline(model_path, conf_threshold=0.10)
-        + visualize_detections_and_store(output_path, COCO_CLASSES)
-    )
-    pipeline_high_conf = (
-        decode()
-        + yolo8_inference_pipeline(model_path, conf_threshold=0.50)
-        + visualize_detections_and_store(output_path, COCO_CLASSES)
-    )
-
-    result_low = Benchmark(
-        pipeline=pipeline_low_conf,
-        input_fn=input_fn,
-        measurement=config,
-        label="conf=0.10",
-        metadata={"conf_threshold": 0.10},
-    ).run()
-
-    result_high = Benchmark(
-        pipeline=pipeline_high_conf,
-        input_fn=input_fn,
-        measurement=config,
-        label="conf=0.50",
-        metadata={"conf_threshold": 0.50},
-    ).run()
-
-    diff_conf = result_low.diff(result_high)
-    print(diff_conf.to_table())
-
-    # ------------------------------------------------------------------
-    # 3. Structural comparison — inference-only vs full pipeline
-    # ------------------------------------------------------------------
-    print("\n=== 3. Structural comparison: inference-only vs full pipeline ===\n")
+    print("\n=== Structural comparison: inference-only vs full pipeline ===\n")
     infer_only_pipeline = decode() + yolo8_inference_pipeline(model_path)
 
     result_infer_only = Benchmark(
         pipeline=infer_only_pipeline,
         input_fn=input_fn,
         measurement=config,
-        label="inference-only",
-        metadata={"model": model_name},
+        label=f"yolo8{args.model}-infer-only",
+        metadata={"model": model_name, "variant": args.model},
     ).run()
 
-    diff_structural = result_infer_only.diff(result_full)
-    print(diff_structural.to_table())
+    diff = result_infer_only.diff(result_full)
+    print(diff.to_table())
     print("\n(operators with 'only in candidate' are the visualisation steps added in the full pipeline)")
 
     # ------------------------------------------------------------------
@@ -140,10 +99,8 @@ def main() -> int:
     if args.save:
         save_dir = args.save
         save_dir.mkdir(parents=True, exist_ok=True)
-        result_full.save(str(save_dir / f"yolo8{args.model}_full.json"))
-        result_infer_only.save(str(save_dir / f"yolo8{args.model}_infer_only.json"))
-        result_low.save(str(save_dir / f"yolo8{args.model}_conf_low.json"))
-        result_high.save(str(save_dir / f"yolo8{args.model}_conf_high.json"))
+        result_full.save(str(save_dir / result_full.slug(".json")))
+        result_infer_only.save(str(save_dir / result_infer_only.slug(".json")))
         print(f"\nResults saved to {save_dir}/", file=sys.stderr)
 
     return 0

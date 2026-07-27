@@ -468,17 +468,18 @@ python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
 
 | Script | What it demonstrates |
 |---|---|
-| `examples/benchmarks/run_yolo8_benchmark.py` | `Benchmark` directly: single run, config diff, structural diff |
-| `examples/benchmarks/run_yolo8_benchmark_sweep.py` | `BenchmarkBuilder`: plain vs tiled pipeline side-by-side |
-| `examples/benchmarks/run_yolo8_benchmark_sweep_axis.py` | Axis sweep: `slice_wh × overlap_wh` cartesian product with filter |
+| `examples/benchmarks/run_yolo8_benchmark.py` | `Benchmark` directly: one measured run plus one structural diff |
+| `examples/benchmarks/run_yolo8_benchmark_sweep.py` | `BenchmarkBuilder`: one plain baseline plus a small tiled `slice_wh` sweep |
 | `examples/benchmarks/run_yolo8_benchmark_variants.py` | Variant sweep: compare YOLOv8 n/s/m/l/x model sizes |
 | `examples/benchmarks/run_yolo8_benchmark_cli.py` | CLI target: `@pipeline_factory` + `@data_factory` for `python -m ml_pipes benchmark` |
+
+Start with `run_yolo8_benchmark_sweep.py` if you want one comparison table with
+a plain control row and a small tiled sweep.
 
 ```bash
 cd examples/benchmarks
 python run_yolo8_benchmark.py --model n --runs 30
 python run_yolo8_benchmark_sweep.py --model n --runs 20
-python run_yolo8_benchmark_sweep_axis.py --model n --runs 20
 python run_yolo8_benchmark_variants.py --variants n s --runs 20
 ```
 

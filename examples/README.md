@@ -148,8 +148,7 @@ python examples/run_yolo8_tile.py --input path/to/photo.jpg --slice-wh 320 320 -
 
 | Example | Focus | Notes |
 |---|---|---|
-| `run_inspect.py` | step-by-step inspection | renders a successful pipeline run |
-| `run_inspect_errors.py` | failed-run inspection | shows how inspection captures errors |
+| `run_inspect.py` | step-by-step inspection | renders successful runs and a synthetic failure case |
 | `run_yolo8_tracing.py` | tracing | prints or captures per-step trace data |
 
 Common args in this section:
@@ -158,12 +157,11 @@ Common args in this section:
 |---|---|---|
 | `--save-html path/to/report.html` | inspection | Save the generated HTML inspection report instead of opening it in the browser. |
 | `--print-only` | inspection | Print the inspection result to the terminal instead of opening a browser window. |
-| `--pipeline <name>` | `run_inspect.py` | Choose which inspection pipeline to run, such as `simple`, `batched`, or `tiled`. |
+| `--pipeline <name>` | `run_inspect.py` | Choose which inspection pipeline to run, such as `simple`, `tiled`, or `error`. |
 | `--plot path/to/plot.png` | `run_inspect.py` | Save a static inspection plot instead of opening the browser UI. |
 | `--dump path/to/result.pkl` / `--load path/to/result.pkl` | `run_inspect.py` | Save or reload serialized inspection results for later analysis. |
 
-Extra setup for the inspection entries (`run_inspect.py` and
-`run_inspect_errors.py`):
+Extra setup for the inspection entry (`run_inspect.py`):
 
 ```bash
 # Local workspace setup
@@ -179,19 +177,12 @@ Example command:
 python examples/run_inspect.py --pipeline tiled --save-html report.html
 ```
 
-> [!NOTE]
-> `run_inspect.py --pipeline batched` has the same extra Ultralytics
-> requirement as `run_yolo8_batch.py`, because it reuses the same
-> dynamic-batch YOLOv8 export path.
-
 ## Benchmarking
 
 | Example | Focus | Notes |
 |---|---|---|
-| `run_yolo8_batch_benchmark.py` | single benchmark | benchmarks batch throughput on one pipeline |
 | `benchmarks/run_yolo8_benchmark.py` | benchmark workflow | direct `Benchmark` usage for one pipeline |
-| `benchmarks/run_yolo8_benchmark_sweep.py` | benchmark sweep | compares plain and tiled pipelines side by side |
-| `benchmarks/run_yolo8_benchmark_sweep_axis.py` | axis sweep | sweeps `slice_wh x overlap_wh` combinations |
+| `benchmarks/run_yolo8_benchmark_sweep.py` | benchmark sweep | compares one plain baseline against a small tiled `slice_wh` sweep |
 | `benchmarks/run_yolo8_benchmark_variants.py` | variant sweep | compares multiple YOLOv8 model sizes |
 | `benchmarks/run_yolo8_benchmark_cli.py` | CLI benchmark target | target for `python -m ml_pipes benchmark` |
 
@@ -208,7 +199,7 @@ The benchmark entries use the base install above.
 Example command:
 
 ```bash
-python examples/benchmarks/run_yolo8_benchmark.py --model n --runs 20 --save results/
+python examples/benchmarks/run_yolo8_benchmark_sweep.py --model n --runs 20 --save results/
 ```
 
 ## Data Preparation
@@ -231,7 +222,6 @@ python examples/run_sms_spam_prepare.py --inspect-html report.html
 | `run_yolo8_video.py` | YOLOv8 | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
 | `streaming/run_shibuya_counter.py` | CSRNet + detector | crowd counting pipeline |
 | `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation |
-| `streaming/run_shibuya_rf.py` | DETR-style detector | streaming detector pipeline |
 
 Common args in this section:
 
@@ -241,23 +231,16 @@ Common args in this section:
 | `--workers N` | live stream examples | Control how many inference workers run in parallel. |
 | `--stride N` | live stream examples | Process every `N`th frame instead of every frame. |
 | `--target-fps N` | throughput-measured stream examples | Set the target or fallback FPS used by throughput reporting. |
-| `--tile` | `run_shibuya_counter.py`, `run_shibuya_rf.py` | Enable tiled inference for better small-object recall at lower throughput. |
 
 Extra setup for specific streaming entries:
 
 `streaming/run_shibuya_csrnet.py` and `streaming/run_shibuya_counter.py`
 need the same Torch setup described in [Torch And Domain Handoff](#torch-and-domain-handoff).
 
-`streaming/run_shibuya_rf.py` also needs:
-
-```bash
-python -m pip install supervision
-```
-
 Example command:
 
 ```bash
-python examples/streaming/run_shibuya_rf.py --workers 2 --stride 2 --tile
+python examples/run_yolo8_video.py
 ```
 
 ## Torch And Domain Handoff
