@@ -24,7 +24,7 @@ Usage:
     python run_inspect.py --pipeline batched
 
     # Save HTML report to a file (does not open browser)
-    python run_inspect.py --save report.html
+    python run_inspect.py --save-html report.html
 
     # Save a matplotlib figure to a PNG
     python run_inspect.py --plot inspect.png
@@ -128,8 +128,8 @@ def run_inspection_tiled(model_path: Path, image_path: Path, output_path: Path) 
 
 def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
     inspector = PipelineInspector()
-    if args.save:
-        saved = inspector.save_to_html(result, args.save)
+    if args.save_html:
+        saved = inspector.save_to_html(result, args.save_html)
         print(f"Inspection report saved to: {saved}", file=sys.stderr)
     elif args.plot:
         saved = inspector.save_to_plot(result, args.plot)
@@ -181,7 +181,7 @@ def main() -> int:
     parser.add_argument("--load", metavar="PATH", type=Path, default=None,
                         help="Load a previously serialized result instead of running the pipeline.")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--save", metavar="PATH", type=Path, default=None,
+    group.add_argument("--save-html", metavar="PATH", type=Path, default=None,
                        help="Save HTML report to PATH instead of opening a browser.")
     group.add_argument("--plot", metavar="PATH", type=Path, default=None,
                        help="Save a matplotlib figure to PATH (e.g. inspect.png).")

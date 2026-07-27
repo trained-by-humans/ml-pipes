@@ -23,7 +23,7 @@ Usage:
     python run_inspect_errors.py --scenario nested
 
     # Save HTML report instead of opening the browser
-    python run_inspect_errors.py --save report.html
+    python run_inspect_errors.py --save-html report.html
 
     # Print step labels to stdout only
     python run_inspect_errors.py --print-only
@@ -139,7 +139,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Which error scenario to run (default: mid_pipeline).",
     )
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--save", metavar="PATH", type=Path, default=None,
+    group.add_argument("--save-html", metavar="PATH", type=Path, default=None,
                        help="Save HTML report to PATH instead of opening a browser.")
     group.add_argument("--print-only", action="store_true",
                        help="Print step labels to stdout; do not open any window.")
@@ -150,9 +150,9 @@ def main() -> int:
     args = _build_parser().parse_args()
     result = _SCENARIOS[args.scenario]()
     inspector = PipelineInspector()
-    if args.save:
-        saved = inspector.save_to_html(result, args.save)
-        print(f"Saved to: {saved}", file=sys.stderr)
+    if args.save_html:
+        saved = inspector.save_to_html(result, args.save_html)
+        print(f"Inspection report saved to: {saved}", file=sys.stderr)
     elif not args.print_only:
         inspector.show_in_browser(result)
 

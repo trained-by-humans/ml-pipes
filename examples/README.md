@@ -144,29 +144,21 @@ Example command:
 python examples/run_yolo8_tile.py --input path/to/photo.jpg --slice-wh 320 320 --overlap-wh 80 80
 ```
 
-## Inspection, Tracing, And Benchmarking
+## Inspection And Tracing
 
 | Example | Focus | Notes |
 |---|---|---|
 | `run_inspect.py` | step-by-step inspection | renders a successful pipeline run |
 | `run_inspect_errors.py` | failed-run inspection | shows how inspection captures errors |
 | `run_yolo8_tracing.py` | tracing | prints or captures per-step trace data |
-| `run_yolo8_batch_benchmark.py` | single benchmark | benchmarks batch throughput on one pipeline |
-| `benchmarks/run_yolo8_benchmark.py` | benchmark workflow | direct `Benchmark` usage for one pipeline |
-| `benchmarks/run_yolo8_benchmark_sweep.py` | benchmark sweep | compares plain and tiled pipelines side by side |
-| `benchmarks/run_yolo8_benchmark_sweep_axis.py` | axis sweep | sweeps `slice_wh x overlap_wh` combinations |
-| `benchmarks/run_yolo8_benchmark_variants.py` | variant sweep | compares multiple YOLOv8 model sizes |
-| `benchmarks/run_yolo8_benchmark_cli.py` | CLI benchmark target | target for `python -m ml_pipes benchmark` |
 
 Common args in this section:
 
 | Arg | Common in | Meaning |
 |---|---|---|
-| `--save path/to/report-or-results` | inspection, benchmarks | Save the generated report or benchmark results instead of only printing or opening them. |
-| `--runs N` | tracing, benchmarks | Control how many repeated runs an example executes. |
-| `--warmup N` | benchmarks | Discard warmup iterations before measurement. |
-| `--pipeline <name>` | `run_inspect.py` | Choose which inspection pipeline to run, such as `simple`, `batched`, or `tiled`. |
+| `--save-html path/to/report.html` | inspection | Save the generated HTML inspection report instead of opening it in the browser. |
 | `--print-only` | inspection | Print the inspection result to the terminal instead of opening a browser window. |
+| `--pipeline <name>` | `run_inspect.py` | Choose which inspection pipeline to run, such as `simple`, `batched`, or `tiled`. |
 | `--plot path/to/plot.png` | `run_inspect.py` | Save a static inspection plot instead of opening the browser UI. |
 | `--dump path/to/result.pkl` / `--load path/to/result.pkl` | `run_inspect.py` | Save or reload serialized inspection results for later analysis. |
 
@@ -181,21 +173,42 @@ uv sync --group shared-framework --group inspection-otel
 python -m pip install 'ml-pipes[inspection,onnx,vision]'
 ```
 
-`run_yolo8_tracing.py` and the benchmark entries use the base install above.
-If you run `run_inspect.py --pipeline batched`, also install Ultralytics for
-the dynamic-batch YOLOv8 export:
+Example command:
 
 ```bash
-python -m pip install ultralytics
+python examples/run_inspect.py --pipeline tiled --save-html report.html
 ```
 
-`run_inspect.py` also accepts `--output` to override the annotated image path
-for the simple and tiled pipelines.
+> [!NOTE]
+> `run_inspect.py --pipeline batched` has the same extra Ultralytics
+> requirement as `run_yolo8_batch.py`, because it reuses the same
+> dynamic-batch YOLOv8 export path.
+
+## Benchmarking
+
+| Example | Focus | Notes |
+|---|---|---|
+| `run_yolo8_batch_benchmark.py` | single benchmark | benchmarks batch throughput on one pipeline |
+| `benchmarks/run_yolo8_benchmark.py` | benchmark workflow | direct `Benchmark` usage for one pipeline |
+| `benchmarks/run_yolo8_benchmark_sweep.py` | benchmark sweep | compares plain and tiled pipelines side by side |
+| `benchmarks/run_yolo8_benchmark_sweep_axis.py` | axis sweep | sweeps `slice_wh x overlap_wh` combinations |
+| `benchmarks/run_yolo8_benchmark_variants.py` | variant sweep | compares multiple YOLOv8 model sizes |
+| `benchmarks/run_yolo8_benchmark_cli.py` | CLI benchmark target | target for `python -m ml_pipes benchmark` |
+
+Common args in this section:
+
+| Arg | Common in | Meaning |
+|---|---|---|
+| `--save path/to/results-dir` | benchmarks | Save benchmark result files under the given directory. |
+| `--runs N` | benchmarks | Control how many repeated runs a benchmark executes. |
+| `--warmup N` | benchmarks | Discard warmup iterations before measurement. |
+
+The benchmark entries use the base install above.
 
 Example command:
 
 ```bash
-python examples/run_inspect.py --pipeline tiled --save report.html
+python examples/benchmarks/run_yolo8_benchmark.py --model n --runs 20 --save results/
 ```
 
 ## Data Preparation

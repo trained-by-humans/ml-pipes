@@ -118,8 +118,10 @@ def download_if_missing(url: str, destination: Path) -> None:
         return
 
     destination.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading {destination.name} -> {destination}", file=sys.stderr)
     with urllib.request.urlopen(url, timeout=120) as response, destination.open("wb") as target:
         shutil.copyfileobj(response, target)
+    print(f"Downloaded {destination.name}", file=sys.stderr)
 
 
 def decode() -> Pipeline[str | Path, ImagePayload]:
