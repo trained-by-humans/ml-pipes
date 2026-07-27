@@ -62,6 +62,7 @@ from common import (
 )
 from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from run_yolo8_tile import yolo8_tiled_pipeline
+from ml_pipes.core import Pipeline
 from ml_pipes.inspection import (
     InspectionResult,
     InspectionSerializer,
