@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -30,12 +31,15 @@ COCO_PANOPTIC_THING_IDS = frozenset(range(80))
 
 def _require_transformers() -> tuple[Any, Any]:
     try:
+        import safetensors  # noqa: F401
         from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
-    except ImportError as exc:
-        raise RuntimeError(
-            "Mask2Former examples require transformers and safetensors. "
-            "Install them in the project environment before running these scripts."
-        ) from exc
+    except ImportError:
+        print(
+            "Transformers and safetensors are required: "
+            "python -m pip install transformers safetensors",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     return AutoImageProcessor, Mask2FormerForUniversalSegmentation
 
 
