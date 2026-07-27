@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import torch
@@ -11,7 +11,7 @@ from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, build_output_path
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import Store
 from ml_pipes.tensor import TensorPayload
-from ml_pipes.torch import ToTorch, TorchExtract, TorchInfer
+from ml_pipes.torch import ToTorch, TorchExtract, TorchInfer, TorchSqueeze
 from ml_pipes.torch.types import TorchTensorRegistry
 from ml_pipes.vision import (
     ConvertColorSpace,
@@ -113,21 +113,13 @@ class PrepareHFImageInputs:
                 )
         if self.require_contiguous and not image.array.flags.c_contiguous:
             raise ValueError("PrepareHFImageInputs expects a contiguous image array")
-        outputs = self.processor(images=image.array, return_tensors="np")
-        pixel_values = np.asarray(outputs[self.output_key])
+        model_inputs = self.processor(images=image.array, return_tensors="np")
+        output_array = np.asarray(model_inputs[self.output_key])
         return TensorPayload(
-            array=pixel_values,
+            array=output_array,
             layout=self.output_layout,
-            dtype=str(pixel_values.dtype),
+            dtype=str(output_array.dtype),
         )
-
-
-def build_mask2former_forward(model: torch.nn.Module) -> Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]:
-    def forward(pixel_values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        outputs = model(pixel_values=pixel_values)
-        return outputs.class_queries_logits[0], outputs.masks_queries_logits[0]
-
-    return forward
 
 
 def build_mask2former_infer_pipeline(
@@ -144,11 +136,13 @@ def build_mask2former_infer_pipeline(
             PrepareHFImageInputs(processor=bundle.processor, output_key="pixel_values"),
             ToTorch(device=device),
             TorchInfer(
-                build_mask2former_forward(bundle.model),
+                bundle.model,
+                input_name="pixel_values",
                 input_layout="NCHW",
-                output_names=("class_queries_logits", "masks_queries_logits"),
             ),
             TorchExtract("class_queries_logits", "masks_queries_logits"),
+            TorchSqueeze("class_queries_logits", axis=0),
+            TorchSqueeze("masks_queries_logits", axis=0),
         ]
     )
 

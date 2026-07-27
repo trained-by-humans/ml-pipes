@@ -123,8 +123,8 @@ pipeline = Pipeline([
     ...,
     Normalize(),
     ToTorch(device="cpu"),
-    TorchInfer(model, input_layout="NCHW", output_names=("logits",), output_layouts=("NCHW",)),
-    TorchExtract("logits", as_="scores"),
+    TorchInfer(model, input_layout="NCHW"),
+    TorchExtract("output_0", as_="scores"),
     ToNumpyRegistry(),
     ...
 ])
@@ -132,6 +132,11 @@ pipeline = Pipeline([
 
 Use this when the model is Torch-native but the rest of the pipeline is
 already clear and standardized in NumPy.
+
+For models that expect a named input such as `pixel_values=...`, use
+`input_name="..."`. If the model returns a mapping of named tensors, those
+mapping keys become the runtime output names that `TorchExtract(...)` can
+select.
 
 ### Torch-Side Postprocess
 
@@ -148,12 +153,15 @@ from ml_pipes.torch import (
     TorchMasksToBoxes,
     TorchResizeMasks,
     TorchSigmoid,
+    TorchSqueeze,
     TorchSoftmax,
 )
 
 pipeline = Pipeline([
     ...,
     ToTorchRegistry(device="cuda:0"),
+    TorchSqueeze("class_queries_logits", axis=0),
+    TorchSqueeze("masks_queries_logits", axis=0),
     TorchResizeMasks(masks="masks_queries_logits"),
     TorchSoftmax("class_queries_logits", as_="class_probs"),
     TorchSigmoid("masks_queries_logits", as_="mask_probs"),

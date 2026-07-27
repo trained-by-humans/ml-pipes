@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -28,7 +27,6 @@ from examples.torch.mask2former_infer import (  # noqa: E402
     Mask2FormerBundle,
     PrepareHFImageInputs,
     build_mask2former_infer_pipeline,
-    build_mask2former_forward,
 )
 from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFromQueries  # noqa: E402
 from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries  # noqa: E402
@@ -36,7 +34,7 @@ from ml_pipes.core import Pipeline  # noqa: E402
 from ml_pipes.standard import Recall  # noqa: E402
 from ml_pipes.tensor import ArgMax  # noqa: E402
 from ml_pipes.tensor import TensorPayload, TensorRegistry  # noqa: E402
-from ml_pipes.torch import ToTorch, TorchArgMax, TorchExtract, TorchInfer  # noqa: E402
+from ml_pipes.torch import ToTorch, TorchArgMax, TorchExtract, TorchInfer, TorchSqueeze  # noqa: E402
 from ml_pipes.torch.types import TorchTensorRegistry  # noqa: E402
 from ml_pipes.vision import ImagePayload  # noqa: E402
 
@@ -61,13 +59,13 @@ class _FakeProcessor:
 
 
 class _FakeModel(torch.nn.Module):
-    def forward(self, *, pixel_values: torch.Tensor) -> SimpleNamespace:
+    def forward(self, *, pixel_values: torch.Tensor) -> dict[str, torch.Tensor]:
         batch = pixel_values.shape[0]
         device = pixel_values.device
-        return SimpleNamespace(
-            class_queries_logits=torch.arange(batch * 6, dtype=torch.float32, device=device).reshape(batch, 2, 3),
-            masks_queries_logits=torch.arange(batch * 24, dtype=torch.float32, device=device).reshape(batch, 2, 3, 4),
-        )
+        return {
+            "class_queries_logits": torch.arange(batch * 6, dtype=torch.float32, device=device).reshape(batch, 2, 3),
+            "masks_queries_logits": torch.arange(batch * 24, dtype=torch.float32, device=device).reshape(batch, 2, 3, 4),
+        }
 
 
 def test_mask2former_infer_pipeline_preserves_stored_values_and_exposes_model_outputs(tmp_path: Path) -> None:
@@ -155,17 +153,19 @@ def test_prepare_hf_image_inputs_supports_custom_contract() -> None:
     assert tuple(result.array.shape) == (1, 3, 5, 7)
 
 
-def test_mask2former_forward_adapter_exposes_model_outputs() -> None:
+def test_mask2former_torch_infer_exposes_model_outputs() -> None:
     processor = _FakeProcessor()
     image = ImagePayload(array=np.zeros((3, 4, 3), dtype=np.uint8), color_space="RGB", layout="HWC")
 
     pixel_values = PrepareHFImageInputs(processor=processor, output_key="pixel_values")(image)
     outputs = TorchInfer(
-        build_mask2former_forward(_FakeModel()),
+        _FakeModel(),
+        input_name="pixel_values",
         input_layout="NCHW",
-        output_names=("class_queries_logits", "masks_queries_logits"),
     )(ToTorch(device="cpu")(pixel_values))
     registry = TorchExtract("class_queries_logits", "masks_queries_logits")(outputs)
+    TorchSqueeze("class_queries_logits", axis=0)(registry)
+    TorchSqueeze("masks_queries_logits", axis=0)(registry)
 
     assert tuple(registry["class_queries_logits"].shape) == (2, 3)
     assert tuple(registry["masks_queries_logits"].shape) == (2, 3, 4)

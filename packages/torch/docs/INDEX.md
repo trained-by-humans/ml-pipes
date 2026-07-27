@@ -41,7 +41,7 @@ For the cross-package package catalogs, see
 | Operator | Notes |
 |---|---|
 | `TorchAsType(dtype, src=None, as_=None)` | Casts Torch-backed tensor values or named registry tensors. |
-| `TorchInfer(model, input_layout="NCHW", ...)` | Runs a Torch-native callable on one `TorchTensorPayload` and returns `TorchRuntimeOutputs`. |
+| `TorchInfer(model, input_name=None, input_layout="NCHW", ...)` | Runs one `torch.nn.Module` on one `TorchTensorPayload` and returns `TorchRuntimeOutputs`. |
 | `TorchExtract(*names, as_=...)` | Extracts named Torch outputs into `TorchTensorRegistry`. |
 | `TorchDistribute()` | Splits batched `TorchRuntimeOutputs` into per-sample outputs. |
 | `TorchCollate()` | Stacks `list[TorchTensorPayload]` into one batched payload. |
@@ -53,6 +53,7 @@ For the cross-package package catalogs, see
 | `TorchArgMax(...)` | Argmax over a named Torch tensor. |
 | `TorchGatherRows(...)` | Row-wise gather driven by another registry tensor of indices. |
 | `TorchTopK(...)` / `TorchTopKIndices2D(...)` | Top-k ranking helpers for 1D and 2D tensors. |
+| `TorchSqueeze(src, axis=None, as_=None)` | Removes unit dimensions from a named Torch tensor. |
 | `TorchSlice(...)` | Slices a named tensor in a Torch registry. |
 | `TorchSoftmax(...)` / `TorchSigmoid(...)` | Standard per-tensor nonlinearities. |
 | `TorchMultiplyTensors(...)` | Element-wise multiplication of two named tensors. |

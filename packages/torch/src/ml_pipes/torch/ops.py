@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Generic, Literal, TypeAlias, TypeVar, cast, overload
 
 import numpy as np
@@ -35,7 +35,6 @@ TorchTensorLike: TypeAlias = (
 TorchTensorInput: TypeAlias = TorchTensorLike | TorchTensorRegistry
 TorchTransferInput: TypeAlias = TorchTensorInput | TorchRuntimeOutputs
 TorchTensorMask: TypeAlias = torch.Tensor | npt.NDArray[np.bool_]
-TorchInferOutput: TypeAlias = torch.Tensor | Sequence[torch.Tensor]
 TorchTensorValueT = TypeVar("TorchTensorValueT", bound=TorchTensorLike)
 TorchAsTypeModeT = TypeVar("TorchAsTypeModeT", bound=bool)
 TorchTransferInputT = TypeVar("TorchTransferInputT", bound=TorchTransferInput)
@@ -80,6 +79,23 @@ def _numpy_conversion_can_alias_torch_source(
     target_dtype: np.dtype | None,
 ) -> bool:
     return source_device_type == "cpu" and (target_dtype is None or source_dtype == target_dtype)
+
+
+def _normalize_torch_axis(axis: int, ndim: int) -> int:
+    normalized = axis if axis >= 0 else axis + ndim
+    if normalized < 0 or normalized >= ndim:
+        raise IndexError(
+            f"Dimension out of range (expected to be in range of [{-ndim}, {ndim - 1}], got {axis})"
+        )
+    return normalized
+
+
+def _normalize_torch_axes(axis: int | tuple[int, ...], ndim: int) -> tuple[int, ...]:
+    axes = (axis,) if isinstance(axis, int) else axis
+    normalized = tuple(_normalize_torch_axis(item, ndim) for item in axes)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"duplicate axis in squeeze: {axis!r}")
+    return normalized
 
 
 def _convert_numpy_array_to_torch(
@@ -386,6 +402,31 @@ class TorchArgMax:
             registry[self.as_] = torch.zeros(shape, dtype=torch.int64, device=tensor.device)
             return registry
         registry[self.as_] = torch.argmax(tensor, dim=axis)
+        return registry
+
+
+@Operator
+class TorchSqueeze:
+    def __init__(self, src: str, axis: int | tuple[int, ...] | None = None, as_: str | None = None):
+        self.src = src
+        self.axis = axis
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        tensor = registry[self.src]
+        if self.axis is None:
+            registry[self.as_] = torch.squeeze(tensor)
+            return registry
+
+        axes = sorted(_normalize_torch_axes(self.axis, tensor.ndim), reverse=True)
+        squeezed = tensor
+        for axis in axes:
+            if squeezed.shape[axis] != 1:
+                raise ValueError(
+                    f"cannot squeeze axis {axis} with size {squeezed.shape[axis]} for tensor {self.src!r}"
+                )
+            squeezed = torch.squeeze(squeezed, dim=axis)
+        registry[self.as_] = squeezed
         return registry
 
 
@@ -800,19 +841,19 @@ class TorchMasksToBoxes:
 class TorchInfer:
     def __init__(
         self,
-        module_or_callable: Callable[[torch.Tensor], TorchInferOutput],
+        model: torch.nn.Module,
+        input_name: str | None = None,
         input_layout: str = "NCHW",
         dtype: str | None = None,
-        output_names: Sequence[str] | None = None,
         output_layouts: Sequence[str] | None = None,
         serialize: bool = False,
     ):
-        if not callable(module_or_callable):
-            raise TypeError("TorchInfer requires a callable module or function")
-        self.module_or_callable = module_or_callable
+        if not isinstance(model, torch.nn.Module):
+            raise TypeError(f"TorchInfer requires a torch.nn.Module, got {type(model)!r}")
+        self.model = model
+        self.input_name = input_name
         self.input_layout = input_layout
         self.model_dtype = dtype
-        self.output_names = tuple(output_names) if output_names is not None else None
         self.output_layouts = tuple(output_layouts) if output_layouts is not None else None
         self._lock = threading.Lock() if serialize else contextlib.nullcontext()
 
@@ -828,20 +869,12 @@ class TorchInfer:
 
         with torch.inference_mode():
             with self._lock:
-                outputs = self.module_or_callable(tensor_payload.array)
+                if self.input_name is None:
+                    outputs = self.model(tensor_payload.array)
+                else:
+                    outputs = self.model(**{self.input_name: tensor_payload.array})
 
-        if isinstance(outputs, torch.Tensor):
-            output_tensors = (outputs,)
-        elif isinstance(outputs, Sequence):
-            output_tensors = tuple(outputs)
-            if any(not isinstance(output, torch.Tensor) for output in output_tensors):
-                raise TypeError(
-                    "TorchInfer supports only torch.Tensor outputs or sequences of torch.Tensor outputs"
-                )
-        else:
-            raise TypeError(
-                "TorchInfer supports only torch.Tensor outputs or sequences of torch.Tensor outputs"
-            )
+        output_names, output_tensors = self._normalize_outputs(outputs)
 
         if self.output_layouts is None:
             output_layouts = tuple("UNKNOWN" for _ in output_tensors)
@@ -851,15 +884,6 @@ class TorchInfer:
                     f"TorchInfer expected {len(self.output_layouts)} output layouts, got {len(output_tensors)} outputs"
                 )
             output_layouts = self.output_layouts
-
-        if self.output_names is None:
-            output_names = tuple(f"output_{index}" for index in range(len(output_tensors)))
-        else:
-            if len(self.output_names) != len(output_tensors):
-                raise ValueError(
-                    f"TorchInfer expected {len(self.output_names)} output names, got {len(output_tensors)} outputs"
-                )
-            output_names = self.output_names
 
         tensors = tuple(
             TorchTensorPayload(
@@ -871,6 +895,35 @@ class TorchInfer:
             for output, layout in zip(output_tensors, output_layouts, strict=True)
         )
         return TorchRuntimeOutputs(tensors=tensors, names=output_names)
+
+    def _normalize_outputs(self, outputs: object) -> tuple[tuple[str, ...], tuple[torch.Tensor, ...]]:
+        if isinstance(outputs, torch.Tensor):
+            return ("output_0",), (outputs,)
+        if isinstance(outputs, Sequence):
+            output_tensors = tuple(outputs)
+            if any(not isinstance(output, torch.Tensor) for output in output_tensors):
+                raise TypeError(
+                    "TorchInfer supports only torch.Tensor outputs, sequences of torch.Tensor outputs, "
+                    "or mappings of named torch.Tensor outputs"
+                )
+            return tuple(f"output_{index}" for index in range(len(output_tensors))), output_tensors
+        if isinstance(outputs, Mapping):
+            output_names: list[str] = []
+            output_tensors: list[torch.Tensor] = []
+            for name, output in outputs.items():
+                if not isinstance(name, str):
+                    raise TypeError(f"TorchInfer mapping output names must be strings, got {type(name)!r}")
+                if not isinstance(output, torch.Tensor):
+                    continue
+                output_names.append(name)
+                output_tensors.append(output)
+            if output_tensors:
+                return tuple(output_names), tuple(output_tensors)
+            raise TypeError("TorchInfer mapping outputs must contain at least one torch.Tensor value")
+        raise TypeError(
+            "TorchInfer supports only torch.Tensor outputs, sequences of torch.Tensor outputs, "
+            "or mappings of named torch.Tensor outputs"
+        )
 
 
 @Operator
