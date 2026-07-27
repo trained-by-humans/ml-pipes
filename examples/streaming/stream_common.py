@@ -6,15 +6,41 @@ import sys
 import threading
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import cv2
 
 
-def get_stream_url(youtube_url: str) -> str:
-    import yt_dlp
-    with yt_dlp.YoutubeDL({"format": "best[ext=mp4]/best", "quiet": True}) as ydl:
-        info = ydl.extract_info(youtube_url, download=False)
-        return info["url"]
+def _is_youtube_page_url(value: str) -> bool:
+    host = (urlparse(value).hostname or "").lower()
+    return host == "youtu.be" or host.endswith(".youtu.be") or host == "youtube.com" or host.endswith(".youtube.com")
+
+
+def resolve_stream_source(url: str) -> str:
+    """Resolve a YouTube page URL to a playable stream URL, or pass direct sources through unchanged."""
+    if not _is_youtube_page_url(url):
+        return url
+
+    try:
+        import yt_dlp
+    except ImportError as exc:
+        raise RuntimeError(
+            "yt-dlp is required to resolve YouTube page URLs. Install it with "
+            "'python -m pip install yt-dlp', or pass a direct stream URL with --url."
+        ) from exc
+
+    try:
+        with yt_dlp.YoutubeDL({"format": "best[ext=mp4]/best", "quiet": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        raise RuntimeError(
+            "Failed to resolve the YouTube stream URL. Retry later or pass a direct stream URL with --url."
+        ) from exc
+
+    stream_url = info.get("url")
+    if not isinstance(stream_url, str) or not stream_url:
+        raise RuntimeError("yt-dlp did not return a playable stream URL.")
+    return stream_url
 
 
 class FrameReader:
@@ -123,7 +149,7 @@ def add_streaming_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--url",
         default="https://www.youtube.com/watch?v=dfVK7ld38Ys",
-        help="YouTube live URL.",
+        help="YouTube page URL or direct stream URL.",
     )
     parser.add_argument(
         "--workers",

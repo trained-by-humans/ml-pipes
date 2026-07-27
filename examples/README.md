@@ -128,6 +128,7 @@ python examples/run_yolo8_onnx.py --input path/to/photo.jpg --model-path path/to
 | `run_rfdetr_nano.py` | DETR-style detector | detection | `Scale` for normalized boxes, softmax logits |
 | `run_yolo11n_seg.py` | YOLO11n-seg | instance segmentation | prototype masks, `ReconstructMasks` + `FilterBy` |
 | `run_maskrcnn.py` | Mask R-CNN int8 | instance segmentation | CNN family, NMS baked in, 28x28 RoI masks, BGR mean subtraction |
+| `run_yolo8_video.py` | YOLOv8 | video detection | sequential video-file baseline |
 | `run_yolo8_batch.py` | YOLOv8 | batch detection | simple batch region usage |
 | `run_yolo8_tile.py` | YOLOv8 | tiled detection | tile and merge style pipeline |
 
@@ -219,28 +220,37 @@ python examples/run_sms_spam_prepare.py --inspect-html report.html
 | Example | Model | Task | Notes |
 |---|---|---|---|
 | `streaming/run_yolo8_webcam.py` | YOLOv8 | live detection | reads from the default camera; press Q to quit |
-| `run_yolo8_video.py` | YOLOv8 | video detection | sequential baseline; auto-downloads OpenCV's `vtest.avi` sample |
-| `streaming/run_shibuya_counter.py` | CSRNet + detector | crowd counting pipeline |
-| `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation |
+| `streaming/run_shibuya_counter.py` | YOLOv8 | detection-based crowd counting | default YouTube source needs `yt-dlp`; direct stream URLs do not |
+| `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation | default YouTube source needs `yt-dlp`; also requires `torch` |
 
 Common args in this section:
 
 | Arg | Common in | Meaning |
 |---|---|---|
-| `--url <stream-url>` | live stream examples | Override the default stream source. |
+| `--url <stream-url>` | live stream examples | Pass a YouTube page URL or a direct playable stream URL. |
 | `--workers N` | live stream examples | Control how many inference workers run in parallel. |
 | `--stride N` | live stream examples | Process every `N`th frame instead of every frame. |
-| `--target-fps N` | throughput-measured stream examples | Set the target or fallback FPS used by throughput reporting. |
+| `--target-fps N` | throughput-measured stream examples | Set the fallback FPS used when the stream source does not report one. |
 
 Extra setup for specific streaming entries:
 
-`streaming/run_shibuya_csrnet.py` and `streaming/run_shibuya_counter.py`
-need the same Torch setup described in [Torch And Domain Handoff](#torch-and-domain-handoff).
+The Shibuya stream examples use a default YouTube page URL. Install `yt-dlp`
+to resolve that default, or pass a direct stream URL with `--url`:
+
+```bash
+python -m pip install yt-dlp
+```
+
+`streaming/run_shibuya_csrnet.py` also requires Torch:
+
+```bash
+python -m pip install torch
+```
 
 Example command:
 
 ```bash
-python examples/run_yolo8_video.py
+python examples/streaming/run_yolo8_webcam.py
 ```
 
 ## Torch And Domain Handoff

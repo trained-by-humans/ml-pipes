@@ -97,7 +97,7 @@ def main() -> int:
         if not ret:
             break
 
-        source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
+        source = ImagePayload(array=frame)
         annotated = pipeline(source)
         writer.write(annotated.array)
 
