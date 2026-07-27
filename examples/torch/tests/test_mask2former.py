@@ -25,18 +25,20 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from examples.torch.mask2former_infer import (  # noqa: E402
-    LoadedMask2Former,
-    Mask2FormerInfer,
-    build_mask2former_preprocess_pipeline,
+    Mask2FormerBundle,
+    PrepareHFImageInputs,
+    build_mask2former_infer_pipeline,
+    build_mask2former_forward,
 )
 from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFromQueries  # noqa: E402
 from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries  # noqa: E402
 from ml_pipes.core import Pipeline  # noqa: E402
 from ml_pipes.standard import Recall  # noqa: E402
 from ml_pipes.tensor import ArgMax  # noqa: E402
-from ml_pipes.tensor import TensorRegistry  # noqa: E402
-from ml_pipes.torch import TorchArgMax  # noqa: E402
+from ml_pipes.tensor import TensorPayload, TensorRegistry  # noqa: E402
+from ml_pipes.torch import ToTorch, TorchArgMax, TorchExtract, TorchInfer  # noqa: E402
 from ml_pipes.torch.types import TorchTensorRegistry  # noqa: E402
+from ml_pipes.vision import ImagePayload  # noqa: E402
 
 
 def _write_png(path: Path, image: np.ndarray) -> None:
@@ -51,10 +53,10 @@ class _FakeProcessor:
         self.last_image: np.ndarray | None = None
         self.last_return_tensors: str | None = None
 
-    def __call__(self, *, images: np.ndarray, return_tensors: str) -> dict[str, torch.Tensor]:
+    def __call__(self, *, images: np.ndarray, return_tensors: str) -> dict[str, np.ndarray]:
         self.last_image = images
         self.last_return_tensors = return_tensors
-        pixel_values = torch.from_numpy(np.transpose(images, (2, 0, 1))).unsqueeze(0).to(dtype=torch.float32)
+        pixel_values = np.transpose(images, (2, 0, 1))[None, ...].astype(np.float32, copy=False)
         return {"pixel_values": pixel_values}
 
 
@@ -68,65 +70,110 @@ class _FakeModel(torch.nn.Module):
         )
 
 
-def test_mask2former_preprocess_pipeline_produces_rgb_array_and_preserves_stored_values(tmp_path: Path) -> None:
+def test_mask2former_infer_pipeline_preserves_stored_values_and_exposes_model_outputs(tmp_path: Path) -> None:
     image_path = tmp_path / "sample.png"
     image = np.array([[[10, 20, 30], [40, 50, 60]]], dtype=np.uint8)
     _write_png(image_path, image)
+    processor = _FakeProcessor()
+    bundle = Mask2FormerBundle(
+        task="instance",
+        model_id="fake/mask2former",
+        processor=processor,
+        model=_FakeModel(),
+        class_names=["a", "b"],
+        thing_class_ids=frozenset({0, 1}),
+    )
 
-    pipeline = build_mask2former_preprocess_pipeline() + Pipeline([Recall("source_image"), Recall("image_shape")])
+    pipeline = build_mask2former_infer_pipeline(bundle, "cpu") + Pipeline([Recall("source_image"), Recall("image_shape")])
 
-    rgb, source_image, image_shape = pipeline(image_path)
+    registry, source_image, image_shape = pipeline(image_path)
 
-    assert isinstance(rgb, np.ndarray)
-    assert rgb.flags.c_contiguous
-    assert rgb.tolist() == [[[30, 20, 10], [60, 50, 40]]]
+    assert processor.last_image is not None
+    assert processor.last_return_tensors == "np"
+    assert processor.last_image.tolist() == [[[30, 20, 10], [60, 50, 40]]]
+    assert isinstance(registry, TorchTensorRegistry)
+    assert tuple(registry["class_queries_logits"].shape) == (2, 3)
+    assert tuple(registry["masks_queries_logits"].shape) == (2, 3, 4)
     assert source_image.color_space == "BGR"
     assert source_image.layout == "HWC"
     assert source_image.array.tolist() == image.tolist()
     assert image_shape == (1, 2)
 
 
-def test_mask2former_infer_consumes_hugging_face_ready_array() -> None:
+def test_prepare_hf_image_inputs_consumes_hugging_face_ready_array() -> None:
     processor = _FakeProcessor()
-    bundle = LoadedMask2Former(
-        task="instance",
-        model_id="fake/mask2former",
-        processor=processor,
-        model=_FakeModel(),
-        class_names=["a", "b"],
-        thing_class_ids=frozenset({0, 1}),
-    )
-    image = np.zeros((3, 4, 3), dtype=np.uint8)
+    image = ImagePayload(array=np.zeros((3, 4, 3), dtype=np.uint8), color_space="RGB", layout="HWC")
 
-    result = Mask2FormerInfer(bundle=bundle, device="cpu")(image)
+    result = PrepareHFImageInputs(processor=processor, output_key="pixel_values")(image)
 
-    assert processor.last_image is image
-    assert processor.last_return_tensors == "pt"
-    assert tuple(result["class_queries_logits"].shape) == (2, 3)
-    assert tuple(result["masks_queries_logits"].shape) == (2, 3, 4)
+    assert processor.last_image is image.array
+    assert processor.last_return_tensors == "np"
+    assert isinstance(result, TensorPayload)
+    assert result.layout == "NCHW"
+    assert result.dtype == "float32"
+    assert tuple(result.array.shape) == (1, 3, 3, 4)
 
 
-def test_mask2former_infer_rejects_non_contiguous_array() -> None:
+def test_prepare_hf_image_inputs_rejects_non_contiguous_array() -> None:
     processor = _FakeProcessor()
-    bundle = LoadedMask2Former(
-        task="instance",
-        model_id="fake/mask2former",
-        processor=processor,
-        model=_FakeModel(),
-        class_names=["a", "b"],
-        thing_class_ids=frozenset({0, 1}),
+    image = ImagePayload(
+        array=np.zeros((4, 4, 3), dtype=np.uint8)[:, ::2, :],
+        color_space="RGB",
+        layout="HWC",
     )
-    image = np.zeros((4, 4, 3), dtype=np.uint8)[:, ::2, :]
 
-    assert not image.flags.c_contiguous
+    assert not image.array.flags.c_contiguous
 
-    with pytest.raises(ValueError, match="contiguous RGB ndarray"):
-        Mask2FormerInfer(bundle=bundle, device="cpu")(image)
+    with pytest.raises(ValueError, match="contiguous image array"):
+        PrepareHFImageInputs(processor=processor, output_key="pixel_values")(image)
+
+
+def test_prepare_hf_image_inputs_supports_custom_contract() -> None:
+    class _CustomProcessor:
+        def __call__(self, *, images: np.ndarray, return_tensors: str) -> dict[str, np.ndarray]:
+            assert return_tensors == "np"
+            return {"inputs": images[None, ...].astype(np.float32, copy=False)}
+
+    image = ImagePayload(
+        array=np.zeros((3, 5, 7), dtype=np.uint8),
+        color_space="RGB",
+        layout="CHW",
+    )
+
+    result = PrepareHFImageInputs(
+        processor=_CustomProcessor(),
+        output_key="inputs",
+        input_layout="CHW",
+        input_channels=3,
+        output_layout="NCHW",
+        require_contiguous=False,
+    )(image)
+
+    assert isinstance(result, TensorPayload)
+    assert result.layout == "NCHW"
+    assert result.dtype == "float32"
+    assert tuple(result.array.shape) == (1, 3, 5, 7)
+
+
+def test_mask2former_forward_adapter_exposes_model_outputs() -> None:
+    processor = _FakeProcessor()
+    image = ImagePayload(array=np.zeros((3, 4, 3), dtype=np.uint8), color_space="RGB", layout="HWC")
+
+    pixel_values = PrepareHFImageInputs(processor=processor, output_key="pixel_values")(image)
+    outputs = TorchInfer(
+        build_mask2former_forward(_FakeModel()),
+        input_layout="NCHW",
+        output_names=("class_queries_logits", "masks_queries_logits"),
+    )(ToTorch(device="cpu")(pixel_values))
+    registry = TorchExtract("class_queries_logits", "masks_queries_logits")(outputs)
+
+    assert tuple(registry["class_queries_logits"].shape) == (2, 3)
+    assert tuple(registry["masks_queries_logits"].shape) == (2, 3, 4)
 
 
 def test_mask2former_boundary_pipeline_validates() -> None:
     processor = _FakeProcessor()
-    bundle = LoadedMask2Former(
+    bundle = Mask2FormerBundle(
         task="instance",
         model_id="fake/mask2former",
         processor=processor,
@@ -136,8 +183,7 @@ def test_mask2former_boundary_pipeline_validates() -> None:
     )
 
     contract = (
-        build_mask2former_preprocess_pipeline()
-        + Pipeline([Mask2FormerInfer(bundle=bundle, device="cpu")])
+        build_mask2former_infer_pipeline(bundle, "cpu")
     ).validate()
 
     assert contract is not None

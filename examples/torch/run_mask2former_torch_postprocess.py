@@ -42,9 +42,8 @@ from ml_pipes.torch import (
 )
 from ml_pipes.torch.types import TorchTensorRegistry
 from .mask2former_infer import (
-    Mask2FormerInfer,
-    LoadedMask2Former,
-    build_mask2former_preprocess_pipeline,
+    Mask2FormerBundle,
+    build_mask2former_infer_pipeline,
     resolve_output_path,
     resolve_task_list,
 )
@@ -181,9 +180,6 @@ class TorchPanopticSegmentsFromQueries:
         registry["classes"] = classes
         return registry
 
-
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -215,8 +211,9 @@ def main() -> int:
     download_if_missing(COCO_IMAGE_URL, image_path)
 
     for task in resolve_task_list(args.task):
-        bundle = LoadedMask2Former.load(task=task, device=args.device)
+        bundle = Mask2FormerBundle.load(task=task, device=args.device)
         output_path = resolve_output_path(args.output, task, "torch")
+        infer_pipeline = build_mask2former_infer_pipeline(bundle, args.device)
         record_fields = {
             "index": lambda p: list(range(len(p.classes))),
             "class_id": "classes",
@@ -229,8 +226,7 @@ def main() -> int:
         }
 
         if task == "panoptic":
-            pipeline = Pipeline([
-                Mask2FormerInfer(bundle=bundle, device=args.device),
+            postprocess_pipeline = Pipeline([
                 Recall("image_shape"),
                 TorchResizeMasks(masks="masks_queries_logits"),
                 TorchSoftmax("class_queries_logits", as_="class_probs"),
@@ -260,8 +256,7 @@ def main() -> int:
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
         else:
-            pipeline = Pipeline([
-                Mask2FormerInfer(bundle=bundle, device=args.device),
+            postprocess_pipeline = Pipeline([
                 Recall("image_shape"),
                 TorchResizeMasks(masks="masks_queries_logits"),
                 TorchSoftmax("class_queries_logits", as_="class_probs"),
@@ -289,7 +284,7 @@ def main() -> int:
                 LogDetections(bundle.model_id, image_path, output_path, at=1),
             ])
 
-        pipeline = build_mask2former_preprocess_pipeline() + pipeline
+        pipeline = infer_pipeline + postprocess_pipeline
         pipeline.validate()
         pipeline(image_path)
 

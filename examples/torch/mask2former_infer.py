@@ -2,23 +2,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import torch
 
 from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, build_output_path
 from ml_pipes.core import Pipeline
-from ml_pipes.standard import (
-    Select,
-    Store,
-)
+from ml_pipes.standard import Store
+from ml_pipes.tensor import TensorPayload
+from ml_pipes.torch import ToTorch, TorchExtract, TorchInfer
+from ml_pipes.torch.types import TorchTensorRegistry
 from ml_pipes.vision import (
     ConvertColorSpace,
     Decode,
+    ImagePayload,
     LoadFile,
 )
-from ml_pipes.torch.types import TorchTensorRegistry
 
 MASK2FORMER_MODEL_IDS: dict[str, str] = {
     "panoptic": "facebook/mask2former-swin-tiny-coco-panoptic",
@@ -40,7 +40,7 @@ def _require_transformers() -> tuple[Any, Any]:
 
 
 @dataclass(frozen=True)
-class LoadedMask2Former:
+class Mask2FormerBundle:
     task: str
     model_id: str
     processor: Any
@@ -49,7 +49,7 @@ class LoadedMask2Former:
     thing_class_ids: frozenset[int]
 
     @classmethod
-    def load(cls, task: str, device: str) -> LoadedMask2Former:
+    def load(cls, task: str, device: str) -> Mask2FormerBundle:
         AutoImageProcessor, Mask2FormerForUniversalSegmentation = _require_transformers()
         model_id = MASK2FORMER_MODEL_IDS[task]
         processor = AutoImageProcessor.from_pretrained(model_id)
@@ -68,30 +68,72 @@ class LoadedMask2Former:
         )
 
 
-class Mask2FormerInfer:
-    def __init__(self, bundle: LoadedMask2Former, device: str) -> None:
-        self.bundle = bundle
-        self.device = device
+class PrepareHFImageInputs:
+    def __init__(
+        self,
+        processor: Any,
+        *,
+        output_key: str,
+        input_layout: str = "HWC",
+        input_color_space: str = "RGB",
+        input_channels: int | None = 3,
+        output_layout: str = "NCHW",
+        require_contiguous: bool = True,
+    ) -> None:
+        self.processor = processor
+        self.output_key = output_key
+        self.input_layout = input_layout
+        self.input_color_space = input_color_space
+        self.input_channels = input_channels
+        self.output_layout = output_layout
+        self.require_contiguous = require_contiguous
 
-    def __call__(self, image: np.ndarray) -> TorchTensorRegistry:
-        if image.ndim != 3 or image.shape[-1] != 3:
+    def __call__(self, image: ImagePayload) -> TensorPayload:
+        if image.layout != self.input_layout or image.color_space != self.input_color_space:
             raise ValueError(
-                f"Mask2FormerInfer expects an HWC RGB ndarray with 3 channels, got shape {image.shape!r}"
+                "PrepareHFImageInputs expects the configured ImagePayload contract, "
+                f"got layout={image.layout!r} color_space={image.color_space!r}"
             )
-        if not image.flags.c_contiguous:
-            raise ValueError("Mask2FormerInfer expects a contiguous RGB ndarray")
-        pixel_values = self.bundle.processor(images=image, return_tensors="pt")["pixel_values"].to(self.device)
-        with torch.inference_mode():
-            outputs = self.bundle.model(pixel_values=pixel_values)
-        return TorchTensorRegistry(
-            {
-                "class_queries_logits": outputs.class_queries_logits[0],
-                "masks_queries_logits": outputs.masks_queries_logits[0],
-            }
+        if image.array.ndim != len(self.input_layout):
+            raise ValueError(
+                "PrepareHFImageInputs expects an image matching the configured layout rank, "
+                f"got shape {image.array.shape!r}"
+            )
+        if self.input_channels is not None:
+            try:
+                channel_axis = self.input_layout.index("C")
+            except ValueError as exc:
+                raise ValueError(
+                    f"PrepareHFImageInputs input_layout={self.input_layout!r} must contain 'C' when input_channels is set"
+                ) from exc
+            if image.array.shape[channel_axis] != self.input_channels:
+                raise ValueError(
+                    "PrepareHFImageInputs expects the configured channel count, "
+                    f"got shape {image.array.shape!r}"
+                )
+        if self.require_contiguous and not image.array.flags.c_contiguous:
+            raise ValueError("PrepareHFImageInputs expects a contiguous image array")
+        outputs = self.processor(images=image.array, return_tensors="np")
+        pixel_values = np.asarray(outputs[self.output_key])
+        return TensorPayload(
+            array=pixel_values,
+            layout=self.output_layout,
+            dtype=str(pixel_values.dtype),
         )
 
 
-def build_mask2former_preprocess_pipeline() -> Pipeline[str | Path, np.ndarray]:
+def build_mask2former_forward(model: torch.nn.Module) -> Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]]:
+    def forward(pixel_values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        outputs = model(pixel_values=pixel_values)
+        return outputs.class_queries_logits[0], outputs.masks_queries_logits[0]
+
+    return forward
+
+
+def build_mask2former_infer_pipeline(
+    bundle: Mask2FormerBundle,
+    device: str,
+) -> Pipeline[str | Path, TorchTensorRegistry]:
     return Pipeline(
         [
             LoadFile(),
@@ -99,7 +141,14 @@ def build_mask2former_preprocess_pipeline() -> Pipeline[str | Path, np.ndarray]:
             Store("source_image"),
             Store("image_shape", source="spatial_shape"),
             ConvertColorSpace("RGB"),
-            Select("array"),
+            PrepareHFImageInputs(processor=bundle.processor, output_key="pixel_values"),
+            ToTorch(device=device),
+            TorchInfer(
+                build_mask2former_forward(bundle.model),
+                input_layout="NCHW",
+                output_names=("class_queries_logits", "masks_queries_logits"),
+            ),
+            TorchExtract("class_queries_logits", "masks_queries_logits"),
         ]
     )
 
