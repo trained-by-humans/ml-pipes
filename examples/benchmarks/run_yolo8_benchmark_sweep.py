@@ -9,8 +9,8 @@ Use it when you want one comparison table without jumping between separate
 sweep scripts.
 
 Run from the repo root:
-    python examples/benchmarks/run_yolo8_benchmark_sweep.py --model n --runs 20
-    python examples/benchmarks/run_yolo8_benchmark_sweep.py --model s --save results/
+    python examples/benchmarks/run_yolo8_benchmark_sweep.py --runs 20
+    python examples/benchmarks/run_yolo8_benchmark_sweep.py --model-path path/to/model.onnx --save results/
 
 See `docs/BENCHMARKING.md` for shared sweep concepts, measurement options, and
 factory rules.
@@ -35,10 +35,10 @@ from examples.common import (
     build_output_path,
     decode,
     resolve_input_path,
+    resolve_model_path,
     visualize_detections_and_store,
 )
-from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant
-from examples.run_yolo8_onnx import yolo8_inference_pipeline
+from examples.run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
 from ml_pipes.core import Pipeline
@@ -50,59 +50,57 @@ from ml_pipes.vision import (
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
-_DEFAULT_MODEL_VARIANT = "n"
-_DEFAULT_MODEL_NAME, _DEFAULT_MODEL_PATH = resolve_model_variant(_DEFAULT_MODEL_VARIANT)
-_DEFAULT_OUTPUT_PATH = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, _DEFAULT_MODEL_NAME)
-
-
+_DEFAULT_MODEL_PATH = BUNDLED_MODEL_PATH
 @pipeline_factory
 def yolo8_plain_benchmark_pipeline(
     model_path: Path = _DEFAULT_MODEL_PATH,
-    output_path: Path = _DEFAULT_OUTPUT_PATH,
+    output_path: Path | None = None,
 ) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+    resolved_model_path = resolve_model_path(model_path, BUNDLED_MODEL_PATH)
+    resolved_output_path = output_path or build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, resolved_model_path.name)
     return (
         decode()
-        + yolo8_inference_pipeline(model_path)
-        + visualize_detections_and_store(output_path, COCO_CLASSES)
+        + yolo8_inference_pipeline(resolved_model_path)
+        + visualize_detections_and_store(resolved_output_path, COCO_CLASSES)
     )
 
 
 @pipeline_factory
 def yolo8_tiled_benchmark_pipeline(
     model_path: Path = _DEFAULT_MODEL_PATH,
-    output_path: Path = _DEFAULT_OUTPUT_PATH,
+    output_path: Path | None = None,
     slice_wh: tuple[int, int] = (320, 320),
     overlap_wh: tuple[int, int] = (80, 80),
 ) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+    resolved_model_path = resolve_model_path(model_path, BUNDLED_MODEL_PATH)
+    resolved_output_path = output_path or build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, resolved_model_path.name)
     return (
         decode()
         + yolo8_tiled_pipeline(
-            model_path,
+            resolved_model_path,
             slice_wh=slice_wh,
             overlap_wh=overlap_wh,
         )
-        + visualize_detections_and_store(output_path, COCO_CLASSES)
+        + visualize_detections_and_store(resolved_output_path, COCO_CLASSES)
     )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--model",
-        choices=list(YOLO8_MODELS),
-        default="n",
-        help=f"Model variant ({' → '.join(YOLO8_MODELS)}).",
+        "--model-path",
+        type=Path,
+        default=None,
+        help="Path to a local ONNX model. Defaults to the bundled yolov8n model.",
     )
     parser.add_argument("--runs", type=int, default=20, help="Measured runs per cell (default: 20).")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup runs per cell (default: 3).")
     parser.add_argument("--save", type=Path, default=None, help="Directory to save per-cell result JSON files.")
     args = parser.parse_args()
 
-    model_name, model_path = resolve_model_variant(args.model)
-
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     image_path = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
-
-    output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
+    output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_path.name)
 
     input_fn = lambda: (image_path.name, image_path, None, None)
 

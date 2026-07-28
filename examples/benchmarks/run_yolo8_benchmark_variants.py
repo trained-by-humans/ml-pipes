@@ -30,10 +30,10 @@ from examples.common import (
     COCO_IMAGE_URL,
     build_output_path,
     decode,
+    download_if_missing,
     resolve_input_path,
     visualize_detections_and_store,
 )
-from examples.benchmarks.benchmark_common import YOLO8_MODELS, resolve_model_variant
 from examples.run_yolo8_onnx import yolo8_inference_pipeline
 
 from ml_pipes.core import Pipeline
@@ -43,6 +43,34 @@ from ml_pipes.vision import (
     ImagePayload,
 )
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
+
+
+YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
+    "n": ("yolov8n.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx"),
+    "s": ("yolov8s.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx"),
+    "m": ("yolov8m.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8m.onnx"),
+    "l": ("yolov8l.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8l.onnx"),
+    "x": ("yolov8x.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8x.onnx"),
+}
+
+
+def _try_resolve_model_variant(variant: str) -> tuple[str, Path] | None:
+    model_name, model_url = YOLO8_MODELS[variant]
+    model_path = ASSETS_DIR / model_name
+    if model_path.exists():
+        return model_name, model_path
+    if model_url is None:
+        print(f"warning: no download URL configured for variant {variant!r}, skipping", file=sys.stderr)
+        return None
+    try:
+        download_if_missing(model_url, model_path)
+    except Exception as exc:
+        print(f"warning: could not resolve variant {variant!r} ({model_name}): {exc}", file=sys.stderr)
+        return None
+    if not model_path.exists():
+        print(f"warning: model file not found for variant {variant!r}: {model_path}", file=sys.stderr)
+        return None
+    return model_name, model_path
 
 
 @pipeline_factory
@@ -56,6 +84,7 @@ def yolo8_variant_pipeline(
         + yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
         + visualize_detections_and_store(output_path, COCO_CLASSES)
     )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -76,7 +105,10 @@ def main() -> int:
         if variant not in YOLO8_MODELS:
             print(f"warning: unknown variant {variant!r}, skipping", file=sys.stderr)
             continue
-        model_name, model_path = resolve_model_variant(variant)
+        resolved = _try_resolve_model_variant(variant)
+        if resolved is None:
+            continue
+        model_name, model_path = resolved
         output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
         configs.append({"model_path": model_path, "output_path": output_path})
 

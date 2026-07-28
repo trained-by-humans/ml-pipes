@@ -191,16 +191,18 @@ Common args in this section:
 
 | Arg | Common in | Meaning |
 |---|---|---|
+| `--model-path path/to/model.onnx` | single-model benchmarks | Use your own local ONNX model instead of the bundled YOLOv8n default. |
 | `--save path/to/results-dir` | benchmarks | Save benchmark result files under the given directory. |
 | `--runs N` | benchmarks | Control how many repeated runs a benchmark executes. |
 | `--warmup N` | benchmarks | Discard warmup iterations before measurement. |
+| `--variants VARIANT...` | `run_yolo8_benchmark_variants.py` | Choose which YOLOv8 `n/s/m/l/x` variants to compare in the variant sweep. |
 
 The benchmark entries use the base install above.
 
 Example command:
 
 ```bash
-python examples/benchmarks/run_yolo8_benchmark_sweep.py --model n --runs 20 --save results/
+python examples/benchmarks/run_yolo8_benchmark_sweep.py --runs 20 --save results/
 ```
 
 ## Data Preparation
