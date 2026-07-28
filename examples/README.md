@@ -278,7 +278,7 @@ python -m pip install transformers safetensors
 Example command:
 
 ```bash
-python examples/torch/run_mask2former_torch_postprocess.py --task panoptic --output mask2former.png
+python examples/torch/run_mask2former_torch_postprocess.py
 ```
 
 ## Inference Endpoint

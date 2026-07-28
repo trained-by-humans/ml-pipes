@@ -149,12 +149,6 @@ def build_mask2former_infer_pipeline(
             TorchSqueeze("masks_queries_logits", axis=0),
         ]
     )
-
-
-def resolve_task_list(task: str) -> list[str]:
-    return ["panoptic", "instance"] if task == "both" else [task]
-
-
 def resolve_output_path(
     requested_output: Path | None,
     task: str,
