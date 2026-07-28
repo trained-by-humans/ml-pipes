@@ -33,7 +33,7 @@ from examples.common import (
     COCO_IMAGE_URL,
     build_output_path,
     decode,
-    download_if_missing,
+    resolve_input_path,
     resolve_model_path,
     visualize_detections_and_store,
 )
@@ -53,8 +53,8 @@ from ml_pipes.benchmark import InputFn
 
 @pipeline_factory
 def yolo8_tiled_benchmark_pipeline(
-    model_path: Path | None = None,
-    output_path: Path | None = None,
+    model_path: str | None = None,
+    output_path: str | None = None,
     slice_wh: tuple[int, int] = (320, 320),
     overlap_wh: tuple[int, int] = (80, 80),
     conf_threshold: float = 0.25,
@@ -62,8 +62,20 @@ def yolo8_tiled_benchmark_pipeline(
 ) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
     """Tiled YOLOv8 pipeline — the target pipeline for CLI benchmarking."""
     from examples.run_yolo8_tile import yolo8_tiled_pipeline
-    resolved_model_path = resolve_model_path(model_path, BUNDLED_MODEL_PATH)
-    resolved_output_path = output_path or build_output_path(ASSETS_DIR, "run_yolo8_benchmark_cli_tiled.jpg", resolved_model_path.name)
+
+    resolved_model_path = resolve_model_path(
+        Path(model_path) if model_path is not None else None,
+        BUNDLED_MODEL_PATH,
+    )
+    resolved_output_path = (
+        Path(output_path)
+        if output_path is not None
+        else build_output_path(
+            ASSETS_DIR,
+            "run_yolo8_benchmark_cli_tiled.jpg",
+            resolved_model_path.name,
+        )
+    )
     return (
         decode()
         + yolo8_tiled_pipeline(
@@ -79,10 +91,16 @@ def yolo8_tiled_benchmark_pipeline(
 
 @data_factory
 def coco_sample_input(
-    image_path: Path = ASSETS_DIR / COCO_IMAGE_NAME,
+    image_path: str | None = None,
 ) -> InputFn:
     """Downloads the standard COCO sample image if needed and returns an InputFn."""
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    resolved_image_path = resolve_input_path(
+        Path(image_path) if image_path is not None else None,
+        ASSETS_DIR / COCO_IMAGE_NAME,
+        COCO_IMAGE_URL,
+    )
+
     def fn():
-        return (image_path.name, image_path, None, None)
+        return (resolved_image_path.name, resolved_image_path, None, None)
+
     return fn
