@@ -142,8 +142,8 @@ def _try_resolve_model_variant(variant: str) -> tuple[str, Path] | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--variants", nargs="+", default=list(YOLO8_MODELS),
-        metavar="VARIANT", help=f"Model variants to benchmark (default: {' '.join(YOLO8_MODELS)}).",
+        "--variants", nargs="+", default=["n", "s"],
+        metavar="VARIANT", help="Model variants to benchmark (default: n s).",
     )
     parser.add_argument("--runs", type=int, default=20, help="Measured runs per variant (default: 20).")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup runs per variant (default: 3).")

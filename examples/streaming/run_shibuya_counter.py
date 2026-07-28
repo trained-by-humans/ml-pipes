@@ -70,7 +70,7 @@ from ml_pipes.vision import (
     ToDetections,
 )
 
-_PERSON_CLASS_IDS = {0}  # COCO: 0=person
+_PERSON_CLASS_ID = 0  # COCO: person
 _MAX_PERSON_AREA = 1_000  # px² — keeps the count focused on smaller pedestrians in the crowd
 
 
@@ -96,7 +96,7 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePa
             "boxes",
             "scores",
             "classes",
-            keep_classes=_PERSON_CLASS_IDS,
+            keep_classes={_PERSON_CLASS_ID},
         ),
         ConvertBoxFormat(from_="cxcywh"),
         NMS(conf_threshold=conf_threshold),
@@ -128,7 +128,7 @@ def build_pipeline(
     ], auto_validate=True) if tile else _infer_pipeline(model_path, conf_threshold)
 
     postprocess = Pipeline([
-        FilterPredictionsByClass(_PERSON_CLASS_IDS),
+        FilterPredictionsByClass({_PERSON_CLASS_ID}),
         FilterPredictionsByArea(max_area=_MAX_PERSON_AREA),
         Store("filtered_detections"),
         Map(_count_detections),
@@ -235,9 +235,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+
     model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     pipeline = build_pipeline(model_path, args.conf_threshold, args.tile)
     pipeline.validate()
+
     mode = "tiled" if args.tile else "standard"
     return run_stream(
         url=args.url,

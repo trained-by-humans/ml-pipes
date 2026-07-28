@@ -162,8 +162,12 @@ def main() -> int:
         # Repeat the sample image to fill the thread pool and demonstrate batching.
         image_paths = [sample] * args.workers
 
-    pipeline = build_pipeline(model_path, args.batch_size, args.timeout,
-                              serialize=not args.no_serialize)
+    pipeline = build_pipeline(
+        model_path,
+        args.batch_size,
+        args.timeout,
+        serialize=not args.no_serialize,
+    )
     pipeline.describe()
     pipeline.set_tracing(PrintCollector())
 
