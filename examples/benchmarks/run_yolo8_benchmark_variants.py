@@ -32,9 +32,10 @@ from examples.common import (
     decode,
     download_if_missing,
     resolve_input_path,
+    resolve_model_path,
     visualize_detections_and_store,
 )
-from examples.run_yolo8_onnx import yolo8_inference_pipeline
+from examples.run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 
 from ml_pipes.core import Pipeline
 from ml_pipes.factory import pipeline_factory
@@ -54,6 +55,21 @@ YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
 }
 
 
+@pipeline_factory
+def yolo8_variant_pipeline(
+    model_path: Path | None = None,
+    output_path: Path | None = None,
+    conf_threshold: float = 0.25,
+) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+    resolved_model_path = resolve_model_path(model_path, BUNDLED_MODEL_PATH, YOLO8_MODELS["n"][1])
+    resolved_output_path = output_path or build_output_path(ASSETS_DIR, "run_yolo8_benchmark_variants.jpg", resolved_model_path.name)
+    return (
+        decode()
+        + yolo8_inference_pipeline(resolved_model_path, conf_threshold=conf_threshold)
+        + visualize_detections_and_store(resolved_output_path, COCO_CLASSES)
+    )
+
+
 def _try_resolve_model_variant(variant: str) -> tuple[str, Path] | None:
     model_name, model_url = YOLO8_MODELS[variant]
     model_path = ASSETS_DIR / model_name
@@ -71,19 +87,6 @@ def _try_resolve_model_variant(variant: str) -> tuple[str, Path] | None:
         print(f"warning: model file not found for variant {variant!r}: {model_path}", file=sys.stderr)
         return None
     return model_name, model_path
-
-
-@pipeline_factory
-def yolo8_variant_pipeline(
-    model_path: Path = ASSETS_DIR / "yolov8n.onnx",
-    output_path: Path = ASSETS_DIR / "out.jpg",
-    conf_threshold: float = 0.25,
-) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
-    return (
-        decode()
-        + yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
-        + visualize_detections_and_store(output_path, COCO_CLASSES)
-    )
 
 
 def main() -> int:
@@ -108,9 +111,8 @@ def main() -> int:
         resolved = _try_resolve_model_variant(variant)
         if resolved is None:
             continue
-        model_name, model_path = resolved
-        output_path = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, model_name)
-        configs.append({"model_path": model_path, "output_path": output_path})
+        _, model_path = resolved
+        configs.append({"model_path": model_path})
 
     if not configs:
         print("error: no model variants available — download at least one model file first", file=sys.stderr)
