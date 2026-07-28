@@ -1,3 +1,13 @@
+"""
+Tiled YOLOv8 crowd counting on a live stream.
+
+The default source is a YouTube page URL, so `yt-dlp` is required unless you
+pass a direct stream URL with `--url`.
+
+Run from the repo root:
+    python examples/streaming/run_shibuya_counter.py
+    python examples/streaming/run_shibuya_counter.py --url <stream-url> --workers 4
+"""
 from __future__ import annotations
 
 import argparse
@@ -208,12 +218,7 @@ def parse_args() -> argparse.Namespace:
         default=25.0,
         help="Fallback FPS when the stream does not expose one.",
     )
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument(
         "--conf-threshold",
         type=float,

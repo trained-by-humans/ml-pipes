@@ -1,15 +1,13 @@
 """
-YOLOv8 tiled detection example.
+YOLOv8 tiled detection on a sample image.
 
-Tiles the input image into overlapping patches, runs inference on each patch
-in parallel via Scatter/Gather, then stitches detections back and suppresses
-duplicates with NMM. Useful for high-resolution images where small objects
-would be missed at 640×640.
+This example slices the image into overlapping tiles, runs inference per tile,
+and merges the detections with NMM.
 
-Usage:
-    python run_yolo8_tile.py
-    python run_yolo8_tile.py --model-path path/to/model.onnx --slice-wh 320 320 --overlap-wh 80 80
-    python run_yolo8_tile.py --input image.jpg --output result.jpg
+Run from the repo root:
+    python examples/run_yolo8_tile.py
+    python examples/run_yolo8_tile.py --input path/to/photo.jpg --output result.jpg
+    python examples/run_yolo8_tile.py --model-path path/to/model.onnx --slice-wh 320 320 --overlap-wh 80 80
 """
 from __future__ import annotations
 
@@ -77,12 +75,7 @@ def yolo8_tiled_pipeline(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument("--conf-threshold", type=float, default=0.25, help="Minimum confidence score for detections (default: 0.25).")
     parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
     parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")

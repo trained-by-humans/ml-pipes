@@ -1,3 +1,13 @@
+"""
+CSRNet crowd density estimation on a live stream.
+
+Requires `torch`. The default source is a YouTube page URL, so `yt-dlp` is
+required unless you pass a direct stream URL with `--url`.
+
+Run from the repo root:
+    python examples/streaming/run_shibuya_csrnet.py
+    python examples/streaming/run_shibuya_csrnet.py --url <stream-url>
+"""
 from __future__ import annotations
 
 import argparse

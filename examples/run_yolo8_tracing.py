@@ -1,15 +1,13 @@
 """
-Tracing example: per-operator latency breakdown for the YOLOv8 pipeline.
+Trace YOLOv8 pipeline execution on a sample image.
 
-Shows how to attach a TraceCollector to an existing pipeline and inspect
-the InvocationTrace produced by each call — both a single detailed trace
-and a simple aggregate over multiple runs.
+Attaches a `TraceCollector` and prints both a single invocation trace and an
+aggregate summary across repeated runs.
 
-Usage:
-    python run_yolo8_tracing.py
-    python run_yolo8_tracing.py --runs 10
-    python run_yolo8_tracing.py --model-path path/to/model.onnx
-    python run_yolo8_tracing.py --input path/to/photo.jpg
+Run from the repo root:
+    python examples/run_yolo8_tracing.py
+    python examples/run_yolo8_tracing.py --input path/to/photo.jpg
+    python examples/run_yolo8_tracing.py --model-path path/to/model.onnx --runs 10
 """
 from __future__ import annotations
 
@@ -37,12 +35,7 @@ from ml_pipes.collectors import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
     parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")
     parser.add_argument("--runs", type=int, default=5, help="Number of inference runs for aggregate stats.")

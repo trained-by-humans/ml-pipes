@@ -1,3 +1,15 @@
+"""
+Batched YOLOv8 detection across multiple images.
+
+Batch and `UnBatch` delimit the shared inference region so multiple threads
+can feed one ONNX call. Requires `ultralytics` to export the dynamic-batch
+YOLOv8n model on first run.
+
+Run from the repo root:
+    python examples/run_yolo8_batch.py
+    python examples/run_yolo8_batch.py --images img1.jpg img2.jpg img3.jpg img4.jpg
+    python examples/run_yolo8_batch.py --batch-size 4 --workers 8
+"""
 from __future__ import annotations
 
 import argparse
@@ -40,27 +52,6 @@ from ml_pipes.vision import (
     Resize,
     ToDetections,
 )
-
-# Batched YOLOv8 detection across multiple images using concurrent threads.
-#
-# Batch and UnBatch delimit a batch region in the pipeline.  When enough
-# threads have reached Batch (or the timeout fires), one thread becomes the
-# leader and runs Collate → Infer → Distribute as a single batched call.
-# The other threads wait and resume with their individual result after UnBatch.
-#
-# The model is exported from Ultralytics with dynamic=True so ONNX Runtime
-# accepts any batch size.  Requires: pip install ultralytics
-#
-# Usage (shown from `examples/`; from repo root, prefix script paths with
-# `examples/`):
-# Runs the sample COCO image 8 times by default:
-#   python run_yolo8_batch.py
-#
-# Run with explicit images:
-#   python run_yolo8_batch.py --images img1.jpg img2.jpg img3.jpg img4.jpg
-#
-# Tune batch size and thread-pool size:
-#   python run_yolo8_batch.py --batch-size 4 --workers 8
 
 MODEL_NAME = "yolov8n_dynamic.onnx"
 

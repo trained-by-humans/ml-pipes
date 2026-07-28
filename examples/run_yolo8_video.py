@@ -1,3 +1,13 @@
+"""
+Sequential YOLOv8 video inference.
+
+Reads a video file frame by frame, runs detection, and writes an annotated
+output video.
+
+Run from the repo root:
+    python examples/run_yolo8_video.py
+    python examples/run_yolo8_video.py --input path/to/video.mp4 --output annotated.mp4
+"""
 from __future__ import annotations
 
 import argparse
@@ -22,17 +32,6 @@ from ml_pipes.vision import (
     ImagePayload,
 )
 
-# Sequential frame-by-frame inference on a video file with YOLOv8.
-#
-# Reads every frame from a video, runs detection, and writes an annotated
-# output video.  This is the single-frame sequential baseline we will later
-# compare against batched inference.
-#
-# Usage (shown from `examples/`; from repo root, prefix script paths with
-# `examples/`):
-#   python run_yolo8_video.py --input clip.mp4
-#   python run_yolo8_video.py --input clip.mp4 --output annotated.mp4
-
 def build_video_annotation_pipeline(model_path: Path) -> Pipeline[ImagePayload, ImagePayload]:
     return Pipeline([
         Store("source_frame"),
@@ -47,12 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Sequential YOLOv8 inference on a video file.",
     )
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument(
         "--input",
         type=Path,

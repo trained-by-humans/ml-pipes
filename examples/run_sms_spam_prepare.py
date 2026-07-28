@@ -1,18 +1,12 @@
 """
 Prepare the UCI SMS Spam Collection for spam-detection training.
 
-The script downloads the dataset on first run, normalizes the text with a
-`data_ops` pipeline, removes duplicates by normalized text, assigns
-deterministic train/validation/test splits, and writes JSONL files ready for
-model training.
+This script downloads the dataset, normalizes and deduplicates the messages,
+creates deterministic splits, and writes JSONL files for training.
 
-Usage:
+Run from the repo root:
     python examples/run_sms_spam_prepare.py
-
-    python examples/run_sms_spam_prepare.py \
-        --lazy \
-        --min-chars 8 \
-        --min-tokens 3 \
+    python examples/run_sms_spam_prepare.py --lazy --min-chars 8 --min-tokens 3 \
         --inspect-html examples/.example_assets/sms_spam_prepare.html
 """
 from __future__ import annotations

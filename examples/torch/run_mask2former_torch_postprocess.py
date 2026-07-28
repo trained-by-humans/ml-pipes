@@ -1,3 +1,12 @@
+"""
+Mask2Former segmentation with Torch-side postprocess.
+
+Requires `torch`, `transformers`, and `safetensors`.
+
+Run from the repo root:
+    python examples/torch/run_mask2former_torch_postprocess.py
+    python examples/torch/run_mask2former_torch_postprocess.py --task panoptic --output mask2former.png
+"""
 from __future__ import annotations
 
 import argparse

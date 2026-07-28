@@ -1,3 +1,10 @@
+"""
+YOLOv8 ONNX detection on a sample image.
+
+Run from the repo root:
+    python examples/run_yolo8_onnx.py
+    python examples/run_yolo8_onnx.py --input path/to/photo.jpg --model-path path/to/model.onnx
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -76,12 +83,7 @@ def yolo8_inference_pipeline(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run YOLOv8 ONNX detection on a COCO image.")
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
     parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")
     args = parser.parse_args()

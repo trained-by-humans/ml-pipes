@@ -1,3 +1,10 @@
+"""
+Live YOLOv8 webcam detection.
+
+Run from the repo root:
+    python examples/streaming/run_yolo8_webcam.py
+    python examples/streaming/run_yolo8_webcam.py --model-path path/to/model.onnx
+"""
 from __future__ import annotations
 
 import argparse
@@ -69,12 +76,7 @@ def run_webcam(pipeline: Pipeline[ImagePayload, ImagePayload]) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Live webcam inference with YOLOv8.")
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     args = parser.parse_args()
 
     model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)

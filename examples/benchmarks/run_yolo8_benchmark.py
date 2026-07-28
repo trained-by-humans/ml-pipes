@@ -43,12 +43,7 @@ from ml_pipes.benchmark import Benchmark, MeasurementConfig
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument("--runs", type=int, default=30, help="Measured runs per benchmark (default: 30).")
     parser.add_argument("--warmup", type=int, default=5, help="Warmup runs discarded before measurement (default: 5).")
     parser.add_argument("--save", type=Path, default=None, help="Directory to save result JSON files.")

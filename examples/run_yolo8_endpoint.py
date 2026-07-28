@@ -1,3 +1,13 @@
+"""
+Minimal YOLOv8 inference endpoint.
+
+Requires `flask`.
+
+Run from the repo root:
+    python examples/run_yolo8_endpoint.py
+    python examples/run_yolo8_endpoint.py --call
+    python examples/run_yolo8_endpoint.py --call --input path/to/photo.jpg
+"""
 from __future__ import annotations
 
 import argparse
@@ -22,28 +32,6 @@ from ml_pipes.vision import (
     Decode,
     MapPredictionsToObjects,
 )
-
-# Minimal YOLOv8 inference endpoint.
-#
-# Requires Flask:
-#   pip install flask
-#
-# Commands below are shown from `examples/`. From the repository root, prefix
-# script paths and asset paths with `examples/`.
-#
-# Start the server:
-#   python run_yolo8_endpoint.py
-#
-# Run a test call (downloads the sample COCO image if needed):
-#   python run_yolo8_endpoint.py --call
-#
-# Or send a specific image:
-#   python run_yolo8_endpoint.py --call --input photo.jpg
-#
-# Or with curl:
-#   curl -s -X POST http://localhost:5000/detect \
-#        -H "Content-Type: application/octet-stream" \
-#        --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
 
 HOST = "localhost"
 PORT = 5000
@@ -93,12 +81,7 @@ def run_call(image_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="YOLOv8 inference endpoint.")
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the bundled yolov8n model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument(
         "--call",
         action="store_true",

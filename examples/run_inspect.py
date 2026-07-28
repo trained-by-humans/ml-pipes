@@ -1,44 +1,14 @@
 """
-Inspection example: visualise the data at every pipeline step.
+Inspect intermediate data for the YOLOv8 example pipelines.
 
-Three pipelines are demonstrated:
+Choose `simple` for the plain image pipeline, `tiled` for sliced inference, or
+`error` for a synthetic mid-pipeline failure.
 
-  Simple   — single image through the full YOLOv8 detection pipeline.
-
-  Tiled    — single image tiled into overlapping 200×200 patches,
-             each tile inferred independently via Scatter, results
-             stitched back and deduplicated with NMM.
-
-  Error    — synthetic mid-pipeline failure; prior steps render normally,
-             the failing step is highlighted, and later steps are absent.
-
-Usage:
-    # Open result in the default web browser (default behavior)
-    python run_inspect.py
-
-    # Use the tiled pipeline
-    python run_inspect.py --pipeline tiled
-
-    # Inspect a synthetic mid-pipeline failure
-    python run_inspect.py --pipeline error
-
-    # Save HTML report to a file (does not open browser)
-    python run_inspect.py --save-html report.html
-
-    # Save a matplotlib figure to a PNG
-    python run_inspect.py --plot inspect.png
-
-    # Save the annotated image for the simple or tiled pipeline
-    python run_inspect.py --output annotated.jpg
-
-    # Serialize result to disk for later analysis
-    python run_inspect.py --dump result.pkl
-
-    # Load a previously serialized result and open it in the browser
-    python run_inspect.py --load result.pkl
-
-    # Print step labels and shapes to stdout only
-    python run_inspect.py --print-only
+Run from the repo root:
+    python examples/run_inspect.py
+    python examples/run_inspect.py --pipeline tiled
+    python examples/run_inspect.py --pipeline error
+    python examples/run_inspect.py --save-html examples/.example_assets/inspect.html
 """
 from __future__ import annotations
 
@@ -179,12 +149,7 @@ def load_or_run_result(args: argparse.Namespace) -> InspectionResult:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model for the simple and tiled pipelines. Defaults to the bundled yolov8n model.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model for the simple and tiled pipelines. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
     parser.add_argument("--output", type=Path, default=None,
                         help="Output image path for the simple and tiled pipelines. Defaults to a file under the assets directory.")

@@ -1,3 +1,10 @@
+"""
+YOLO11n-seg ONNX instance segmentation on a sample image.
+
+Run from the repo root:
+    python examples/run_yolo11n_seg.py
+    python examples/run_yolo11n_seg.py --input path/to/photo.jpg
+"""
 from __future__ import annotations
 
 import argparse
@@ -86,12 +93,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segment
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a YOLO11n-seg ONNX instance segmentation demo on a COCO image.")
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=None,
-        help="Path to a local ONNX model. Defaults to the example model in the assets directory.",
-    )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to downloading the example YOLO11n-seg model.")
     parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
     parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")
     args = parser.parse_args()
