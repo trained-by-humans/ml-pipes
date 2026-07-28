@@ -35,24 +35,73 @@ from examples.common import (
     resolve_model_path,
     visualize_detections_and_store,
 )
-from examples.run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 
 from ml_pipes.core import Pipeline
 from ml_pipes.factory import pipeline_factory
+from ml_pipes.onnx import (
+    Extract,
+    Infer,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
+    ArgMax,
+    GatherScores,
+    Slice,
+    Squeeze,
+    Transpose,
+)
 from ml_pipes.vision import (
+    ConvertBoxFormat,
     Detections,
     ImagePayload,
+    NMS,
+    Normalize,
+    ProjectBoxes,
+    Resize,
+    ToDetections,
 )
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
 YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
-    "n": ("yolov8n.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx"),
-    "s": ("yolov8s.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx"),
-    "m": ("yolov8m.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8m.onnx"),
-    "l": ("yolov8l.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8l.onnx"),
-    "x": ("yolov8x.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8x.onnx"),
+    "n": ("yolov8n_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx"),
+    "s": ("yolov8s_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx"),
+    "m": ("yolov8m_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8m.onnx"),
+    "l": ("yolov8l_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8l.onnx"),
+    "x": ("yolov8x_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8x.onnx"),
 }
+
+
+def yolo8_variant_inference_pipeline(
+    model_path: Path,
+    conf_threshold: float = 0.25,
+) -> Pipeline[ImagePayload, Detections]:
+    return Pipeline(
+        [
+            Resize((640, 640)),
+            Store("resize_transform", source=1),
+            Pick(0),
+            Normalize(),
+            Infer(model_path),
+            Extract("predictions", as_="preds"),
+            Squeeze("preds"),
+            Transpose("preds"),
+            Slice("preds", slice(None, 4), as_="boxes"),
+            Slice("preds", slice(4, None), as_="scores"),
+            ArgMax("scores", as_="classes"),
+            GatherScores("scores", "classes"),
+            ConvertBoxFormat(from_="cxcywh"),
+            NMS(conf_threshold=conf_threshold),
+            Recall("resize_transform"),
+            ProjectBoxes(),
+            ToDetections(),
+        ],
+        auto_validate=True,
+    )
 
 
 @pipeline_factory
@@ -61,11 +110,12 @@ def yolo8_variant_pipeline(
     output_path: Path | None = None,
     conf_threshold: float = 0.25,
 ) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
-    resolved_model_path = resolve_model_path(model_path, BUNDLED_MODEL_PATH, YOLO8_MODELS["n"][1])
+    default_model_name, default_model_url = YOLO8_MODELS["n"]
+    resolved_model_path = resolve_model_path(model_path, ASSETS_DIR / default_model_name, default_model_url)
     resolved_output_path = output_path or build_output_path(ASSETS_DIR, "run_yolo8_benchmark_variants.jpg", resolved_model_path.name)
     return (
         decode()
-        + yolo8_inference_pipeline(resolved_model_path, conf_threshold=conf_threshold)
+        + yolo8_variant_inference_pipeline(resolved_model_path, conf_threshold=conf_threshold)
         + visualize_detections_and_store(resolved_output_path, COCO_CLASSES)
     )
 
