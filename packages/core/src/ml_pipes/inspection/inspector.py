@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import sys
 import tempfile
 import webbrowser
 from collections.abc import Mapping
@@ -353,15 +354,17 @@ class PipelineInspector:
             plt.show()
 
     def show_in_browser(self, result: InspectionResult, orientation: str = "horizontal") -> None:
-        """Open the HTML report in the default web browser via a temporary file."""
+        """Save the HTML report to a temp file, announce it, and open it in the default browser."""
 
         fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
         os.close(fd)
-        out = Path(tmp)
-        out.write_text(
-            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-            "<title>Pipeline inspection</title></head><body>"
-            f"{self.to_html(result, orientation=orientation)}</body></html>",
-            encoding="utf-8",
-        )
-        webbrowser.open(out.as_uri())
+        out = self.save_to_html(result, tmp, orientation=orientation)
+        uri = out.as_uri()
+        print(f"Inspection report saved to: {out}", file=sys.stderr)
+        print("Opening inspection report in browser...", file=sys.stderr)
+        opened = webbrowser.open(uri)
+        if opened is False:
+            print(
+                "Browser launch was not confirmed. If nothing opened, use the saved report path above.",
+                file=sys.stderr,
+            )
