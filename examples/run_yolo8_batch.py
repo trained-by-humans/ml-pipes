@@ -18,7 +18,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path
+if __name__ == "__main__" and __package__ is None:
+    from _bootstrap import normalize_direct_example_sys_path
+
+    normalize_direct_example_sys_path(__file__, sys.path)
+    __package__ = "examples"
+
+from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path
 from ml_pipes.collectors import PrintCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import (
