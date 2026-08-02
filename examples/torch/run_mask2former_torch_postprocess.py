@@ -1,7 +1,7 @@
 """
 Mask2Former segmentation with Torch-side postprocess.
 
-Requires `torch`, `transformers`, and `safetensors`.
+Requires `torch`, `transformers`, `safetensors`, and `scipy`.
 
 Run from the repo root:
     python examples/torch/run_mask2former_torch_postprocess.py

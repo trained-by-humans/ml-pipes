@@ -1,7 +1,7 @@
 """
 Mask2Former segmentation with NumPy-side postprocess.
 
-Requires `torch`, `transformers`, and `safetensors`.
+Requires `torch`, `transformers`, `safetensors`, and `scipy`.
 
 Run from the repo root:
     python examples/torch/run_mask2former_numpy_postprocess.py

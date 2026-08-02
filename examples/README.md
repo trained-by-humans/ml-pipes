@@ -73,7 +73,7 @@ python -m pip install 'ml-pipes[onnx,vision]'             # most vision + ONNX e
 > to flags such as `--input`, `--output`, or `--model-path` are still resolved
 > from the directory where you run the command.
 
-## Run The Bundled Starter Example
+## Bundled Starter Example
 
 `run_yolo8_onnx.py` is the recommended first run. This repository already
 includes the starter model and sample image in `examples/.example_assets/`, so
@@ -97,11 +97,15 @@ python examples/run_yolo8_onnx.py
 A successful default run writes the annotated image to
 `examples/.example_assets/coco_000000039769_yolov8n.jpg`.
 
-## Common Args
+## Running Examples
 
-Many file-oriented examples follow the same CLI pattern. The exact flags still
-depend on the script, so check `python path/to/example.py --help` when in
-doubt.
+Most entries in this guide are run from the repository root as direct Python
+scripts. The exact flags still vary by script, so check
+`python path/to/example.py --help` when in doubt.
+
+### Shared CLI Args
+
+Several examples follow the same CLI pattern:
 
 | Arg | Common in | Meaning |
 |---|---|---|
@@ -119,7 +123,7 @@ python examples/run_yolo8_onnx.py --input path/to/photo.jpg
 python examples/run_yolo8_onnx.py --input path/to/photo.jpg --model-path path/to/model.onnx
 ```
 
-## Inference On Files
+## File-Based Inference
 
 | Example | Model | Task | Notable pipeline features |
 |---|---|---|---|
@@ -255,7 +259,7 @@ Example command:
 python examples/streaming/run_yolo8_webcam.py
 ```
 
-## Torch And Domain Handoff
+## Torch Domain Handoff
 
 | Example | Focus | Notes |
 |---|---|---|
@@ -272,7 +276,7 @@ uv sync --group shared-framework --group torch
 python -m pip install 'ml-pipes[torch,vision]'
 
 # Model-specific dependencies for the Mask2Former weights
-python -m pip install transformers safetensors
+python -m pip install transformers safetensors scipy
 ```
 
 Example command:
@@ -281,7 +285,7 @@ Example command:
 python examples/torch/run_mask2former_torch_postprocess.py
 ```
 
-## Inference Endpoint
+## RESTful Inference Endpoint
 
 | Example | Model | Task | Notes |
 |---|---|---|---|

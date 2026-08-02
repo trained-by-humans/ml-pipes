@@ -35,8 +35,8 @@ def _require_transformers() -> tuple[Any, Any]:
         from transformers import AutoImageProcessor, Mask2FormerForUniversalSegmentation
     except ImportError:
         print(
-            "Transformers and safetensors are required: "
-            "python -m pip install transformers safetensors",
+            "Transformers, safetensors, and scipy are required: "
+            "python -m pip install transformers safetensors scipy",
             file=sys.stderr,
         )
         raise SystemExit(1)
