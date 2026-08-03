@@ -88,6 +88,29 @@ def test_torch_mean_mask_scores_computes_mean_over_binary_support():
     assert torch.allclose(registry["mean_mask_scores"], torch.tensor([0.75, 0.5]))
 
 
+def test_torch_mean_mask_scores_handles_empty_masks():
+    registry = TorchTensorRegistry(
+        {
+            "selected_masks": torch.zeros((0, 2, 2), dtype=torch.float32),
+            "binary_masks": torch.zeros((0, 2, 2), dtype=torch.bool),
+        }
+    )
+
+    result = TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+
+    assert tuple(result["mean_mask_scores"].shape) == (0,)
+    assert result["mean_mask_scores"].dtype == torch.float32
+
+
+def test_torch_mean_mask_scores_handles_empty_masks_without_binary_masks():
+    registry = TorchTensorRegistry({"selected_masks": torch.zeros((0, 2, 2), dtype=torch.float32)})
+
+    result = TorchMeanMaskScores(masks="selected_masks", binary_masks=None, as_="mean_mask_scores")(registry)
+
+    assert tuple(result["mean_mask_scores"].shape) == (0,)
+    assert result["mean_mask_scores"].dtype == torch.float32
+
+
 def test_torch_masks_to_boxes_converts_masks_to_xyxy():
     registry = TorchTensorRegistry(
         {
@@ -149,6 +172,22 @@ def test_torch_filter_tensors_by_masks_area_filters_parallel_tensors():
     assert registry["masks"].shape[0] == 1
     assert torch.allclose(registry["scores"], torch.tensor([0.9]))
     assert registry["classes"].tolist() == [9]
+
+
+def test_torch_filter_tensors_by_masks_area_handles_empty_masks():
+    registry = TorchTensorRegistry(
+        {
+            "masks": torch.zeros((0, 2, 2), dtype=torch.bool),
+            "scores": torch.zeros((0,), dtype=torch.float32),
+            "classes": torch.zeros((0,), dtype=torch.int64),
+        }
+    )
+
+    result = TorchFilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
+
+    assert tuple(result["masks"].shape) == (0, 2, 2)
+    assert tuple(result["scores"].shape) == (0,)
+    assert tuple(result["classes"].shape) == (0,)
 
 
 def test_torch_filter_tensors_by_score_can_write_to_new_keys():
@@ -218,6 +257,38 @@ def test_torch_filter_tensors_by_classes_can_write_to_new_keys():
     assert registry["selected_classes"].tolist() == [0, 2]
     assert torch.allclose(registry["selected_scores"], torch.tensor([0.9, 0.8]))
     assert registry["classes"].tolist() == [0, 1, 2]
+
+
+def test_torch_nms_keeps_overlapping_boxes_from_different_classes():
+    pytest.importorskip("torchvision")
+    registry = TorchTensorRegistry(
+        {
+            "boxes": torch.tensor([[10, 10, 50, 50], [12, 12, 48, 48]], dtype=torch.float32),
+            "scores": torch.tensor([0.95, 0.9], dtype=torch.float32),
+            "classes": torch.tensor([0, 1], dtype=torch.int64),
+        }
+    )
+
+    result = TorchNMS()(registry)
+
+    assert tuple(result["boxes"].shape) == (2, 4)
+    assert result["classes"].tolist() == [0, 1]
+
+
+def test_torch_nms_suppresses_same_class_overlap():
+    pytest.importorskip("torchvision")
+    registry = TorchTensorRegistry(
+        {
+            "boxes": torch.tensor([[10, 10, 50, 50], [12, 12, 48, 48], [100, 100, 140, 140]], dtype=torch.float32),
+            "scores": torch.tensor([0.95, 0.85, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 0, 0], dtype=torch.int64),
+        }
+    )
+
+    result = TorchNMS()(registry)
+
+    assert tuple(result["boxes"].shape) == (2, 4)
+    assert torch.allclose(result["scores"], torch.tensor([0.95, 0.8]))
 
 
 def test_torch_nms_filters_and_stores_indices():
