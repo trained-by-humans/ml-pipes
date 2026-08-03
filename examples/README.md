@@ -100,16 +100,28 @@ A successful default run writes the annotated image to
 ## Running Examples
 
 Most entries in this guide are run from the repository root as direct Python
-scripts. The exact flags still vary by script, so check
-`python path/to/example.py --help` when in doubt.
+scripts. Once the documented setup for a section is installed, start by
+running the example with its default arguments. If you want to customize the
+run afterward, use CLI flags to override the default model, input, output, or
+runtime behavior.
 
-### Shared CLI Args
+For example:
 
-Several examples follow the same CLI pattern:
+```bash
+# Start with the default run
+python examples/run_yolo8_tile.py
+
+# Then override only the parts you want to change
+python examples/run_yolo8_tile.py --input path/to/photo.jpg --slice-wh 320 320 --overlap-wh 80 80
+```
+
+### Common CLI Args
+
+Many examples reuse the same small set of file and model selection flags:
 
 | Arg | Common in | Meaning |
 |---|---|---|
-| `--model-path path/to/model.onnx` | file-based inference, streaming | Use your own local model instead of the bundled or downloaded default model. |
+| `--model-path path/to/model.onnx` | file-based inference, selected streaming examples | Use your own local model instead of the bundled or downloaded default model. |
 | `--input path/to/input-file` | file-based inference, endpoint calls | Use your own image or video instead of the bundled sample input. |
 | `--output path/to/output-file` | file-based inference, inspection, video | Write the result to an explicit location instead of the example's default output path. |
 
@@ -123,18 +135,23 @@ python examples/run_yolo8_onnx.py --input path/to/photo.jpg
 python examples/run_yolo8_onnx.py --input path/to/photo.jpg --model-path path/to/model.onnx
 ```
 
+> [!TIP]
+> The exact flags vary by script, so check `python path/to/example.py --help`
+> when in doubt. The tables below highlight the most useful args for each
+> example, not the full CLI surface.
+
 ## File-Based Inference
 
-| Example | Model | Task | Notable pipeline features |
-|---|---|---|---|
-| `run_yolo8_onnx.py` | YOLOv8 | detection | baseline YOLO pipeline |
-| `run_yolo11n_fp16.py` | YOLO11n FP16 | detection | `Cast` for FP16, letterbox resize |
-| `run_rfdetr_nano.py` | DETR-style detector | detection | `Scale` for normalized boxes, softmax logits |
-| `run_yolo11n_seg.py` | YOLO11n-seg | instance segmentation | prototype masks, `ReconstructMasks` + `FilterBy` |
-| `run_maskrcnn.py` | Mask R-CNN int8 | instance segmentation | CNN family, NMS baked in, 28x28 RoI masks, BGR mean subtraction |
-| `run_yolo8_video.py` | YOLOv8 | video detection | sequential video-file baseline |
-| `run_yolo8_batch.py` | YOLOv8 | batch detection | simple batch region usage |
-| `run_yolo8_tile.py` | YOLOv8 | tiled detection | tile and merge style pipeline |
+| Example | Model | Task | Key args | Notable pipeline features |
+|---|---|---|---|---|
+| `run_yolo8_onnx.py` | YOLOv8 | detection | common args only | baseline YOLO pipeline |
+| `run_yolo11n_fp16.py` | YOLO11n FP16 | detection | common args only | `Cast` for FP16, letterbox resize |
+| `run_rfdetr_nano.py` | DETR-style detector | detection | common args only | `Scale` for normalized boxes, softmax logits |
+| `run_yolo11n_seg.py` | YOLO11n-seg | instance segmentation | common args only | prototype masks, `ReconstructMasks` + `FilterBy` |
+| `run_maskrcnn.py` | Mask R-CNN int8 | instance segmentation | common args only | CNN family, NMS baked in, 28x28 RoI masks, BGR mean subtraction |
+| `run_yolo8_video.py` | YOLOv8 | video detection | common args only | sequential video-file baseline |
+| `run_yolo8_batch.py` | YOLOv8 | batch detection | `--images`, `--batch-size`, `--workers` | simple batch region usage |
+| `run_yolo8_tile.py` | YOLOv8 | tiled detection | `--conf-threshold`, `--slice-wh`, `--overlap-wh`, `--max-concurrency` | tile and merge style pipeline |
 
 `run_yolo8_batch.py` also needs Ultralytics to export the dynamic-batch YOLOv8
 model on first run:
@@ -151,20 +168,10 @@ python examples/run_yolo8_tile.py --input path/to/photo.jpg --slice-wh 320 320 -
 
 ## Inspection And Tracing
 
-| Example | Focus | Notes |
-|---|---|---|
-| `run_inspect.py` | step-by-step inspection | renders successful runs and a synthetic failure case |
-| `run_yolo8_tracing.py` | tracing | prints or captures per-step trace data |
-
-Common args in this section:
-
-| Arg | Common in | Meaning |
-|---|---|---|
-| `--save-html path/to/report.html` | inspection | Save the generated HTML inspection report instead of opening it in the browser. |
-| `--print-only` | inspection | Print the inspection result to the terminal instead of opening a browser window. |
-| `--pipeline <name>` | `run_inspect.py` | Choose which inspection pipeline to run, such as `simple`, `tiled`, or `error`. |
-| `--plot path/to/plot.png` | `run_inspect.py` | Save a static inspection plot instead of opening the browser UI. |
-| `--dump path/to/result.pkl` / `--load path/to/result.pkl` | `run_inspect.py` | Save or reload serialized inspection results for later analysis. |
+| Example | Focus | Key args | Notes |
+|---|---|---|---|
+| `run_inspect.py` | step-by-step inspection | `--pipeline`, `--save-html`, `--plot`, `--dump`, `--load`, `--print-only` | renders successful runs and a synthetic failure case |
+| `run_yolo8_tracing.py` | tracing | `--runs` | prints or captures per-step trace data |
 
 Extra setup for the inspection entry (`run_inspect.py`):
 
@@ -184,22 +191,20 @@ python examples/run_inspect.py --pipeline tiled --save-html report.html
 
 ## Benchmarking
 
-| Example | Focus | Notes |
-|---|---|---|
-| `benchmarks/run_yolo8_benchmark.py` | benchmark workflow | direct `Benchmark` usage for one pipeline |
-| `benchmarks/run_yolo8_benchmark_sweep.py` | benchmark sweep | compares one plain baseline against a small tiled `slice_wh` sweep |
-| `benchmarks/run_yolo8_benchmark_variants.py` | variant sweep | compares multiple YOLOv8 model sizes |
-| `benchmarks/run_yolo8_benchmark_cli.py` | CLI benchmark target | target for `python -m ml_pipes benchmark` |
+| Example | Focus | Key args | Notes |
+|---|---|---|---|
+| `benchmarks/run_yolo8_benchmark.py` | benchmark workflow | common args only | direct `Benchmark` usage for one pipeline |
+| `benchmarks/run_yolo8_benchmark_sweep.py` | benchmark sweep | common args only | compares one plain baseline against a small tiled `slice_wh` sweep |
+| `benchmarks/run_yolo8_benchmark_variants.py` | variant sweep | `--variants` | compares multiple YOLOv8 model sizes |
+| `benchmarks/run_yolo8_benchmark_cli.py` | CLI benchmark target | `--arg slice_wh=...`, `--arg model_path=...` | target for `python -m ml_pipes benchmark` |
 
-Common args in this section:
+Common benchmark args for the script-based examples:
 
 | Arg | Common in | Meaning |
 |---|---|---|
-| `--model-path path/to/model.onnx` | single-model benchmarks | Use your own local ONNX model instead of the bundled YOLOv8n default. |
-| `--save path/to/results-dir` | benchmarks | Save benchmark result files under the given directory. |
-| `--runs N` | benchmarks | Control how many repeated runs a benchmark executes. |
-| `--warmup N` | benchmarks | Discard warmup iterations before measurement. |
-| `--variants VARIANT...` | `run_yolo8_benchmark_variants.py` | Choose which YOLOv8 `n/s/m/l/x` variants to compare in the variant sweep. |
+| `--runs N` | script-based benchmarks | Control how many repeated runs a benchmark executes. |
+| `--warmup N` | script-based benchmarks | Discard warmup iterations before measurement. |
+| `--save path/to/results-dir` | script-based benchmarks | Save benchmark result files under the given directory. |
 
 The benchmark entries use the base install above.
 
@@ -211,9 +216,9 @@ python examples/benchmarks/run_yolo8_benchmark_sweep.py --runs 20 --save results
 
 ## Data Preparation
 
-| Example | Domain | Notes |
-|---|---|---|
-| `run_sms_spam_prepare.py` | tabular / text preparation | non-vision example built from data operators |
+| Example | Domain | Key args | Notes |
+|---|---|---|---|
+| `run_sms_spam_prepare.py` | tabular / text preparation | `--output-dir`, `--inspect-html`, `--lazy` | non-vision example built from data operators |
 
 Example command:
 
@@ -223,20 +228,20 @@ python examples/run_sms_spam_prepare.py --inspect-html report.html
 
 ## Streaming And Live Inference
 
-| Example | Model | Task | Notes |
-|---|---|---|---|
-| `streaming/run_yolo8_webcam.py` | YOLOv8 | live detection | reads from the default camera; press Q to quit |
-| `streaming/run_shibuya_counter.py` | YOLOv8 | detection-based crowd counting | default YouTube source needs `yt-dlp`; direct stream URLs do not |
-| `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation | default YouTube source needs `yt-dlp`; also requires `torch` |
+| Example | Model | Task | Key args | Notes |
+|---|---|---|---|---|
+| `streaming/run_yolo8_webcam.py` | YOLOv8 | live detection | `--model-path` | reads from the default camera; press Q to quit |
+| `streaming/run_shibuya_counter.py` | YOLOv8 | detection-based crowd counting | `--tile`, `--conf-threshold` | default YouTube source needs `yt-dlp`; direct stream URLs do not |
+| `streaming/run_shibuya_csrnet.py` | CSRNet | density-map based crowd estimation | `--weights`, `--device` | default YouTube source needs `yt-dlp`; also requires `torch` |
 
-Common args in this section:
+Common args for the two Shibuya stream examples:
 
 | Arg | Common in | Meaning |
 |---|---|---|
-| `--url <stream-url>` | live stream examples | Pass a YouTube page URL or a direct playable stream URL. |
-| `--workers N` | live stream examples | Control how many inference workers run in parallel. |
-| `--stride N` | live stream examples | Process every `N`th frame instead of every frame. |
-| `--target-fps N` | throughput-measured stream examples | Set the fallback FPS used when the stream source does not report one. |
+| `--url <stream-url>` | Shibuya stream examples | Pass a YouTube page URL or a direct playable stream URL. |
+| `--workers N` | Shibuya stream examples | Control how many inference workers run in parallel. |
+| `--stride N` | Shibuya stream examples | Process every `N`th frame instead of every frame. |
+| `--target-fps N` | Shibuya stream examples | Set the fallback FPS used when the stream source does not report one. |
 
 Extra setup for specific streaming entries:
 
@@ -261,10 +266,10 @@ python examples/streaming/run_yolo8_webcam.py
 
 ## Torch Domain Handoff
 
-| Example | Focus | Notes |
-|---|---|---|
-| `torch/run_mask2former_torch_postprocess.py` | Torch-heavy postprocess | keeps mask postprocessing in Torch |
-| `torch/run_mask2former_numpy_postprocess.py` | NumPy handoff | converts back earlier and finishes in NumPy |
+| Example | Focus | Key args | Notes |
+|---|---|---|---|
+| `torch/run_mask2former_torch_postprocess.py` | Torch-heavy postprocess | `--task`, `--device`, `--output` | keeps mask postprocessing in Torch |
+| `torch/run_mask2former_numpy_postprocess.py` | NumPy handoff | `--task`, `--device`, `--output` | converts back earlier and finishes in NumPy |
 
 Extra setup for these Torch examples:
 
@@ -287,9 +292,9 @@ python examples/torch/run_mask2former_torch_postprocess.py
 
 ## RESTful Inference Endpoint
 
-| Example | Model | Task | Notes |
-|---|---|---|---|
-| `run_yolo8_endpoint.py` | YOLOv8 | HTTP detection endpoint | requires `pip install flask` |
+| Example | Model | Task | Key args | Notes |
+|---|---|---|---|---|
+| `run_yolo8_endpoint.py` | YOLOv8 | HTTP detection endpoint | `--call`, `--input`, `--model-path` | requires `pip install flask` |
 
 Extra setup for the HTTP endpoint example:
 
