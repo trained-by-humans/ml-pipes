@@ -4,6 +4,10 @@ This page catalogs the Torch package surface in `ml_pipes.torch`.
 For package overview, scope, design principles, and usage patterns, see
 [`README.md`](./README.md).
 
+Internally, the package is organized into boundary, runtime, tensor, and
+vision-helper modules while the public import surface remains
+`ml_pipes.torch`.
+
 For framework-wide operator concepts, see
 [`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
 For the cross-package package catalogs, see
@@ -36,20 +40,20 @@ For the cross-package package catalogs, see
 | `ToDevice(device)` | Moves Torch-backed payloads, registries, or runtime outputs to another device. |
 | `TorchSynchronizeTensors()` | Forces device synchronization at a chosen pipeline boundary. |
 
-## Runtime And Registry Setup
+## Runtime Operators
 
 | Operator | Notes |
 |---|---|
-| `TorchAsType(dtype, src=None, as_=None)` | Casts Torch-backed tensor values or named registry tensors. |
 | `TorchInfer(model, input_name=None, input_layout="NCHW", ...)` | Runs one `torch.nn.Module` on one `TorchTensorPayload` and returns `TorchRuntimeOutputs`. |
 | `TorchExtract(*names, as_=...)` | Extracts named Torch outputs into `TorchTensorRegistry`. |
 | `TorchDistribute()` | Splits batched `TorchRuntimeOutputs` into per-sample outputs. |
 | `TorchCollate()` | Stacks `list[TorchTensorPayload]` into one batched payload. |
 
-## Registry Math, Ranking, And Masking
+## Generic Torch Tensor Ops
 
 | Operator | Notes |
 |---|---|
+| `TorchAsType(dtype, src=None, as_=None)` | Casts Torch-backed tensor values or named registry tensors. |
 | `TorchArgMax(...)` | Argmax over a named Torch tensor. |
 | `TorchGatherRows(...)` | Row-wise gather driven by another registry tensor of indices. |
 | `TorchTopK(...)` / `TorchTopKIndices2D(...)` | Top-k ranking helpers for 1D and 2D tensors. |
@@ -61,15 +65,15 @@ For the cross-package package catalogs, see
 | `TorchCreateTensorMaskByThreshold(...)` | Threshold-based mask creation. |
 | `TorchApplyTensorMask(...)` | Applies one boolean mask across one or more tensors. |
 | `TorchSelectTensors(...)` | Applies integer-index selection across one or more tensors. |
-| `TorchFilterTensorsByScore(...)` | Filters tensors by a score threshold. |
-| `TorchFilterTensorsByClasses(...)` | Filters tensors by allowed class ids. |
-| `TorchFilterTensorsByMasksArea(...)` | Filters tensors by mask area. |
 | `TorchSortTensorsBy(...)` | Reorders tensors by a ranking tensor. |
 
-## Segmentation Helpers
+## Torch Vision Helpers
 
 | Operator | Notes |
 |---|---|
+| `TorchFilterTensorsByScore(...)` | Filters tensors by a score threshold. |
+| `TorchFilterTensorsByClasses(...)` | Filters tensors by allowed class ids. |
+| `TorchFilterTensorsByMasksArea(...)` | Filters tensors by mask area. |
 | `TorchWeightMasksByScores(...)` | Weights masks by per-instance scores. |
 | `TorchResizeMasks(...)` | Resizes masks while staying in the Torch domain. |
 | `TorchMeanMaskScores(...)` | Computes mean scores over masks or masked areas. |

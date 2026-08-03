@@ -56,6 +56,11 @@ That mirroring is what lets Torch stages integrate cleanly with
 postprocess path. The main addition is `device`, which keeps placement
 explicit while the value is in the Torch domain.
 
+Torch may carry Torch-native implementations of vision-adjacent registry
+helpers while the working values remain `TorchTensorRegistry`. Vision still
+owns image payloads, projection, rendering, and typed outputs such as
+`ToDetections()` and `ToSegmentations()`.
+
 The main crossings are:
 
 - `ToTorch` / `ToTorchRegistry` into the Torch domain
