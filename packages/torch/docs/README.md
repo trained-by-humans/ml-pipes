@@ -15,13 +15,23 @@ For the full package surface, aliases, and operator signatures, see [`INDEX.md`]
 ## Scope And Use Cases
 
 This package owns the explicit Torch execution domain inside `ml-pipes`. Many
-of its practical use cases overlap with
-[`ml_pipes.tensor`](../../tensor/docs/README.md), the default shared
-NumPy-side path for tensor-domain work around runtime stages.
+of its practical use cases overlap with the NumPy-side package chain around
+runtime and postprocess.
 
-Pick this package instead of, or alongside, `ml_pipes.tensor` when a pipeline
-needs to:
+Its scope covers three Torch-native slices:
 
+- a model runtime boundary parallel to
+  [`ml_pipes.onnx`](../../onnx/docs/README.md)
+- generic tensor postprocess that mirrors
+  [`ml_pipes.tensor`](../../tensor/docs/README.md)
+- a narrow set of vision postprocess operators that mirrors part of
+  [`ml_pipes.vision`](../../vision/docs/README.md) while values remain in
+  `TorchTensorRegistry`
+
+Pick this package instead of, or alongside, that NumPy-side package chain when
+a pipeline needs to:
+
+- run a `torch.nn.Module` as one explicit inference stage
 - keep control over device placement for a heavy postprocess stage on GPU
 - keep a large tensor stage in Torch to avoid unnecessary device transfers or
   host-device synchronization
@@ -45,34 +55,39 @@ For broader background on the Torch vs NumPy runtime tradeoff, see the
 
 ## Where Torch Fits
 
-Torch is a separate execution domain. A pipeline crosses from NumPy into Torch
-only when you add an explicit conversion step such as `ToTorch()` or
-`ToTorchRegistry()`.
+Torch is a separate execution domain that a pipeline can enter and leave
+explicitly at whichever stage benefits from Torch. A pipeline does not need to
+move wholesale into Torch: it can cross in for runtime, stay in Torch for
+several generic tensor or vision postprocess stages, then cross back out once
+later steps fit the NumPy-side packages better.
+
+In practice, that means the Torch crossing point is flexible:
+
+- cross in with `ToTorch()` when the runtime stage itself is Torch-native
+- cross in with `ToTorchRegistry()` when a later postprocess segment should
+  stay on-device in Torch
+- cross back out with `ToNumpy()` or `ToNumpyRegistry()` as soon as the
+  remaining stages are better served by `ml_pipes.tensor` or
+  `ml_pipes.vision`
+- use `ToDevice()` inside the Torch domain when the stage should stay in Torch
+  but move to a different device
 
 To keep mixed Torch and NumPy pipelines composable, the Torch domain mirrors
-the Tensor package value models such as `TorchTensorPayload` or `TorchTensorRegistry`.
-That mirroring is what lets Torch stages integrate cleanly with
-`ml_pipes.tensor` when a pipeline crosses back into the shared NumPy-side
-postprocess path. The main addition is `device`, which keeps placement
-explicit while the value is in the Torch domain.
+the surrounding NumPy-side package shapes: `TorchTensorPayload` and
+`TorchTensorRegistry` mirror the Tensor package value models, while
+`TorchRuntimeOutputs` parallels the ONNX runtime handoff. The main addition
+across these Torch values is `device`, which keeps placement explicit while
+the value is in the Torch domain.
+
 When values stay in `TorchTensorRegistry`, the package also mirrors the core
 generic tensor helpers that are worth keeping on-device, including transpose,
-scale, filtering, and mapping stages.
+scale, filtering, and mapping stages. It also carries a narrow set of
+Torch-native vision postprocess operators such as box-format conversion, mask
+reconstruction, filtering, resizing, and NMS. Vision still owns image
+payloads, projection, rendering, and typed outputs such as `ToDetections()`
+and `ToSegmentations()`.
 
-Torch may carry Torch-native implementations of vision-adjacent registry
-helpers while the working values remain `TorchTensorRegistry`. Vision still
-owns image payloads, projection, rendering, and typed outputs such as
-`ToDetections()` and `ToSegmentations()`. That includes Torch-side helpers
-such as box-format conversion, mask reconstruction, filtering, resizing, and
-NMS as long as the working values stay in the Torch registry domain.
-
-The main crossings are:
-
-- `ToTorch` / `ToTorchRegistry` into the Torch domain
-- `ToNumpy` / `ToNumpyRegistry` back into the NumPy-side Tensor domain
-- `ToDevice` to move Torch-backed values without leaving the Torch domain
-
-At a high level, mixed pipelines look like this:
+One common mixed flow looks like this:
 
 ```text
 ┌─────────────────────────────────────────────┐
@@ -98,15 +113,6 @@ At a high level, mixed pipelines look like this:
 That split keeps Torch execution explicit while still letting the rest of the
 pipeline stay in the packages that already own NumPy-side postprocess and typed
 task results.
-
-> [!TIP]
-> Use `copy=False` when you want the cheapest Torch/NumPy conversion and shared
-> storage is acceptable. Use `copy=True` when you want the converted result to
-> be isolated from the source.
->
-> `ToNumpy` and `ToNumpyRegistry` materialize NumPy arrays on CPU. Once data
-> crosses back into NumPy, device placement is no longer part of the
-> value model.
 
 ## Using Torch In Pipelines
 
@@ -240,6 +246,38 @@ pipeline = Pipeline([
 
 That makes it useful for stage-level placement, not for fine-grained
 per-tensor scheduling inside one registry.
+
+## Conversion And Copy Semantics
+
+Boundary conversion operators such as `ToTorch`, `ToTorchRegistry`,
+`ToNumpy`, and `ToNumpyRegistry` all take a `copy=...` flag that controls
+whether a conversion may reuse source storage when aliasing is possible, or
+whether the converted value should be detached from the source.
+
+For example:
+
+```python
+from ml_pipes.core import Pipeline
+from ml_pipes.torch import ToNumpyRegistry, ToTorchRegistry
+
+pipeline = Pipeline([
+    ...,
+    ToTorchRegistry(device="cuda:0", copy=False),
+    CustomTorchStage(),
+    ToNumpyRegistry(copy=True),
+    ...
+])
+```
+
+Use the flag differently depending on the priority:
+
+- `copy=False`: prefer the cheapest conversion; use this when the crossing should stay as cheap as possible
+- `copy=True`: isolate the converted value; use this when the result should be independent from the source
+
+> [!NOTE]
+> `ToNumpy` and `ToNumpyRegistry` always materialize NumPy arrays on CPU. Once
+> data crosses back into NumPy, device placement is no longer part of the
+> value model.
 
 ## Timing And Synchronization
 
