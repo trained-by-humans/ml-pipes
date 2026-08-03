@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 
-def _resolve_multi_output_names(
+def resolve_multi_output_names(
     operator_name: str,
     srcs: Sequence[str],
     as_: str | tuple[str, ...] | None,

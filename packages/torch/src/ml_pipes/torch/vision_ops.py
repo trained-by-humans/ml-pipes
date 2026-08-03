@@ -4,9 +4,8 @@ from collections.abc import Collection
 
 import torch
 
+from ml_pipes._operator_utils import resolve_multi_output_names
 from ml_pipes.operator import Operator
-
-from ._shared import _resolve_multi_output_names
 from .types import TorchTensorRegistry
 
 __all__ = [
@@ -34,7 +33,7 @@ class TorchFilterTensorsByScore:
         self.srcs = all_srcs
         self.score = score
         self.min_score = min_score
-        self.dst_names = _resolve_multi_output_names("TorchFilterTensorsByScore", all_srcs, as_)
+        self.dst_names = resolve_multi_output_names("TorchFilterTensorsByScore", all_srcs, as_)
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         keep = registry[self.score] >= self.min_score
@@ -58,7 +57,7 @@ class TorchFilterTensorsByClasses:
         self.srcs = all_srcs
         self.classes = classes
         self.keep_classes = tuple(keep_classes)
-        self.dst_names = _resolve_multi_output_names("TorchFilterTensorsByClasses", all_srcs, as_)
+        self.dst_names = resolve_multi_output_names("TorchFilterTensorsByClasses", all_srcs, as_)
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         allowed = torch.as_tensor(
@@ -85,7 +84,7 @@ class TorchFilterTensorsByMasksArea:
         self.srcs = all_srcs
         self.masks = masks
         self.min_area = min_area
-        self.dst_names = _resolve_multi_output_names("TorchFilterTensorsByMasksArea", all_srcs, as_)
+        self.dst_names = resolve_multi_output_names("TorchFilterTensorsByMasksArea", all_srcs, as_)
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         masks = registry[self.masks]

@@ -7,10 +7,9 @@ import numpy as np
 import numpy.typing as npt
 import torch
 
+from ml_pipes._operator_utils import resolve_multi_output_names
 from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.operator import Operator
-
-from ._shared import _resolve_multi_output_names
 from .types import (
     TorchTensorPayload,
     TorchTensorRegistry,
@@ -377,7 +376,7 @@ class TorchApplyTensorMask:
     def __init__(self, *srcs: str, mask: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
         self.mask = mask
-        self.dst_names = _resolve_multi_output_names("TorchApplyTensorMask", srcs, as_)
+        self.dst_names = resolve_multi_output_names("TorchApplyTensorMask", srcs, as_)
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         mask = registry[self.mask]
@@ -391,7 +390,7 @@ class TorchSelectTensors:
     def __init__(self, *srcs: str, indices: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
         self.indices = indices
-        self.dst_names = _resolve_multi_output_names("TorchSelectTensors", srcs, as_)
+        self.dst_names = resolve_multi_output_names("TorchSelectTensors", srcs, as_)
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         indices = registry[self.indices]
@@ -415,7 +414,7 @@ class TorchSortTensorsBy:
         self.srcs = all_srcs
         self.by = by
         self.descending = descending
-        self.dst_names = _resolve_multi_output_names("TorchSortTensorsBy", all_srcs, as_)
+        self.dst_names = resolve_multi_output_names("TorchSortTensorsBy", all_srcs, as_)
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
         order = torch.argsort(registry[self.by], descending=self.descending)
