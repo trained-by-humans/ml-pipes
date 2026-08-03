@@ -1,14 +1,13 @@
 """
-Tracing example: per-operator latency breakdown for the YOLOv8 pipeline.
+Trace YOLOv8 pipeline execution on a sample image.
 
-Shows how to attach a TraceCollector to an existing pipeline and inspect
-the InvocationTrace produced by each call — both a single detailed trace
-and a simple aggregate over multiple runs.
+Attaches a `TraceCollector` and prints both a single invocation trace and an
+aggregate summary across repeated runs.
 
-Usage:
-    python run_yolo8_tracing.py
-    python run_yolo8_tracing.py --runs 10 --assets-dir /tmp/assets
-    python run_yolo8_tracing.py --model s
+Run from the repo root:
+    python examples/run_yolo8_tracing.py
+    python examples/run_yolo8_tracing.py --input path/to/photo.jpg
+    python examples/run_yolo8_tracing.py --model-path path/to/model.onnx --runs 10
 """
 from __future__ import annotations
 
@@ -17,18 +16,17 @@ import sys
 from pathlib import Path
 
 from common import (
+    ASSETS_DIR,
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
-    add_assets_dir_arg,
-    add_model_arg,
     build_output_path,
     decode,
-    download_if_missing,
+    resolve_input_path,
     resolve_model_path,
     visualize_detections_and_store,
 )
-from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from ml_pipes.collectors import (
     AggregateCollector,
     PrintCollector,
@@ -37,23 +35,15 @@ from ml_pipes.collectors import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_assets_dir_arg(parser)
-    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
+    parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
+    parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")
     parser.add_argument("--runs", type=int, default=5, help="Number of inference runs for aggregate stats.")
-    add_model_arg(parser, list(YOLO8_MODELS))
     args = parser.parse_args()
 
-    assets_dir: Path = args.assets_dir
-    model_name, model_url = YOLO8_MODELS[args.model]
-    model_path = resolve_model_path(assets_dir, model_name, model_url, args.model)
-    if model_path is None:
-        return 1
-
-    image_path = assets_dir / COCO_IMAGE_NAME
-    output_path = args.output or build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
-
-    print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
+    image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
 
     infer_pipe = yolo8_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_detections_and_store(output_path, COCO_CLASSES)

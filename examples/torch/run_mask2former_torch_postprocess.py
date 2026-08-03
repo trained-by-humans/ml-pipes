@@ -1,3 +1,12 @@
+"""
+Mask2Former segmentation with Torch-side postprocess.
+
+Requires `torch`, `transformers`, `safetensors`, and `scipy`.
+
+Run from the repo root:
+    python examples/torch/run_mask2former_torch_postprocess.py
+    python examples/torch/run_mask2former_torch_postprocess.py --task panoptic --output mask2former.png
+"""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +19,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     __package__ = "examples.torch"
 
-from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
+from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path, visualize_and_store
 from ml_pipes.core import (
     Pipeline,
     inline,
@@ -42,12 +51,16 @@ from ml_pipes.torch import (
 )
 from ml_pipes.torch.types import TorchTensorRegistry
 from .mask2former_infer import (
-    Mask2FormerInfer,
-    LoadedMask2Former,
-    build_mask2former_preprocess_pipeline,
+    Mask2FormerBundle,
+    add_mask2former_args,
+    build_mask2former_infer_pipeline,
     resolve_output_path,
-    resolve_task_list,
 )
+
+_TOP_K = 100
+_SCORE_THRESHOLD = 0.5
+_MASK_THRESHOLD = 0.5
+_OVERLAP_THRESHOLD = 0.8
 
 
 def _empty_torch_segments(
@@ -182,113 +195,104 @@ class TorchPanopticSegmentsFromQueries:
         return registry
 
 
+def build_torch_postprocess_pipeline(
+    bundle: Mask2FormerBundle,
+    input_path: Path,
+    output_path: Path,
+) -> Pipeline[TorchTensorRegistry, object]:
+    record_fields = {
+        "index": lambda p: list(range(len(p.classes))),
+        "class_id": "classes",
+        "class_name": lambda p, names=bundle.class_names: [
+            names[int(class_id)] if 0 <= int(class_id) < len(names) else str(class_id) for class_id in p.classes
+        ],
+        "score": "scores",
+        "area": lambda p: [int(np.asarray(mask, dtype=bool).sum()) for mask in p.masks],
+        "box": "boxes",
+    }
+
+    if bundle.task == "panoptic":
+        postprocess_pipeline = Pipeline([
+            Recall("image_shape"),
+            TorchResizeMasks(masks="masks_queries_logits"),
+            TorchSoftmax("class_queries_logits", as_="class_probs"),
+            TorchSlice("class_probs", slice(None, -1)),
+            TorchSigmoid("masks_queries_logits", as_="mask_probs"),
+            TorchArgMax("class_probs", as_="query_classes"),
+            TorchGatherScores("class_probs", "query_classes", as_="query_scores"),
+            TorchFilterTensorsByScore(
+                "query_classes", "mask_probs", score="query_scores", min_score=_SCORE_THRESHOLD
+            ),
+            TorchWeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
+            TorchArgMax("weighted_masks", axis=0, as_="winner_ids"),
+            TorchPanopticSegmentsFromQueries(
+                thing_class_ids=bundle.thing_class_ids,
+                scores="query_scores",
+                classes="query_classes",
+                masks="mask_probs",
+                winner_ids="winner_ids",
+                mask_threshold=_MASK_THRESHOLD,
+                overlap_threshold=_OVERLAP_THRESHOLD,
+            ),
+            TorchMasksToBoxes(as_="boxes"),
+            ToNumpyRegistry(),
+            ToSegmentations(),
+            inline(visualize_and_store(output_path, bundle.class_names)),
+            MapPredictionsToObjects(fields=record_fields, at=1),
+            LogDetections(bundle.model_id, input_path, output_path, at=1),
+        ])
+    else:
+        postprocess_pipeline = Pipeline([
+            Recall("image_shape"),
+            TorchResizeMasks(masks="masks_queries_logits"),
+            TorchSoftmax("class_queries_logits", as_="class_probs"),
+            TorchSlice("class_probs", slice(None, -1)),
+            TorchSigmoid("masks_queries_logits", as_="mask_probs"),
+            TorchTopKIndices2D(
+                "class_probs",
+                k=_TOP_K,
+                values_as="top_scores",
+                row_indices_as="query_indices",
+                col_indices_as="class_ids",
+            ),
+            TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+            TorchBinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="binary_masks"),
+            TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
+            TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
+            TorchFilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
+            TorchFilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=_SCORE_THRESHOLD),
+            TorchSortTensorsBy("binary_masks", "class_ids", by="final_scores"),
+            TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
+            ToNumpyRegistry(),
+            ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
+            inline(visualize_and_store(output_path, bundle.class_names)),
+            MapPredictionsToObjects(fields=record_fields, at=1),
+            LogDetections(bundle.model_id, input_path, output_path, at=1),
+        ])
+
+    return postprocess_pipeline
 
 
-def parse_args() -> argparse.Namespace:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Run a real Mask2Former example where inference and post-processing stay in Torch "
             "until the final conversion back to NumPy segmentations."
         )
     )
-    add_assets_dir_arg(parser)
-    parser.add_argument("--output", type=Path, default=None, help="Optional output path prefix for annotated images.")
-    parser.add_argument("--task", choices=("panoptic", "instance", "both"), default="both")
-    parser.add_argument("--top-k", type=int, default=100, help="Top-k query/class pairs kept for instance mode.")
-    parser.add_argument("--score-threshold", type=float, default=0.5)
-    parser.add_argument("--mask-threshold", type=float, default=0.5)
-    parser.add_argument("--overlap-threshold", type=float, default=0.8)
-    parser.add_argument(
-        "--device",
-        default="cuda:0" if torch.cuda.is_available() else "cpu",
-        help="Torch device for model execution and Torch post-processing.",
-    )
-    return parser.parse_args()
+    add_mask2former_args(parser, device_help="Torch device for model execution and Torch postprocess.")
+    args = parser.parse_args()
 
+    input_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    output_path = resolve_output_path(args.output, input_path.name, args.task, "torch")
 
-def main() -> int:
-    args = parse_args()
-    image_path = args.assets_dir / COCO_IMAGE_NAME
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    bundle = Mask2FormerBundle.load(task=args.task, device=args.device)
+    infer_pipeline = build_mask2former_infer_pipeline(bundle, args.device)
+    postprocess_pipeline = build_torch_postprocess_pipeline(bundle, input_path, output_path)
 
-    for task in resolve_task_list(args.task):
-        bundle = LoadedMask2Former.load(task=task, device=args.device)
-        output_path = resolve_output_path(args.output, args.assets_dir, task, "torch")
-        record_fields = {
-            "index": lambda p: list(range(len(p.classes))),
-            "class_id": "classes",
-            "class_name": lambda p, names=bundle.class_names: [
-                names[int(class_id)] if 0 <= int(class_id) < len(names) else str(class_id) for class_id in p.classes
-            ],
-            "score": "scores",
-            "area": lambda p: [int(torch.as_tensor(mask, dtype=torch.bool).sum().item()) for mask in p.masks],
-            "box": "boxes",
-        }
-
-        if task == "panoptic":
-            pipeline = Pipeline([
-                Mask2FormerInfer(bundle=bundle, device=args.device),
-                Recall("image_shape"),
-                TorchResizeMasks(masks="masks_queries_logits"),
-                TorchSoftmax("class_queries_logits", as_="class_probs"),
-                TorchSlice("class_probs", slice(None, -1)),
-                TorchSigmoid("masks_queries_logits", as_="mask_probs"),
-                TorchArgMax("class_probs", as_="query_classes"),
-                TorchGatherScores("class_probs", "query_classes", as_="query_scores"),
-                TorchFilterTensorsByScore(
-                    "query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold
-                ),
-                TorchWeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
-                TorchArgMax("weighted_masks", axis=0, as_="winner_ids"),
-                TorchPanopticSegmentsFromQueries(
-                    thing_class_ids=bundle.thing_class_ids,
-                    scores="query_scores",
-                    classes="query_classes",
-                    masks="mask_probs",
-                    winner_ids="winner_ids",
-                    mask_threshold=args.mask_threshold,
-                    overlap_threshold=args.overlap_threshold,
-                ),
-                TorchMasksToBoxes(as_="boxes"),
-                ToNumpyRegistry(),
-                ToSegmentations(),
-                inline(visualize_and_store(output_path, bundle.class_names)),
-                MapPredictionsToObjects(fields=record_fields, at=1),
-                LogDetections(bundle.model_id, image_path, output_path, at=1),
-            ])
-        else:
-            pipeline = Pipeline([
-                Mask2FormerInfer(bundle=bundle, device=args.device),
-                Recall("image_shape"),
-                TorchResizeMasks(masks="masks_queries_logits"),
-                TorchSoftmax("class_queries_logits", as_="class_probs"),
-                TorchSlice("class_probs", slice(None, -1)),
-                TorchSigmoid("masks_queries_logits", as_="mask_probs"),
-                TorchTopKIndices2D(
-                    "class_probs",
-                    k=args.top_k,
-                    values_as="top_scores",
-                    row_indices_as="query_indices",
-                    col_indices_as="class_ids",
-                ),
-                TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
-                TorchBinarizeTensorByThreshold("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
-                TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
-                TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
-                TorchFilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
-                TorchFilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=args.score_threshold),
-                TorchSortTensorsBy("binary_masks", "class_ids", by="final_scores"),
-                TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
-                ToNumpyRegistry(),
-                ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
-                inline(visualize_and_store(output_path, bundle.class_names)),
-                MapPredictionsToObjects(fields=record_fields, at=1),
-                LogDetections(bundle.model_id, image_path, output_path, at=1),
-            ])
-
-        pipeline = build_mask2former_preprocess_pipeline() + pipeline
-        pipeline.validate()
-        pipeline(image_path)
+    pipeline = infer_pipeline + postprocess_pipeline
+    pipeline.validate()
+    pipeline(input_path)
 
     return 0
 

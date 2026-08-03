@@ -142,7 +142,6 @@ pipeline = Pipeline([
 ```
 
 This is the front half of many example pipelines, including
-[`examples/run_detection.py`](../../../examples/run_detection.py) and
 [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py).
 
 ### Vision-Specific Postprocess
@@ -230,8 +229,8 @@ This shape appears in
 - [`Tensor guide`](../../tensor/docs/README.md) for the shared tensor domain
   that Vision builds on
 - [`examples/README.md`](../../../examples/README.md) for runnable pipeline entry points
-  - [`examples/run_detection.py`](../../../examples/run_detection.py) for an
-    end-to-end detection pipeline
+  - [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py) for a
+    baseline end-to-end detection pipeline
   - [`examples/run_yolo8_tile.py`](../../../examples/run_yolo8_tile.py) for
     tiled detection over large images
   - [`examples/streaming/run_shibuya_csrnet.py`](../../../examples/streaming/run_shibuya_csrnet.py)

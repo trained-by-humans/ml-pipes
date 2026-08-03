@@ -1,3 +1,13 @@
+"""
+Sequential YOLOv8 video inference.
+
+Reads a video file frame by frame, runs detection, and writes an annotated
+output video.
+
+Run from the repo root:
+    python examples/run_yolo8_video.py
+    python examples/run_yolo8_video.py --input path/to/video.mp4 --output annotated.mp4
+"""
 from __future__ import annotations
 
 import argparse
@@ -6,8 +16,8 @@ from pathlib import Path
 
 import cv2
 
-from common import COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, add_assets_dir_arg, add_model_arg, download_if_missing, resolve_model_path
-from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from common import ASSETS_DIR, COCO_CLASSES, SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL, resolve_input_path, resolve_model_path
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from ml_pipes.core import (
     Pipeline,
     Embed,
@@ -21,17 +31,6 @@ from ml_pipes.vision import (
     DrawBoxes,
     ImagePayload,
 )
-
-# Sequential frame-by-frame inference on a video file with YOLOv8.
-#
-# Reads every frame from a video, runs detection, and writes an annotated
-# output video.  This is the single-frame sequential baseline we will later
-# compare against batched inference.
-#
-# Usage (shown from `examples/`; from repo root, prefix script paths with
-# `examples/`):
-#   python run_yolo8_video.py --input clip.mp4
-#   python run_yolo8_video.py --input clip.mp4 --output annotated.mp4
 
 def build_video_annotation_pipeline(model_path: Path) -> Pipeline[ImagePayload, ImagePayload]:
     return Pipeline([
@@ -47,30 +46,21 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Sequential YOLOv8 inference on a video file.",
     )
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument(
         "--input",
         type=Path,
         default=None,
-        help="Input video file. Defaults to the bundled sample video (downloaded on first run).",
+        help="Input video path. Defaults to the bundled sample video.",
     )
-    parser.add_argument("--output", type=Path, default=None,
-                        help="Output annotated video. Defaults to <input>_annotated.mp4.")
-    add_assets_dir_arg(parser)
-    add_model_arg(parser, list(YOLO8_MODELS))
+    parser.add_argument("--output", type=Path, default=None, help="Output video path. Defaults to <input>_annotated.mp4.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    model_name, model_url = YOLO8_MODELS[args.model]
-    model_path = resolve_model_path(args.assets_dir, model_name, model_url, args.model)
-    if model_path is None:
-        return 1
-
-    input_path = args.input or args.assets_dir / SAMPLE_VIDEO_NAME
-    if args.input is None:
-        print(f"Downloading sample video to {input_path} if needed...", file=sys.stderr)
-        download_if_missing(SAMPLE_VIDEO_URL, input_path)
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
+    input_path = resolve_input_path(args.input, ASSETS_DIR / SAMPLE_VIDEO_NAME, SAMPLE_VIDEO_URL)
 
     output_path = args.output or input_path.with_stem(input_path.stem + "_annotated").with_suffix(".mp4")
 
@@ -101,7 +91,7 @@ def main() -> int:
         if not ret:
             break
 
-        source = ImagePayload(array=frame, color_space="BGR", layout="HWC")
+        source = ImagePayload(array=frame)
         annotated = pipeline(source)
         writer.write(annotated.array)
 

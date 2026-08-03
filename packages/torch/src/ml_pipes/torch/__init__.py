@@ -43,6 +43,7 @@ from .ops import (
     TorchNMS,
     TorchResizeMasks,
     TorchWeightMasksByScores,
+    TorchSqueeze,
 )
 from .types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
 
@@ -61,6 +62,7 @@ __all__ = [
     "TorchGatherScores",
     "TorchSelectTensors",
     "TorchSigmoid",
+    "TorchSqueeze",
     "TorchSlice",
     "TorchSortTensorsBy",
     "TorchSoftmax",

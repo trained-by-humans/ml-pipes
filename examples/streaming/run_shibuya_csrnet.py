@@ -1,10 +1,19 @@
+"""
+CSRNet crowd density estimation on a live stream.
+
+Requires `torch`. The default source is a YouTube page URL, so `yt-dlp` is
+required unless you pass a direct stream URL with `--url`.
+
+Run from the repo root:
+    python examples/streaming/run_shibuya_csrnet.py
+    python examples/streaming/run_shibuya_csrnet.py --url <stream-url>
+"""
 from __future__ import annotations
 
 import argparse
 import collections
 import sys
 import urllib.error
-from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -18,19 +27,22 @@ if __name__ == "__main__" and __package__ is None:
 import cv2
 import numpy as np
 
-from ..common import add_assets_dir_arg, download_if_missing
-from .stream_common import FrameReader, add_streaming_args, get_stream_url
+try:
+    import torch
+    import torch.nn as nn
+except ImportError:
+    torch = None
+    nn = None
+
+from ..common import ASSETS_DIR, download_if_missing
+from .stream_common import DrawCount, FrameReader, add_streaming_args, resolve_stream_source
 from ml_pipes.collectors import ThroughputCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import (
     Extract,
     RuntimeOutputs,
 )
-from ml_pipes.standard import (
-    Pick,
-    Recall,
-    Store,
-)
+from ml_pipes.standard import Pick, Recall, Store
 from ml_pipes.tensor import (
     AsType,
     Squeeze,
@@ -58,8 +70,6 @@ _IMAGENET_STD_RGB = (0.229, 0.224, 0.225)
 # ---------------------------------------------------------------------------
 
 def build_csrnet_model() -> Any:
-    _, nn = _import_torch()
-
     def make_layers(cfg: list[int | str], in_channels: int = 3, dilation: bool = False) -> Any:
         rate = 2 if dilation else 1
         layers: list[Any] = []
@@ -93,17 +103,6 @@ def build_csrnet_model() -> Any:
 # Torch/runtime integration
 # ---------------------------------------------------------------------------
 
-def _import_torch() -> tuple[Any, Any]:
-    try:
-        import torch
-        import torch.nn as nn
-    except ImportError as exc:
-        raise RuntimeError(
-            "CSRNet example requires torch. Install it in the project environment before running this script."
-        ) from exc
-    return torch, nn
-
-
 def unwrap_state_dict(checkpoint: Any) -> dict[str, Any]:
     if not isinstance(checkpoint, dict):
         raise TypeError(f"Unsupported checkpoint type: {type(checkpoint)!r}")
@@ -122,12 +121,12 @@ def unwrap_state_dict(checkpoint: Any) -> dict[str, Any]:
     raise ValueError("Checkpoint did not contain any weights")
 
 
-def resolve_weights_path(assets_dir: Path, weights_path: Path | None) -> Path:
+def resolve_weights_path(weights_path: Path | None) -> Path:
     if weights_path is not None:
         if not weights_path.is_file():
             raise FileNotFoundError(f"CSRNet weights not found: {weights_path}")
         return weights_path
-    resolved = assets_dir / CSRNET_MODEL_NAME
+    resolved = ASSETS_DIR / CSRNET_MODEL_NAME
     try:
         download_if_missing(CSRNET_MODEL_URL, resolved)
     except (OSError, urllib.error.URLError) as exc:
@@ -138,7 +137,6 @@ def resolve_weights_path(assets_dir: Path, weights_path: Path | None) -> Path:
 
 
 def choose_device(requested: str) -> str:
-    torch, _ = _import_torch()
     if requested != "auto":
         return requested
     if torch.cuda.is_available():
@@ -149,8 +147,7 @@ def choose_device(requested: str) -> str:
     return "cpu"
 
 
-def load_model(weights_path: Path, device: str) -> tuple[Any, Any]:
-    torch, _ = _import_torch()
+def load_model(weights_path: Path, device: str) -> Any:
     model = build_csrnet_model()
     checkpoint = torch.load(str(weights_path), map_location=device)
     state_dict = unwrap_state_dict(checkpoint)
@@ -161,20 +158,19 @@ def load_model(weights_path: Path, device: str) -> tuple[Any, Any]:
         )
     model.to(device)
     model.eval()
-    return model, torch
+    return model
 
 
 class CSRNetInfer:
-    def __init__(self, model: Any, torch: Any, device: str) -> None:
+    def __init__(self, model: Any, device: str) -> None:
         self.model = model
-        self.torch = torch
         self.device = device
 
     def __call__(self, tensor_payload: TensorPayload) -> RuntimeOutputs:
         if tensor_payload.layout != "NCHW":
             raise ValueError(f"CSRNetInfer expects NCHW tensor layout, got {tensor_payload.layout}")
-        tensor = self.torch.from_numpy(np.ascontiguousarray(tensor_payload.array)).to(self.device)
-        with self.torch.inference_mode():
+        tensor = torch.from_numpy(np.ascontiguousarray(tensor_payload.array)).to(self.device)
+        with torch.inference_mode():
             density = self.model(tensor).cpu().numpy()
         return RuntimeOutputs(
             tensors=(TensorPayload(array=density, layout="NCHW", dtype=str(density.dtype)),),
@@ -182,11 +178,10 @@ class CSRNetInfer:
         )
 
 
-# ---------------------------------------------------------------------------
-# Pipeline composition
-# ---------------------------------------------------------------------------
-
-def build_preprocess_pipeline() -> Pipeline[ImagePayload, TensorPayload]:
+def build_pipeline(
+    model: Any,
+    device: str,
+) -> Pipeline[ImagePayload, ImagePayload]:
     return Pipeline([
         Store("source_frame"),
         Normalize(
@@ -196,11 +191,7 @@ def build_preprocess_pipeline() -> Pipeline[ImagePayload, TensorPayload]:
             output_layout="NCHW",
             output_color_space="RGB",
         ),
-    ])
-
-
-def build_postprocess_pipeline() -> Pipeline[RuntimeOutputs, tuple[ImagePayload, float]]:
-    return Pipeline([
+        CSRNetInfer(model, device),
         Extract("output0", as_="density"),
         Squeeze("density", axis=(0, 1)),
         AsType(src="density", dtype="float32"),
@@ -215,60 +206,43 @@ def build_postprocess_pipeline() -> Pipeline[RuntimeOutputs, tuple[ImagePayload,
         DensityToHeatmap(),
         BlendImages(),
         Recall("count"),
-    ])
+        DrawCount(counter="People", decimals=1),
+    ], auto_validate=True)
 
 
-def build_frame_pipeline(
-    infer_op: Callable[[TensorPayload], RuntimeOutputs],
-) -> Pipeline[ImagePayload, tuple[ImagePayload, float]]:
-    pipeline = build_preprocess_pipeline() + Pipeline([infer_op]) + build_postprocess_pipeline()
-    pipeline.validate()
-    pipeline.describe()
-    return pipeline
-
-
-def run(
+def run_stream(
     url: str,
-    assets_dir: Path,
+    pipeline: Pipeline[ImagePayload, ImagePayload],
     target_fps: float,
     workers: int,
     stride: int,
-    weights: Path | None,
     device: str,
 ) -> int:
-    try:
-        resolved_weights = resolve_weights_path(assets_dir, weights)
-        resolved_device = choose_device(device)
-        model, torch = load_model(resolved_weights, resolved_device)
-    except (FileNotFoundError, RuntimeError, ValueError, TypeError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"Resolving stream URL from {url} ...", file=sys.stderr)
-    stream_url = get_stream_url(url)
+    print(f"Resolving stream source from {url} ...", file=sys.stderr)
 
     try:
-        reader = FrameReader(stream_url, fallback_fps=target_fps, stride=stride)
-    except OSError as exc:
+        stream_source = resolve_stream_source(url)
+        reader = FrameReader(stream_source, fallback_fps=target_fps, stride=stride)
+    except (OSError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     throughput = ThroughputCollector(target_fps=target_fps, report_interval_s=1.0)
-    pending: collections.deque[Future[tuple[ImagePayload, float]]] = collections.deque()
+    pipeline.set_tracing(throughput)
+    pending: collections.deque[Future[ImagePayload]] = collections.deque()
     stopped = False
-    frame_pipeline = build_frame_pipeline(CSRNetInfer(model, torch, resolved_device))
-    frame_pipeline.set_tracing(throughput)
-
     throughput.target_fps = reader.stream_fps
+    status = f"device={device}"
+    window_title = "Shibuya Crossing - CSRNet"
 
     print(
-        f"Streaming with {workers} worker(s), stride={stride}, device={resolved_device} "
+        f"Streaming with {workers} worker(s), stride={stride}, {status} "
         "— press Q in the window to quit.",
         file=sys.stderr,
     )
 
-    def infer(frame: np.ndarray) -> tuple[ImagePayload, float]:
-        return frame_pipeline(ImagePayload(array=frame, color_space="BGR", layout="HWC"))
+    def infer(frame: np.ndarray) -> ImagePayload:
+        return pipeline(ImagePayload(array=frame))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         while True:
@@ -287,9 +261,9 @@ def run(
 
             future = pending[0]
             try:
-                annotated, count = future.result(timeout=0.05)
+                annotated = future.result(timeout=0.05)
                 pending.popleft()
-                cv2.imshow("Shibuya Crossing - CSRNet", annotated.array)
+                cv2.imshow(window_title, annotated.array)
             except TimeoutError:
                 pass
 
@@ -303,7 +277,6 @@ def run(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Stream Shibuya crossing with CSRNet crowd counting.")
     add_streaming_args(parser)
-    add_assets_dir_arg(parser)
     parser.add_argument(
         "--target-fps",
         type=float,
@@ -327,14 +300,29 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    return run(
+    if torch is None or nn is None:
+        print("Torch is required: python -m pip install torch", file=sys.stderr)
+        return 1
+
+    try:
+        resolved_weights = resolve_weights_path(args.weights)
+        resolved_device = choose_device(args.device)
+        model = load_model(resolved_weights, resolved_device)
+    except (FileNotFoundError, RuntimeError, ValueError, TypeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    pipeline = build_pipeline(model, resolved_device)
+    pipeline.validate()
+    pipeline.describe()
+
+    return run_stream(
         url=args.url,
-        assets_dir=args.assets_dir,
+        pipeline=pipeline,
         target_fps=args.target_fps,
         workers=args.workers,
         stride=args.stride,
-        weights=args.weights,
-        device=args.device,
+        device=resolved_device,
     )
 
 

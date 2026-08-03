@@ -1,18 +1,12 @@
 """
 Prepare the UCI SMS Spam Collection for spam-detection training.
 
-The script downloads the dataset on first run, normalizes the text with a
-`data_ops` pipeline, removes duplicates by normalized text, assigns
-deterministic train/validation/test splits, and writes JSONL files ready for
-model training.
+This script downloads the dataset, normalizes and deduplicates the messages,
+creates deterministic splits, and writes JSONL files for training.
 
-Usage:
+Run from the repo root:
     python examples/run_sms_spam_prepare.py
-
-    python examples/run_sms_spam_prepare.py \
-        --lazy \
-        --min-chars 8 \
-        --min-tokens 3 \
+    python examples/run_sms_spam_prepare.py --lazy --min-chars 8 --min-tokens 3 \
         --inspect-html examples/.example_assets/sms_spam_prepare.html
 """
 from __future__ import annotations
@@ -37,7 +31,7 @@ if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     __package__ = "examples"
 
-from examples.common import ASSETS_DIR, add_assets_dir_arg
+from examples.common import ASSETS_DIR
 from ml_pipes.collectors import CaptureCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.factory import (
@@ -299,13 +293,11 @@ def _download_with_fallback(urls: tuple[str, ...], destination: Path) -> None:
 
 
 def ensure_sms_spam_collection(
-    assets_dir: Path | str = DEFAULT_SMS_SPAM_DIR,
     *,
     force_download: bool = False,
 ) -> Path:
-    assets_path = Path(assets_dir)
-    archive_path = assets_path / SMS_SPAM_ARCHIVE_NAME
-    dataset_path = assets_path / SMS_SPAM_MEMBER_NAME
+    archive_path = DEFAULT_SMS_SPAM_DIR / SMS_SPAM_ARCHIVE_NAME
+    dataset_path = DEFAULT_SMS_SPAM_DIR / SMS_SPAM_MEMBER_NAME
 
     if force_download:
         if archive_path.exists():
@@ -320,7 +312,7 @@ def ensure_sms_spam_collection(
         _download_with_fallback(SMS_SPAM_ARCHIVE_URLS, archive_path)
 
     with zipfile.ZipFile(archive_path) as archive:
-        archive.extract(SMS_SPAM_MEMBER_NAME, assets_path)
+        archive.extract(SMS_SPAM_MEMBER_NAME, DEFAULT_SMS_SPAM_DIR)
     return dataset_path
 
 
@@ -482,14 +474,13 @@ def sms_spam_prepare_pipeline(
 
 @data_factory
 def sms_spam_collection_input(
-    assets_dir: str | Path = DEFAULT_SMS_SPAM_DIR,
     force_download: int = 0,
     sample_count: int = 0,
 ) -> InputFn:
     if sample_count < 0:
         raise ValueError(f"sample_count must be >= 0, got {sample_count}")
 
-    dataset_path = ensure_sms_spam_collection(assets_dir, force_download=bool(force_download))
+    dataset_path = ensure_sms_spam_collection(force_download=bool(force_download))
     rows = read_sms_spam_rows(dataset_path)
     if sample_count > 0:
         rows = rows[:sample_count]
@@ -670,13 +661,12 @@ def _write_sms_spam_lineage_artifacts(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_assets_dir_arg(parser)
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
         help="Where to write the prepared JSONL files. Defaults to "
-             "<assets-dir>/sms_spam_prepared.",
+             "examples/.example_assets/sms_spam_prepared.",
     )
     parser.add_argument(
         "--force-download",
@@ -736,8 +726,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
-    assets_dir = args.assets_dir / "sms_spam_collection"
-    output_dir = args.output_dir or (args.assets_dir / "sms_spam_prepared")
+    output_dir = args.output_dir or (ASSETS_DIR / "sms_spam_prepared")
     sample_count = args.inspect_samples if args.inspect_html is not None and args.inspect_samples > 0 else 0
     inspect_requested_samples = args.inspect_samples if args.inspect_html is not None else None
     pipeline = sms_spam_prepare_pipeline(
@@ -748,7 +737,6 @@ def main() -> int:
         lazy=args.lazy,
     )
     input_fn = sms_spam_collection_input(
-        assets_dir=assets_dir,
         force_download=int(args.force_download),
         sample_count=sample_count,
     )
@@ -807,7 +795,7 @@ def main() -> int:
         output_dir=output_dir,
         pipeline_description=pipeline_description,
         run_args={
-            "assets_dir": str(assets_dir),
+            "dataset_dir": str(DEFAULT_SMS_SPAM_DIR),
             "output_dir": str(output_dir),
             "force_download": args.force_download,
             "min_chars": args.min_chars,

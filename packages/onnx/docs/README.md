@@ -124,7 +124,6 @@ pipeline = Pipeline([
 ```
 
 This is the shape used in
-[`examples/run_detection.py`](../../../examples/run_detection.py) and
 [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py).
 
 ### Batched Inference
@@ -145,7 +144,7 @@ pipeline = Pipeline([
     ...,
     Batch(size=4, timeout=0.05),
     Collate(),
-    Infer(model_path, providers=("CPUExecutionProvider",), serialize=True),
+    Infer(model_path, serialize=True),
     Distribute(),
     UnBatch(),
     Extract("output0", as_="preds"),
@@ -158,13 +157,16 @@ This shape appears in
 
 ## Providers And Concurrency
 
-Provider choice is explicit in `Infer(...)`. The package does not try to guess
-the best backend for you, and shared runtime stages may need explicit
-serialization.
+`Infer(...)` defaults to `CPUExecutionProvider`. Pass `providers=(...)` when
+you want to opt into other ONNX Runtime execution providers, and keep in mind
+that shared runtime stages may still need explicit serialization.
 
 The main expectations are:
 
-- set `providers=(...)` in the order you want ONNX Runtime to try them
+- keep the default CPU-only provider list unless you intentionally want a
+  different ONNX Runtime execution provider setup
+- set `providers=(...)` in the order you want ONNX Runtime to try them when
+  you override the default
 - use `serialize=True` when one shared `Infer` stage can be reached
   concurrently from multiple workers
 - expect `Distribute()` to copy per-sample arrays so downstream mutation does
@@ -175,5 +177,5 @@ The main expectations are:
 - [`INDEX.md`](./INDEX.md) for the full surface catalog
 - [`docs/README.md`](../../../docs/README.md) for the shared framework docs index
 - [`examples/README.md`](../../../examples/README.md) for runnable pipeline entry points
-  - [`examples/run_detection.py`](../../../examples/run_detection.py)
+  - [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py)
   - [`examples/run_yolo8_batch.py`](../../../examples/run_yolo8_batch.py)

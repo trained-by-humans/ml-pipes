@@ -1,3 +1,13 @@
+"""
+Minimal YOLOv8 inference endpoint.
+
+Requires `flask`.
+
+Run from the repo root:
+    python examples/run_yolo8_endpoint.py
+    python examples/run_yolo8_endpoint.py --call
+    python examples/run_yolo8_endpoint.py --call --input path/to/photo.jpg
+"""
 from __future__ import annotations
 
 import argparse
@@ -7,13 +17,13 @@ import urllib.request
 from pathlib import Path
 
 from common import (
-    add_assets_dir_arg,
+    ASSETS_DIR,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
-    download_if_missing,
+    resolve_input_path,
     resolve_model_path,
 )
-from run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
+from run_yolo8_onnx import BUNDLED_MODEL_PATH, yolo8_inference_pipeline
 from ml_pipes.core import (
     Embed,
     Pipeline,
@@ -22,28 +32,6 @@ from ml_pipes.vision import (
     Decode,
     MapPredictionsToObjects,
 )
-
-# Minimal YOLOv8 inference endpoint.
-#
-# Requires Flask:
-#   pip install flask
-#
-# Commands below are shown from `examples/`. From the repository root, prefix
-# script paths and asset paths with `examples/`.
-#
-# Start the server:
-#   python run_yolo8_endpoint.py
-#
-# Run a test call (downloads the sample COCO image if needed):
-#   python run_yolo8_endpoint.py --call
-#
-# Or send a specific image:
-#   python run_yolo8_endpoint.py --call --input photo.jpg
-#
-# Or with curl:
-#   curl -s -X POST http://localhost:5000/detect \
-#        -H "Content-Type: application/octet-stream" \
-#        --data-binary @.example_assets/coco_000000039769.jpg | python -m json.tool
 
 HOST = "localhost"
 PORT = 5000
@@ -93,6 +81,7 @@ def run_call(image_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="YOLOv8 inference endpoint.")
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to the bundled YOLOv8n model in the assets directory.")
     parser.add_argument(
         "--call",
         action="store_true",
@@ -104,26 +93,17 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Image to send with --call. Defaults to the sample COCO image.",
     )
-    add_assets_dir_arg(parser)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    assets_dir = args.assets_dir
-
     if args.call:
-        image_path = args.input or assets_dir / COCO_IMAGE_NAME
-        if args.input is None:
-            print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
-            download_if_missing(COCO_IMAGE_URL, image_path)
+        image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
         run_call(image_path)
         return 0
 
-    model_name, model_url = YOLO8_MODELS["n"]
-    model_path = resolve_model_path(assets_dir, model_name, model_url, "n")
-    if model_path is None:
-        return 1
+    model_path = resolve_model_path(args.model_path, BUNDLED_MODEL_PATH)
     run_server(model_path)
     return 0
 

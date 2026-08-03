@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +30,22 @@ def _inspection_result() -> InspectionResult:
     )
 
 
+def _fake_mkstemp_factory(tmp_path: Path):
+    counter = {"value": 0}
+
+    def fake_mkstemp(suffix: str = "", prefix: str = "tmp", dir: str | None = None, text: bool = False) -> tuple[int, str]:
+        path = tmp_path / f"{prefix}{counter['value']}{suffix}"
+        counter["value"] += 1
+        fd = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_RDWR)
+        return fd, str(path)
+
+    return fake_mkstemp
+
+
+def _saved_reports(tmp_path: Path) -> list[Path]:
+    return sorted(tmp_path.glob("ml_pipes_inspect_*.html"))
+
+
 def test_pipeline_inspector_to_html_defaults_to_horizontal_orientation():
     html = PipelineInspector().to_html(_inspection_result())
 
@@ -38,6 +56,61 @@ def test_pipeline_inspector_to_html_supports_vertical_orientation():
     html = PipelineInspector().to_html(_inspection_result(), orientation="vertical")
 
     assert '<div class="insp-container insp-container--vertical">' in html
+
+
+def test_pipeline_inspector_show_in_browser_announces_saved_report_and_browser_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "ml_pipes.inspection.inspector.tempfile.mkstemp",
+        _fake_mkstemp_factory(tmp_path),
+    )
+
+    opened: dict[str, str] = {}
+
+    def fake_open(uri: str) -> bool:
+        opened["uri"] = uri
+        return True
+
+    monkeypatch.setattr("ml_pipes.inspection.inspector.webbrowser.open", fake_open)
+
+    PipelineInspector().show_in_browser(_inspection_result())
+    captured = capsys.readouterr()
+
+    reports = _saved_reports(tmp_path)
+    assert len(reports) == 1
+    report = reports[0]
+    assert report.exists()
+    assert opened["uri"] == report.as_uri()
+    assert f"Inspection report saved to: {report}" in captured.err
+    assert "Opening inspection report in browser..." in captured.err
+    assert "Browser launch was not confirmed." not in captured.err
+    assert "<title>Pipeline inspection</title>" in report.read_text(encoding="utf-8")
+
+
+def test_pipeline_inspector_show_in_browser_warns_when_browser_launch_is_not_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "ml_pipes.inspection.inspector.tempfile.mkstemp",
+        _fake_mkstemp_factory(tmp_path),
+    )
+    monkeypatch.setattr("ml_pipes.inspection.inspector.webbrowser.open", lambda _uri: False)
+
+    PipelineInspector().show_in_browser(_inspection_result())
+    captured = capsys.readouterr()
+    reports = _saved_reports(tmp_path)
+
+    assert len(reports) == 1
+    report = reports[0]
+    assert report.exists()
+    assert f"Inspection report saved to: {report}" in captured.err
+    assert "Opening inspection report in browser..." in captured.err
+    assert "Browser launch was not confirmed. If nothing opened, use the saved report path above." in captured.err
 
 
 def test_html_renderer_rejects_unknown_orientation():

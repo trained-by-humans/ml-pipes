@@ -64,26 +64,26 @@ class _TensorPayloadPassthrough:
 
 
 class _EmptyDetectionModule(torch.nn.Module):
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         device = x.device
-        return (
-            torch.zeros((0, 4), dtype=torch.float32, device=device),
-            torch.zeros((0, 3), dtype=torch.float32, device=device),
-            torch.zeros((0, 2, 2), dtype=torch.float32, device=device),
-            torch.zeros((0,), dtype=torch.float32, device=device),
-        )
+        return {
+            "boxes": torch.zeros((0, 4), dtype=torch.float32, device=device),
+            "class_logits": torch.zeros((0, 3), dtype=torch.float32, device=device),
+            "mask_logits": torch.zeros((0, 2, 2), dtype=torch.float32, device=device),
+            "flat_scores": torch.zeros((0,), dtype=torch.float32, device=device),
+        }
 
 
 class _EmptyBatchedDetectionModule(torch.nn.Module):
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         batch = int(x.shape[0])
         device = x.device
-        return (
-            torch.zeros((batch, 0, 4), dtype=torch.float32, device=device),
-            torch.zeros((batch, 0, 3), dtype=torch.float32, device=device),
-            torch.zeros((batch, 0, 2, 2), dtype=torch.float32, device=device),
-            torch.zeros((batch, 0), dtype=torch.float32, device=device),
-        )
+        return {
+            "boxes": torch.zeros((batch, 0, 4), dtype=torch.float32, device=device),
+            "class_logits": torch.zeros((batch, 0, 3), dtype=torch.float32, device=device),
+            "mask_logits": torch.zeros((batch, 0, 2, 2), dtype=torch.float32, device=device),
+            "flat_scores": torch.zeros((batch, 0), dtype=torch.float32, device=device),
+        }
 
 
 def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TorchTensorPayload:
@@ -127,12 +127,15 @@ def test_validate_mixed_domains_fail_without_explicit_conversion() -> None:
 
 def test_torch_infer_extract_and_registry_conversion_round_trip() -> None:
     class _Module(torch.nn.Module):
-        def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return x + 1, x.sum(dim=1)
+        def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+            return {
+                "boxes": x + 1,
+                "scores": x.sum(dim=1),
+            }
 
     pipeline = Pipeline([
         ToTorch(),
-        TorchInfer(_Module().eval(), output_names=("boxes", "scores"), output_layouts=("NCHW", "NHW")),
+        TorchInfer(_Module().eval(), output_layouts=("NCHW", "NHW")),
         TorchExtract("scores", as_="scores"),
         ToNumpyRegistry(),
     ])
@@ -152,7 +155,6 @@ def test_torch_infer_and_distribute_preserve_empty_detection_axes_per_sample() -
         ToTorch(),
         TorchInfer(
             _EmptyBatchedDetectionModule().eval(),
-            output_names=("boxes", "class_logits", "mask_logits", "flat_scores"),
             output_layouts=("NNC", "NNC", "NNHW", "NN"),
         ),
         TorchDistribute(),
@@ -184,7 +186,6 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
         TorchAsType("float32"),
         TorchInfer(
             _EmptyDetectionModule().eval(),
-            output_names=("boxes", "class_logits", "mask_logits", "flat_scores"),
             output_layouts=("NC", "NC", "NHW", "N"),
         ),
         TorchExtract("boxes", "class_logits", "mask_logits", "flat_scores"),

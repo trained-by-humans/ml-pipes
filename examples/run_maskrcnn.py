@@ -1,18 +1,26 @@
+"""
+Mask R-CNN int8 ONNX instance segmentation on a sample image.
+
+Run from the repo root:
+    python examples/run_maskrcnn.py
+    python examples/run_maskrcnn.py --input path/to/photo.jpg
+"""
 from __future__ import annotations
 
-import sys
+import argparse
 from pathlib import Path
 
 import numpy as np
 
 from common import (
+    ASSETS_DIR,
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
     build_output_path,
     decode,
-    download_if_missing,
-    parse_input_and_output_args,
+    resolve_input_path,
+    resolve_model_path,
     visualize_and_store,
 )
 from ml_pipes.core import Pipeline
@@ -65,7 +73,7 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segment
                 output_color_space="BGR",
                 add_batch_dim=False,
             ),
-            Infer(model_path, input_layout="CHW", dtype="float32", providers=("CPUExecutionProvider",)),
+            Infer(model_path, input_layout="CHW", dtype="float32"),
             Extract("6568", "6570", "6572", "6887", as_=("boxes", "labels", "scores", "masks")),
             FilterTensorsByScore("boxes", "labels", "masks", score="scores", min_score=CONF_THRESHOLD),
             MapTensor("labels", fn=lambda t: t.astype(np.int32) - 1, as_="classes"),
@@ -81,17 +89,15 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segment
 
 
 def main() -> int:
-    args = parse_input_and_output_args("Run a Mask R-CNN int8 ONNX instance segmentation demo on a COCO image.")
-    assets_dir = args.assets_dir
-    model_path = assets_dir / MODEL_NAME
-    image_path = assets_dir / COCO_IMAGE_NAME
-    output_path = args.output or build_output_path(assets_dir, COCO_IMAGE_NAME, MODEL_NAME)
+    parser = argparse.ArgumentParser(description="Run a Mask R-CNN int8 ONNX instance segmentation demo on a COCO image.")
+    parser.add_argument("--model-path", type=Path, default=None, help="Path to a local ONNX model. Defaults to downloading the example Mask R-CNN int8 model.")
+    parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
+    parser.add_argument("--output", type=Path, default=None, help="Output image path. Defaults to a file under the assets directory.")
+    args = parser.parse_args()
 
-    print(f"Downloading model to {model_path} if needed...", file=sys.stderr)
-    download_if_missing(MODEL_URL, model_path)
-
-    print(f"Downloading image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    model_path = resolve_model_path(args.model_path, ASSETS_DIR / MODEL_NAME, MODEL_URL)
+    image_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    output_path = args.output or build_output_path(ASSETS_DIR, image_path.name, model_path.name)
 
     infer_pipe = build_inference_pipeline(model_path)
     pipeline = decode() + infer_pipe + visualize_and_store(output_path, COCO_CLASSES)
