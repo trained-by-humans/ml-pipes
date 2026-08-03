@@ -22,6 +22,7 @@ __all__ = [
     "TorchAsType",
     "TorchArgMax",
     "TorchSqueeze",
+    "TorchTranspose",
     "TorchGatherRows",
     "TorchTopK",
     "TorchTopKIndices2D",
@@ -36,7 +37,10 @@ __all__ = [
     "TorchBinarizeTensorByThreshold",
     "TorchApplyTensorMask",
     "TorchSelectTensors",
+    "TorchFilterTensors",
+    "TorchMapTensor",
     "TorchSortTensorsBy",
+    "TorchScale",
 ]
 
 TorchTensorLike: TypeAlias = (
@@ -207,6 +211,20 @@ class TorchSqueeze:
                 )
             squeezed = torch.squeeze(squeezed, dim=axis)
         registry[self.as_] = squeezed
+        return registry
+
+
+@Operator
+class TorchTranspose:
+    def __init__(self, src: str, axes: tuple[int, ...] | None = None, as_: str | None = None):
+        self.src = src
+        self.axes = axes
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        tensor = registry[self.src]
+        dims = self.axes if self.axes is not None else tuple(range(tensor.ndim - 1, -1, -1))
+        registry[self.as_] = torch.permute(tensor, dims)
         return registry
 
 
@@ -402,6 +420,49 @@ class TorchSelectTensors:
 
 
 @Operator
+class TorchFilterTensors:
+    def __init__(
+        self,
+        *srcs: str,
+        by: str,
+        predicate: Callable[[torch.Tensor], TorchTensorMask],
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        self.srcs = srcs
+        self.by = by
+        self.predicate = predicate
+        self.dst_names = resolve_multi_output_names("TorchFilterTensors", srcs, as_)
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        source = registry[self.by]
+        raw_mask = self.predicate(source)
+        if isinstance(raw_mask, torch.Tensor):
+            if raw_mask.dtype != torch.bool:
+                raise TypeError("TorchFilterTensors predicate must return a boolean mask.")
+            mask = raw_mask.to(device=source.device)
+        else:
+            mask_array = np.asarray(raw_mask)
+            if not np.issubdtype(mask_array.dtype, np.bool_):
+                raise TypeError("TorchFilterTensors predicate must return a boolean mask.")
+            mask = torch.as_tensor(mask_array, dtype=torch.bool, device=source.device)
+        for src, dst in zip(self.srcs, self.dst_names, strict=True):
+            registry[dst] = registry[src][mask]
+        return registry
+
+
+@Operator
+class TorchMapTensor:
+    def __init__(self, src: str, fn: Callable[[torch.Tensor], torch.Tensor], as_: str | None = None):
+        self.src = src
+        self.fn = fn
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        registry[self.as_] = self.fn(registry[self.src])
+        return registry
+
+
+@Operator
 class TorchSortTensorsBy:
     def __init__(
         self,
@@ -420,4 +481,17 @@ class TorchSortTensorsBy:
         order = torch.argsort(registry[self.by], descending=self.descending)
         for src, dst in zip(self.srcs, self.dst_names, strict=True):
             registry[dst] = registry[src][order]
+        return registry
+
+
+@Operator
+class TorchScale:
+    def __init__(self, src: str, by: float | tuple | list, as_: str | None = None):
+        self.src = src
+        self.by = torch.as_tensor(by)
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        tensor = registry[self.src]
+        registry[self.as_] = tensor * self.by.to(device=tensor.device, dtype=tensor.dtype)
         return registry

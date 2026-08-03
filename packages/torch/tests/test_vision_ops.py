@@ -5,16 +5,26 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from ml_pipes.torch import (
+    TorchConvertBoxFormat,
     TorchFilterTensorsByClasses,
     TorchFilterTensorsByMasksArea,
     TorchFilterTensorsByScore,
     TorchMasksToBoxes,
     TorchMeanMaskScores,
     TorchNMS,
+    TorchReconstructMasks,
     TorchResizeMasks,
     TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchTensorRegistry
+
+
+def test_torch_convert_box_format_cxcywh_to_xyxy():
+    registry = TorchTensorRegistry({"boxes": torch.tensor([[10.0, 20.0, 4.0, 6.0]], dtype=torch.float32)})
+
+    result = TorchConvertBoxFormat(from_="cxcywh")(registry)
+
+    assert torch.allclose(result["boxes"], torch.tensor([[8.0, 17.0, 12.0, 23.0]], dtype=torch.float32))
 
 
 def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
@@ -257,6 +267,16 @@ def test_torch_filter_tensors_by_classes_can_write_to_new_keys():
     assert registry["selected_classes"].tolist() == [0, 2]
     assert torch.allclose(registry["selected_scores"], torch.tensor([0.9, 0.8]))
     assert registry["classes"].tolist() == [0, 1, 2]
+
+
+def test_torch_reconstruct_masks_produces_correct_shape():
+    coefficients = torch.ones((2, 3), dtype=torch.float32)
+    prototypes = torch.ones((3, 4, 4), dtype=torch.float32)
+    registry = TorchTensorRegistry({"coefficients": coefficients, "prototypes": prototypes})
+
+    result = TorchReconstructMasks("coefficients", "prototypes", as_="masks")(registry)
+
+    assert result["masks"].shape == (2, 4, 4)
 
 
 def test_torch_nms_keeps_overlapping_boxes_from_different_classes():

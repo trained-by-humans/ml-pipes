@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from typing import Literal, get_args
 
 import torch
 
@@ -9,6 +10,7 @@ from ml_pipes.operator import Operator
 from .types import TorchTensorRegistry
 
 __all__ = [
+    "TorchConvertBoxFormat",
     "TorchFilterTensorsByScore",
     "TorchFilterTensorsByClasses",
     "TorchFilterTensorsByMasksArea",
@@ -16,8 +18,63 @@ __all__ = [
     "TorchResizeMasks",
     "TorchMeanMaskScores",
     "TorchMasksToBoxes",
+    "TorchReconstructMasks",
     "TorchNMS",
 ]
+
+BoxFormat = Literal["xyxy", "xywh", "cxcywh"]
+_BOX_FORMATS: frozenset[str] = frozenset(get_args(BoxFormat))
+
+
+@Operator
+class TorchConvertBoxFormat:
+    def __init__(
+        self,
+        src: str = "boxes",
+        *,
+        from_: BoxFormat,
+        to: BoxFormat = "xyxy",
+        as_: str | None = None,
+    ):
+        if from_ not in _BOX_FORMATS:
+            raise ValueError(
+                f"TorchConvertBoxFormat: unknown from_ format {from_!r}. Choose from {sorted(_BOX_FORMATS)}"
+            )
+        if to not in _BOX_FORMATS:
+            raise ValueError(f"TorchConvertBoxFormat: unknown to format {to!r}. Choose from {sorted(_BOX_FORMATS)}")
+        self.src = src
+        self.from_ = from_
+        self.to = to
+        self.as_ = as_ or src
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        boxes = registry[self.src]
+        registry[self.as_] = self._convert(boxes, self.from_, self.to)
+        return registry
+
+    @staticmethod
+    def _convert(boxes: torch.Tensor, from_: str, to: str) -> torch.Tensor:
+        if from_ == to:
+            return boxes
+
+        if from_ == "xyxy":
+            xyxy = boxes
+        elif from_ == "xywh":
+            xyxy = torch.cat([boxes[:, :2], boxes[:, :2] + boxes[:, 2:4]], dim=1)
+        elif from_ == "cxcywh":
+            half = boxes[:, 2:4] / 2.0
+            xyxy = torch.cat([boxes[:, :2] - half, boxes[:, :2] + half], dim=1)
+        else:
+            raise ValueError(from_)
+
+        if to == "xyxy":
+            return xyxy.to(dtype=boxes.dtype)
+        if to == "xywh":
+            return torch.cat([xyxy[:, :2], xyxy[:, 2:4] - xyxy[:, :2]], dim=1).to(dtype=boxes.dtype)
+        if to == "cxcywh":
+            wh = xyxy[:, 2:4] - xyxy[:, :2]
+            return torch.cat([xyxy[:, :2] + wh / 2.0, wh], dim=1).to(dtype=boxes.dtype)
+        raise ValueError(to)
 
 
 @Operator
@@ -190,6 +247,22 @@ class TorchMasksToBoxes:
         empty = ~masks.any(dim=(-2, -1))
         boxes[empty] = 0.0
         registry[self.as_] = boxes
+        return registry
+
+
+@Operator
+class TorchReconstructMasks:
+    def __init__(self, coefficients: str, prototypes: str, as_: str):
+        self.coefficients = coefficients
+        self.prototypes = prototypes
+        self.as_ = as_
+
+    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        coefficients = registry[self.coefficients]
+        prototypes = registry[self.prototypes]
+        channels, mask_h, mask_w = prototypes.shape
+        masks = coefficients @ prototypes.reshape(channels, -1)
+        registry[self.as_] = masks.reshape(-1, mask_h, mask_w)
         return registry
 
 

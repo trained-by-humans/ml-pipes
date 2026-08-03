@@ -55,11 +55,16 @@ That mirroring is what lets Torch stages integrate cleanly with
 `ml_pipes.tensor` when a pipeline crosses back into the shared NumPy-side
 postprocess path. The main addition is `device`, which keeps placement
 explicit while the value is in the Torch domain.
+When values stay in `TorchTensorRegistry`, the package also mirrors the core
+generic tensor helpers that are worth keeping on-device, including transpose,
+scale, filtering, and mapping stages.
 
 Torch may carry Torch-native implementations of vision-adjacent registry
 helpers while the working values remain `TorchTensorRegistry`. Vision still
 owns image payloads, projection, rendering, and typed outputs such as
-`ToDetections()` and `ToSegmentations()`.
+`ToDetections()` and `ToSegmentations()`. That includes Torch-side helpers
+such as box-format conversion, mask reconstruction, filtering, resizing, and
+NMS as long as the working values stay in the Torch registry domain.
 
 The main crossings are:
 

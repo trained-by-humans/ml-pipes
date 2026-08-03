@@ -55,22 +55,27 @@ For the cross-package package catalogs, see
 |---|---|
 | `TorchAsType(dtype, src=None, as_=None)` | Casts Torch-backed tensor values or named registry tensors. |
 | `TorchArgMax(...)` | Argmax over a named Torch tensor. |
+| `TorchSqueeze(src, axis=None, as_=None)` | Removes unit dimensions from a named Torch tensor. |
+| `TorchTranspose(src, axes=None, as_=None)` | Permutes axes of a named Torch tensor. |
+| `TorchSlice(...)` | Slices a named tensor in a Torch registry. |
 | `TorchGatherRows(...)` | Row-wise gather driven by another registry tensor of indices. |
 | `TorchTopK(...)` / `TorchTopKIndices2D(...)` | Top-k ranking helpers for 1D and 2D tensors. |
-| `TorchSqueeze(src, axis=None, as_=None)` | Removes unit dimensions from a named Torch tensor. |
-| `TorchSlice(...)` | Slices a named tensor in a Torch registry. |
 | `TorchSoftmax(...)` / `TorchSigmoid(...)` | Standard per-tensor nonlinearities. |
 | `TorchMultiplyTensors(...)` | Element-wise multiplication of two named tensors. |
+| `TorchScale(src, by, as_=None)` | Multiplies a tensor by a scalar or broadcastable factors. |
 | `TorchCreateTensorMask(...)` | Builds boolean masks from Torch tensors. |
 | `TorchCreateTensorMaskByThreshold(...)` | Threshold-based mask creation. |
 | `TorchApplyTensorMask(...)` | Applies one boolean mask across one or more tensors. |
 | `TorchSelectTensors(...)` | Applies integer-index selection across one or more tensors. |
+| `TorchFilterTensors(...)` | Filters one or more tensors by a predicate on another Torch tensor. |
+| `TorchMapTensor(src, fn, as_=None)` | Applies an arbitrary tensor-to-tensor mapping function. |
 | `TorchSortTensorsBy(...)` | Reorders tensors by a ranking tensor. |
 
 ## Torch Vision Helpers
 
 | Operator | Notes |
 |---|---|
+| `TorchConvertBoxFormat(...)` | Converts boxes between `xyxy`, `xywh`, and `cxcywh` while staying in Torch. |
 | `TorchFilterTensorsByScore(...)` | Filters tensors by a score threshold. |
 | `TorchFilterTensorsByClasses(...)` | Filters tensors by allowed class ids. |
 | `TorchFilterTensorsByMasksArea(...)` | Filters tensors by mask area. |
@@ -78,4 +83,5 @@ For the cross-package package catalogs, see
 | `TorchResizeMasks(...)` | Resizes masks while staying in the Torch domain. |
 | `TorchMeanMaskScores(...)` | Computes mean scores over masks or masked areas. |
 | `TorchMasksToBoxes(...)` | Derives boxes from masks. |
+| `TorchReconstructMasks(...)` | Reconstructs dense masks from coefficients and prototypes in Torch. |
 | `TorchNMS(...)` | Torch-native non-maximum suppression for registry tensors. |

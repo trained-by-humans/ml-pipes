@@ -12,8 +12,11 @@ from ml_pipes.torch import (
     TorchBinarizeTensorByThreshold,
     TorchCreateTensorMask,
     TorchCreateTensorMaskByThreshold,
+    TorchFilterTensors,
     TorchGatherScores,
+    TorchMapTensor,
     TorchMultiplyTensors,
+    TorchScale,
     TorchSelectTensors,
     TorchSigmoid,
     TorchSqueeze,
@@ -22,6 +25,7 @@ from ml_pipes.torch import (
     TorchSoftmax,
     TorchTopK,
     TorchTopKIndices2D,
+    TorchTranspose,
 )
 from ml_pipes.torch.types import TorchTensorPayload, TorchTensorRegistry
 
@@ -117,12 +121,29 @@ def test_torch_argmax_and_multiply_tensors_work_on_registry():
     assert torch.allclose(registry["product"], torch.tensor([[10.0, 20.0], [20.0, 40.0]]))
 
 
+def test_torch_scale_multiplies_by_broadcastable_factors():
+    registry = TorchTensorRegistry({"preds": torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)})
+
+    result = TorchScale("preds", by=(10.0, 100.0), as_="scaled_preds")(registry)
+
+    assert torch.allclose(result["scaled_preds"], torch.tensor([[10.0, 200.0], [30.0, 400.0]]))
+    assert torch.allclose(result["preds"], torch.tensor([[1.0, 2.0], [3.0, 4.0]]))
+
+
 def test_torch_squeeze_removes_size_one_batch_dim():
     registry = TorchTensorRegistry({"preds": torch.zeros((1, 5, 10), dtype=torch.float32)})
 
     result = TorchSqueeze("preds")(registry)
 
     assert tuple(result["preds"].shape) == (5, 10)
+
+
+def test_torch_transpose_swaps_axes():
+    registry = TorchTensorRegistry({"preds": torch.zeros((5, 10), dtype=torch.float32)})
+
+    result = TorchTranspose("preds")(registry)
+
+    assert tuple(result["preds"].shape) == (10, 5)
 
 
 def test_torch_squeeze_supports_single_and_multiple_axes():
@@ -276,6 +297,27 @@ def test_torch_sort_tensors_by_sorts_parallel_tensors():
 
     assert torch.allclose(result["scores"], torch.tensor([0.9, 0.5, 0.1]))
     assert result["classes"].tolist() == [9, 5, 1]
+
+
+def test_torch_filter_tensors_can_write_to_new_keys():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
+        }
+    )
+
+    result = TorchFilterTensors(
+        "scores",
+        "classes",
+        by="classes",
+        predicate=lambda classes: classes == 0,
+        as_=("selected_scores", "selected_classes"),
+    )(registry)
+
+    assert torch.allclose(result["selected_scores"], torch.tensor([0.9, 0.8]))
+    assert result["selected_classes"].tolist() == [0, 0]
+    assert torch.allclose(result["scores"], torch.tensor([0.9, 0.5, 0.8]))
 
 
 def test_torch_sort_tensors_by_can_write_to_new_keys():
@@ -452,3 +494,63 @@ def test_torch_select_tensors_can_write_multiple_outputs():
     assert torch.allclose(registry["selected_scores"], torch.tensor([0.8, 0.9]))
     assert registry["selected_classes"].tolist() == [6, 4]
     assert torch.allclose(registry["scores"], torch.tensor([0.9, 0.5, 0.8]))
+
+
+def test_torch_filter_tensors_applies_predicate():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
+        }
+    )
+
+    result = TorchFilterTensors("scores", by="classes", predicate=lambda classes: classes == 0)(registry)
+
+    assert torch.allclose(result["scores"], torch.tensor([0.9, 0.8]))
+
+
+def test_torch_filter_tensors_applies_to_multiple_keys():
+    registry = TorchTensorRegistry(
+        {
+            "boxes": torch.tensor([[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]], dtype=torch.float32),
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
+        }
+    )
+
+    result = TorchFilterTensors(
+        "boxes",
+        "scores",
+        "classes",
+        by="classes",
+        predicate=lambda classes: classes == 0,
+    )(registry)
+
+    assert torch.allclose(result["scores"], torch.tensor([0.9, 0.8]))
+    assert result["classes"].tolist() == [0, 0]
+    assert len(result["boxes"]) == 2
+
+
+def test_torch_filter_tensors_rejects_integer_index_output():
+    registry = TorchTensorRegistry(
+        {
+            "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
+            "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
+        }
+    )
+
+    with pytest.raises(TypeError):
+        TorchFilterTensors(
+            "scores",
+            by="scores",
+            predicate=lambda scores: torch.argsort(scores)[-2:],
+        )(registry)
+
+
+def test_torch_map_tensor_applies_fn():
+    registry = TorchTensorRegistry({"mask_probs": torch.tensor([[0.1, 0.9]], dtype=torch.float32)})
+
+    result = TorchMapTensor("mask_probs", fn=lambda tensor: tensor + 1.0, as_="mapped_mask_probs")(registry)
+
+    assert torch.allclose(result["mapped_mask_probs"], torch.tensor([[1.1, 1.9]], dtype=torch.float32))
+    assert torch.allclose(result["mask_probs"], torch.tensor([[0.1, 0.9]], dtype=torch.float32))
