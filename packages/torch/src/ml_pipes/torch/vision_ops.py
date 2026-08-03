@@ -5,8 +5,8 @@ from typing import Literal, get_args
 
 import torch
 
-from ml_pipes._operator_utils import resolve_multi_output_names
 from ml_pipes.operator import Operator
+from .tensor_ops import TorchFilterTensors
 from .types import TorchTensorRegistry
 
 __all__ = [
@@ -87,16 +87,15 @@ class TorchFilterTensorsByScore:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (score,) + tuple(src for src in srcs if src != score)
-        self.srcs = all_srcs
-        self.score = score
-        self.min_score = min_score
-        self.dst_names = resolve_multi_output_names("TorchFilterTensorsByScore", all_srcs, as_)
+        self._inner = TorchFilterTensors(
+            *all_srcs,
+            by=score,
+            predicate=lambda scores: scores >= min_score,
+            as_=as_,
+        )
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        keep = registry[self.score] >= self.min_score
-        for src, dst in zip(self.srcs, self.dst_names, strict=True):
-            registry[dst] = registry[src][keep]
-        return registry
+        return self._inner(registry)
 
 
 @Operator
@@ -111,21 +110,19 @@ class TorchFilterTensorsByClasses:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (classes,) + tuple(src for src in srcs if src != classes)
-        self.srcs = all_srcs
-        self.classes = classes
-        self.keep_classes = tuple(keep_classes)
-        self.dst_names = resolve_multi_output_names("TorchFilterTensorsByClasses", all_srcs, as_)
+        allowed = tuple(keep_classes)
+        self._inner = TorchFilterTensors(
+            *all_srcs,
+            by=classes,
+            predicate=lambda values: torch.isin(
+                values,
+                torch.as_tensor(allowed, device=values.device, dtype=values.dtype),
+            ),
+            as_=as_,
+        )
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        allowed = torch.as_tensor(
-            self.keep_classes,
-            device=registry[self.classes].device,
-            dtype=registry[self.classes].dtype,
-        )
-        keep = torch.isin(registry[self.classes], allowed)
-        for src, dst in zip(self.srcs, self.dst_names, strict=True):
-            registry[dst] = registry[src][keep]
-        return registry
+        return self._inner(registry)
 
 
 @Operator
@@ -138,18 +135,15 @@ class TorchFilterTensorsByMasksArea:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
-        self.srcs = all_srcs
-        self.masks = masks
-        self.min_area = min_area
-        self.dst_names = resolve_multi_output_names("TorchFilterTensorsByMasksArea", all_srcs, as_)
+        self._inner = TorchFilterTensors(
+            *all_srcs,
+            by=masks,
+            predicate=lambda tensor: tensor.to(dtype=torch.bool).flatten(1).sum(dim=1) >= min_area,
+            as_=as_,
+        )
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
-        masks = registry[self.masks]
-        areas = masks.to(dtype=torch.bool).flatten(1).sum(dim=1)
-        keep = areas >= self.min_area
-        for src, dst in zip(self.srcs, self.dst_names, strict=True):
-            registry[dst] = registry[src][keep]
-        return registry
+        return self._inner(registry)
 
 
 @Operator
