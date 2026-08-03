@@ -28,10 +28,7 @@ On Windows PowerShell, use `.venv\Scripts\Activate.ps1` instead of
 
 ## Dependency Setup
 
-Choose one dependency setup path after the environment is active. Start with
-this base install for the bundled starter example and most ONNX + vision
-examples. Extra setup for inspection, Torch, streaming, and endpoint examples
-is listed under the relevant sections below.
+Choose one dependency setup path after the environment is active.
 
 ### Local Workspace Setup
 
@@ -56,22 +53,8 @@ python -m pip install 'ml-pipes[onnx,vision]'             # most vision + ONNX e
 ```
 
 > [!NOTE]
-> The commands above cover the bundled starter example and most ONNX + vision
-> examples. Some examples below need extra setup, additional dependencies, or
-> extra assets. Those requirements are listed under the relevant sections.
->
 > For the package matrix and public import model behind these installs, see
 > [docs/PACKAGES.md](../docs/PACKAGES.md).
-
-> [!IMPORTANT]
-> All commands and file paths below are shown relative to the repository root
-> unless noted otherwise. If you run commands from `examples/`, adjust paths
-> accordingly.
->
-> The built-in example assets always resolve under `examples/.example_assets`,
-> regardless of your current working directory. Relative paths that you pass
-> to flags such as `--input`, `--output`, or `--model-path` are still resolved
-> from the directory where you run the command.
 
 ## Bundled Starter Example
 
@@ -99,18 +82,31 @@ A successful default run writes the annotated image to
 
 ## Running Examples
 
-Most entries in this guide are run from the repository root as direct Python
-scripts. Once the documented setup for a section is installed, start by
-running the example with its default arguments. If you want to customize the
-run afterward, use CLI flags to override the default model, input, output, or
-runtime behavior.
+Once setup is done, you can run each example as a Python script.
+Some examples need extra setup, and their sections call that out.
 
-For example:
+All commands and file paths below are shown relative to the repository root
+unless noted otherwise. If you run commands from `examples/`, adjust paths
+accordingly.
+
+> [!NOTE]
+> The built-in example assets always resolve under
+> `examples/.example_assets`, regardless of your current working directory.
+> Relative paths that you pass to flags such as `--input`, `--output`, or
+> `--model-path` are still resolved from the directory where you run the
+> command.
+
+Start by running the example with its default arguments:
 
 ```bash
 # Start with the default run
 python examples/run_yolo8_tile.py
+```
 
+If you want to customize the run afterward, use CLI flags to override the
+default model, input, output, or runtime behavior:
+
+```bash
 # Then override only the parts you want to change
 python examples/run_yolo8_tile.py --input path/to/photo.jpg --slice-wh 320 320 --overlap-wh 80 80
 ```
