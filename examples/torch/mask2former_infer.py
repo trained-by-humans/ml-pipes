@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 import sys
@@ -27,6 +28,17 @@ MASK2FORMER_MODEL_IDS: dict[str, str] = {
 }
 
 COCO_PANOPTIC_THING_IDS = frozenset(range(80))
+
+
+def add_mask2former_args(parser: argparse.ArgumentParser, *, device_help: str) -> None:
+    parser.add_argument("--task", choices=("instance", "panoptic"), default="instance", help="Segmentation task to run (default: instance).")
+    parser.add_argument(
+        "--device",
+        default="cuda:0" if torch.cuda.is_available() else "cpu",
+        help=device_help,
+    )
+    parser.add_argument("--input", type=Path, default=None, help="Input image path. Defaults to the sample COCO image.")
+    parser.add_argument("--output", type=Path, default=None, help="Output path prefix for annotated images.")
 
 
 def _require_transformers() -> tuple[Any, Any]:
@@ -149,12 +161,15 @@ def build_mask2former_infer_pipeline(
             TorchSqueeze("masks_queries_logits", axis=0),
         ]
     )
+
+
 def resolve_output_path(
     requested_output: Path | None,
+    input_name: str | Path,
     task: str,
     domain: str,
 ) -> Path:
     if requested_output is not None:
         stem = requested_output.stem
         return requested_output.with_name(f"{stem}_{task}_{domain}{requested_output.suffix}")
-    return build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, f"mask2former_{task}_{domain}.png")
+    return build_output_path(ASSETS_DIR, input_name, f"mask2former_{task}_{domain}.png")

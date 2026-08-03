@@ -264,8 +264,17 @@ python examples/streaming/run_yolo8_webcam.py
 
 | Example | Focus | Key args | Notes |
 |---|---|---|---|
-| `torch/run_mask2former_torch_postprocess.py` | Torch-heavy postprocess | `--task`, `--device`, `--output` | keeps mask postprocessing in Torch |
-| `torch/run_mask2former_numpy_postprocess.py` | NumPy handoff | `--task`, `--device`, `--output` | converts back earlier and finishes in NumPy |
+| `torch/run_mask2former_torch_postprocess.py` | Torch-heavy postprocess | common args only | keeps mask postprocessing in Torch |
+| `torch/run_mask2former_numpy_postprocess.py` | NumPy handoff | common args only | converts back earlier and finishes in NumPy |
+
+Common args for the two Mask2Former examples:
+
+| Arg | Common in | Meaning |
+|---|---|---|
+| `--task {instance,panoptic}` | Mask2Former examples | Choose which Mask2Former task variant to run. |
+| `--device <torch-device>` | Mask2Former examples | Select the Torch device for model execution. |
+| `--input path/to/input-file` | Mask2Former examples | Use your own image instead of the sample COCO image. |
+| `--output path/to/output-file` | Mask2Former examples | Set the output path prefix for the annotated result image. |
 
 Extra setup for these Torch examples:
 

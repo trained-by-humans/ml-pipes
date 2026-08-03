@@ -14,13 +14,12 @@ from pathlib import Path
 import sys
 
 import numpy as np
-import torch
 
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     __package__ = "examples.torch"
 
-from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing, visualize_and_store
+from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path, visualize_and_store
 from ml_pipes.core import (
     Pipeline,
     inline,
@@ -50,10 +49,12 @@ from ml_pipes.vision import (
     WeightMasksByScores,
 )
 from ml_pipes.torch import ToNumpyRegistry
+from ml_pipes.torch.types import TorchTensorRegistry
 from ml_pipes.tensor import TensorRegistry
 
 from .mask2former_infer import (
     Mask2FormerBundle,
+    add_mask2former_args,
     build_mask2former_infer_pipeline,
     resolve_output_path,
 )
@@ -193,13 +194,11 @@ class PanopticSegmentsFromQueries:
         return registry
 
 
-def build_pipeline(
+def build_numpy_postprocess_pipeline(
     bundle: Mask2FormerBundle,
-    device: str,
-    image_path: Path,
+    input_path: Path,
     output_path: Path,
-) -> Pipeline[str | Path, object]:
-    infer_pipeline = build_mask2former_infer_pipeline(bundle, device)
+) -> Pipeline[TorchTensorRegistry, object]:
     record_fields = {
         "index": lambda p: list(range(len(p.classes))),
         "class_id": "classes",
@@ -237,7 +236,7 @@ def build_pipeline(
             ToSegmentations(),
             inline(visualize_and_store(output_path, bundle.class_names)),
             MapPredictionsToObjects(fields=record_fields, at=1),
-            LogDetections(bundle.model_id, image_path, output_path, at=1),
+            LogDetections(bundle.model_id, input_path, output_path, at=1),
         ])
     else:
         postprocess_pipeline = Pipeline([
@@ -265,10 +264,10 @@ def build_pipeline(
             ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
             inline(visualize_and_store(output_path, bundle.class_names)),
             MapPredictionsToObjects(fields=record_fields, at=1),
-            LogDetections(bundle.model_id, image_path, output_path, at=1),
+            LogDetections(bundle.model_id, input_path, output_path, at=1),
         ])
 
-    return infer_pipeline + postprocess_pipeline
+    return postprocess_pipeline
 
 
 def main() -> int:
@@ -278,29 +277,19 @@ def main() -> int:
             "post-processing crosses into NumPy immediately after raw outputs."
         )
     )
-    parser.add_argument(
-        "--task",
-        choices=("instance", "panoptic"),
-        default="instance",
-        help="Segmentation task to run (default: instance).",
-    )
-    parser.add_argument(
-        "--device",
-        default="cuda:0" if torch.cuda.is_available() else "cpu",
-        help="Torch device for model execution before the NumPy handoff.",
-    )
-    parser.add_argument("--output", type=Path, default=None, help="Output path prefix for annotated images.")
+    add_mask2former_args(parser, device_help="Torch device for model execution before the NumPy handoff.")
     args = parser.parse_args()
 
-    image_path = ASSETS_DIR / COCO_IMAGE_NAME
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    input_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    output_path = resolve_output_path(args.output, input_path.name, args.task, "numpy")
 
     bundle = Mask2FormerBundle.load(task=args.task, device=args.device)
-    output_path = resolve_output_path(args.output, args.task, "numpy")
+    infer_pipeline = build_mask2former_infer_pipeline(bundle, args.device)
+    postprocess_pipeline = build_numpy_postprocess_pipeline(bundle, input_path, output_path)
 
-    pipeline = build_pipeline(bundle, args.device, image_path, output_path)
+    pipeline = infer_pipeline + postprocess_pipeline
     pipeline.validate()
-    pipeline(image_path)
+    pipeline(input_path)
 
     return 0
 
