@@ -194,3 +194,4 @@ jobs:
       extra_index_url: https://pypi.org/simple/
       checkout_ref: ${{ github.ref }}
       tag: ${{ github.ref_name }}
+      allow_failure: true

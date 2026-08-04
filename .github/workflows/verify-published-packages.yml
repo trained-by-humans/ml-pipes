@@ -23,6 +23,11 @@ on:
         description: Release tag whose package metadata should be validated.
         required: true
         type: string
+      allow_failure:
+        description: Whether published-package verification should be advisory instead of failing the workflow.
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   verify:
@@ -42,6 +47,8 @@ jobs:
           python-version: "3.12"
 
       - name: Smoke published packages
+        id: smoke_published_packages
+        continue-on-error: ${{ inputs.allow_failure }}
         env:
           INDEX_URL: ${{ inputs.index_url }}
           EXTRA_INDEX_URL: ${{ inputs.extra_index_url }}
@@ -55,3 +62,18 @@ jobs:
             args+=(--extra-index-url "${EXTRA_INDEX_URL}")
           fi
           python .github/scripts/verify_published_package_installs.py "${args[@]}"
+
+      - name: Report advisory verification failure
+        if: ${{ inputs.allow_failure && steps.smoke_published_packages.outcome == 'failure' }}
+        env:
+          TARGET_NAME: ${{ inputs.target_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          echo "::warning::${TARGET_NAME} published-package verification failed for ${RELEASE_TAG}. Release artifacts were already published; inspect the verification logs and rerun verification locally if needed."
+          {
+            echo "## Advisory Verification Failure"
+            echo
+            echo "- Target: ${TARGET_NAME}"
+            echo "- Tag: ${RELEASE_TAG}"
+            echo "- Result: published artifacts remain published; verification needs follow-up."
+          } >> "$GITHUB_STEP_SUMMARY"

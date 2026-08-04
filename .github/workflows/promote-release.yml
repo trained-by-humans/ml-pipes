@@ -166,3 +166,4 @@ jobs:
       index_url: https://pypi.org/simple/
       checkout_ref: ${{ inputs.tag }}
       tag: ${{ inputs.tag }}
+      allow_failure: true
