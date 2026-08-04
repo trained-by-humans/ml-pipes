@@ -43,12 +43,12 @@ Match your synced groups to the surfaces you are testing. The
 `shared-framework` group covers many shared tests. When you run tests for a
 package-specific surface, sync that package group too.
 
-For example, to run a Torch-specific test module:
+For example, to run the Torch package tests:
 
 ```bash
 uv sync --group torch
 
-uv run pytest packages/torch/tests/test_torch.py
+uv run pytest packages/torch/tests
 ```
 
 Some test surfaces need more than one group. For example, the Torch

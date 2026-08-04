@@ -6,6 +6,7 @@ from typing import Any, Generic, Literal, TypeAlias, TypeVar, cast, overload
 import numpy as np
 import numpy.typing as npt
 
+from ml_pipes._operator_utils import resolve_multi_output_names
 from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.operator import Operator
 from .types import TensorPayload, TensorRegistry
@@ -67,27 +68,6 @@ def _flatten_leading_dim(array: np.ndarray) -> np.ndarray:
     leading = int(array.shape[0])
     trailing = int(np.prod(array.shape[1:], dtype=np.int64))
     return array.reshape(leading, trailing)
-
-
-def _resolve_multi_output_names(
-    operator_name: str,
-    srcs: tuple[str, ...],
-    as_: str | tuple[str, ...] | None,
-) -> tuple[str, ...]:
-    if not srcs:
-        raise ValueError(f"{operator_name} requires at least one source tensor")
-    if len(srcs) == 1:
-        src = srcs[0]
-        if as_ is not None and not isinstance(as_, str):
-            raise ValueError(f"{operator_name} as_ must be a string when operating on one tensor")
-        return (as_ or src,)
-    if as_ is None:
-        return tuple(srcs)
-    if isinstance(as_, str):
-        raise ValueError(f"{operator_name} as_ must be a tuple when operating on more than one tensor")
-    if len(as_) != len(srcs):
-        raise ValueError(f"{operator_name} as_ tuple must match the number of source tensors")
-    return tuple(as_)
 
 
 @Operator
@@ -383,7 +363,7 @@ class ApplyTensorMask:
     def __init__(self, *srcs: str, mask: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
         self.mask = mask
-        self.dst_names = _resolve_multi_output_names("ApplyTensorMask", srcs, as_)
+        self.dst_names = resolve_multi_output_names("ApplyTensorMask", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         mask = registry[self.mask]
@@ -397,7 +377,7 @@ class SelectTensors:
     def __init__(self, *srcs: str, indices: str, as_: str | tuple[str, ...] | None = None):
         self.srcs = srcs
         self.indices = indices
-        self.dst_names = _resolve_multi_output_names("SelectTensors", srcs, as_)
+        self.dst_names = resolve_multi_output_names("SelectTensors", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         indices = registry[self.indices]
@@ -420,7 +400,7 @@ class FilterTensors:
         self.srcs = srcs
         self.by = by
         self.predicate = predicate
-        self.dst_names = _resolve_multi_output_names("FilterTensors", srcs, as_)
+        self.dst_names = resolve_multi_output_names("FilterTensors", srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         mask = np.asarray(self.predicate(registry[self.by]))
@@ -456,7 +436,7 @@ class SortTensorsBy:
         self.srcs = all_srcs
         self.by = by
         self.descending = descending
-        self.dst_names = _resolve_multi_output_names("SortTensorsBy", all_srcs, as_)
+        self.dst_names = resolve_multi_output_names("SortTensorsBy", all_srcs, as_)
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         order = np.argsort(registry[self.by])
