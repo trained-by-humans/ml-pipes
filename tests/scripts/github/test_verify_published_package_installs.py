@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import importlib.util
 from pathlib import Path
 import sys
@@ -77,8 +78,19 @@ def test_verify_published_package_installs_verifies_release_packages_in_order(
     ]
     commands: list[tuple[str, tuple[str, ...]]] = []
     created_venvs: list[Path] = []
+    entered_workspaces: list[str] = []
+    exited_workspaces: list[str] = []
 
     monkeypatch.setattr(module, "validate_release_metadata", lambda tag=None: ("0.2.0", manifests))
+
+    @contextmanager
+    def fake_target_workspace(workspace_dir: Path, *, target):
+        entered_workspaces.append(target.label)
+        target_dir = workspace_dir / target.venv_dir_name
+        try:
+            yield target_dir
+        finally:
+            exited_workspaces.append(target.label)
 
     def fake_create_virtualenv(venv_dir: Path) -> Path:
         created_venvs.append(venv_dir)
@@ -87,6 +99,7 @@ def test_verify_published_package_installs_verifies_release_packages_in_order(
     def fake_run(command: list[str], *, dist_name: str) -> None:
         commands.append((dist_name, tuple(command)))
 
+    monkeypatch.setattr(module, "_target_workspace", fake_target_workspace)
     monkeypatch.setattr(module, "_create_virtualenv", fake_create_virtualenv)
     monkeypatch.setattr(module, "_run", fake_run)
 
@@ -103,6 +116,8 @@ def test_verify_published_package_installs_verifies_release_packages_in_order(
         "ml-pipes",
         "ml-pipes[all]",
     )
+    assert entered_workspaces == list(verified_packages)
+    assert exited_workspaces == list(verified_packages)
     assert created_venvs == [
         tmp_path / "core",
         tmp_path / "tensor",
@@ -128,6 +143,7 @@ def test_verify_published_package_installs_verifies_release_packages_in_order(
                 "-m",
                 "pip",
                 "install",
+                "--no-cache-dir",
                 "--index-url",
                 "https://test.pypi.org/simple/",
                 "--extra-index-url",
@@ -170,6 +186,7 @@ def test_verify_published_package_installs_verifies_release_packages_in_order(
                 "-m",
                 "pip",
                 "install",
+                "--no-cache-dir",
                 "--index-url",
                 "https://test.pypi.org/simple/",
                 "--extra-index-url",
@@ -212,6 +229,7 @@ def test_verify_published_package_installs_verifies_release_packages_in_order(
                 "-m",
                 "pip",
                 "install",
+                "--no-cache-dir",
                 "--index-url",
                 "https://test.pypi.org/simple/",
                 "--extra-index-url",
@@ -254,6 +272,7 @@ def test_verify_published_package_installs_verifies_release_packages_in_order(
                 "-m",
                 "pip",
                 "install",
+                "--no-cache-dir",
                 "--index-url",
                 "https://test.pypi.org/simple/",
                 "--extra-index-url",

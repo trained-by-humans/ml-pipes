@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 import shlex
 import subprocess
 import sys
 import tempfile
+from typing import Iterator
 import venv
 
 
@@ -88,6 +90,7 @@ def _install_command(
         "-m",
         "pip",
         "install",
+        "--no-cache-dir",
         "--index-url",
         index_url,
     ]
@@ -95,6 +98,20 @@ def _install_command(
         command.extend(["--extra-index-url", extra_index_url])
     command.append(requirement)
     return command
+
+
+@contextmanager
+def _target_workspace(
+    workspace_dir: Path,
+    *,
+    target: VerificationTarget,
+) -> Iterator[Path]:
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        dir=workspace_dir,
+        prefix=f"{target.venv_dir_name}-",
+    ) as temp_dir:
+        yield Path(temp_dir)
 
 
 def _public_module_name(package_dir_name: str) -> str:
@@ -193,27 +210,27 @@ def verify_published_package_installs(
             all_public_modules=all_public_modules,
         ):
             print(f"== verifying {target.label} ==", flush=True)
-            venv_dir = workspace_dir / target.venv_dir_name
-            python_executable = _create_virtualenv(venv_dir)
+            with _target_workspace(workspace_dir, target=target) as venv_dir:
+                python_executable = _create_virtualenv(venv_dir)
 
-            _run(
-                [str(python_executable), "-m", "pip", "install", "--upgrade", "pip"],
-                dist_name=target.label,
-            )
-            _run(
-                _install_command(
-                    python_executable,
-                    requirement=target.requirement,
-                    index_url=index_url,
-                    extra_index_url=extra_index_url,
-                ),
-                dist_name=target.label,
-            )
-            _run([str(python_executable), "-m", "pip", "check"], dist_name=target.label)
-            _run(
-                [str(python_executable), "-c", target.smoke_code],
-                dist_name=target.label,
-            )
+                _run(
+                    [str(python_executable), "-m", "pip", "install", "--upgrade", "pip"],
+                    dist_name=target.label,
+                )
+                _run(
+                    _install_command(
+                        python_executable,
+                        requirement=target.requirement,
+                        index_url=index_url,
+                        extra_index_url=extra_index_url,
+                    ),
+                    dist_name=target.label,
+                )
+                _run([str(python_executable), "-m", "pip", "check"], dist_name=target.label)
+                _run(
+                    [str(python_executable), "-c", target.smoke_code],
+                    dist_name=target.label,
+                )
             verified_targets.append(target.label)
             print(f"Verified {target.label} {version}", flush=True)
 
