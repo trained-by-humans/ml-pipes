@@ -9,6 +9,8 @@ Run from the repo root:
     python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli
     python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
         --arg slice_wh=480x480 --runs 20 --warmup 3
+    python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
+        --arg model_path=path/to/model.onnx
 
 See `docs/BENCHMARKING.md` for sweep variants, shared CLI options, and factory
 rules.
@@ -31,11 +33,11 @@ from examples.common import (
     COCO_IMAGE_URL,
     build_output_path,
     decode,
-    download_if_missing,
+    resolve_input_path,
     resolve_model_path,
     visualize_detections_and_store,
 )
-from examples.run_yolo8_onnx import YOLO8_MODELS
+from examples.run_yolo8_onnx import BUNDLED_MODEL_PATH
 
 from ml_pipes.core import Pipeline
 from ml_pipes.factory import (
@@ -49,17 +51,10 @@ from ml_pipes.vision import (
 from ml_pipes.benchmark import InputFn
 
 
-_DEFAULT_MODEL_VARIANT = "n"
-_model_name, _model_url = YOLO8_MODELS[_DEFAULT_MODEL_VARIANT]
-_DEFAULT_MODEL_PATH = resolve_model_path(ASSETS_DIR, _model_name, _model_url, _DEFAULT_MODEL_VARIANT)
-_DEFAULT_IMAGE_PATH = ASSETS_DIR / COCO_IMAGE_NAME
-_DEFAULT_OUTPUT_PATH = build_output_path(ASSETS_DIR, COCO_IMAGE_NAME, _model_name)
-
-
 @pipeline_factory
 def yolo8_tiled_benchmark_pipeline(
-    model_path: Path = _DEFAULT_MODEL_PATH,
-    output_path: Path = _DEFAULT_OUTPUT_PATH,
+    model_path: str | None = None,
+    output_path: str | None = None,
     slice_wh: tuple[int, int] = (320, 320),
     overlap_wh: tuple[int, int] = (80, 80),
     conf_threshold: float = 0.25,
@@ -67,25 +62,45 @@ def yolo8_tiled_benchmark_pipeline(
 ) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
     """Tiled YOLOv8 pipeline — the target pipeline for CLI benchmarking."""
     from examples.run_yolo8_tile import yolo8_tiled_pipeline
+
+    resolved_model_path = resolve_model_path(
+        Path(model_path) if model_path is not None else None,
+        BUNDLED_MODEL_PATH,
+    )
+    resolved_output_path = (
+        Path(output_path)
+        if output_path is not None
+        else build_output_path(
+            ASSETS_DIR,
+            "run_yolo8_benchmark_cli_tiled.jpg",
+            resolved_model_path.name,
+        )
+    )
     return (
         decode()
         + yolo8_tiled_pipeline(
-            model_path,
+            resolved_model_path,
             conf_threshold=conf_threshold,
             slice_wh=slice_wh,
             overlap_wh=overlap_wh,
             max_concurrency=max_concurrency,
         )
-        + visualize_detections_and_store(output_path, COCO_CLASSES)
+        + visualize_detections_and_store(resolved_output_path, COCO_CLASSES)
     )
 
 
 @data_factory
 def coco_sample_input(
-    image_path: Path = _DEFAULT_IMAGE_PATH,
+    image_path: str | None = None,
 ) -> InputFn:
     """Downloads the standard COCO sample image if needed and returns an InputFn."""
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    resolved_image_path = resolve_input_path(
+        Path(image_path) if image_path is not None else None,
+        ASSETS_DIR / COCO_IMAGE_NAME,
+        COCO_IMAGE_URL,
+    )
+
     def fn():
-        return (image_path.name, image_path, None, None)
+        return (resolved_image_path.name, resolved_image_path, None, None)
+
     return fn

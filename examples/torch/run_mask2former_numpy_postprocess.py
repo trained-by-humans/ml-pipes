@@ -1,3 +1,12 @@
+"""
+Mask2Former segmentation with NumPy-side postprocess.
+
+Requires `torch`, `transformers`, `safetensors`, and `scipy`.
+
+Run from the repo root:
+    python examples/torch/run_mask2former_numpy_postprocess.py
+    python examples/torch/run_mask2former_numpy_postprocess.py --task panoptic --output mask2former.png
+"""
 from __future__ import annotations
 
 import argparse
@@ -5,18 +14,16 @@ from pathlib import Path
 import sys
 
 import numpy as np
-import torch
 
 if __name__ == "__main__" and __package__ is None:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     __package__ = "examples.torch"
 
-from examples.common import COCO_IMAGE_NAME, COCO_IMAGE_URL, add_assets_dir_arg, download_if_missing, visualize_and_store
+from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path, visualize_and_store
 from ml_pipes.core import (
     Pipeline,
     inline,
 )
-from ml_pipes.inspection import PipelineInspector
 from ml_pipes.standard import Recall
 from ml_pipes.tensor import (
     ArgMax,
@@ -42,15 +49,20 @@ from ml_pipes.vision import (
     WeightMasksByScores,
 )
 from ml_pipes.torch import ToNumpyRegistry
+from ml_pipes.torch.types import TorchTensorRegistry
 from ml_pipes.tensor import TensorRegistry
 
 from .mask2former_infer import (
-    Mask2FormerInfer,
-    LoadedMask2Former,
-    build_mask2former_preprocess_pipeline,
+    Mask2FormerBundle,
+    add_mask2former_args,
+    build_mask2former_infer_pipeline,
     resolve_output_path,
-    resolve_task_list,
 )
+
+_TOP_K = 100
+_SCORE_THRESHOLD = 0.5
+_MASK_THRESHOLD = 0.5
+_OVERLAP_THRESHOLD = 0.8
 
 
 def _empty_numpy_segments(
@@ -182,113 +194,102 @@ class PanopticSegmentsFromQueries:
         return registry
 
 
+def build_numpy_postprocess_pipeline(
+    bundle: Mask2FormerBundle,
+    input_path: Path,
+    output_path: Path,
+) -> Pipeline[TorchTensorRegistry, object]:
+    record_fields = {
+        "index": lambda p: list(range(len(p.classes))),
+        "class_id": "classes",
+        "class_name": lambda p, names=bundle.class_names: [
+            names[int(class_id)] if 0 <= int(class_id) < len(names) else str(class_id) for class_id in p.classes
+        ],
+        "score": "scores",
+        "area": lambda p: [int(np.asarray(mask, dtype=bool).sum()) for mask in p.masks],
+        "box": "boxes",
+    }
+
+    if bundle.task == "panoptic":
+        postprocess_pipeline = Pipeline([
+            ToNumpyRegistry(),
+            Recall("image_shape"),
+            ResizeMasks(masks="masks_queries_logits"),
+            Softmax("class_queries_logits", as_="class_probs"),
+            Slice("class_probs", slice(None, -1)),
+            Sigmoid("masks_queries_logits", as_="mask_probs"),
+            ArgMax("class_probs", as_="query_classes"),
+            GatherScores("class_probs", "query_classes", as_="query_scores"),
+            FilterTensorsByScore("query_classes", "mask_probs", score="query_scores", min_score=_SCORE_THRESHOLD),
+            WeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
+            ArgMax("weighted_masks", axis=0, as_="winner_ids"),
+            PanopticSegmentsFromQueries(
+                thing_class_ids=bundle.thing_class_ids,
+                scores="query_scores",
+                classes="query_classes",
+                masks="mask_probs",
+                winner_ids="winner_ids",
+                mask_threshold=_MASK_THRESHOLD,
+                overlap_threshold=_OVERLAP_THRESHOLD,
+            ),
+            MasksToBoxes(as_="boxes"),
+            ToSegmentations(),
+            inline(visualize_and_store(output_path, bundle.class_names)),
+            MapPredictionsToObjects(fields=record_fields, at=1),
+            LogDetections(bundle.model_id, input_path, output_path, at=1),
+        ])
+    else:
+        postprocess_pipeline = Pipeline([
+            ToNumpyRegistry(),
+            Recall("image_shape"),
+            ResizeMasks(masks="masks_queries_logits"),
+            Softmax("class_queries_logits", as_="class_probs"),
+            Slice("class_probs", slice(None, -1)),
+            Sigmoid("masks_queries_logits", as_="mask_probs"),
+            TopKIndices2D(
+                "class_probs",
+                k=_TOP_K,
+                values_as="top_scores",
+                row_indices_as="query_indices",
+                col_indices_as="class_ids",
+            ),
+            SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+            BinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="binary_masks"),
+            MeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
+            MultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
+            FilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
+            FilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=_SCORE_THRESHOLD),
+            SortTensorsBy("binary_masks", "class_ids", by="final_scores"),
+            MasksToBoxes(masks="binary_masks", as_="boxes"),
+            ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
+            inline(visualize_and_store(output_path, bundle.class_names)),
+            MapPredictionsToObjects(fields=record_fields, at=1),
+            LogDetections(bundle.model_id, input_path, output_path, at=1),
+        ])
+
+    return postprocess_pipeline
 
 
-def parse_args() -> argparse.Namespace:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Run a real Mask2Former example where inference stays in Torch and "
             "post-processing crosses into NumPy immediately after raw outputs."
         )
     )
-    add_assets_dir_arg(parser)
-    parser.add_argument("--output", type=Path, default=None, help="Optional output path prefix for annotated images.")
-    parser.add_argument("--task", choices=("panoptic", "instance", "both"), default="both")
-    parser.add_argument("--top-k", type=int, default=100, help="Top-k query/class pairs kept for instance mode.")
-    parser.add_argument("--score-threshold", type=float, default=0.5)
-    parser.add_argument("--mask-threshold", type=float, default=0.5)
-    parser.add_argument("--overlap-threshold", type=float, default=0.8)
-    parser.add_argument(
-        "--device",
-        default="cuda:0" if torch.cuda.is_available() else "cpu",
-        help="Torch device for model execution before the NumPy handoff.",
-    )
-    return parser.parse_args()
+    add_mask2former_args(parser, device_help="Torch device for model execution before the NumPy handoff.")
+    args = parser.parse_args()
 
+    input_path = resolve_input_path(args.input, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    output_path = resolve_output_path(args.output, input_path.name, args.task, "numpy")
 
-def main() -> int:
-    args = parse_args()
-    image_path = args.assets_dir / COCO_IMAGE_NAME
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    bundle = Mask2FormerBundle.load(task=args.task, device=args.device)
+    infer_pipeline = build_mask2former_infer_pipeline(bundle, args.device)
+    postprocess_pipeline = build_numpy_postprocess_pipeline(bundle, input_path, output_path)
 
-    for task in resolve_task_list(args.task):
-        bundle = LoadedMask2Former.load(task=task, device=args.device)
-        output_path = resolve_output_path(args.output, args.assets_dir, task, "numpy")
-        record_fields = {
-            "index": lambda p: list(range(len(p.classes))),
-            "class_id": "classes",
-            "class_name": lambda p, names=bundle.class_names: [
-                names[int(class_id)] if 0 <= int(class_id) < len(names) else str(class_id) for class_id in p.classes
-            ],
-            "score": "scores",
-            "area": lambda p: [int(np.asarray(mask, dtype=bool).sum()) for mask in p.masks],
-            "box": "boxes",
-        }
-
-        if task == "panoptic":
-            pipeline = Pipeline([
-                Mask2FormerInfer(bundle=bundle, device=args.device),
-                ToNumpyRegistry(),
-                Recall("image_shape"),
-                ResizeMasks(masks="masks_queries_logits"),
-                Softmax("class_queries_logits", as_="class_probs"),
-                Slice("class_probs", slice(None, -1)),
-                Sigmoid("masks_queries_logits", as_="mask_probs"),
-                ArgMax("class_probs", as_="query_classes"),
-                GatherScores("class_probs", "query_classes", as_="query_scores"),
-                FilterTensorsByScore("query_classes", "mask_probs", score="query_scores", min_score=args.score_threshold),
-                WeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
-                ArgMax("weighted_masks", axis=0, as_="winner_ids"),
-                PanopticSegmentsFromQueries(
-                    thing_class_ids=bundle.thing_class_ids,
-                    scores="query_scores",
-                    classes="query_classes",
-                    masks="mask_probs",
-                    winner_ids="winner_ids",
-                    mask_threshold=args.mask_threshold,
-                    overlap_threshold=args.overlap_threshold,
-                ),
-                MasksToBoxes(as_="boxes"),
-                ToSegmentations(),
-                inline(visualize_and_store(output_path, bundle.class_names)),
-                MapPredictionsToObjects(fields=record_fields, at=1),
-                LogDetections(bundle.model_id, image_path, output_path, at=1),
-            ])
-        else:
-            pipeline = Pipeline([
-                Mask2FormerInfer(bundle=bundle, device=args.device),
-                ToNumpyRegistry(),
-                Recall("image_shape"),
-                ResizeMasks(masks="masks_queries_logits"),
-                Softmax("class_queries_logits", as_="class_probs"),
-                Slice("class_probs", slice(None, -1)),
-                Sigmoid("masks_queries_logits", as_="mask_probs"),
-                TopKIndices2D(
-                    "class_probs",
-                    k=args.top_k,
-                    values_as="top_scores",
-                    row_indices_as="query_indices",
-                    col_indices_as="class_ids",
-                ),
-                SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
-                BinarizeTensorByThreshold("selected_masks", threshold=args.mask_threshold, as_="binary_masks"),
-                MeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
-                MultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
-                FilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
-                FilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=args.score_threshold),
-                SortTensorsBy("binary_masks", "class_ids", by="final_scores"),
-                MasksToBoxes(masks="binary_masks", as_="boxes"),
-                ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
-                inline(visualize_and_store(output_path, bundle.class_names)),
-                MapPredictionsToObjects(fields=record_fields, at=1),
-                LogDetections(bundle.model_id, image_path, output_path, at=1),
-            ])
-
-        pipeline = build_mask2former_preprocess_pipeline() + pipeline
-        pipeline.validate()
-        pipeline(image_path)
-        inspection = pipeline.inspect(image_path)
-        PipelineInspector().show_in_browser(inspection)
+    pipeline = infer_pipeline + postprocess_pipeline
+    pipeline.validate()
+    pipeline(input_path)
 
     return 0
 

@@ -1,3 +1,15 @@
+"""
+Batched YOLOv8 detection across multiple images.
+
+Batch and `UnBatch` delimit the shared inference region so multiple threads
+can feed one ONNX call. Requires `ultralytics` to export the dynamic-batch
+YOLOv8n model on first run.
+
+Run from the repo root:
+    python examples/run_yolo8_batch.py
+    python examples/run_yolo8_batch.py --images img1.jpg img2.jpg img3.jpg img4.jpg
+    python examples/run_yolo8_batch.py --batch-size 4 --workers 8
+"""
 from __future__ import annotations
 
 import argparse
@@ -6,7 +18,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from common import add_assets_dir_arg, COCO_IMAGE_NAME, COCO_IMAGE_URL, download_if_missing
+if __name__ == "__main__" and __package__ is None:
+    from _bootstrap import normalize_direct_example_sys_path
+
+    normalize_direct_example_sys_path(__file__, sys.path)
+    __package__ = "examples"
+
+from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, COCO_IMAGE_URL, resolve_input_path
 from ml_pipes.collectors import PrintCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import (
@@ -41,40 +59,33 @@ from ml_pipes.vision import (
     ToDetections,
 )
 
-# Batched YOLOv8 detection across multiple images using concurrent threads.
-#
-# Batch and UnBatch delimit a batch region in the pipeline.  When enough
-# threads have reached Batch (or the timeout fires), one thread becomes the
-# leader and runs Collate → Infer → Distribute as a single batched call.
-# The other threads wait and resume with their individual result after UnBatch.
-#
-# The model is exported from Ultralytics with dynamic=True so ONNX Runtime
-# accepts any batch size.  Requires: pip install ultralytics
-#
-# Usage (shown from `examples/`; from repo root, prefix script paths with
-# `examples/`):
-# Runs the sample COCO image 8 times by default:
-#   python run_yolo8_batch.py
-#
-# Run with explicit images:
-#   python run_yolo8_batch.py --images img1.jpg img2.jpg img3.jpg img4.jpg
-#
-# Tune batch size and thread-pool size:
-#   python run_yolo8_batch.py --batch-size 4 --workers 8
-
 MODEL_NAME = "yolov8n_dynamic.onnx"
 
 
-def _export_dynamic_model(dst: Path) -> None:
-    """Export YOLOv8n (nano) with a dynamic batch axis using Ultralytics."""
-    from ultralytics import YOLO
+def _ensure_yolov8n_dynamic_model() -> Path:
+    """Ensure the dynamic-batch YOLOv8n ONNX export exists and return its path."""
+    dst = ASSETS_DIR / MODEL_NAME
+    if dst.exists():
+        return dst
 
+    try:
+        from ultralytics import YOLO
+    except ImportError:
+        print(
+            "Ultralytics is required to export the dynamic-batch YOLOv8 model: "
+            "python -m pip install ultralytics",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    print(f"Exporting YOLOv8n nano (dynamic batch) -> {dst}", file=sys.stderr)
     dst.parent.mkdir(parents=True, exist_ok=True)
     pt_path = dst.parent / "yolov8n.pt"
     model = YOLO(str(pt_path))
     exported = model.export(format="onnx", dynamic=True, imgsz=640, simplify=False)
     Path(exported).rename(dst)
     pt_path.unlink(missing_ok=True)
+    return dst
 
 
 def build_pipeline(model_path: Path, batch_size: int, timeout: float,
@@ -88,7 +99,7 @@ def build_pipeline(model_path: Path, batch_size: int, timeout: float,
         Normalize(),
         Batch(size=batch_size, timeout=timeout),
         Collate(),
-        Infer(model_path, serialize=serialize, providers=["CPUExecutionProvider"]),
+        Infer(model_path, serialize=serialize),
         Distribute(),
         UnBatch(),
         Extract("output0", as_="preds"),
@@ -138,7 +149,6 @@ def parse_args() -> argparse.Namespace:
         default=0.05,
         help="Seconds to wait before running a partial batch (default: 0.05).",
     )
-    add_assets_dir_arg(parser)
     parser.add_argument(
         "--no-serialize",
         action="store_true",
@@ -149,24 +159,21 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    assets_dir = args.assets_dir
-    model_path = assets_dir / MODEL_NAME
-
-    if not model_path.exists():
-        print(f"Exporting YOLOv8n nano (dynamic batch) → {model_path}", file=sys.stderr)
-        _export_dynamic_model(model_path)
+    model_path = _ensure_yolov8n_dynamic_model()
 
     if args.images is not None:
         image_paths = args.images
     else:
-        sample = assets_dir / COCO_IMAGE_NAME
-        print(f"Downloading sample image to {sample} if needed...", file=sys.stderr)
-        download_if_missing(COCO_IMAGE_URL, sample)
+        sample = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
         # Repeat the sample image to fill the thread pool and demonstrate batching.
         image_paths = [sample] * args.workers
 
-    pipeline = build_pipeline(model_path, args.batch_size, args.timeout,
-                              serialize=not args.no_serialize)
+    pipeline = build_pipeline(
+        model_path,
+        args.batch_size,
+        args.timeout,
+        serialize=not args.no_serialize,
+    )
     pipeline.describe()
     pipeline.set_tracing(PrintCollector())
 

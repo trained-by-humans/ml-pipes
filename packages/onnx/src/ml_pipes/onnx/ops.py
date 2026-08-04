@@ -23,7 +23,7 @@ class Infer:
     def __init__(
         self,
         model_path: str | Path,
-        providers: tuple[str, ...] = ("CoreMLExecutionProvider", "CPUExecutionProvider"),
+        providers: tuple[str, ...] = ("CPUExecutionProvider",),
         input_name: str | None = None,
         input_layout: str = "NCHW",
         dtype: str | None = None,

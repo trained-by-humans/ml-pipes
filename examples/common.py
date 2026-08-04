@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import argparse
 import shutil
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -21,7 +21,7 @@ from ml_pipes.vision import (
     Segmentations,
 )
 
-ASSETS_DIR = Path(__file__).parent / ".example_assets"
+ASSETS_DIR = Path(__file__).resolve().parent / ".example_assets"
 
 COCO_IMAGE_URL = "http://images.cocodataset.org/val2017/000000039769.jpg"
 COCO_IMAGE_NAME = "coco_000000039769.jpg"
@@ -118,8 +118,10 @@ def download_if_missing(url: str, destination: Path) -> None:
         return
 
     destination.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading {destination.name} -> {destination}", file=sys.stderr)
     with urllib.request.urlopen(url, timeout=120) as response, destination.open("wb") as target:
         shutil.copyfileobj(response, target)
+    print(f"Downloaded {destination.name}", file=sys.stderr)
 
 
 def decode() -> Pipeline[str | Path, ImagePayload]:
@@ -153,75 +155,55 @@ def visualize_detections_and_store(
     ])
 
 
-def add_assets_dir_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=ASSETS_DIR,
-        help="Directory used to cache downloaded models and sample assets.",
-    )
-
-
-def add_conf_threshold_arg(parser: argparse.ArgumentParser, default: float = 0.25) -> None:
-    parser.add_argument(
-        "--conf-threshold",
-        type=float,
-        default=default,
-        help="Minimum confidence score for detections (default: 0.25).",
-    )
-
-
-def add_model_arg(parser: argparse.ArgumentParser, choices: list[str], default: str = "n") -> None:
-    parser.add_argument(
-        "--model",
-        choices=choices,
-        default=default,
-        help=f"Model variant ({' → '.join(choices)}).",
-    )
-
-
 def resolve_model_path(
-    assets_dir: Path,
-    model_name: str,
-    model_url: str | None,
-    variant: str,
-) -> Path | None:
-    """Return the model path, downloading it if a URL is provided.
+    model_path: Path | None,
+    default_path: Path,
+    default_url: str | None = None,
+) -> Path:
+    resolved_model_path = model_path or default_path
+    if model_path is None and default_url is not None:
+        download_if_missing(default_url, resolved_model_path)
+    if resolved_model_path.exists():
+        return resolved_model_path
 
-    Returns None and prints an error if the model is missing and has no URL.
-    """
-    model_path = assets_dir / model_name
-    if model_url:
-        download_if_missing(model_url, model_path)
-    elif not model_path.exists():
-        import sys
-        print(
-            f"Model not found at {model_path}. "
-            f"Export with: yolo export model=yolov8{variant}.pt format=onnx",
-            file=sys.stderr,
-        )
-        return None
-    return model_path
+    print(f"Error: model file not found: {resolved_model_path}", file=sys.stderr)
+    if model_path is None:
+        if default_url is None:
+            print(
+                "The bundled default model is expected under the assets directory. "
+                "Pass --model-path path/to/model-file to use a different local model.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "The default example model could not be found after the download attempt. "
+                "Pass --model-path path/to/model-file to use a different local model.",
+                file=sys.stderr,
+            )
+    raise SystemExit(1)
 
 
-def parse_input_and_output_args(description: str) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=description)
-    add_assets_dir_arg(parser)
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Where to save the annotated image. Defaults to the input image name with the model name as suffix.",
-    )
-    return parser.parse_args()
+def resolve_input_path(
+    input_path: Path | None,
+    default_path: Path,
+    default_url: str | None = None,
+) -> Path:
+    resolved_input_path = input_path or default_path
+    if input_path is None and default_url is not None:
+        download_if_missing(default_url, resolved_input_path)
+    if resolved_input_path.exists():
+        return resolved_input_path
+
+    print(f"Error: input file not found: {resolved_input_path}", file=sys.stderr)
+    raise SystemExit(1)
 
 
 def build_output_path(
-        assets_dir: Path,
-        image_name: str | Path,
-        model_name: str | Path,
+    output_dir: Path,
+    image_name: str | Path,
+    model_name: str | Path,
 ) -> Path:
     image_path = Path(image_name)
     model_path = Path(model_name)
     suffix = model_path.stem.replace(".", "_")
-    return assets_dir / f"{image_path.stem}_{suffix}{image_path.suffix}"
+    return output_dir / f"{image_path.stem}_{suffix}{image_path.suffix}"

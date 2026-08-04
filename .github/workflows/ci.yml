@@ -163,11 +163,7 @@ jobs:
         env:
           ML_PIPES_STRICT_OPTIONAL_IMPORTS: "1"
         run: |
-          python -m pytest -q \
-            packages/torch/tests/test_exports.py \
-            packages/torch/tests/test_torch.py \
-            packages/torch/tests/test_integration.py \
-            packages/torch/tests/test_inspection.py
+          python -m pytest -q packages/torch/tests
 
       - name: Check tracked files for mutations
         run: |

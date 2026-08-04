@@ -28,73 +28,141 @@ from examples.common import (
     COCO_CLASSES,
     COCO_IMAGE_NAME,
     COCO_IMAGE_URL,
-    add_assets_dir_arg,
     build_output_path,
     decode,
     download_if_missing,
+    resolve_input_path,
     resolve_model_path,
     visualize_detections_and_store,
 )
-from examples.run_yolo8_onnx import YOLO8_MODELS, yolo8_inference_pipeline
 
 from ml_pipes.core import Pipeline
 from ml_pipes.factory import pipeline_factory
+from ml_pipes.onnx import (
+    Extract,
+    Infer,
+)
+from ml_pipes.standard import (
+    Pick,
+    Recall,
+    Store,
+)
+from ml_pipes.tensor import (
+    ArgMax,
+    GatherScores,
+    Slice,
+    Squeeze,
+    Transpose,
+)
 from ml_pipes.vision import (
+    ConvertBoxFormat,
     Detections,
     ImagePayload,
+    NMS,
+    Normalize,
+    ProjectBoxes,
+    Resize,
+    ToDetections,
 )
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
 
-@pipeline_factory
-def yolo8_variant_pipeline(
-    model_path: Path = ASSETS_DIR / "yolov8n.onnx",
-    output_path: Path = ASSETS_DIR / "out.jpg",
+YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
+    "n": ("yolov8n_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8n.onnx"),
+    "s": ("yolov8s_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8s.onnx"),
+    "m": ("yolov8m_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8m.onnx"),
+    "l": ("yolov8l_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8l.onnx"),
+    "x": ("yolov8x_variants.onnx", "https://huggingface.co/Kalray/yolov8/resolve/main/yolov8x.onnx"),
+}
+
+
+def yolo8_variant_inference_pipeline(
+    model_path: Path,
     conf_threshold: float = 0.25,
-) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
-    return (
-        decode()
-        + yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)
-        + visualize_detections_and_store(output_path, COCO_CLASSES)
+) -> Pipeline[ImagePayload, Detections]:
+    return Pipeline(
+        [
+            Resize((640, 640)),
+            Store("resize_transform", source=1),
+            Pick(0),
+            Normalize(),
+            Infer(model_path),
+            Extract("predictions", as_="preds"),
+            Squeeze("preds"),
+            Transpose("preds"),
+            Slice("preds", slice(None, 4), as_="boxes"),
+            Slice("preds", slice(4, None), as_="scores"),
+            ArgMax("scores", as_="classes"),
+            GatherScores("scores", "classes"),
+            ConvertBoxFormat(from_="cxcywh"),
+            NMS(conf_threshold=conf_threshold),
+            Recall("resize_transform"),
+            ProjectBoxes(),
+            ToDetections(),
+        ],
+        auto_validate=True,
     )
 
 
-def _input_fn(image_path: Path):
-    def fn():
-        return image_path.name, image_path, None, None
-    return fn
+@pipeline_factory
+def yolo8_variant_pipeline(
+    model_path: Path | None = None,
+    output_path: Path | None = None,
+    conf_threshold: float = 0.25,
+) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+    default_model_name, default_model_url = YOLO8_MODELS["n"]
+    resolved_model_path = resolve_model_path(model_path, ASSETS_DIR / default_model_name, default_model_url)
+    resolved_output_path = output_path or build_output_path(ASSETS_DIR, "run_yolo8_benchmark_variants.jpg", resolved_model_path.name)
+    return (
+        decode()
+        + yolo8_variant_inference_pipeline(resolved_model_path, conf_threshold=conf_threshold)
+        + visualize_detections_and_store(resolved_output_path, COCO_CLASSES)
+    )
+
+
+def _try_resolve_model_variant(variant: str) -> tuple[str, Path] | None:
+    model_name, model_url = YOLO8_MODELS[variant]
+    model_path = ASSETS_DIR / model_name
+    if model_path.exists():
+        return model_name, model_path
+    if model_url is None:
+        print(f"warning: no download URL configured for variant {variant!r}, skipping", file=sys.stderr)
+        return None
+    try:
+        download_if_missing(model_url, model_path)
+    except Exception as exc:
+        print(f"warning: could not resolve variant {variant!r} ({model_name}): {exc}", file=sys.stderr)
+        return None
+    if not model_path.exists():
+        print(f"warning: model file not found for variant {variant!r}: {model_path}", file=sys.stderr)
+        return None
+    return model_name, model_path
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_assets_dir_arg(parser)
     parser.add_argument(
-        "--variants", nargs="+", default=list(YOLO8_MODELS),
-        metavar="VARIANT", help=f"Model variants to benchmark (default: {' '.join(YOLO8_MODELS)}).",
+        "--variants", nargs="+", default=["n", "s"],
+        metavar="VARIANT", help="Model variants to benchmark (default: n s).",
     )
     parser.add_argument("--runs", type=int, default=20, help="Measured runs per variant (default: 20).")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup runs per variant (default: 3).")
     parser.add_argument("--save", type=Path, default=None, help="Directory to save per-variant result JSON files.")
     args = parser.parse_args()
 
-    assets_dir: Path = args.assets_dir
-
-    image_path = assets_dir / COCO_IMAGE_NAME
-    print(f"Downloading sample image to {image_path} if needed...", file=sys.stderr)
-    download_if_missing(COCO_IMAGE_URL, image_path)
+    image_path = resolve_input_path(None, ASSETS_DIR / COCO_IMAGE_NAME, COCO_IMAGE_URL)
+    input_fn = lambda: (image_path.name, image_path, None, None)
 
     configs = []
     for variant in args.variants:
         if variant not in YOLO8_MODELS:
             print(f"warning: unknown variant {variant!r}, skipping", file=sys.stderr)
             continue
-        model_name, model_url = YOLO8_MODELS[variant]
-        model_path = resolve_model_path(assets_dir, model_name, model_url, variant)
-        if model_path is None:
-            print(f"warning: model file for variant {variant!r} not found, skipping", file=sys.stderr)
+        resolved = _try_resolve_model_variant(variant)
+        if resolved is None:
             continue
-        output_path = build_output_path(assets_dir, COCO_IMAGE_NAME, model_name)
-        configs.append({"model_path": model_path, "output_path": output_path})
+        _, model_path = resolved
+        configs.append({"model_path": model_path})
 
     if not configs:
         print("error: no model variants available — download at least one model file first", file=sys.stderr)
@@ -103,7 +171,7 @@ def main() -> int:
     results = (
         BenchmarkBuilder.factory(yolo8_variant_pipeline)
         .pipeline_config_set(configs)
-        .data_input(_input_fn(image_path))
+        .data_input(input_fn)
         .runs(args.runs)
         .warmup(args.warmup)
         .run(verbose=True)

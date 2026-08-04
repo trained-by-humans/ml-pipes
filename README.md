@@ -20,9 +20,10 @@ pip install 'ml-pipes[onnx,vision]'
 python examples/run_yolo8_onnx.py
 ```
 
-To pick the matching install for other runnable examples, see
-[examples/README.md](examples/README.md). For the full package matrix and the
-public component import model, see [docs/PACKAGES.md](docs/PACKAGES.md).
+For runnable example details, bundled starter assets, and repository-local
+setup guidance, see [examples/README.md](examples/README.md). For the full
+package matrix and the public component import model, see
+[docs/PACKAGES.md](docs/PACKAGES.md).
 
 ## Supported Use-cases/Domains
 

@@ -55,7 +55,7 @@ def test_detect_changed_packages_filters_to_changed_package_paths(tmp_path: Path
         head_sha="head",
         root=root,
         resolve_changed_files=lambda *_args: (
-            "packages/torch/src/ml_pipes/torch/ops.py",
+            "packages/torch/src/ml_pipes/torch/boundary_ops.py",
             "packages/core/README.md",
             "docs/PACKAGES.md",
         ),
