@@ -76,7 +76,7 @@ jobs:
     needs: prepare-release-assets
     permissions:
       contents: read
-    uses: ./.github/workflows/publish-package-to-index.yml
+    uses: ./.github/workflows/publish-artifacts-to-index.yml
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -90,7 +90,7 @@ jobs:
     needs: publish-pypi-core
     permissions:
       contents: read
-    uses: ./.github/workflows/publish-package-to-index.yml
+    uses: ./.github/workflows/publish-artifacts-to-index.yml
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -104,7 +104,7 @@ jobs:
     needs: publish-pypi-tensor
     permissions:
       contents: read
-    uses: ./.github/workflows/publish-package-to-index.yml
+    uses: ./.github/workflows/publish-artifacts-to-index.yml
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -118,7 +118,7 @@ jobs:
     needs: publish-pypi-vision
     permissions:
       contents: read
-    uses: ./.github/workflows/publish-package-to-index.yml
+    uses: ./.github/workflows/publish-artifacts-to-index.yml
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -132,7 +132,7 @@ jobs:
     needs: publish-pypi-onnx
     permissions:
       contents: read
-    uses: ./.github/workflows/publish-package-to-index.yml
+    uses: ./.github/workflows/publish-artifacts-to-index.yml
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -146,7 +146,7 @@ jobs:
     needs: publish-pypi-torch
     permissions:
       contents: read
-    uses: ./.github/workflows/publish-package-to-index.yml
+    uses: ./.github/workflows/publish-artifacts-to-index.yml
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/

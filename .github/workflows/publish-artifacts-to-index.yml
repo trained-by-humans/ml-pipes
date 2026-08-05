@@ -1,4 +1,4 @@
-name: Publish Package
+name: Publish Artifacts To Index
 
 on:
   workflow_call:
@@ -67,7 +67,7 @@ jobs:
             --index-url-base "${{ inputs.index_url_base }}" \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Publish package
+      - name: Publish artifacts
         if: ${{ steps.check_package_index_artifacts.outputs.artifacts_missing == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

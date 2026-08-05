@@ -1,4 +1,4 @@
-# Releasing
+# Release
 
 This guide is for maintainers cutting an `ml-pipes` release. Keep
 [`CONTRIBUTING.md`](CONTRIBUTING.md) focused on local development setup and
@@ -41,6 +41,46 @@ for the same tag. The workflow:
 - verifies that the published packages install and import correctly
 
 Promotion reuses the staged artifacts. It does not rebuild the release.
+
+## Release Tooling Context
+
+The release workflows behave similarly, but GitHub resolves different parts of
+the tooling at different times.
+
+- Workflow YAML, including same-repo reusable workflows under
+  `.github/workflows/*.yml`, is fixed when the run starts.
+- Helper scripts under `.github/scripts/*.py` come from whatever tree
+  `actions/checkout` places in the job workspace.
+
+That leads to one important difference between staging and promotion:
+
+- `stage-release` starts from the tag push, so the workflow definition, helper
+  scripts, and package code all line up with the tagged commit.
+- `promote-release` is started manually, but the run still follows the branch
+  or tag ref selected for that dispatch. Its workflow definition comes from
+  that dispatched ref, while its helper scripts come from the tag after
+  checkout.
+
+Promotion can therefore mix newer workflow orchestration with older
+tag-scoped helper scripts. That is workable when staging and promotion stay
+close together, but the gap is real.
+
+If staging and promotion drift apart, later workflow fixes, permission
+changes, or verification-policy changes may apply during promotion even though
+helper-script behavior still comes from the older staged tag.
+
+Treat this as an operational constraint of the current design:
+
+- keep staging and promotion close together
+- do not assume a post-tag tooling fix applies to an already staged release
+- if release tooling changes materially after staging, cut a new release
+  candidate and restage instead of promoting under drifted tooling
+
+For the GitHub Actions mechanics behind this, see:
+
+- [Manually run a workflow](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+- [Reuse workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows)
+- [actions/checkout](https://github.com/actions/checkout)
 
 ## Prerequisites
 
@@ -104,11 +144,16 @@ the GitHub release artifacts after the workflow finishes.
 
 1. Open the `promote-release` workflow in GitHub Actions.
 2. Run it with the exact staged tag, such as `v0.1.0`.
-3. Wait for the PyPI publish jobs and the final verification job to pass.
+3. Wait for the PyPI publish jobs to complete and review the final verification
+   job.
 
 Do not rebuild artifacts locally and do not move the tag between staging and
 promotion. Promotion is meant to publish the exact files that already passed
 the staging flow.
+
+Published-package verification is advisory during promotion. A verification
+warning still needs follow-up, but it does not mean the uploaded PyPI artifacts
+were rolled back.
 
 ## Reruns And Failure Handling
 
@@ -128,6 +173,6 @@ create a new release tag. Do not mutate an existing staged release in place.
 
 - [`stage-release`](.github/workflows/stage-release.yml)
 - [`promote-release`](.github/workflows/promote-release.yml)
-- [`publish-package-to-index`](.github/workflows/publish-package-to-index.yml)
+- [`publish-artifacts-to-index`](.github/workflows/publish-artifacts-to-index.yml)
 - [`verify-published-packages`](.github/workflows/verify-published-packages.yml)
 - [`release-plan.toml`](release-plan.toml)
