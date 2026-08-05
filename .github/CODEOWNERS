@@ -1,0 +1,6 @@
+# CODEOWNERS for trained-by-humans/ml-pipes
+# This file designates the default code owner for the repository.
+# Format: <pattern> <owner>
+
+# Default: all files are owned by the user Tenkei
+* @Tenkei
