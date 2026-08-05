@@ -30,17 +30,19 @@ def _workspace_root(tmp_path: Path, package_names: tuple[str, ...] = ("core", "t
     return tmp_path
 
 
-def test_detect_changed_packages_returns_all_workspace_packages_for_workflow_call(tmp_path: Path) -> None:
+def test_detect_changed_packages_returns_all_workspace_packages_for_non_diffable_events(tmp_path: Path) -> None:
     module = _load_detect_changed_packages_module()
-    root = _workspace_root(tmp_path, ("torch", "core", "meta"))
+    root = _workspace_root(tmp_path, ("vision", "core", "torch"))
 
     changed_packages = module.detect_changed_packages(
         "workflow_call",
+        base_sha="base",
+        head_sha="head",
         root=root,
         resolve_changed_files=lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected git call")),
     )
 
-    assert changed_packages == ("core", "meta", "torch")
+    assert changed_packages == ("core", "torch", "vision")
 
 
 def test_detect_changed_packages_filters_to_changed_package_paths(tmp_path: Path) -> None:

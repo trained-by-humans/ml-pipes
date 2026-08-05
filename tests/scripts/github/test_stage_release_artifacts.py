@@ -30,6 +30,7 @@ def _stage_release_directory(tmp_path: Path) -> Path:
     _write_artifact(artifacts_dir / "ml_pipes_tensor-0.2.0-py3-none-any.whl", "tensor-wheel")
     _write_artifact(artifacts_dir / "ml_pipes-0.2.0-py3-none-any.whl", "meta-wheel")
     _write_artifact(artifacts_dir / "ml_pipes-0.2.0.tar.gz", "meta-sdist")
+    _write_artifact(artifacts_dir / "release-artifact-manifest.json", "{}")
     return artifacts_dir
 
 
@@ -79,3 +80,18 @@ def test_stage_release_artifacts_rejects_missing_distribution(tmp_path: Path) ->
             staging_dir=tmp_path / "publish",
             dist_name="ml-pipes-vision",
         )
+
+
+def test_stage_release_artifacts_ignores_non_package_metadata(tmp_path: Path) -> None:
+    module = _load_stage_release_artifacts_module()
+    artifacts_dir = _stage_release_directory(tmp_path)
+    staging_dir = tmp_path / "publish"
+
+    staged_filenames = module.stage_release_artifacts(
+        artifacts_dir,
+        staging_dir=staging_dir,
+        dist_name="ml-pipes-core",
+    )
+
+    assert "release-artifact-manifest.json" not in staged_filenames
+    assert sorted(path.name for path in staging_dir.iterdir()) == list(staged_filenames)

@@ -15,24 +15,22 @@ ChangedFilesResolver = Callable[[str | None, str | None, Path], tuple[str, ...]]
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Detect which workspace packages changed between two Git revisions and emit them as JSON."
-        )
+        description="Detect which workspace packages changed between two Git revisions and emit them as JSON."
     )
     parser.add_argument(
         "--event-name",
         required=True,
-        help="GitHub event name such as pull_request, push, or workflow_call.",
+        help="GitHub event name such as pull_request or push.",
     )
     parser.add_argument(
         "--base-sha",
         default=None,
-        help="Base revision for Git diffs. Ignored for workflow_call.",
+        help="Base revision for Git diffs.",
     )
     parser.add_argument(
         "--head-sha",
         default=None,
-        help="Head revision for Git diffs. Ignored for workflow_call.",
+        help="Head revision for Git diffs.",
     )
     parser.add_argument(
         "--github-output",
@@ -92,8 +90,6 @@ def detect_changed_packages(
 ) -> tuple[str, ...]:
     packages = _workspace_packages(root)
 
-    if event_name == "workflow_call":
-        return packages
     if event_name not in {"pull_request", "push"}:
         return packages
     if not head_sha:

@@ -1,0 +1,23 @@
+[[package]]
+workspace = "core"
+dist = "ml-pipes-core"
+
+[[package]]
+workspace = "tensor"
+dist = "ml-pipes-tensor"
+
+[[package]]
+workspace = "vision"
+dist = "ml-pipes-vision"
+
+[[package]]
+workspace = "onnx"
+dist = "ml-pipes-onnx"
+
+[[package]]
+workspace = "torch"
+dist = "ml-pipes-torch"
+
+[[package]]
+workspace = "meta"
+dist = "ml-pipes"

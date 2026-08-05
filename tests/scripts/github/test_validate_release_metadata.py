@@ -1,27 +1,22 @@
 from __future__ import annotations
 
-import argparse
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 
-def _load_release_packages_module():
-    module_path = Path(__file__).resolve().parents[3] / ".github" / "scripts" / "release_packages.py"
-    spec = importlib.util.spec_from_file_location("release_packages", module_path)
+def _load_validate_release_metadata_module():
+    module_path = Path(__file__).resolve().parents[3] / ".github" / "scripts" / "validate_release_metadata.py"
+    spec = importlib.util.spec_from_file_location("validate_release_metadata", module_path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _skip_without_toml_parser(module: object) -> None:
-    if getattr(module, "tomllib", None) is None:
-        pytest.skip("release metadata validation requires tomli on Python 3.10 or Python 3.11+")
 
 
 def _fake_release_pyprojects(version: str = "0.2.0") -> dict[str, dict[str, object]]:
@@ -105,7 +100,18 @@ def _fake_release_pyprojects(version: str = "0.2.0") -> dict[str, dict[str, obje
     }
 
 
-def _patch_pyprojects(
+def _fake_release_packages() -> tuple[SimpleNamespace, ...]:
+    return (
+        SimpleNamespace(package_dir_name="core", dist_name="ml-pipes-core"),
+        SimpleNamespace(package_dir_name="tensor", dist_name="ml-pipes-tensor"),
+        SimpleNamespace(package_dir_name="vision", dist_name="ml-pipes-vision"),
+        SimpleNamespace(package_dir_name="onnx", dist_name="ml-pipes-onnx"),
+        SimpleNamespace(package_dir_name="torch", dist_name="ml-pipes-torch"),
+        SimpleNamespace(package_dir_name="meta", dist_name="ml-pipes"),
+    )
+
+
+def _patch_release_inputs(
     monkeypatch: pytest.MonkeyPatch,
     module: object,
     *,
@@ -116,6 +122,7 @@ def _patch_pyprojects(
     def fake_load_pyproject(package_dir: Path) -> dict[str, object]:
         return pyprojects[package_dir.name]
 
+    monkeypatch.setattr(module, "_release_packages", _fake_release_packages)
     monkeypatch.setattr(module, "_load_pyproject", fake_load_pyproject)
     return pyprojects
 
@@ -123,14 +130,14 @@ def _patch_pyprojects(
 def test_validate_release_metadata_accepts_valid_manifests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _load_release_packages_module()
-    _patch_pyprojects(monkeypatch, module)
+    module = _load_validate_release_metadata_module()
+    _patch_release_inputs(monkeypatch, module)
 
     version, manifests = module.validate_release_metadata("v0.2.0")
 
     assert version == "0.2.0"
     assert [manifest.dist_name for manifest in manifests] == [
-        dist_name for _, dist_name in module.PACKAGE_ORDER
+        package.dist_name for package in _fake_release_packages()
     ]
     assert manifests[0].runtime_internal_dependencies == ()
     assert manifests[1].runtime_internal_dependencies == ("ml-pipes-core",)
@@ -147,8 +154,7 @@ def test_validate_release_metadata_accepts_valid_manifests(
 
 
 def test_package_manifest_captures_optional_internal_dependencies_on_current_manifests() -> None:
-    module = _load_release_packages_module()
-    _skip_without_toml_parser(module)
+    module = _load_validate_release_metadata_module()
 
     core_manifest = module._package_manifest("core", "ml-pipes-core")
     meta_manifest = module._package_manifest("meta", "ml-pipes")
@@ -164,8 +170,7 @@ def test_package_manifest_captures_optional_internal_dependencies_on_current_man
 
 
 def test_validate_release_metadata_rejects_mismatched_tag() -> None:
-    module = _load_release_packages_module()
-    _skip_without_toml_parser(module)
+    module = _load_validate_release_metadata_module()
 
     with pytest.raises(ValueError, match="Release tag"):
         module.validate_release_metadata("v9.9.9")
@@ -174,9 +179,8 @@ def test_validate_release_metadata_rejects_mismatched_tag() -> None:
 def test_validate_release_metadata_rejects_stale_runtime_internal_pin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _load_release_packages_module()
-    pyprojects = _patch_pyprojects(monkeypatch, module)
-
+    module = _load_validate_release_metadata_module()
+    pyprojects = _patch_release_inputs(monkeypatch, module)
     pyprojects["vision"]["project"]["dependencies"][0] = "ml-pipes-core==0.1.0"
 
     with pytest.raises(ValueError, match="project.dependencies requirement"):
@@ -186,9 +190,8 @@ def test_validate_release_metadata_rejects_stale_runtime_internal_pin(
 def test_validate_release_metadata_rejects_stale_optional_internal_pin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _load_release_packages_module()
-    pyprojects = _patch_pyprojects(monkeypatch, module)
-
+    module = _load_validate_release_metadata_module()
+    pyprojects = _patch_release_inputs(monkeypatch, module)
     pyprojects["meta"]["project"]["optional-dependencies"]["all"][0] = "ml-pipes-core[inspection]==0.1.0"
 
     with pytest.raises(ValueError, match="project.optional-dependencies.all requirement"):
@@ -198,30 +201,28 @@ def test_validate_release_metadata_rejects_stale_optional_internal_pin(
 def test_validate_release_metadata_allows_optional_internal_publish_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _load_release_packages_module()
-    pyprojects = _patch_pyprojects(monkeypatch, module)
-
+    module = _load_validate_release_metadata_module()
+    pyprojects = _patch_release_inputs(monkeypatch, module)
     pyprojects["core"]["project"]["optional-dependencies"]["inspection"] = [
         "matplotlib>=3.8",
-        f"ml-pipes-onnx==0.2.0",
-        f"ml-pipes-tensor==0.2.0",
-        f"ml-pipes-vision==0.2.0",
+        "ml-pipes-onnx==0.2.0",
+        "ml-pipes-tensor==0.2.0",
+        "ml-pipes-vision==0.2.0",
     ]
 
     version, manifests = module.validate_release_metadata("v0.2.0")
 
     assert version == "0.2.0"
     assert [manifest.dist_name for manifest in manifests] == [
-        dist_name for _, dist_name in module.PACKAGE_ORDER
+        package.dist_name for package in _fake_release_packages()
     ]
 
 
 def test_validate_release_metadata_requires_exact_internal_pins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _load_release_packages_module()
-    pyprojects = _patch_pyprojects(monkeypatch, module)
-
+    module = _load_validate_release_metadata_module()
+    pyprojects = _patch_release_inputs(monkeypatch, module)
     pyprojects["tensor"]["project"]["dependencies"][0] = "ml-pipes-core>=0.2.0"
 
     with pytest.raises(ValueError, match="must pin an exact version with =="):
@@ -231,106 +232,9 @@ def test_validate_release_metadata_requires_exact_internal_pins(
 def test_validate_release_metadata_canonicalizes_internal_dependency_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _load_release_packages_module()
-    pyprojects = _patch_pyprojects(monkeypatch, module)
-
+    module = _load_validate_release_metadata_module()
+    pyprojects = _patch_release_inputs(monkeypatch, module)
     pyprojects["tensor"]["project"]["dependencies"][0] = "ml_pipes.core==0.1.0"
 
     with pytest.raises(ValueError, match="project.dependencies requirement"):
         module.validate_release_metadata("v0.2.0")
-
-
-def test_load_pyproject_requires_toml_parser(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load_release_packages_module()
-
-    monkeypatch.setattr(module, "tomllib", None)
-    monkeypatch.setattr(module, "_TOML_IMPORT_ERROR", ModuleNotFoundError("No module named 'tomli'"))
-
-    with pytest.raises(RuntimeError, match="install tomli"):
-        module._load_pyproject(module.ROOT / "packages" / "core")
-
-
-def test_ensure_release_tooling_requires_build_modules(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load_release_packages_module()
-
-    def fake_find_spec(name: str) -> object | None:
-        if name in {"build", "hatchling"}:
-            return None
-        return object()
-
-    monkeypatch.setattr(module.importlib.util, "find_spec", fake_find_spec)
-
-    with pytest.raises(RuntimeError, match="Missing modules: build, hatchling"):
-        module._ensure_release_tooling(include_upload=False)
-
-
-def test_ensure_release_tooling_requires_twine_for_publish(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load_release_packages_module()
-
-    def fake_find_spec(name: str) -> object | None:
-        if name == "twine":
-            return None
-        return object()
-
-    monkeypatch.setattr(module.importlib.util, "find_spec", fake_find_spec)
-
-    with pytest.raises(RuntimeError, match="Missing modules: twine"):
-        module._ensure_release_tooling(include_upload=True)
-
-
-@pytest.mark.parametrize("publish", [False, True], ids=["dry-run", "publish"])
-def test_main_validates_release_metadata_before_building(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    publish: bool,
-) -> None:
-    module = _load_release_packages_module()
-
-    args = argparse.Namespace(
-        publish=publish,
-        dry_run=not publish,
-        validate=False,
-        outdir=tmp_path,
-        repository_url="https://example.invalid/legacy/" if publish else None,
-        tag=None,
-    )
-    monkeypatch.setattr(module, "_parse_args", lambda: args)
-
-    events: list[tuple[str, object]] = []
-
-    def fake_validate_release_metadata(expected_tag: str | None = None) -> tuple[str, list[object]]:
-        events.append(("validate", expected_tag))
-        return ("0.2.0", [])
-
-    def fake_ensure_release_tooling(*, include_upload: bool) -> None:
-        events.append(("ensure_release_tooling", include_upload))
-
-    def fake_build_package(package_dir: Path, outdir: Path) -> None:
-        events.append(("build", package_dir.name))
-
-    def fake_artifacts_for(dist_name: str, outdir: Path) -> list[Path]:
-        return [outdir / f"{dist_name}.whl"]
-
-    def fake_publish_package(dist_name: str, outdir: Path, repository_url: str | None) -> None:
-        events.append(("publish", dist_name, repository_url))
-
-    monkeypatch.setattr(module, "validate_release_metadata", fake_validate_release_metadata)
-    monkeypatch.setattr(module, "_ensure_release_tooling", fake_ensure_release_tooling)
-    monkeypatch.setattr(module, "_build_package", fake_build_package)
-    monkeypatch.setattr(module, "_artifacts_for", fake_artifacts_for)
-    monkeypatch.setattr(module, "_publish_package", fake_publish_package)
-
-    assert module.main() == 0
-
-    assert events[0] == ("validate", None)
-    assert events[1] == ("ensure_release_tooling", publish)
-    assert [event for event in events if event[0] == "build"] == [
-        ("build", package_dir_name) for package_dir_name, _ in module.PACKAGE_ORDER
-    ]
-    if publish:
-        assert [event for event in events if event[0] == "publish"] == [
-            ("publish", dist_name, "https://example.invalid/legacy/")
-            for _, dist_name in module.PACKAGE_ORDER
-        ]
-    else:
-        assert not [event for event in events if event[0] == "publish"]
