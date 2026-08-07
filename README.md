@@ -1,5 +1,10 @@
 # ml-pipes
 
+[![CI](https://github.com/trained-by-humans/ml-pipes/actions/workflows/ci.yml/badge.svg)](https://github.com/trained-by-humans/ml-pipes/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](https://github.com/trained-by-humans/ml-pipes)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/ml-pipes)](https://pypi.org/project/ml-pipes/)
+
 Build explicit ML pipelines you can validate, run, inspect, trace, and
 benchmark.
 
