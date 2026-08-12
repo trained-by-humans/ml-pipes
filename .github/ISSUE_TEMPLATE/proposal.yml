@@ -1,6 +1,7 @@
 name: Proposal / Improvement
 description: Propose a new package, operator, or tooling improvement.
 title: "[Proposal] "
+type: feature
 body:
   - type: markdown
     attributes:

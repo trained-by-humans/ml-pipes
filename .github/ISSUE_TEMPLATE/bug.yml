@@ -1,6 +1,7 @@
 name: Bug / Regression
 description: Report incorrect or regressed behavior in validation, runtime execution, tooling, packaging, or examples.
 title: "[Bug] "
+type: bug
 body:
   - type: markdown
     attributes:
