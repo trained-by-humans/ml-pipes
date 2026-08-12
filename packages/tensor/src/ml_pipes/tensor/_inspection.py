@@ -45,5 +45,6 @@ def _format_tensor_registry(value: TensorRegistry) -> list[OutputBlock]:
     return [TextBlock(type(value).__name__, rows)]
 
 
-register_output_formatter(TensorPayload, _format_tensor)
-register_output_formatter(TensorRegistry, _format_tensor_registry)
+def register_inspection_formatters() -> None:
+    register_output_formatter(TensorPayload, _format_tensor)
+    register_output_formatter(TensorRegistry, _format_tensor_registry)

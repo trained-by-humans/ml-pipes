@@ -11,4 +11,5 @@ def _format_runtime_outputs(value: RuntimeOutputs) -> list[OutputBlock]:
     return [TextBlock(type(value).__name__, rows)]
 
 
-register_output_formatter(RuntimeOutputs, _format_runtime_outputs)
+def register_inspection_formatters() -> None:
+    register_output_formatter(RuntimeOutputs, _format_runtime_outputs)

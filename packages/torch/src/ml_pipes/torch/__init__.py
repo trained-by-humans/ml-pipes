@@ -107,4 +107,7 @@ __all__ = [
     "TorchTensorRegistry",
 ]
 
-from . import _inspection as _inspection
+from ._inspection import register_inspection_formatters as _register_inspection_formatters
+
+
+_register_inspection_formatters()

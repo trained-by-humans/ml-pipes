@@ -13,4 +13,5 @@ def _format_torch_tensor_registry(value: TorchTensorRegistry) -> list[OutputBloc
     return [TextBlock(type(value).__name__, rows)]
 
 
-register_output_formatter(TorchTensorRegistry, _format_torch_tensor_registry)
+def register_inspection_formatters() -> None:
+    register_output_formatter(TorchTensorRegistry, _format_torch_tensor_registry)

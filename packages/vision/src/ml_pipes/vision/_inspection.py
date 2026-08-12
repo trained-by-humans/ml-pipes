@@ -136,9 +136,10 @@ def _tile_span_formatter(
     return StepView(span.label, span.operator_config, blocks), image_to_carry
 
 
-register_output_formatter(Detections, _format_detections)
-register_output_formatter(ImagePayload, _format_image)
-register_output_formatter(ResizeTransform, _format_resize_transform)
-register_output_formatter(Segmentations, _format_segmentations)
-register_output_formatter(TileRect, _format_tile_rect)
-register_span_formatter(Tile, _tile_span_formatter)
+def register_inspection_formatters() -> None:
+    register_output_formatter(Detections, _format_detections)
+    register_output_formatter(ImagePayload, _format_image)
+    register_output_formatter(ResizeTransform, _format_resize_transform)
+    register_output_formatter(Segmentations, _format_segmentations)
+    register_output_formatter(TileRect, _format_tile_rect)
+    register_span_formatter(Tile, _tile_span_formatter)
