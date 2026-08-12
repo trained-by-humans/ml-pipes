@@ -86,3 +86,5 @@ __all__ = [
     "ToSegmentations",
     "WeightMasksByScores",
 ]
+
+from . import _inspection as _inspection

@@ -1,47 +1,17 @@
 from __future__ import annotations
 
-import importlib
-import os
-
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes.torch.types import TorchTensorRegistry
-
-_STRICT_OPTIONAL_IMPORTS_ENV = "ML_PIPES_STRICT_OPTIONAL_IMPORTS"
-
-
-def _strict_optional_imports_enabled() -> bool:
-    value = os.getenv(_STRICT_OPTIONAL_IMPORTS_ENV, "")
-    return value.lower() not in {"", "0", "false"}
-
-
-def _import_optional_dependency(module_name: str) -> None:
-    if _strict_optional_imports_enabled():
-        importlib.import_module(module_name)
-        return
-
-    pytest.importorskip(module_name)
+from ml_pipes.torch import TorchTensorRegistry
 
 
 def _inspection_tools():
-    # These formatting assertions exercise core's optional inspection stack.
-    _import_optional_dependency("cv2")
-    _import_optional_dependency("ml_pipes.onnx")
-    _import_optional_dependency("ml_pipes.vision")
-
     from ml_pipes.inspection import ImageBlock, PipelineInspector, TextBlock
 
-    try:
-        inspector = PipelineInspector()
-    except ImportError as exc:  # pragma: no cover - depends on optional extras
-        if _strict_optional_imports_enabled():
-            raise
-        pytest.skip(str(exc))
-
-    return ImageBlock, TextBlock, inspector
+    return ImageBlock, TextBlock, PipelineInspector()
 
 
 def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry():

@@ -24,6 +24,10 @@ from ml_pipes.onnx import Infer
 from ml_pipes.vision import Resize
 ```
 
+Inspection installs compose the same way. Use `ml-pipes[inspection]` for the
+shared renderers, then add the package profiles whose pipelines you want
+specialized inspection output for, such as `ml-pipes[inspection,onnx,vision]`.
+
 Optional installs are requested through the umbrella package name. For
 example, install OpenTelemetry support with `pip install 'ml-pipes[otel]'`,
 not with nested extra syntax such as `ml-pipes[core[otel]]`.

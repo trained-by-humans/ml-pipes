@@ -179,6 +179,10 @@ uv sync --group shared-framework --group inspection-otel
 python -m pip install 'ml-pipes[inspection,onnx,vision]'
 ```
 
+Package-specific inspection formatting follows the package chain you install
+and import. Add `inspection` to the same package profiles you use in the
+pipeline you want to inspect.
+
 Example command:
 
 ```bash

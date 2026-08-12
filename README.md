@@ -182,6 +182,10 @@ result.dump("inspection.pkl")
 PipelineInspector().show_in_browser(result, orientation="horizontal")
 ```
 
+Install the shared inspection renderer extra together with the package chain
+you inspect, for example `ml-pipes[inspection,onnx,vision]`. Specialized
+inspection formatting follows the package modules you import.
+
 You can save the inspection result and open it in a browser:
 
 <p align="center">

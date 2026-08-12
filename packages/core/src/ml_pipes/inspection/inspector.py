@@ -9,11 +9,12 @@ import tempfile
 import webbrowser
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 
 from ml_pipes.inspection.artifacts import InspectionResult
+from ml_pipes.tracing import StepSpan
 from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
@@ -29,6 +30,7 @@ from ml_pipes.inspection.views import (
 )
 
 _IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
+FormatterT = TypeVar("FormatterT")
 
 
 def _block_summary(blocks: list[OutputBlock]) -> str:
@@ -64,14 +66,42 @@ def _is_primitive_tuple(value: tuple[Any, ...]) -> bool:
     return bool(value) and all(isinstance(item, primitive_types) for item in value)
 
 
+def _find_registered_formatter(
+    value_type: type,
+    local_formatters: dict[type, FormatterT],
+    global_formatters: dict[type, FormatterT],
+) -> FormatterT | None:
+    formatter = local_formatters.get(value_type)
+    if formatter is not None:
+        return formatter
+
+    formatter = global_formatters.get(value_type)
+    if formatter is not None:
+        return formatter
+
+    for registered_type, formatter in local_formatters.items():
+        if issubclass(value_type, registered_type):
+            return formatter
+
+    return next(
+        (
+            formatter
+            for registered_type, formatter in global_formatters.items()
+            if issubclass(value_type, registered_type)
+        ),
+        None,
+    )
+
+
 class PipelineInspector:
     """Converts an InspectionResult into views and renders them."""
 
     def __init__(self) -> None:
-        from ml_pipes.inspection.formatters import default_output_formatters, default_span_formatters
+        from ml_pipes.inspection.formatters import ensure_builtin_formatters_registered
 
-        self._output_fmts: dict[type, OutputFormatter] = default_output_formatters()
-        self._span_fmts: dict[type, SpanFormatter] = default_span_formatters()
+        ensure_builtin_formatters_registered()
+        self._output_fmts: dict[type, OutputFormatter] = {}
+        self._span_fmts: dict[type, SpanFormatter] = {}
 
     def register_output_formatter(self, type_: type, formatter: OutputFormatter) -> "PipelineInspector":
         """Register a formatter for *type_* output values. Returns self for chaining."""
@@ -86,15 +116,23 @@ class PipelineInspector:
         return self
 
     def _find_output_formatter(self, value: Any) -> OutputFormatter | None:
-        value_type = type(value)
-        return self._output_fmts.get(value_type) or next(
-            (
-                formatter
-                for registered_type, formatter in self._output_fmts.items()
-                if issubclass(value_type, registered_type)
-            ),
-            None,
+        return _find_registered_formatter(
+            type(value),
+            self._output_fmts,
+            self._global_output_formatters(),
         )
+
+    @staticmethod
+    def _global_output_formatters() -> dict[type, OutputFormatter]:
+        from ml_pipes.inspection.formatters import default_output_formatters
+
+        return default_output_formatters()
+
+    @staticmethod
+    def _global_span_formatters() -> dict[type, SpanFormatter]:
+        from ml_pipes.inspection.formatters import default_span_formatters
+
+        return default_span_formatters()
 
     def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
         return (
@@ -239,17 +277,13 @@ class PipelineInspector:
 
         op_type = span.operator_type
         formatter = (
-            self._span_fmts.get(op_type) or (
-                next(
-                    (
-                        fmt
-                        for registered_type, fmt in self._span_fmts.items()
-                        if issubclass(op_type, registered_type)
-                    ),
-                    None,
-                )
-                if op_type is not None else None
+            _find_registered_formatter(
+                op_type,
+                self._span_fmts,
+                self._global_span_formatters(),
             )
+            if op_type is not None
+            else None
         )
         if formatter is not None:
             view, image_to_carry = formatter(span, last_image)

@@ -4,7 +4,7 @@ import base64
 import html as _html
 from pathlib import Path
 
-from ml_pipes.inspection.formatters import cv2
+from ml_pipes.inspection._deps import load_cv2
 from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
@@ -13,6 +13,8 @@ from ml_pipes.inspection.views import (
     TextBlock,
     _flatten_step_views,
 )
+
+cv2 = load_cv2()
 
 _HTML_ORIENTATIONS = ("horizontal", "vertical")
 _IMG_STYLE = "max-width:240px;max-height:200px;object-fit:contain;display:block;"

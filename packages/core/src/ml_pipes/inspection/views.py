@@ -5,6 +5,7 @@ from typing import Any, Callable, Protocol
 
 import numpy as np
 
+from ml_pipes.inspection._deps import load_cv2
 from ml_pipes.tracing import StepSpan
 
 
@@ -69,9 +70,7 @@ def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
     grid = np.full((gh, gw, 3), 180, dtype=np.uint8)
     for idx, img in enumerate(images):
         if img.shape[:2] != (h, w):
-            import cv2
-
-            img = cv2.resize(img, (w, h))
+            img = load_cv2().resize(img, (w, h))
         r, c = divmod(idx, cols)
         y = r * (h + divider)
         x = c * (w + divider)

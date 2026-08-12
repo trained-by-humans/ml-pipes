@@ -54,3 +54,5 @@ __all__ = [
     "TopKIndices2D",
     "Transpose",
 ]
+
+from . import _inspection as _inspection

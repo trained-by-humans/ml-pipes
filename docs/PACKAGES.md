@@ -39,6 +39,12 @@ under the shared `ml_pipes` namespace.
 That makes core the default shape of the framework, while umbrella profiles
 add the extra package chains you want in the same install.
 
+The `inspection` profile installs the shared inspection renderers from core.
+Combine it with package profiles such as `ml-pipes[inspection,tensor]` or
+`ml-pipes[inspection,onnx,vision]` for package-specific inspection formatting.
+That formatting follows the package modules you import, not every package that
+could be installed.
+
 > [!NOTE]
 > For more on the umbrella package itself, see
 > [`packages/meta/README.md`](../packages/meta/README.md).

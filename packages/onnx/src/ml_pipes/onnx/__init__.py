@@ -9,3 +9,5 @@ __all__ = [
     "Infer",
     "RuntimeOutputs",
 ]
+
+from . import _inspection as _inspection

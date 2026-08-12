@@ -19,8 +19,6 @@ torch = [
 ]
 inspection-otel = [
     "ml-pipes-core[inspection,otel]",
-    "ml-pipes-onnx",
-    "ml-pipes-vision",
 ]
 full-workspace = [
     { include-group = "shared-framework" },
