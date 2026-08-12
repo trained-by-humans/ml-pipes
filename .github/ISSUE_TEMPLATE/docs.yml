@@ -1,6 +1,8 @@
 name: Docs
 description: Report incorrect, unclear, missing, or outdated documentation.
 title: "[Docs] "
+labels: ["documentation"]
+type: task
 body:
   - type: markdown
     attributes:
