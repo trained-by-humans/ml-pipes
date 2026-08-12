@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ml_pipes.inspection._registry import register_value_formatter
+from ml_pipes.inspection._formatter_registry import register_value_formatter
 from ml_pipes.inspection.views import OutputBlock, TextBlock
 
 from .types import TorchTensorRegistry

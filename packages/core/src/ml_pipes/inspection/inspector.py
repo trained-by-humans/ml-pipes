@@ -5,11 +5,12 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import numpy as np
 
 from ml_pipes.inspection.artifacts import InspectionResult
+from ml_pipes.inspection._formatter_registry import StepFormatter, ValueFormatter
 from ml_pipes.inspection.renderer import _normalize_orientation
 from ml_pipes.tracing import StepSpan
 from ml_pipes.inspection.views import (
@@ -18,14 +19,13 @@ from ml_pipes.inspection.views import (
     OutputBlock,
     StepView,
     TextBlock,
-    StepFormatter,
-    ValueFormatter,
     _apply_image_carry,
     _build_span_metadata,
     _make_grid,
 )
 
 FormatterT = TypeVar("FormatterT")
+ValueT = TypeVar("ValueT")
 
 if TYPE_CHECKING:
     from ml_pipes.inspection.renderer import HtmlRenderer
@@ -65,9 +65,9 @@ def _is_primitive_tuple(value: tuple[Any, ...]) -> bool:
 
 
 def _find_registered_formatter(
-    value_type: type,
-    local_formatters: dict[type, FormatterT],
-    global_formatters: dict[type, FormatterT],
+    value_type: type[Any],
+    local_formatters: dict[type[Any], FormatterT],
+    global_formatters: dict[type[Any], FormatterT],
 ) -> FormatterT | None:
     formatter = local_formatters.get(value_type)
     if formatter is not None:
@@ -95,21 +95,25 @@ class PipelineInspector:
     """Converts an InspectionResult into views and renders them."""
 
     def __init__(self) -> None:
-        from ml_pipes.inspection.formatters import ensure_builtin_formatters_registered
+        from ml_pipes.inspection._builtin_formatters import ensure_builtin_formatters_registered
         from ml_pipes.inspection.renderer import HtmlRenderer
 
         ensure_builtin_formatters_registered()
         self._renderer: HtmlRenderer = HtmlRenderer()
-        self._value_fmts: dict[type, ValueFormatter] = {}
-        self._step_fmts: dict[type, StepFormatter] = {}
+        self._value_fmts: dict[type[Any], ValueFormatter[Any]] = {}
+        self._step_fmts: dict[type[Any], StepFormatter] = {}
 
-    def register_value_formatter(self, value_type: type, formatter: ValueFormatter) -> "PipelineInspector":
+    def register_value_formatter(
+        self,
+        value_type: type[ValueT],
+        formatter: ValueFormatter[ValueT],
+    ) -> "PipelineInspector":
         """Register a formatter for inspected values of *value_type*. Returns self for chaining."""
 
-        self._value_fmts[value_type] = formatter
+        self._value_fmts[value_type] = cast(ValueFormatter[Any], formatter)
         return self
 
-    def register_step_formatter(self, operator_type: type, formatter: StepFormatter) -> "PipelineInspector":
+    def register_step_formatter(self, operator_type: type[Any], formatter: StepFormatter) -> "PipelineInspector":
         """Register a formatter for inspected steps of *operator_type*. Returns self for chaining."""
 
         self._step_fmts[operator_type] = formatter
@@ -201,7 +205,7 @@ class PipelineInspector:
         children, _ = self._trace_to_views(span.child_trace, image_to_carry)
         return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
 
-    def _find_value_formatter(self, value: Any) -> ValueFormatter | None:
+    def _find_value_formatter(self, value: Any) -> ValueFormatter[Any] | None:
         return _find_registered_formatter(
             type(value),
             self._value_fmts,
@@ -209,16 +213,16 @@ class PipelineInspector:
         )
 
     @staticmethod
-    def _global_value_formatters() -> dict[type, ValueFormatter]:
-        from ml_pipes.inspection.formatters import default_value_formatters
+    def _global_value_formatters() -> dict[type[Any], ValueFormatter[Any]]:
+        from ml_pipes.inspection._formatter_registry import value_formatters
 
-        return default_value_formatters()
+        return value_formatters()
 
     @staticmethod
-    def _global_step_formatters() -> dict[type, StepFormatter]:
-        from ml_pipes.inspection.formatters import default_step_formatters
+    def _global_step_formatters() -> dict[type[Any], StepFormatter]:
+        from ml_pipes.inspection._formatter_registry import step_formatters
 
-        return default_step_formatters()
+        return step_formatters()
 
     def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
         return (

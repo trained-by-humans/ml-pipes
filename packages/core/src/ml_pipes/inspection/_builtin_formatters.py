@@ -5,21 +5,17 @@ from typing import Any
 
 import numpy as np
 
-from ml_pipes.inspection._registry import (
+from ml_pipes.inspection._formatter_registry import (
     register_step_formatter,
     register_value_formatter,
-    step_formatters,
-    value_formatters,
 )
 from ml_pipes.region import RegionOpener
 from ml_pipes.tracing import StepSpan, _fmt_batch_size
 from ml_pipes.inspection.views import (
     ImageBlock,
     OutputBlock,
-    StepFormatter,
     StepView,
     TextBlock,
-    ValueFormatter,
     _build_span_metadata,
 )
 
@@ -85,13 +81,3 @@ def ensure_builtin_formatters_registered() -> None:
         register_value_formatter(bytes, _format_bytes)
         register_step_formatter(RegionOpener, _region_step_formatter)
         _BUILTINS_REGISTERED = True
-
-
-def default_value_formatters() -> dict[type, ValueFormatter]:
-    ensure_builtin_formatters_registered()
-    return value_formatters()
-
-
-def default_step_formatters() -> dict[type, StepFormatter]:
-    ensure_builtin_formatters_registered()
-    return step_formatters()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -41,13 +41,6 @@ class StepView:
     blocks: list[OutputBlock]
     error: bool = False
     children: list["StepView"] = field(default_factory=list)
-
-
-ValueFormatter = Callable[[Any], list[OutputBlock]]
-StepFormatter = Callable[
-    [StepSpan, np.ndarray | None],
-    tuple[StepView, np.ndarray | None],
-]
 
 
 def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:

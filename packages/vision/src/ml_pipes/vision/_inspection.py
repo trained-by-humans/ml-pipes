@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from ml_pipes.inspection._deps import load_cv2
-from ml_pipes.inspection._registry import register_step_formatter, register_value_formatter
+from ml_pipes.inspection._formatter_registry import register_step_formatter, register_value_formatter
 from ml_pipes.inspection.views import (
     ImageBlock,
     OutputBlock,
