@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
-import os
-import sys
-import tempfile
-import webbrowser
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
 
@@ -23,13 +19,16 @@ from ml_pipes.inspection.views import (
     TextBlock,
     StepFormatter,
     ValueFormatter,
+    _normalize_orientation,
     _apply_image_carry,
     _build_span_metadata,
     _make_grid,
 )
 
-_IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
 FormatterT = TypeVar("FormatterT")
+
+if TYPE_CHECKING:
+    from ml_pipes.inspection.html_renderer import HtmlRenderer
 
 
 def _block_summary(blocks: list[OutputBlock]) -> str:
@@ -97,8 +96,10 @@ class PipelineInspector:
 
     def __init__(self) -> None:
         from ml_pipes.inspection.formatters import ensure_builtin_formatters_registered
+        from ml_pipes.inspection.html_renderer import HtmlRenderer
 
         ensure_builtin_formatters_registered()
+        self._renderer: HtmlRenderer = HtmlRenderer()
         self._value_fmts: dict[type, ValueFormatter] = {}
         self._step_fmts: dict[type, StepFormatter] = {}
 
@@ -121,15 +122,16 @@ class PipelineInspector:
         return views
 
     def render(
-            self,
-            result: InspectionResult,
-            orientation: str = "horizontal"
+        self,
+        result: InspectionResult,
+        orientation: str = "horizontal",
     ) -> str:
         """Return the built-in self-contained HTML report."""
 
-        from ml_pipes.inspection.html_renderer import HtmlRenderer
-
-        return HtmlRenderer(orientation=orientation).render(self.build_views(result))
+        return self._renderer.render(
+            self.build_views(result),
+            orientation=_normalize_orientation(orientation),
+        )
 
     def save(
         self,
@@ -139,9 +141,11 @@ class PipelineInspector:
     ) -> Path:
         """Write the built-in HTML report to *path* and return it."""
 
-        from ml_pipes.inspection.html_renderer import HtmlRenderer
-
-        return HtmlRenderer(orientation=orientation).save(self.build_views(result), path)
+        return self._renderer.save(
+            self.build_views(result),
+            path,
+            orientation=_normalize_orientation(orientation),
+        )
 
     def show(
         self,
@@ -150,23 +154,10 @@ class PipelineInspector:
     ) -> None:
         """Display the result inline in Jupyter or open a browser report otherwise."""
 
-        if _IN_JUPYTER:
-            from IPython.display import HTML, display
-
-            display(HTML(self.render(result, orientation=orientation)))
-        else:
-            fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
-            os.close(fd)
-            out = self.save(result, tmp, orientation=orientation)
-            uri = out.as_uri()
-            print(f"Inspection report saved to: {out}", file=sys.stderr)
-            print("Opening inspection report in browser...", file=sys.stderr)
-            opened = webbrowser.open(uri)
-            if opened is False:
-                print(
-                    "Browser launch was not confirmed. If nothing opened, use the saved report path above.",
-                    file=sys.stderr,
-                )
+        self._renderer.show(
+            self.build_views(result),
+            orientation=_normalize_orientation(orientation),
+        )
 
     def _trace_to_views(
         self,

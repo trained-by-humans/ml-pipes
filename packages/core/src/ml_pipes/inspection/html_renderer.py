@@ -2,21 +2,26 @@ from __future__ import annotations
 
 import base64
 import html as _html
+import os
 from pathlib import Path
+import sys
+import tempfile
+import webbrowser
 
 from ml_pipes.inspection._deps import load_cv2
 from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
+    Orientation,
     OutputBlock,
     StepView,
     TextBlock,
+    _normalize_orientation,
     _flatten_step_views,
 )
 
 cv2 = load_cv2()
-
-_HTML_ORIENTATIONS = ("horizontal", "vertical")
+_IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
 _IMG_STYLE = "max-width:240px;max-height:200px;object-fit:contain;display:block;"
 _TBL_STYLE = "font-size:11px;border-collapse:collapse;width:100%;"
 _TD_K = "padding:1px 6px 1px 0;color:#555;white-space:nowrap;vertical-align:top;"
@@ -148,16 +153,6 @@ _CSS = """
 """
 
 
-def _normalize_html_orientation(orientation: str) -> str:
-    normalized = orientation.strip().lower()
-    if normalized not in _HTML_ORIENTATIONS:
-        raise ValueError(
-            f"Invalid HTML orientation: {orientation!r}. "
-            f"Expected one of {list(_HTML_ORIENTATIONS)}."
-        )
-    return normalized
-
-
 class HtmlRenderer:
     """Renders a list of StepViews as HTML cards.
 
@@ -168,28 +163,61 @@ class HtmlRenderer:
         HtmlRenderer().save(views, "report.html")
     """
 
-    def __init__(self, orientation: str = "horizontal") -> None:
-        self.orientation = _normalize_html_orientation(orientation)
-
-    def render(self, views: list[StepView]) -> str:
+    def render(
+        self,
+        views: list[StepView],
+        orientation: Orientation = "horizontal",
+    ) -> str:
         """Return a self-contained HTML string."""
+        normalized_orientation = _normalize_orientation(orientation)
         cards = [self._render_card(view) for view, _ in _flatten_step_views(views)]
         return (
-            f'{_CSS}<div class="insp-container insp-container--{self.orientation}">'
+            f'{_CSS}<div class="insp-container insp-container--{normalized_orientation}">'
             f'{"".join(cards)}</div>'
         )
 
-    def save(self, views: list[StepView], path: str | Path) -> Path:
+    def save(
+        self,
+        views: list[StepView],
+        path: str | Path,
+        orientation: Orientation = "horizontal",
+    ) -> Path:
         """Write the HTML report to *path* and return it."""
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
             "<title>Pipeline inspection</title></head><body>"
-            f"{self.render(views)}</body></html>",
+            f"{self.render(views, orientation=orientation)}</body></html>",
             encoding="utf-8",
         )
         return out
+
+    def show(
+        self,
+        views: list[StepView],
+        orientation: Orientation = "horizontal",
+    ) -> None:
+        """Display the HTML report inline in Jupyter or open it in a browser."""
+
+        if _IN_JUPYTER:
+            from IPython.display import HTML, display
+
+            display(HTML(self.render(views, orientation=orientation)))
+            return
+
+        fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
+        os.close(fd)
+        out = self.save(views, tmp, orientation=orientation)
+        uri = out.as_uri()
+        print(f"Inspection report saved to: {out}", file=sys.stderr)
+        print("Opening inspection report in browser...", file=sys.stderr)
+        opened = webbrowser.open(uri)
+        if opened is False:
+            print(
+                "Browser launch was not confirmed. If nothing opened, use the saved report path above.",
+                file=sys.stderr,
+            )
 
     def _render_card(self, view: StepView) -> str:
         error_cls = " insp-card-error" if view.error else ""

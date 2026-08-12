@@ -60,7 +60,34 @@ def test_pipeline_inspector_render_supports_vertical_orientation():
     assert '<div class="insp-container insp-container--vertical">' in html
 
 
-def test_pipeline_inspector_show_displays_html_in_jupyter(
+def test_pipeline_inspector_render_normalizes_orientation():
+    html = PipelineInspector().render(_inspection_result(), orientation=" Vertical ")
+
+    assert '<div class="insp-container insp-container--vertical">' in html
+
+
+def test_pipeline_inspector_show_delegates_to_renderer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inspector = PipelineInspector()
+    shown: dict[str, object] = {}
+
+    def fake_show(views: list[StepView], orientation: str = "horizontal") -> None:
+        shown["labels"] = [view.label for view in views]
+        shown["orientation"] = orientation
+
+    monkeypatch.setattr(inspector._renderer, "show", fake_show)
+
+    result = _inspection_result()
+    inspector.show(result, orientation=" Vertical ")
+
+    assert shown == {
+        "labels": ["0:Example"],
+        "orientation": "vertical",
+    }
+
+
+def test_html_renderer_show_displays_html_in_jupyter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shown: dict[str, object] = {}
@@ -81,15 +108,14 @@ def test_pipeline_inspector_show_displays_html_in_jupyter(
 
     monkeypatch.setitem(sys.modules, "IPython", fake_ipython_module)
     monkeypatch.setitem(sys.modules, "IPython.display", fake_display_module)
-    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", True)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", True)
     monkeypatch.setattr(
-        PipelineInspector,
+        HtmlRenderer,
         "render",
-        lambda self, result, orientation="horizontal": f"<html data-orientation='{orientation}'></html>",
+        lambda self, views, orientation="horizontal": f"<html data-orientation='{orientation}'></html>",
     )
 
-    result = _inspection_result()
-    PipelineInspector().show(result, orientation="vertical")
+    HtmlRenderer().show([], orientation="vertical")
 
     assert shown == {
         "html": "<html data-orientation='vertical'></html>",
@@ -97,14 +123,14 @@ def test_pipeline_inspector_show_displays_html_in_jupyter(
     }
 
 
-def test_pipeline_inspector_show_announces_saved_report_and_browser_open_outside_jupyter(
+def test_html_renderer_show_announces_saved_report_and_browser_open_outside_jupyter(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", False)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", False)
     monkeypatch.setattr(
-        "ml_pipes.inspection.inspector.tempfile.mkstemp",
+        "ml_pipes.inspection.html_renderer.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
     )
 
@@ -114,9 +140,11 @@ def test_pipeline_inspector_show_announces_saved_report_and_browser_open_outside
         opened["uri"] = uri
         return True
 
-    monkeypatch.setattr("ml_pipes.inspection.inspector.webbrowser.open", fake_open)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer.webbrowser.open", fake_open)
 
-    PipelineInspector().show(_inspection_result())
+    HtmlRenderer().show(
+        [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("label", "spam")])])]
+    )
     captured = capsys.readouterr()
 
     reports = _saved_reports(tmp_path)
@@ -130,19 +158,21 @@ def test_pipeline_inspector_show_announces_saved_report_and_browser_open_outside
     assert "<title>Pipeline inspection</title>" in report.read_text(encoding="utf-8")
 
 
-def test_pipeline_inspector_show_warns_when_browser_launch_is_not_confirmed_outside_jupyter(
+def test_html_renderer_show_warns_when_browser_launch_is_not_confirmed_outside_jupyter(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", False)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", False)
     monkeypatch.setattr(
-        "ml_pipes.inspection.inspector.tempfile.mkstemp",
+        "ml_pipes.inspection.html_renderer.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
     )
-    monkeypatch.setattr("ml_pipes.inspection.inspector.webbrowser.open", lambda _uri: False)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer.webbrowser.open", lambda _uri: False)
 
-    PipelineInspector().show(_inspection_result())
+    HtmlRenderer().show(
+        [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("label", "spam")])])]
+    )
     captured = capsys.readouterr()
     reports = _saved_reports(tmp_path)
 
@@ -155,13 +185,14 @@ def test_pipeline_inspector_show_warns_when_browser_launch_is_not_confirmed_outs
 
 
 def test_html_renderer_rejects_unknown_orientation():
-    with pytest.raises(ValueError, match="Invalid HTML orientation"):
-        HtmlRenderer(orientation="diagonal")
+    with pytest.raises(ValueError, match="Invalid inspection orientation"):
+        HtmlRenderer().render([], orientation="diagonal")
 
 
 def test_html_renderer_vertical_layout_widens_cards_for_tabular_output():
-    html = HtmlRenderer(orientation="vertical").render(
-        [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("a", "b")])])]
+    html = HtmlRenderer().render(
+        [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("a", "b")])])],
+        orientation="vertical",
     )
 
     assert '<div class="insp-container insp-container--vertical">' in html
@@ -248,7 +279,7 @@ def test_pipeline_inspector_build_views_handles_cyclic_mappings():
 
 
 def test_html_renderer_renders_group_block_boundaries():
-    html = HtmlRenderer(orientation="vertical").render(
+    html = HtmlRenderer().render(
         [
             StepView(
                 label="0:Example",
@@ -265,7 +296,8 @@ def test_html_renderer_renders_group_block_boundaries():
                     )
                 ],
             )
-        ]
+        ],
+        orientation="vertical",
     )
 
     assert 'class="insp-group"' in html
@@ -275,7 +307,7 @@ def test_html_renderer_renders_group_block_boundaries():
 
 
 def test_html_renderer_coalesces_inline_group_rows_into_one_table():
-    html = HtmlRenderer(orientation="vertical").render(
+    html = HtmlRenderer().render(
         [
             StepView(
                 label="0:Example",
@@ -294,7 +326,8 @@ def test_html_renderer_coalesces_inline_group_rows_into_one_table():
                     )
                 ],
             )
-        ]
+        ],
+        orientation="vertical",
     )
 
     assert html.count('class="insp-inline-grid"') == 2
@@ -310,14 +343,15 @@ def test_pipeline_inspector_summarizes_list_of_mappings_without_generic_ellipsis
 
 
 def test_html_renderer_renders_top_level_leaf_text_block_as_single_inline_row():
-    html = HtmlRenderer(orientation="vertical").render(
+    html = HtmlRenderer().render(
         [
             StepView(
                 label="0:Example",
                 operator_config={},
                 blocks=[TextBlock("str", [("", "<generator object ...>")])],
             )
-        ]
+        ],
+        orientation="vertical",
     )
 
     assert html.count('class="insp-inline-grid"') == 1

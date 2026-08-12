@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Literal, Protocol, cast
 
 import numpy as np
 
@@ -32,6 +32,8 @@ class GroupBlock:
 
 
 OutputBlock = ImageBlock | TextBlock | GroupBlock
+Orientation = Literal["horizontal", "vertical"]
+_ORIENTATIONS: tuple[Orientation, ...] = ("horizontal", "vertical")
 
 
 @dataclass
@@ -46,7 +48,11 @@ class StepView:
 class Renderer(Protocol):
     """Anything that can turn a list of StepViews into an output format."""
 
-    def render(self, views: list[StepView]) -> Any: ...
+    def render(
+        self,
+        views: list[StepView],
+        orientation: Orientation = "horizontal",
+    ) -> Any: ...
 
 
 ValueFormatter = Callable[[Any], list[OutputBlock]]
@@ -54,6 +60,16 @@ StepFormatter = Callable[
     [StepSpan, np.ndarray | None],
     tuple[StepView, np.ndarray | None],
 ]
+
+
+def _normalize_orientation(orientation: str) -> Orientation:
+    normalized = orientation.strip().lower()
+    if normalized not in _ORIENTATIONS:
+        raise ValueError(
+            f"Invalid inspection orientation: {orientation!r}. "
+            f"Expected one of {list(_ORIENTATIONS)}."
+        )
+    return cast(Orientation, normalized)
 
 
 def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
