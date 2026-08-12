@@ -19,23 +19,23 @@ __all__ = [
 
 _LAZY_EXPORTS = {
     "GroupBlock": (".views", "GroupBlock"),
-    "HtmlRenderer": (".html_renderer", "HtmlRenderer"),
+    "HtmlRenderer": (".renderer", "HtmlRenderer"),
     "ImageBlock": (".views", "ImageBlock"),
     "InspectionResult": (".artifacts", "InspectionResult"),
     "InspectionSerializer": (".artifacts", "InspectionSerializer"),
-    "Orientation": (".views", "Orientation"),
+    "Orientation": (".renderer", "Orientation"),
     "OutputBlock": (".views", "OutputBlock"),
     "PipelineInspector": (".inspector", "PipelineInspector"),
-    "Renderer": (".views", "Renderer"),
+    "Renderer": (".renderer", "Renderer"),
     "StepView": (".views", "StepView"),
     "TextBlock": (".views", "TextBlock"),
 }
 
 if TYPE_CHECKING:
     from ml_pipes.inspection.artifacts import InspectionResult, InspectionSerializer
-    from ml_pipes.inspection.html_renderer import HtmlRenderer
+    from ml_pipes.inspection.renderer import HtmlRenderer, Orientation, Renderer
     from ml_pipes.inspection.inspector import PipelineInspector
-    from ml_pipes.inspection.views import GroupBlock, ImageBlock, Orientation, OutputBlock, Renderer, StepView, TextBlock
+    from ml_pipes.inspection.views import GroupBlock, ImageBlock, OutputBlock, StepView, TextBlock
 
 
 def __getattr__(name: str) -> Any:

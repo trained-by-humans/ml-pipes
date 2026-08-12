@@ -108,7 +108,7 @@ def test_html_renderer_show_displays_html_in_jupyter(
 
     monkeypatch.setitem(sys.modules, "IPython", fake_ipython_module)
     monkeypatch.setitem(sys.modules, "IPython.display", fake_display_module)
-    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", True)
+    monkeypatch.setattr("ml_pipes.inspection.renderer._IN_JUPYTER", True)
     monkeypatch.setattr(
         HtmlRenderer,
         "render",
@@ -128,9 +128,9 @@ def test_html_renderer_show_announces_saved_report_and_browser_open_outside_jupy
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", False)
+    monkeypatch.setattr("ml_pipes.inspection.renderer._IN_JUPYTER", False)
     monkeypatch.setattr(
-        "ml_pipes.inspection.html_renderer.tempfile.mkstemp",
+        "ml_pipes.inspection.renderer.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
     )
 
@@ -140,7 +140,7 @@ def test_html_renderer_show_announces_saved_report_and_browser_open_outside_jupy
         opened["uri"] = uri
         return True
 
-    monkeypatch.setattr("ml_pipes.inspection.html_renderer.webbrowser.open", fake_open)
+    monkeypatch.setattr("ml_pipes.inspection.renderer.webbrowser.open", fake_open)
 
     HtmlRenderer().show(
         [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("label", "spam")])])]
@@ -163,12 +163,12 @@ def test_html_renderer_show_warns_when_browser_launch_is_not_confirmed_outside_j
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", False)
+    monkeypatch.setattr("ml_pipes.inspection.renderer._IN_JUPYTER", False)
     monkeypatch.setattr(
-        "ml_pipes.inspection.html_renderer.tempfile.mkstemp",
+        "ml_pipes.inspection.renderer.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
     )
-    monkeypatch.setattr("ml_pipes.inspection.html_renderer.webbrowser.open", lambda _uri: False)
+    monkeypatch.setattr("ml_pipes.inspection.renderer.webbrowser.open", lambda _uri: False)
 
     HtmlRenderer().show(
         [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("label", "spam")])])]

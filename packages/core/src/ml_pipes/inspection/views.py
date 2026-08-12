@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Protocol, cast
+from typing import Any, Callable
 
 import numpy as np
 
@@ -32,8 +32,6 @@ class GroupBlock:
 
 
 OutputBlock = ImageBlock | TextBlock | GroupBlock
-Orientation = Literal["horizontal", "vertical"]
-_ORIENTATIONS: tuple[Orientation, ...] = ("horizontal", "vertical")
 
 
 @dataclass
@@ -45,31 +43,11 @@ class StepView:
     children: list["StepView"] = field(default_factory=list)
 
 
-class Renderer(Protocol):
-    """Anything that can turn a list of StepViews into an output format."""
-
-    def render(
-        self,
-        views: list[StepView],
-        orientation: Orientation = "horizontal",
-    ) -> Any: ...
-
-
 ValueFormatter = Callable[[Any], list[OutputBlock]]
 StepFormatter = Callable[
     [StepSpan, np.ndarray | None],
     tuple[StepView, np.ndarray | None],
 ]
-
-
-def _normalize_orientation(orientation: str) -> Orientation:
-    normalized = orientation.strip().lower()
-    if normalized not in _ORIENTATIONS:
-        raise ValueError(
-            f"Invalid inspection orientation: {orientation!r}. "
-            f"Expected one of {list(_ORIENTATIONS)}."
-        )
-    return cast(Orientation, normalized)
 
 
 def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
@@ -123,13 +101,3 @@ def _build_span_metadata(span: StepSpan) -> dict[str, Any]:
     metadata = dict(span.operator_config)
     metadata.update({f"attributes.{key}": value for key, value in span.attributes.items()})
     return metadata
-
-
-def _flatten_step_views(views: list[StepView], depth: int = 0) -> list[tuple[StepView, int]]:
-    """Pre-order traversal of a StepView tree, each entry paired with its depth."""
-
-    flat = []
-    for view in views:
-        flat.append((view, depth))
-        flat.extend(_flatten_step_views(view.children, depth + 1))
-    return flat

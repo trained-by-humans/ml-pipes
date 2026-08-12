@@ -6,22 +6,22 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from typing import Any, Literal, Protocol, cast
 import webbrowser
 
 from ml_pipes.inspection._deps import load_cv2
 from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
-    Orientation,
     OutputBlock,
     StepView,
     TextBlock,
-    _normalize_orientation,
-    _flatten_step_views,
 )
 
 cv2 = load_cv2()
 _IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
+Orientation = Literal["horizontal", "vertical"]
+_ORIENTATIONS: tuple[Orientation, ...] = ("horizontal", "vertical")
 _IMG_STYLE = "max-width:240px;max-height:200px;object-fit:contain;display:block;"
 _TBL_STYLE = "font-size:11px;border-collapse:collapse;width:100%;"
 _TD_K = "padding:1px 6px 1px 0;color:#555;white-space:nowrap;vertical-align:top;"
@@ -151,6 +151,36 @@ _CSS = """
 })();
 </script>
 """
+
+
+class Renderer(Protocol):
+    """Anything that can turn a list of StepViews into an output format."""
+
+    def render(
+        self,
+        views: list[StepView],
+        orientation: Orientation = "horizontal",
+    ) -> Any: ...
+
+
+def _normalize_orientation(orientation: str) -> Orientation:
+    normalized = orientation.strip().lower()
+    if normalized not in _ORIENTATIONS:
+        raise ValueError(
+            f"Invalid inspection orientation: {orientation!r}. "
+            f"Expected one of {list(_ORIENTATIONS)}."
+        )
+    return cast(Orientation, normalized)
+
+
+def _flatten_step_views(views: list[StepView], depth: int = 0) -> list[tuple[StepView, int]]:
+    """Pre-order traversal of a StepView tree, each entry paired with its depth."""
+
+    flat = []
+    for view in views:
+        flat.append((view, depth))
+        flat.extend(_flatten_step_views(view.children, depth + 1))
+    return flat
 
 
 class HtmlRenderer:

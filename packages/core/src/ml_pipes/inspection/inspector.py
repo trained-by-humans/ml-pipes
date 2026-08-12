@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import numpy as np
 
 from ml_pipes.inspection.artifacts import InspectionResult
+from ml_pipes.inspection.renderer import _normalize_orientation
 from ml_pipes.tracing import StepSpan
 from ml_pipes.inspection.views import (
     GroupBlock,
@@ -19,7 +20,6 @@ from ml_pipes.inspection.views import (
     TextBlock,
     StepFormatter,
     ValueFormatter,
-    _normalize_orientation,
     _apply_image_carry,
     _build_span_metadata,
     _make_grid,
@@ -28,7 +28,7 @@ from ml_pipes.inspection.views import (
 FormatterT = TypeVar("FormatterT")
 
 if TYPE_CHECKING:
-    from ml_pipes.inspection.html_renderer import HtmlRenderer
+    from ml_pipes.inspection.renderer import HtmlRenderer
 
 
 def _block_summary(blocks: list[OutputBlock]) -> str:
@@ -96,7 +96,7 @@ class PipelineInspector:
 
     def __init__(self) -> None:
         from ml_pipes.inspection.formatters import ensure_builtin_formatters_registered
-        from ml_pipes.inspection.html_renderer import HtmlRenderer
+        from ml_pipes.inspection.renderer import HtmlRenderer
 
         ensure_builtin_formatters_registered()
         self._renderer: HtmlRenderer = HtmlRenderer()
