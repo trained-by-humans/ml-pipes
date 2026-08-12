@@ -19,7 +19,6 @@ from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
     OutputBlock,
-    Renderer,
     StepView,
     TextBlock,
     StepFormatter,
@@ -114,6 +113,102 @@ class PipelineInspector:
 
         self._step_fmts[operator_type] = formatter
         return self
+
+    def build_views(self, result: InspectionResult) -> list[StepView]:
+        """Prepare the intermediate StepView tree from spans for built-in or custom renderers."""
+
+        views, _ = self._trace_to_views(result, None)
+        return views
+
+    def render(
+            self,
+            result: InspectionResult,
+            orientation: str = "horizontal"
+    ) -> str:
+        """Return the built-in self-contained HTML report."""
+
+        from ml_pipes.inspection.html_renderer import HtmlRenderer
+
+        return HtmlRenderer(orientation=orientation).render(self.build_views(result))
+
+    def save(
+        self,
+        result: InspectionResult,
+        path: str | Path,
+        orientation: str = "horizontal",
+    ) -> Path:
+        """Write the built-in HTML report to *path* and return it."""
+
+        from ml_pipes.inspection.html_renderer import HtmlRenderer
+
+        return HtmlRenderer(orientation=orientation).save(self.build_views(result), path)
+
+    def show(
+        self,
+        result: InspectionResult,
+        orientation: str = "horizontal",
+    ) -> None:
+        """Display the result inline in Jupyter or open a browser report otherwise."""
+
+        if _IN_JUPYTER:
+            from IPython.display import HTML, display
+
+            display(HTML(self.render(result, orientation=orientation)))
+        else:
+            fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
+            os.close(fd)
+            out = self.save(result, tmp, orientation=orientation)
+            uri = out.as_uri()
+            print(f"Inspection report saved to: {out}", file=sys.stderr)
+            print("Opening inspection report in browser...", file=sys.stderr)
+            opened = webbrowser.open(uri)
+            if opened is False:
+                print(
+                    "Browser launch was not confirmed. If nothing opened, use the saved report path above.",
+                    file=sys.stderr,
+                )
+
+    def _trace_to_views(
+        self,
+        trace: Any,
+        last_image: np.ndarray | None,
+    ) -> tuple[list[StepView], np.ndarray | None]:
+        if trace is None:
+            return [], last_image
+        views = []
+        for span in trace.spans:
+            view, last_image = self._span_to_view(span, last_image)
+            views.append(view)
+        return views, last_image
+
+    def _span_to_view(
+        self,
+        span: StepSpan,
+        last_image: np.ndarray | None,
+    ) -> tuple[StepView, np.ndarray | None]:
+        if span.error:
+            children, _ = self._trace_to_views(span.child_trace, last_image)
+            return StepView(span.label, _build_span_metadata(span), [], error=True, children=children), last_image
+
+        op_type = span.operator_type
+        formatter = (
+            _find_registered_formatter(
+                op_type,
+                self._step_fmts,
+                self._global_step_formatters(),
+            )
+            if op_type is not None
+            else None
+        )
+        if formatter is not None:
+            view, image_to_carry = formatter(span, last_image)
+            children, _ = self._trace_to_views(span.child_trace, image_to_carry)
+            return dataclasses.replace(view, children=children), image_to_carry
+
+        raw_blocks = self._value_to_blocks(span.output_value)
+        blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
+        children, _ = self._trace_to_views(span.child_trace, image_to_carry)
+        return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
 
     def _find_value_formatter(self, value: Any) -> ValueFormatter | None:
         return _find_registered_formatter(
@@ -265,107 +360,3 @@ class PipelineInspector:
         name = type(value).__name__
         text = value if isinstance(value, str) else repr(value)
         return [TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
-
-    def _span_to_view(
-        self,
-        span: StepSpan,
-        last_image: np.ndarray | None,
-    ) -> tuple[StepView, np.ndarray | None]:
-        if span.error:
-            children, _ = self._trace_to_views(span.child_trace, last_image)
-            return StepView(span.label, _build_span_metadata(span), [], error=True, children=children), last_image
-
-        op_type = span.operator_type
-        formatter = (
-            _find_registered_formatter(
-                op_type,
-                self._step_fmts,
-                self._global_step_formatters(),
-            )
-            if op_type is not None
-            else None
-        )
-        if formatter is not None:
-            view, image_to_carry = formatter(span, last_image)
-            children, _ = self._trace_to_views(span.child_trace, image_to_carry)
-            return dataclasses.replace(view, children=children), image_to_carry
-
-        raw_blocks = self._value_to_blocks(span.output_value)
-        blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
-        children, _ = self._trace_to_views(span.child_trace, image_to_carry)
-        return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
-
-    def _trace_to_views(
-        self,
-        trace: Any,
-        last_image: np.ndarray | None,
-    ) -> tuple[list[StepView], np.ndarray | None]:
-        if trace is None:
-            return [], last_image
-        views = []
-        for span in trace.spans:
-            view, last_image = self._span_to_view(span, last_image)
-            views.append(view)
-        return views, last_image
-
-    def build_views(self, result: InspectionResult) -> list[StepView]:
-        """Convert spans to a display-ready StepView tree."""
-
-        views, _ = self._trace_to_views(result, None)
-        return views
-
-    def render(self, result: InspectionResult, renderer: Renderer) -> Any:
-        """Pass the view tree to *renderer* and return its output."""
-
-        return renderer.render(self.build_views(result))
-
-    def to_html(self, result: InspectionResult, orientation: str = "horizontal") -> str:
-        """Return a self-contained HTML string."""
-
-        from ml_pipes.inspection.html_renderer import HtmlRenderer
-
-        return HtmlRenderer(orientation=orientation).render(self.build_views(result))
-
-    def save_to_html(
-        self,
-        result: InspectionResult,
-        path: str | Path,
-        orientation: str = "horizontal",
-    ) -> Path:
-        """Write an HTML report to *path* and return it."""
-
-        from ml_pipes.inspection.html_renderer import HtmlRenderer
-
-        return HtmlRenderer(orientation=orientation).save(self.build_views(result), path)
-
-    def show(
-        self,
-        result: InspectionResult,
-        cols: int = 6,
-        orientation: str = "horizontal",
-    ) -> None:
-        """Display the result."""
-
-        if _IN_JUPYTER:
-            from IPython.display import HTML, display
-
-            display(HTML(self.to_html(result, orientation=orientation)))
-        else:
-            del cols
-            self.show_in_browser(result, orientation=orientation)
-
-    def show_in_browser(self, result: InspectionResult, orientation: str = "horizontal") -> None:
-        """Save the HTML report to a temp file, announce it, and open it in the default browser."""
-
-        fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
-        os.close(fd)
-        out = self.save_to_html(result, tmp, orientation=orientation)
-        uri = out.as_uri()
-        print(f"Inspection report saved to: {out}", file=sys.stderr)
-        print("Opening inspection report in browser...", file=sys.stderr)
-        opened = webbrowser.open(uri)
-        if opened is False:
-            print(
-                "Browser launch was not confirmed. If nothing opened, use the saved report path above.",
-                file=sys.stderr,
-            )

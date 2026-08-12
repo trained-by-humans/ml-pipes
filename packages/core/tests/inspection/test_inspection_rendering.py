@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -46,40 +48,61 @@ def _saved_reports(tmp_path: Path) -> list[Path]:
     return sorted(tmp_path.glob("ml_pipes_inspect_*.html"))
 
 
-def test_pipeline_inspector_to_html_defaults_to_horizontal_orientation():
-    html = PipelineInspector().to_html(_inspection_result())
+def test_pipeline_inspector_render_defaults_to_horizontal_orientation():
+    html = PipelineInspector().render(_inspection_result())
 
     assert '<div class="insp-container insp-container--horizontal">' in html
 
 
-def test_pipeline_inspector_to_html_supports_vertical_orientation():
-    html = PipelineInspector().to_html(_inspection_result(), orientation="vertical")
+def test_pipeline_inspector_render_supports_vertical_orientation():
+    html = PipelineInspector().render(_inspection_result(), orientation="vertical")
 
     assert '<div class="insp-container insp-container--vertical">' in html
 
 
-def test_pipeline_inspector_show_uses_browser_flow_outside_jupyter(
+def test_pipeline_inspector_show_displays_html_in_jupyter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[InspectionResult, str]] = []
+    shown: dict[str, object] = {}
 
-    def fake_show_in_browser(self: PipelineInspector, result: InspectionResult, orientation: str = "horizontal") -> None:
-        calls.append((result, orientation))
+    fake_display_module = ModuleType("IPython.display")
 
-    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", False)
-    monkeypatch.setattr(PipelineInspector, "show_in_browser", fake_show_in_browser)
+    def fake_html(value: str) -> str:
+        shown["html"] = value
+        return value
+
+    def fake_display(value: object) -> None:
+        shown["displayed"] = value
+
+    fake_display_module.HTML = fake_html
+    fake_display_module.display = fake_display
+    fake_ipython_module = ModuleType("IPython")
+    fake_ipython_module.display = fake_display_module
+
+    monkeypatch.setitem(sys.modules, "IPython", fake_ipython_module)
+    monkeypatch.setitem(sys.modules, "IPython.display", fake_display_module)
+    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", True)
+    monkeypatch.setattr(
+        PipelineInspector,
+        "render",
+        lambda self, result, orientation="horizontal": f"<html data-orientation='{orientation}'></html>",
+    )
 
     result = _inspection_result()
-    PipelineInspector().show(result, cols=3, orientation="vertical")
+    PipelineInspector().show(result, orientation="vertical")
 
-    assert calls == [(result, "vertical")]
+    assert shown == {
+        "html": "<html data-orientation='vertical'></html>",
+        "displayed": "<html data-orientation='vertical'></html>",
+    }
 
 
-def test_pipeline_inspector_show_in_browser_announces_saved_report_and_browser_open(
+def test_pipeline_inspector_show_announces_saved_report_and_browser_open_outside_jupyter(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", False)
     monkeypatch.setattr(
         "ml_pipes.inspection.inspector.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
@@ -93,7 +116,7 @@ def test_pipeline_inspector_show_in_browser_announces_saved_report_and_browser_o
 
     monkeypatch.setattr("ml_pipes.inspection.inspector.webbrowser.open", fake_open)
 
-    PipelineInspector().show_in_browser(_inspection_result())
+    PipelineInspector().show(_inspection_result())
     captured = capsys.readouterr()
 
     reports = _saved_reports(tmp_path)
@@ -107,18 +130,19 @@ def test_pipeline_inspector_show_in_browser_announces_saved_report_and_browser_o
     assert "<title>Pipeline inspection</title>" in report.read_text(encoding="utf-8")
 
 
-def test_pipeline_inspector_show_in_browser_warns_when_browser_launch_is_not_confirmed(
+def test_pipeline_inspector_show_warns_when_browser_launch_is_not_confirmed_outside_jupyter(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", False)
     monkeypatch.setattr(
         "ml_pipes.inspection.inspector.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
     )
     monkeypatch.setattr("ml_pipes.inspection.inspector.webbrowser.open", lambda _uri: False)
 
-    PipelineInspector().show_in_browser(_inspection_result())
+    PipelineInspector().show(_inspection_result())
     captured = capsys.readouterr()
     reports = _saved_reports(tmp_path)
 

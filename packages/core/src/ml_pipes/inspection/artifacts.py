@@ -33,7 +33,7 @@ class InspectionResult:
         try:
             from ml_pipes.inspection.inspector import PipelineInspector
 
-            return PipelineInspector().to_html(self)
+            return PipelineInspector().render(self)
         except ImportError as exc:
             if "optional inspection extra" in str(exc):
                 return None
