@@ -24,8 +24,6 @@ body:
         - packaging / install
         - examples
         - other / not sure
-    validations:
-      required: true
   - type: dropdown
     id: suspected_owner
     attributes:
@@ -40,8 +38,6 @@ body:
         - meta
         - examples
         - other / not sure
-    validations:
-      required: true
   - type: input
     id: version_or_commit
     attributes:
@@ -64,25 +60,14 @@ body:
     validations:
       required: true
   - type: textarea
-    id: expected_behavior
+    id: issue_description
     attributes:
-      label: Expected behavior
-      description: What should happen?
+      label: What is the issue?
+      description: Describe what happens, what you expected instead, and include the full error, traceback, or incorrect output when possible.
       placeholder: |
-        pipeline.validate() should succeed
-        or
-        Pipeline.inspect() should render the report without error
-    validations:
-      required: true
-  - type: textarea
-    id: actual_behavior
-    attributes:
-      label: Actual behavior
-      description: What happens instead? Include the full error, traceback, or incorrect output when possible.
-      placeholder: |
-        pipeline.validate() raises ...
-        or
-        Pipeline.inspect() fails with ...
+        I ran ...
+        I expected ...
+        Instead it ...
       render: shell
     validations:
       required: true
