@@ -60,7 +60,6 @@ def test_inspection_component_surface_is_curated() -> None:
         "InspectionSerializer",
         "OutputBlock",
         "PipelineInspector",
-        "PlotRenderer",
         "Renderer",
         "StepView",
         "TextBlock",

@@ -58,6 +58,23 @@ def test_pipeline_inspector_to_html_supports_vertical_orientation():
     assert '<div class="insp-container insp-container--vertical">' in html
 
 
+def test_pipeline_inspector_show_uses_browser_flow_outside_jupyter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[InspectionResult, str]] = []
+
+    def fake_show_in_browser(self: PipelineInspector, result: InspectionResult, orientation: str = "horizontal") -> None:
+        calls.append((result, orientation))
+
+    monkeypatch.setattr("ml_pipes.inspection.inspector._IN_JUPYTER", False)
+    monkeypatch.setattr(PipelineInspector, "show_in_browser", fake_show_in_browser)
+
+    result = _inspection_result()
+    PipelineInspector().show(result, cols=3, orientation="vertical")
+
+    assert calls == [(result, "vertical")]
+
+
 def test_pipeline_inspector_show_in_browser_announces_saved_report_and_browser_open(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

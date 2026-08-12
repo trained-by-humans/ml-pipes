@@ -46,7 +46,6 @@ inspection = [
     "ml-pipes-onnx==0.1.0rc2",
     "ml-pipes-tensor==0.1.0rc2",
     "ml-pipes-vision==0.1.0rc2",
-    "matplotlib>=3.8",
     "opencv-python>=4.9",
 ]
 otel = [

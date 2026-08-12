@@ -166,7 +166,7 @@ python examples/run_yolo8_tile.py --input path/to/photo.jpg --slice-wh 320 320 -
 
 | Example | Focus | Key args | Notes |
 |---|---|---|---|
-| `run_inspect.py` | step-by-step inspection | `--pipeline`, `--save-html`, `--plot`, `--dump`, `--load`, `--print-only` | renders successful runs and a synthetic failure case |
+| `run_inspect.py` | step-by-step inspection | `--pipeline`, `--save-html`, `--dump`, `--load`, `--print-only` | renders successful runs and a synthetic failure case |
 | `run_yolo8_tracing.py` | tracing | `--runs` | prints or captures per-step trace data |
 
 Extra setup for the inspection entry (`run_inspect.py`):

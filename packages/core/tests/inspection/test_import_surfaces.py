@@ -43,37 +43,6 @@ def _run_python(code: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_pipeline_inspector_plot_reports_optional_dependency_error() -> None:
-    result = _run_python(
-        "import importlib.abc\n"
-        "import sys\n"
-        "blocked = {'matplotlib'}\n"
-        "class Blocker(importlib.abc.MetaPathFinder):\n"
-        "    def find_spec(self, fullname, path=None, target=None):\n"
-        "        if fullname in blocked or any(fullname.startswith(name + '.') for name in blocked):\n"
-        "            raise ModuleNotFoundError(f\"No module named {fullname!r}\")\n"
-        "        return None\n"
-        "sys.meta_path.insert(0, Blocker())\n"
-        "from ml_pipes.inspection import InspectionResult, PipelineInspector\n"
-        "from ml_pipes.tracing import StepSpan\n"
-        "result = InspectionResult([\n"
-        "    StepSpan(label='0:Example', start_time=0.0, duration_s=0.01, output_value='ok')\n"
-        "])\n"
-        "try:\n"
-        "    PipelineInspector().to_plot(result)\n"
-        "except ImportError as exc:\n"
-        "    print(str(exc))\n"
-        "else:\n"
-        "    print('installed')\n"
-    )
-
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip() == (
-        "ml_pipes.inspection plotting requires matplotlib from the optional inspection extra. "
-        "Install it with `pip install ml-pipes[inspection]`."
-    )
-
-
 def test_inspection_result_html_repr_falls_back_without_inspection_extras() -> None:
     result = _run_python(
         "import importlib.abc\n"
