@@ -221,7 +221,7 @@ Main components:
 - `Pipeline.inspect()` as the public entry point
 - `InspectionResult` as the captured inspection artifact
 - `PipelineInspector` as the display-oriented inspection layer
-- span formatters, output formatters, and renderers
+- step formatters, value formatters, and renderers
 
 ### Benchmarking
 

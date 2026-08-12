@@ -8,7 +8,7 @@ from ml_pipes.tensor import TensorPayload, TensorRegistry
 
 
 def test_pipeline_inspector_formats_tensor_registry_from_tensor_package() -> None:
-    blocks = PipelineInspector()._output_to_blocks(
+    blocks = PipelineInspector()._value_to_blocks(
         TensorRegistry({"scores": np.zeros((2, 3), dtype=np.float32)})
     )
 
@@ -27,7 +27,7 @@ def test_pipeline_inspector_formats_tensor_payload_as_heatmap() -> None:
         dtype="float32",
     )
 
-    blocks = PipelineInspector()._output_to_blocks(payload)
+    blocks = PipelineInspector()._value_to_blocks(payload)
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], ImageBlock)

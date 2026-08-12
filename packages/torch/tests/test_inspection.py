@@ -23,7 +23,7 @@ def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry()
         }
     )
 
-    blocks = inspector._output_to_blocks(registry)
+    blocks = inspector._value_to_blocks(registry)
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)
@@ -36,7 +36,7 @@ def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry()
 
 def test_pipeline_inspector_formats_primitive_tuple_as_single_block():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    blocks = inspector._output_to_blocks((480, 640))
+    blocks = inspector._value_to_blocks((480, 640))
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)
@@ -49,7 +49,7 @@ def test_pipeline_inspector_formats_rgb_ndarray_as_image():
     image = np.zeros((4, 6, 3), dtype=np.uint8)
     image[:, :, 0] = 255
 
-    blocks = inspector._output_to_blocks(image)
+    blocks = inspector._value_to_blocks(image)
 
     assert len(blocks) == 2
     assert isinstance(blocks[0], ImageBlock)
@@ -62,7 +62,7 @@ def test_pipeline_inspector_formats_rgb_ndarray_as_image():
 
 def test_pipeline_inspector_formats_non_image_ndarray_as_text():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    blocks = inspector._output_to_blocks(np.zeros((2, 3), dtype=np.float32))
+    blocks = inspector._value_to_blocks(np.zeros((2, 3), dtype=np.float32))
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)
@@ -72,7 +72,7 @@ def test_pipeline_inspector_formats_non_image_ndarray_as_text():
 
 def test_pipeline_inspector_formats_list_of_dicts():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    blocks = inspector._output_to_blocks(
+    blocks = inspector._value_to_blocks(
         [
             {"class_id": 1, "score": 0.9},
             {"class_id": 2, "score": 0.8},

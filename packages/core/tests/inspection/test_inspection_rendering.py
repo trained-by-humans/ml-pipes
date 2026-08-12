@@ -157,7 +157,7 @@ class _Run:
 
 
 def test_pipeline_inspector_formats_nested_dataclass_as_group_blocks():
-    blocks = PipelineInspector()._output_to_blocks(_Run(stats=_Stats(scanned=0, kept=1), started_at=2.5))
+    blocks = PipelineInspector()._value_to_blocks(_Run(stats=_Stats(scanned=0, kept=1), started_at=2.5))
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], GroupBlock)
@@ -177,7 +177,7 @@ def test_pipeline_inspector_formats_nested_dataclass_as_group_blocks():
 
 
 def test_pipeline_inspector_formats_mapping_as_group_blocks():
-    blocks = PipelineInspector()._output_to_blocks({"stats": {"kept": 1}, "started_at": 2.5})
+    blocks = PipelineInspector()._value_to_blocks({"stats": {"kept": 1}, "started_at": 2.5})
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], GroupBlock)
@@ -280,7 +280,7 @@ def test_html_renderer_coalesces_inline_group_rows_into_one_table():
 
 
 def test_pipeline_inspector_summarizes_list_of_mappings_without_generic_ellipsis():
-    blocks = PipelineInspector()._output_to_blocks([{"label": "spam"}, {"label": "ham"}])
+    blocks = PipelineInspector()._value_to_blocks([{"label": "spam"}, {"label": "ham"}])
 
     assert blocks == [TextBlock("list  ×2", [("[0]", "dict  label spam"), ("[1]", "dict  label ham")])]
 
@@ -299,3 +299,52 @@ def test_html_renderer_renders_top_level_leaf_text_block_as_single_inline_row():
     assert html.count('class="insp-inline-grid"') == 1
     assert "str" in html
     assert "&lt;generator object ...&gt;" in html
+
+
+def test_pipeline_inspector_register_value_formatter_overrides_value_rendering():
+    class _Packet:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+    inspector = PipelineInspector().register_value_formatter(
+        value_type=_Packet,
+        formatter=lambda value: [TextBlock("packet", [("label", value.label)])],
+    )
+
+    blocks = inspector._value_to_blocks(_Packet("spam"))
+
+    assert blocks == [TextBlock("packet", [("label", "spam")])]
+
+
+def test_pipeline_inspector_register_step_formatter_overrides_step_rendering():
+    class _PacketOp:
+        pass
+
+    inspector = PipelineInspector().register_step_formatter(
+        _PacketOp,
+        lambda span, _last_image: (
+            StepView(
+                label=span.label,
+                operator_config={"source": "custom"},
+                blocks=[TextBlock("packet", [("label", str(span.output_value))])],
+            ),
+            None,
+        ),
+    )
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:PacketOp",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value="spam",
+                operator_type=_PacketOp,
+            )
+        ]
+    )
+
+    views = inspector.build_views(result)
+
+    assert len(views) == 1
+    assert views[0].operator_config == {"source": "custom"}
+    assert views[0].blocks == [TextBlock("packet", [("label", "spam")])]

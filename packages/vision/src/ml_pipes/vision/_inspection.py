@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from ml_pipes.inspection._deps import load_cv2
-from ml_pipes.inspection._registry import register_output_formatter, register_span_formatter
+from ml_pipes.inspection._registry import register_step_formatter, register_value_formatter
 from ml_pipes.inspection.views import (
     ImageBlock,
     OutputBlock,
@@ -126,7 +126,7 @@ def _format_tiles_with_overlay(
     ]
 
 
-def _tile_span_formatter(
+def _format_tile_step(
     span: StepSpan,
     last_image: np.ndarray | None,
 ) -> tuple[StepView, np.ndarray | None]:
@@ -137,9 +137,9 @@ def _tile_span_formatter(
 
 
 def register_inspection_formatters() -> None:
-    register_output_formatter(Detections, _format_detections)
-    register_output_formatter(ImagePayload, _format_image)
-    register_output_formatter(ResizeTransform, _format_resize_transform)
-    register_output_formatter(Segmentations, _format_segmentations)
-    register_output_formatter(TileRect, _format_tile_rect)
-    register_span_formatter(Tile, _tile_span_formatter)
+    register_value_formatter(Detections, _format_detections)
+    register_value_formatter(ImagePayload, _format_image)
+    register_value_formatter(ResizeTransform, _format_resize_transform)
+    register_value_formatter(Segmentations, _format_segmentations)
+    register_value_formatter(TileRect, _format_tile_rect)
+    register_step_formatter(Tile, _format_tile_step)

@@ -19,7 +19,7 @@ def test_pipeline_inspector_formats_runtime_outputs_from_onnx_package() -> None:
         names=("scores",),
     )
 
-    blocks = PipelineInspector()._output_to_blocks(outputs)
+    blocks = PipelineInspector()._value_to_blocks(outputs)
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)

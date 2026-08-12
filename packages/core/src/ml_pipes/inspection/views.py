@@ -49,8 +49,8 @@ class Renderer(Protocol):
     def render(self, views: list[StepView]) -> Any: ...
 
 
-OutputFormatter = Callable[[Any], list[OutputBlock]]
-SpanFormatter = Callable[
+ValueFormatter = Callable[[Any], list[OutputBlock]]
+StepFormatter = Callable[
     [StepSpan, np.ndarray | None],
     tuple[StepView, np.ndarray | None],
 ]

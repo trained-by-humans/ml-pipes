@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from ml_pipes.inspection._deps import load_cv2
-from ml_pipes.inspection._registry import register_output_formatter
+from ml_pipes.inspection._registry import register_value_formatter
 from ml_pipes.inspection.views import ImageBlock, OutputBlock, TextBlock, _make_grid
 
 from .types import TensorPayload, TensorRegistry
@@ -46,5 +46,5 @@ def _format_tensor_registry(value: TensorRegistry) -> list[OutputBlock]:
 
 
 def register_inspection_formatters() -> None:
-    register_output_formatter(TensorPayload, _format_tensor)
-    register_output_formatter(TensorRegistry, _format_tensor_registry)
+    register_value_formatter(TensorPayload, _format_tensor)
+    register_value_formatter(TensorRegistry, _format_tensor_registry)

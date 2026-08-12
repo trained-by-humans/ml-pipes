@@ -19,11 +19,11 @@ from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
     OutputBlock,
-    OutputFormatter,
     Renderer,
-    SpanFormatter,
     StepView,
     TextBlock,
+    StepFormatter,
+    ValueFormatter,
     _apply_image_carry,
     _build_span_metadata,
     _make_grid,
@@ -100,39 +100,39 @@ class PipelineInspector:
         from ml_pipes.inspection.formatters import ensure_builtin_formatters_registered
 
         ensure_builtin_formatters_registered()
-        self._output_fmts: dict[type, OutputFormatter] = {}
-        self._span_fmts: dict[type, SpanFormatter] = {}
+        self._value_fmts: dict[type, ValueFormatter] = {}
+        self._step_fmts: dict[type, StepFormatter] = {}
 
-    def register_output_formatter(self, type_: type, formatter: OutputFormatter) -> "PipelineInspector":
-        """Register a formatter for *type_* output values. Returns self for chaining."""
+    def register_value_formatter(self, value_type: type, formatter: ValueFormatter) -> "PipelineInspector":
+        """Register a formatter for inspected values of *value_type*. Returns self for chaining."""
 
-        self._output_fmts[type_] = formatter
+        self._value_fmts[value_type] = formatter
         return self
 
-    def register_span_formatter(self, operator_type: type, formatter: SpanFormatter) -> "PipelineInspector":
-        """Register a span-level formatter for *operator_type*. Returns self for chaining."""
+    def register_step_formatter(self, operator_type: type, formatter: StepFormatter) -> "PipelineInspector":
+        """Register a formatter for inspected steps of *operator_type*. Returns self for chaining."""
 
-        self._span_fmts[operator_type] = formatter
+        self._step_fmts[operator_type] = formatter
         return self
 
-    def _find_output_formatter(self, value: Any) -> OutputFormatter | None:
+    def _find_value_formatter(self, value: Any) -> ValueFormatter | None:
         return _find_registered_formatter(
             type(value),
-            self._output_fmts,
-            self._global_output_formatters(),
+            self._value_fmts,
+            self._global_value_formatters(),
         )
 
     @staticmethod
-    def _global_output_formatters() -> dict[type, OutputFormatter]:
-        from ml_pipes.inspection.formatters import default_output_formatters
+    def _global_value_formatters() -> dict[type, ValueFormatter]:
+        from ml_pipes.inspection.formatters import default_value_formatters
 
-        return default_output_formatters()
+        return default_value_formatters()
 
     @staticmethod
-    def _global_span_formatters() -> dict[type, SpanFormatter]:
-        from ml_pipes.inspection.formatters import default_span_formatters
+    def _global_step_formatters() -> dict[type, StepFormatter]:
+        from ml_pipes.inspection.formatters import default_step_formatters
 
-        return default_span_formatters()
+        return default_step_formatters()
 
     def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
         return (
@@ -151,7 +151,7 @@ class PipelineInspector:
         value: Any,
         active_ids: set[int],
     ) -> OutputBlock:
-        blocks = self._output_to_blocks(value, active_ids)
+        blocks = self._value_to_blocks(value, active_ids)
         if len(blocks) == 1:
             block = blocks[0]
             if isinstance(block, GroupBlock):
@@ -195,7 +195,7 @@ class PipelineInspector:
             ],
         )
 
-    def _output_to_blocks(
+    def _value_to_blocks(
         self,
         value: Any,
         active_ids: set[int] | None = None,
@@ -208,12 +208,12 @@ class PipelineInspector:
                 return [TextBlock(type(value).__name__, [("", str(value))])]
             blocks: list[OutputBlock] = []
             for item in value:
-                blocks.extend(self._output_to_blocks(item, active_ids))
+                blocks.extend(self._value_to_blocks(item, active_ids))
             return blocks
 
         if isinstance(value, list) and value:
             list_max = 6
-            formatter = self._find_output_formatter(value[0])
+            formatter = self._find_value_formatter(value[0])
             if formatter is not None:
                 all_blocks = [formatter(item) for item in value]
                 first = all_blocks[0]
@@ -229,7 +229,7 @@ class PipelineInspector:
                 return [TextBlock(f"list  ×{len(value)}", rows)]
             if isinstance(value[0], Mapping) or (dataclasses.is_dataclass(value[0]) and not isinstance(value[0], type)):
                 rows = [
-                    (f"[{i}]", _block_summary(self._output_to_blocks(item, active_ids)))
+                    (f"[{i}]", _block_summary(self._value_to_blocks(item, active_ids)))
                     for i, item in enumerate(value[:list_max])
                 ]
                 if len(value) > list_max:
@@ -238,7 +238,7 @@ class PipelineInspector:
             item_type = type(value[0]).__name__
             return [TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
 
-        formatter = self._find_output_formatter(value)
+        formatter = self._find_value_formatter(value)
         if formatter is not None:
             return formatter(value)
 
@@ -279,8 +279,8 @@ class PipelineInspector:
         formatter = (
             _find_registered_formatter(
                 op_type,
-                self._span_fmts,
-                self._global_span_formatters(),
+                self._step_fmts,
+                self._global_step_formatters(),
             )
             if op_type is not None
             else None
@@ -290,7 +290,7 @@ class PipelineInspector:
             children, _ = self._trace_to_views(span.child_trace, image_to_carry)
             return dataclasses.replace(view, children=children), image_to_carry
 
-        raw_blocks = self._output_to_blocks(span.output_value)
+        raw_blocks = self._value_to_blocks(span.output_value)
         blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
         children, _ = self._trace_to_views(span.child_trace, image_to_carry)
         return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry

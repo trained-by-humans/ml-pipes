@@ -81,7 +81,7 @@ def test_pipeline_inspector_follows_imported_package_chain_without_vision_or_onn
         "from ml_pipes.inspection import PipelineInspector\n"
         "inspector = PipelineInspector()\n"
         "from ml_pipes.tensor import TensorRegistry\n"
-        "blocks = inspector._output_to_blocks(\n"
+        "blocks = inspector._value_to_blocks(\n"
         "    TensorRegistry({'scores': np.zeros((2, 3), dtype=np.float32)})\n"
         ")\n"
         "print(type(blocks[0]).__name__)\n"

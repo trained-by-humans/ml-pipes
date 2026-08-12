@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ml_pipes.inspection._registry import register_output_formatter
+from ml_pipes.inspection._registry import register_value_formatter
 from ml_pipes.inspection.views import OutputBlock, TextBlock
 
 from .types import TorchTensorRegistry
@@ -14,4 +14,4 @@ def _format_torch_tensor_registry(value: TorchTensorRegistry) -> list[OutputBloc
 
 
 def register_inspection_formatters() -> None:
-    register_output_formatter(TorchTensorRegistry, _format_torch_tensor_registry)
+    register_value_formatter(TorchTensorRegistry, _format_torch_tensor_registry)

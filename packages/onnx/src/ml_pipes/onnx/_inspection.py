@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ml_pipes.inspection._registry import register_output_formatter
+from ml_pipes.inspection._registry import register_value_formatter
 from ml_pipes.inspection.views import OutputBlock, TextBlock
 
 from .types import RuntimeOutputs
@@ -12,4 +12,4 @@ def _format_runtime_outputs(value: RuntimeOutputs) -> list[OutputBlock]:
 
 
 def register_inspection_formatters() -> None:
-    register_output_formatter(RuntimeOutputs, _format_runtime_outputs)
+    register_value_formatter(RuntimeOutputs, _format_runtime_outputs)

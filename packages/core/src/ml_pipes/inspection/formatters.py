@@ -6,20 +6,20 @@ from typing import Any
 import numpy as np
 
 from ml_pipes.inspection._registry import (
-    output_formatters,
-    register_output_formatter,
-    register_span_formatter,
-    span_formatters,
+    register_step_formatter,
+    register_value_formatter,
+    step_formatters,
+    value_formatters,
 )
 from ml_pipes.region import RegionOpener
 from ml_pipes.tracing import StepSpan, _fmt_batch_size
 from ml_pipes.inspection.views import (
     ImageBlock,
     OutputBlock,
-    OutputFormatter,
-    SpanFormatter,
+    StepFormatter,
     StepView,
     TextBlock,
+    ValueFormatter,
     _build_span_metadata,
 )
 
@@ -66,7 +66,7 @@ def _format_bytes(value: bytes) -> list[OutputBlock]:
     return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
 
 
-def _region_span_formatter(
+def _region_step_formatter(
     span: StepSpan,
     last_image: np.ndarray | None,
 ) -> tuple[StepView, np.ndarray | None]:
@@ -81,17 +81,17 @@ def ensure_builtin_formatters_registered() -> None:
     with _BUILTINS_LOCK:
         if _BUILTINS_REGISTERED:
             return
-        register_output_formatter(np.ndarray, _format_ndarray)
-        register_output_formatter(bytes, _format_bytes)
-        register_span_formatter(RegionOpener, _region_span_formatter)
+        register_value_formatter(np.ndarray, _format_ndarray)
+        register_value_formatter(bytes, _format_bytes)
+        register_step_formatter(RegionOpener, _region_step_formatter)
         _BUILTINS_REGISTERED = True
 
 
-def default_output_formatters() -> dict[type, OutputFormatter]:
+def default_value_formatters() -> dict[type, ValueFormatter]:
     ensure_builtin_formatters_registered()
-    return output_formatters()
+    return value_formatters()
 
 
-def default_span_formatters() -> dict[type, SpanFormatter]:
+def default_step_formatters() -> dict[type, StepFormatter]:
     ensure_builtin_formatters_registered()
-    return span_formatters()
+    return step_formatters()

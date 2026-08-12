@@ -17,7 +17,7 @@ def test_pipeline_inspector_formats_image_payload_from_vision_package() -> None:
         layout="HWC",
     )
 
-    blocks = PipelineInspector()._output_to_blocks(payload)
+    blocks = PipelineInspector()._value_to_blocks(payload)
 
     assert len(blocks) == 2
     assert isinstance(blocks[0], ImageBlock)

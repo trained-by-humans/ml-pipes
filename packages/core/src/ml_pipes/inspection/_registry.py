@@ -2,28 +2,28 @@ from __future__ import annotations
 
 from threading import Lock
 
-from ml_pipes.inspection.views import OutputFormatter, SpanFormatter
+from ml_pipes.inspection.views import StepFormatter, ValueFormatter
 
 _LOCK = Lock()
-_OUTPUT_FORMATTERS: dict[type, OutputFormatter] = {}
-_SPAN_FORMATTERS: dict[type, SpanFormatter] = {}
+_VALUE_FORMATTERS: dict[type, ValueFormatter] = {}
+_STEP_FORMATTERS: dict[type, StepFormatter] = {}
 
 
-def output_formatters() -> dict[type, OutputFormatter]:
+def value_formatters() -> dict[type, ValueFormatter]:
     with _LOCK:
-        return dict(_OUTPUT_FORMATTERS)
+        return dict(_VALUE_FORMATTERS)
 
 
-def register_output_formatter(type_: type, formatter: OutputFormatter) -> None:
+def register_value_formatter(value_type: type, formatter: ValueFormatter) -> None:
     with _LOCK:
-        _OUTPUT_FORMATTERS[type_] = formatter
+        _VALUE_FORMATTERS[value_type] = formatter
 
 
-def span_formatters() -> dict[type, SpanFormatter]:
+def step_formatters() -> dict[type, StepFormatter]:
     with _LOCK:
-        return dict(_SPAN_FORMATTERS)
+        return dict(_STEP_FORMATTERS)
 
 
-def register_span_formatter(operator_type: type, formatter: SpanFormatter) -> None:
+def register_step_formatter(operator_type: type, formatter: StepFormatter) -> None:
     with _LOCK:
-        _SPAN_FORMATTERS[operator_type] = formatter
+        _STEP_FORMATTERS[operator_type] = formatter
