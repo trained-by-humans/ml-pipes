@@ -114,9 +114,6 @@ def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
     if args.save_html:
         saved = inspector.save_to_html(result, args.save_html)
         print(f"Inspection report saved to: {saved}", file=sys.stderr)
-    elif args.plot:
-        saved = inspector.save_to_plot(result, args.plot)
-        print(f"Plot saved to: {saved}", file=sys.stderr)
     elif args.dump:
         saved = InspectionSerializer().dump(result, args.dump)
         print(f"Inspection result serialized to: {saved}", file=sys.stderr)
@@ -160,8 +157,6 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--save-html", metavar="PATH", type=Path, default=None,
                        help="Save HTML report to PATH instead of opening a browser.")
-    group.add_argument("--plot", metavar="PATH", type=Path, default=None,
-                       help="Save a matplotlib figure to PATH (e.g. inspect.png).")
     group.add_argument("--dump", metavar="PATH", type=Path, default=None,
                        help="Serialize the InspectionResult to PATH for later analysis.")
     group.add_argument("--print-only", action="store_true",

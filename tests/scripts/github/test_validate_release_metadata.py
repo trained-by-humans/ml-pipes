@@ -30,7 +30,6 @@ def _fake_release_pyprojects(version: str = "0.2.0") -> dict[str, dict[str, obje
                 ],
                 "optional-dependencies": {
                     "inspection": [
-                        "matplotlib>=3.8",
                         "opencv-python>=4.9",
                     ],
                 },
@@ -204,7 +203,7 @@ def test_validate_release_metadata_allows_optional_internal_publish_order(
     module = _load_validate_release_metadata_module()
     pyprojects = _patch_release_inputs(monkeypatch, module)
     pyprojects["core"]["project"]["optional-dependencies"]["inspection"] = [
-        "matplotlib>=3.8",
+        "opencv-python>=4.9",
         "ml-pipes-onnx==0.2.0",
         "ml-pipes-tensor==0.2.0",
         "ml-pipes-vision==0.2.0",

@@ -304,36 +304,6 @@ class PipelineInspector:
 
         return HtmlRenderer(orientation=orientation).save(self.build_views(result), path)
 
-    def to_plot(
-        self,
-        result: InspectionResult,
-        cols: int = 6,
-        cell_w: float = 2.6,
-        cell_h: float = 3.2,
-    ) -> "matplotlib.figure.Figure":
-        """Return a matplotlib Figure."""
-
-        from ml_pipes.inspection.plot_renderer import PlotRenderer
-
-        return PlotRenderer(cols=cols, cell_w=cell_w, cell_h=cell_h).render(self.build_views(result))
-
-    def save_to_plot(
-        self,
-        result: InspectionResult,
-        path: str | Path,
-        cols: int = 6,
-        cell_w: float = 2.6,
-        cell_h: float = 3.2,
-        dpi: int = 150,
-    ) -> Path:
-        """Save a matplotlib figure to *path* (e.g. "report.png") and return it."""
-
-        out = Path(path)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        fig = self.to_plot(result, cols=cols, cell_w=cell_w, cell_h=cell_h)
-        fig.savefig(out, dpi=dpi, bbox_inches="tight")
-        return out
-
     def show(
         self,
         result: InspectionResult,
@@ -347,11 +317,8 @@ class PipelineInspector:
 
             display(HTML(self.to_html(result, orientation=orientation)))
         else:
-            self.to_plot(result, cols=cols)
-
-            import matplotlib.pyplot as plt
-
-            plt.show()
+            del cols
+            self.show_in_browser(result, orientation=orientation)
 
     def show_in_browser(self, result: InspectionResult, orientation: str = "horizontal") -> None:
         """Save the HTML report to a temp file, announce it, and open it in the default browser."""
