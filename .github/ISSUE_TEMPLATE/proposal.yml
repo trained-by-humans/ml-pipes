@@ -7,7 +7,7 @@ body:
       value: |
         Use this form for concrete shared-feature proposals.
 
-        Start with the problem and use case, then explain the current gap, the proposed public surface, and what done looks like. Keep proposals scoped.
+        Start with the problem and use case, then explain the current gap and any proposed public surface. Keep proposals scoped.
 
         If the idea is still vague or exploratory, it will usually work better as backlog notes than as a GitHub issue.
 
@@ -21,8 +21,6 @@ body:
         - new package
         - new operator
         - tooling feature
-    validations:
-      required: true
   - type: dropdown
     id: proposed_owner
     attributes:
@@ -37,8 +35,6 @@ body:
         - meta
         - new package
         - other / not sure
-    validations:
-      required: true
   - type: textarea
     id: problem_use_case
     attributes:
@@ -54,18 +50,16 @@ body:
     id: current_workaround
     attributes:
       label: Current workaround or gap in existing surface
-      description: What have you tried, and why is the current surface not enough?
+      description: Optional. What have you tried, and why is the current surface not enough?
       placeholder: |
         I tried composing ...
         Today the closest surface is ...
         It is not enough because ...
-    validations:
-      required: true
   - type: textarea
     id: proposed_surface
     attributes:
       label: Proposed public surface
-      description: Describe the import path, operator name, CLI surface, report output, or similar. For operator proposals, include a minimal pipeline snippet and highlight the affected boundary or contract.
+      description: Optional. Describe the import path, operator name, CLI surface, report output, or similar. For operator proposals, include a minimal pipeline snippet and highlight the affected boundary or contract.
       placeholder: |
         from ml_pipes.core import Pipeline
         from ml_pipes.vision import Decode, Resize, SomeOperator
@@ -78,16 +72,3 @@ body:
 
         proposed surface: ml_pipes.vision.SomeOperator
         boundary: ImagePayload -> ImagePayload
-    validations:
-      required: true
-  - type: textarea
-    id: acceptance_criteria
-    attributes:
-      label: Acceptance criteria
-      description: What would make this issue done?
-      placeholder: |
-        - add ...
-        - document ...
-        - cover with ...
-    validations:
-      required: true
