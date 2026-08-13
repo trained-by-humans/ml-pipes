@@ -5,7 +5,9 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from ml_pipes.inspection import InspectionResult
 from ml_pipes.torch import TorchTensorRegistry
+from ml_pipes.tracing import StepSpan
 
 
 def _inspection_tools():
@@ -72,17 +74,24 @@ def test_pipeline_inspector_formats_non_image_ndarray_as_text():
 
 def test_pipeline_inspector_formats_list_of_dicts():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    blocks = inspector._value_to_blocks(
-        [
-            {"class_id": 1, "score": 0.9},
-            {"class_id": 2, "score": 0.8},
-        ]
+    views = inspector.build_views(
+        InspectionResult(
+            [
+                StepSpan(
+                    label="0:Example",
+                    start_time=0.0,
+                    duration_s=0.01,
+                    output_value=[
+                        {"class_id": 1, "score": 0.9},
+                        {"class_id": 2, "score": 0.8},
+                    ],
+                )
+            ]
+        )
     )
 
-    assert len(blocks) == 1
-    assert isinstance(blocks[0], TextBlock)
-    assert blocks[0].title == "list  ×2"
-    assert blocks[0].rows == [
+    assert len(views) == 1
+    assert views[0].blocks == [TextBlock("list  ×2", [
         ("[0]", "dict  class_id 1  |  score 0.9"),
         ("[1]", "dict  class_id 2  |  score 0.8"),
-    ]
+    ])]

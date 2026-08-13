@@ -251,6 +251,44 @@ def test_pipeline_inspector_formats_mapping_as_group_blocks():
     assert started_at.rows == [("started_at", "2.5")]
 
 
+def test_pipeline_inspector_keeps_all_mapping_members_before_compaction():
+    payload = {f"k{i}": i for i in range(13)}
+
+    blocks = PipelineInspector()._value_to_blocks(payload)
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], GroupBlock)
+    assert blocks[0].title == "dict"
+    assert len(blocks[0].children) == 13
+    assert all(child.title != "…" for child in blocks[0].children)
+
+
+def test_pipeline_inspector_build_views_trims_large_mapping_during_compaction():
+    payload = {f"k{i}": i for i in range(13)}
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=payload,
+            )
+        ]
+    )
+
+    views = PipelineInspector().build_views(result)
+
+    assert len(views) == 1
+    assert len(views[0].blocks) == 1
+    block = views[0].blocks[0]
+    assert isinstance(block, GroupBlock)
+    assert block.title == "dict"
+    assert len(block.children) == 13
+    assert isinstance(block.children[-1], TextBlock)
+    assert block.children[-1].title == "…"
+    assert block.children[-1].rows == [("", "+1 more")]
+
+
 def test_pipeline_inspector_build_views_handles_cyclic_mappings():
     payload: dict[str, object] = {"label": "spam"}
     payload["self"] = payload
@@ -277,6 +315,30 @@ def test_pipeline_inspector_build_views_handles_cyclic_mappings():
     assert block.children[0].rows == [("label", "spam")]
     assert isinstance(block.children[1], TextBlock)
     assert block.children[1].rows == [("self", "<recursive dict>")]
+
+
+def test_pipeline_inspector_formats_cyclic_lists_without_recursing_forever():
+    payload: list[object] = []
+    payload.append(payload)
+
+    blocks = PipelineInspector()._value_to_blocks(payload)
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], GroupBlock)
+    assert blocks[0].title == "list[list]  ×1"
+    assert len(blocks[0].children) == 1
+
+    item = blocks[0].children[0]
+    assert isinstance(item, GroupBlock)
+    assert item.title == "[0]"
+    assert len(item.children) == 1
+
+    nested = item.children[0]
+    assert isinstance(nested, GroupBlock)
+    assert nested.title == "list[list]  ×1"
+    assert len(nested.children) == 1
+    assert isinstance(nested.children[0], TextBlock)
+    assert nested.children[0].rows == [("", "<recursive list>")]
 
 
 def test_html_renderer_renders_group_block_boundaries():
@@ -337,10 +399,69 @@ def test_html_renderer_coalesces_inline_group_rows_into_one_table():
     assert "matched_filter" in html
 
 
-def test_pipeline_inspector_summarizes_list_of_mappings_without_generic_ellipsis():
+def test_pipeline_inspector_maps_list_of_mappings_to_group_blocks():
     blocks = PipelineInspector()._value_to_blocks([{"label": "spam"}, {"label": "ham"}])
 
-    assert blocks == [TextBlock("list  ×2", [("[0]", "dict  label spam"), ("[1]", "dict  label ham")])]
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], GroupBlock)
+    assert blocks[0].title == "list[dict]  ×2"
+    assert [child.title for child in blocks[0].children] == ["[0]", "[1]"]
+
+    first = blocks[0].children[0]
+    assert isinstance(first, GroupBlock)
+    assert len(first.children) == 1
+    assert isinstance(first.children[0], GroupBlock)
+    assert first.children[0].title == "dict"
+
+
+def test_pipeline_inspector_build_views_summarizes_list_of_mappings_without_generic_ellipsis():
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=[{"label": "spam"}, {"label": "ham"}],
+            )
+        ]
+    )
+
+    views = PipelineInspector().build_views(result)
+
+    assert views[0].blocks == [TextBlock("list  ×2", [("[0]", "dict  label spam"), ("[1]", "dict  label ham")])]
+
+
+def test_pipeline_inspector_keeps_all_list_items_before_compaction():
+    blocks = PipelineInspector()._value_to_blocks([{"label": str(i)} for i in range(13)])
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], GroupBlock)
+    assert blocks[0].title == "list[dict]  ×13"
+    assert len(blocks[0].children) == 13
+    assert [child.title for child in blocks[0].children[:3]] == ["[0]", "[1]", "[2]"]
+    assert blocks[0].children[-1].title == "[12]"
+
+
+def test_pipeline_inspector_build_views_trims_large_list_during_compaction():
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=[{"label": str(i)} for i in range(13)],
+            )
+        ]
+    )
+
+    views = PipelineInspector().build_views(result)
+
+    assert len(views) == 1
+    assert len(views[0].blocks) == 1
+    block = views[0].blocks[0]
+    assert isinstance(block, TextBlock)
+    assert block.title == "list  ×13"
+    assert block.rows[-1] == ("…", "+7 more")
 
 
 def test_view_blocks_and_steps_expose_summary_text():

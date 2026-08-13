@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -31,6 +32,11 @@ from ml_pipes.inspection.views import (
 )
 
 ValueT = TypeVar("ValueT")
+_DEFAULT_GROUP_PREVIEW_LIMIT = 12
+_DEFAULT_LIST_PREVIEW_LIMIT = 6
+_LIST_TITLE_RE = re.compile(
+    r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
+)
 
 if TYPE_CHECKING:
     from ml_pipes.inspection.renderer import HtmlRenderer
@@ -142,73 +148,10 @@ class PipelineInspector:
             return dataclasses.replace(view, children=children), image_to_carry
 
         raw_blocks = self._value_to_blocks(span.output_value)
-        blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
+        compacted_blocks = self._compact_blocks(raw_blocks)
+        blocks, image_to_carry = _apply_image_carry(compacted_blocks, last_image)
         children, _ = self._trace_to_views(span.child_trace, image_to_carry)
         return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
-
-    def _find_value_formatter(self, value: Any) -> ValueFormatter[Any] | None:
-        return self._formatters.find_value_formatter(type(value))
-
-    def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
-        return (
-            isinstance(block, TextBlock)
-            and block.title == type(value).__name__
-            and len(block.rows) == 1
-            and block.rows[0][0] == ""
-        )
-
-    def _recursive_reference_block(self, value: Any) -> TextBlock:
-        return TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])
-
-    def _named_block(
-        self,
-        name: str,
-        value: Any,
-        active_ids: set[int],
-    ) -> OutputBlock:
-        blocks = self._value_to_blocks(value, active_ids)
-        if len(blocks) == 1:
-            block = blocks[0]
-            if isinstance(block, GroupBlock):
-                return GroupBlock(
-                    title=f"{name}: {block.title}",
-                    children=block.children,
-                    dim=block.dim,
-                )
-            if self._is_scalar_field_block(block, value):
-                return TextBlock("", [(name, block.rows[0][1])], dim=block.dim)
-
-        return GroupBlock(
-            title=f"{name}: {type(value).__name__}",
-            children=blocks,
-        )
-
-    def _mapping_to_group(
-        self,
-        title: str,
-        value: Mapping[Any, Any],
-        active_ids: set[int],
-    ) -> GroupBlock:
-        items = list(value.items())
-        children = [self._named_block(str(key), item, active_ids) for key, item in items[:12]]
-        if len(items) > 12:
-            children.append(TextBlock("…", [("", f"+{len(items) - 12} more")]))
-        return GroupBlock(title=title, children=children)
-
-    def _dataclass_to_group(
-        self,
-        value: Any,
-        title: str | None = None,
-        *,
-        active_ids: set[int],
-    ) -> GroupBlock:
-        return GroupBlock(
-            title=title or type(value).__name__,
-            children=[
-                self._named_block(field.name, getattr(value, field.name), active_ids)
-                for field in dataclasses.fields(value)
-            ],
-        )
 
     def _value_to_blocks(
         self,
@@ -227,33 +170,21 @@ class PipelineInspector:
             return blocks
 
         if isinstance(value, list) and value:
-            list_max = 6
-            formatter = self._find_value_formatter(value[0])
-            if formatter is not None:
-                all_blocks = [formatter(item) for item in value]
-                first = all_blocks[0]
-                if first and isinstance(first[0], ImageBlock):
-                    grid = _make_grid(
-                        [block.array for blocks in all_blocks for block in blocks if isinstance(block, ImageBlock)],
-                        divider=2,
+            value_id = id(value)
+            if value_id in active_ids:
+                return [
+                    GroupBlock(
+                        title=f"list[{type(value[0]).__name__}]  ×{len(value)}",
+                        children=[self._recursive_reference_block(value)],
                     )
-                    return [ImageBlock(title=f"{first[0].title.split('  ')[0]}  ×{len(value)}", array=grid)]
-                rows = [(f"[{i}]", _summarize_blocks(blocks)) for i, blocks in enumerate(all_blocks[:list_max])]
-                if len(value) > list_max:
-                    rows.append(("…", f"+{len(value) - list_max} more"))
-                return [TextBlock(f"list  ×{len(value)}", rows)]
-            if isinstance(value[0], Mapping) or (dataclasses.is_dataclass(value[0]) and not isinstance(value[0], type)):
-                rows = [
-                    (f"[{i}]", _summarize_blocks(self._value_to_blocks(item, active_ids)))
-                    for i, item in enumerate(value[:list_max])
                 ]
-                if len(value) > list_max:
-                    rows.append(("…", f"+{len(value) - list_max} more"))
-                return [TextBlock(f"list  ×{len(value)}", rows)]
-            item_type = type(value[0]).__name__
-            return [TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
+            active_ids.add(value_id)
+            try:
+                return [self._list_to_group(value, active_ids)]
+            finally:
+                active_ids.remove(value_id)
 
-        formatter = self._find_value_formatter(value)
+        formatter = self._formatters.find_value_formatter(type(value))
         if formatter is not None:
             return formatter(value)
 
@@ -280,3 +211,191 @@ class PipelineInspector:
         name = type(value).__name__
         text = value if isinstance(value, str) else repr(value)
         return [TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
+
+    def _list_to_group(
+        self,
+        value: list[Any],
+        active_ids: set[int],
+    ) -> GroupBlock:
+        return GroupBlock(
+            title=f"list[{type(value[0]).__name__}]  ×{len(value)}",
+            children=[
+                GroupBlock(
+                    title=f"[{index}]",
+                    children=self._value_to_blocks(item, active_ids),
+                )
+                for index, item in enumerate(value)
+            ],
+        )
+
+    def _mapping_to_group(
+        self,
+        title: str,
+        value: Mapping[Any, Any],
+        active_ids: set[int],
+    ) -> GroupBlock:
+        return GroupBlock(
+            title=title,
+            children=[
+                self._member_block(str(key), item, active_ids)
+                for key, item in value.items()
+            ],
+        )
+
+    def _dataclass_to_group(
+        self,
+        value: Any,
+        title: str | None = None,
+        *,
+        active_ids: set[int],
+    ) -> GroupBlock:
+        return GroupBlock(
+            title=title or type(value).__name__,
+            children=[
+                self._member_block(field.name, getattr(value, field.name), active_ids)
+                for field in dataclasses.fields(value)
+            ],
+        )
+
+    def _member_block(
+        self,
+        name: str,
+        value: Any,
+        active_ids: set[int],
+    ) -> OutputBlock:
+        blocks = self._value_to_blocks(value, active_ids)
+        if len(blocks) == 1:
+            block = blocks[0]
+            if isinstance(block, GroupBlock):
+                return GroupBlock(
+                    title=f"{name}: {block.title}",
+                    children=block.children,
+                    dim=block.dim,
+                )
+            if self._is_scalar_field_block(block, value):
+                return TextBlock("", [(name, block.rows[0][1])], dim=block.dim)
+
+        return GroupBlock(
+            title=f"{name}: {type(value).__name__}",
+            children=blocks,
+        )
+
+    def _compact_blocks(
+        self,
+        blocks: list[OutputBlock],
+        *,
+        group_preview_limit: int = _DEFAULT_GROUP_PREVIEW_LIMIT,
+        list_preview_limit: int = _DEFAULT_LIST_PREVIEW_LIMIT,
+    ) -> list[OutputBlock]:
+        def preview_group(block: GroupBlock) -> GroupBlock:
+            if len(block.children) <= group_preview_limit:
+                return block
+            return GroupBlock(
+                title=block.title,
+                children=block.children[:group_preview_limit] + [
+                    TextBlock("…", [("", f"+{len(block.children) - group_preview_limit} more")], dim=block.dim)
+                ],
+                dim=block.dim,
+            )
+
+        def compact_list_group(block: GroupBlock) -> OutputBlock:
+            parts = self._list_title_parts(block.title)
+            if parts is None:
+                return block
+
+            label, item_type, count = parts
+            item_groups = self._item_groups(block.children)
+            preview_item_groups = item_groups[:group_preview_limit]
+            images_by_item = [self._collect_image_blocks(item.children) for item in preview_item_groups]
+            if preview_item_groups and all(images_by_item):
+                first_title = images_by_item[0][0].title.split("  ")[0]
+                title = f"{first_title}  ×{count}"
+                if label:
+                    title = f"{label}: {title}"
+                return ImageBlock(
+                    title=title,
+                    array=_make_grid(
+                        [image.array for item_images in images_by_item for image in item_images],
+                        divider=2,
+                    ),
+                    dim=block.dim,
+                )
+
+            if item_groups and not all(self._is_scalar_item_group(item) for item in item_groups):
+                rows = [
+                    (item.title, _summarize_blocks(item.children))
+                    for item in item_groups[:list_preview_limit]
+                ]
+                if count > list_preview_limit:
+                    rows.append(("…", f"+{count - list_preview_limit} more"))
+                return TextBlock(self._list_summary_title(label, count), rows, dim=block.dim)
+
+            return TextBlock(self._list_placeholder_title(label, item_type, count), [("", "…")], dim=block.dim)
+
+        def compact_block(block: OutputBlock) -> OutputBlock:
+            if not isinstance(block, GroupBlock):
+                return block
+
+            compacted = GroupBlock(
+                title=block.title,
+                children=[compact_block(child) for child in block.children],
+                dim=block.dim,
+            )
+            list_compacted = compact_list_group(compacted)
+            if isinstance(list_compacted, GroupBlock):
+                return preview_group(list_compacted)
+            return list_compacted
+
+        return [compact_block(block) for block in blocks]
+
+    def _list_title_parts(self, title: str) -> tuple[str | None, str, int] | None:
+        match = _LIST_TITLE_RE.fullmatch(title)
+        if match is None:
+            return None
+        return match.group("label"), match.group("item_type"), int(match.group("count"))
+
+    def _item_groups(self, children: list[OutputBlock]) -> list[GroupBlock]:
+        groups: list[GroupBlock] = []
+        for child in children:
+            if isinstance(child, GroupBlock) and child.title.startswith("[") and child.title.endswith("]"):
+                groups.append(child)
+        return groups
+
+    def _collect_image_blocks(self, blocks: list[OutputBlock]) -> list[ImageBlock]:
+        images: list[ImageBlock] = []
+        for block in blocks:
+            if isinstance(block, ImageBlock):
+                images.append(block)
+            elif isinstance(block, GroupBlock):
+                images.extend(self._collect_image_blocks(block.children))
+        return images
+
+    def _list_summary_title(self, label: str | None, count: int) -> str:
+        title = f"list  ×{count}"
+        return f"{label}: {title}" if label else title
+
+    def _list_placeholder_title(self, label: str | None, item_type: str, count: int) -> str:
+        title = f"list[{item_type}]  ×{count}"
+        return f"{label}: {title}" if label else title
+
+    def _recursive_reference_block(self, value: Any) -> TextBlock:
+        return TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])
+
+    def _anonymous_single_row_text_block(self, block: OutputBlock) -> TextBlock | None:
+        if (
+            isinstance(block, TextBlock)
+            and len(block.rows) == 1
+            and block.rows[0][0] == ""
+        ):
+            return block
+        return None
+
+    def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
+        text_block = self._anonymous_single_row_text_block(block)
+        return text_block is not None and text_block.title == type(value).__name__
+
+    def _is_scalar_item_group(self, block: GroupBlock) -> bool:
+        return (
+            len(block.children) == 1
+            and self._anonymous_single_row_text_block(block.children[0]) is not None
+        )
