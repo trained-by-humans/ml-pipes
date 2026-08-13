@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
 from ml_pipes.inspection._deps import load_cv2
 from ml_pipes.tracing import StepSpan
+
+
+class Summarizable(Protocol):
+    def summary(self) -> str: ...
 
 
 @dataclass
@@ -16,6 +20,9 @@ class ImageBlock:
     dim: bool = False
     overlay_array: np.ndarray | None = None
 
+    def summary(self) -> str:
+        return self.title
+
 
 @dataclass
 class TextBlock:
@@ -23,12 +30,36 @@ class TextBlock:
     rows: list[tuple[str, str]]
     dim: bool = False
 
+    def summary(self) -> str:
+        summary = self.title
+        rows = self.rows[:3] if self.title == "dict" else self.rows[:1]
+        if rows:
+            row_summaries = [(f"{key} {value}".rstrip() if key else f"{value}") for key, value in rows]
+            if summary:
+                summary += "  " + "  |  ".join(row_summaries)
+            else:
+                summary = "  |  ".join(row_summaries)
+        return summary
+
 
 @dataclass
 class GroupBlock:
     title: str
     children: list["OutputBlock"]
     dim: bool = False
+
+    def summary(self) -> str:
+        summary = self.title
+        child_summaries = [child.summary() for child in self.children[:2]]
+        if child_summaries:
+            if summary:
+                summary += "  " + "  |  ".join(child_summaries)
+            else:
+                summary = "  |  ".join(child_summaries)
+        if len(self.children) > 2:
+            suffix = f"+{len(self.children) - 2} more"
+            summary = f"{summary}  |  {suffix}" if summary else suffix
+        return summary
 
 
 OutputBlock = ImageBlock | TextBlock | GroupBlock
@@ -41,6 +72,16 @@ class StepView:
     blocks: list[OutputBlock]
     error: bool = False
     children: list["StepView"] = field(default_factory=list)
+
+    def summary(self) -> str:
+        summary = _summarize_blocks(self.blocks)
+        if summary:
+            return summary
+        return "[ERROR]" if self.error else ""
+
+
+def _summarize_blocks(blocks: list[OutputBlock]) -> str:
+    return "  |  ".join(block.summary() for block in blocks)
 
 
 def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:

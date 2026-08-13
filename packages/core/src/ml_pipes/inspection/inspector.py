@@ -27,40 +27,13 @@ from ml_pipes.inspection.views import (
     _apply_image_carry,
     _build_span_metadata,
     _make_grid,
+    _summarize_blocks,
 )
 
 ValueT = TypeVar("ValueT")
 
 if TYPE_CHECKING:
     from ml_pipes.inspection.renderer import HtmlRenderer
-
-
-def _block_summary(blocks: list[OutputBlock]) -> str:
-    """Collapse a block list to a single short string for list-item rows."""
-
-    parts = []
-    for block in blocks:
-        if isinstance(block, ImageBlock):
-            parts.append(block.title)
-        elif isinstance(block, TextBlock):
-            summary = block.title
-            rows = block.rows[:3] if block.title == "dict" else block.rows[:1]
-            if rows:
-                row_summaries = [(f"{key} {value}".rstrip() if key else f"{value}") for key, value in rows]
-                if summary:
-                    summary += "  " + "  |  ".join(row_summaries)
-                else:
-                    summary = "  |  ".join(row_summaries)
-            parts.append(summary)
-        else:
-            summary = block.title
-            child_summaries = [_block_summary([child]) for child in block.children[:2]]
-            if child_summaries:
-                summary += "  " + "  |  ".join(child_summaries)
-            if len(block.children) > 2:
-                summary += f"  |  +{len(block.children) - 2} more"
-            parts.append(summary)
-    return "  |  ".join(parts)
 
 
 def _is_primitive_tuple(value: tuple[Any, ...]) -> bool:
@@ -265,13 +238,13 @@ class PipelineInspector:
                         divider=2,
                     )
                     return [ImageBlock(title=f"{first[0].title.split('  ')[0]}  ×{len(value)}", array=grid)]
-                rows = [(f"[{i}]", _block_summary(blocks)) for i, blocks in enumerate(all_blocks[:list_max])]
+                rows = [(f"[{i}]", _summarize_blocks(blocks)) for i, blocks in enumerate(all_blocks[:list_max])]
                 if len(value) > list_max:
                     rows.append(("…", f"+{len(value) - list_max} more"))
                 return [TextBlock(f"list  ×{len(value)}", rows)]
             if isinstance(value[0], Mapping) or (dataclasses.is_dataclass(value[0]) and not isinstance(value[0], type)):
                 rows = [
-                    (f"[{i}]", _block_summary(self._value_to_blocks(item, active_ids)))
+                    (f"[{i}]", _summarize_blocks(self._value_to_blocks(item, active_ids)))
                     for i, item in enumerate(value[:list_max])
                 ]
                 if len(value) > list_max:

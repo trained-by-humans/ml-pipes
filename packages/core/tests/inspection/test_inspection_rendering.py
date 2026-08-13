@@ -343,6 +343,25 @@ def test_pipeline_inspector_summarizes_list_of_mappings_without_generic_ellipsis
     assert blocks == [TextBlock("list  ×2", [("[0]", "dict  label spam"), ("[1]", "dict  label ham")])]
 
 
+def test_view_blocks_and_steps_expose_summary_text():
+    dict_block = TextBlock("dict", [("label", "spam"), ("msg", "hello"), ("lang", "en"), ("skip", "x")])
+    group_block = GroupBlock(
+        "packet",
+        [
+            TextBlock("", [("label", "spam")]),
+            TextBlock("", [("score", "0.9")]),
+            TextBlock("", [("keep", "yes")]),
+        ],
+    )
+    step = StepView(label="0:Example", operator_config={}, blocks=[dict_block, group_block])
+    error_step = StepView(label="1:Error", operator_config={}, blocks=[], error=True)
+
+    assert dict_block.summary() == "dict  label spam  |  msg hello  |  lang en"
+    assert group_block.summary() == "packet  label spam  |  score 0.9  |  +1 more"
+    assert step.summary() == "dict  label spam  |  msg hello  |  lang en  |  packet  label spam  |  score 0.9  |  +1 more"
+    assert error_step.summary() == "[ERROR]"
+
+
 def test_html_renderer_renders_top_level_leaf_text_block_as_single_inline_row():
     html = HtmlRenderer().render(
         [

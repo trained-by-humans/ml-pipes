@@ -24,6 +24,20 @@ def _is_rgb_image_array(value: np.ndarray) -> bool:
     return value.dtype == np.uint8 and value.ndim == 3 and value.shape[-1] == 3
 
 
+def _format_ndarray(value: np.ndarray) -> list[OutputBlock]:
+    if _is_rgb_image_array(value):
+        height, width = value.shape[:2]
+        return [
+            ImageBlock(title=f"ndarray  {width}×{height}  RGB", array=value),
+            TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))]),
+        ]
+    return [TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))])]
+
+
+def _format_bytes(value: bytes) -> list[OutputBlock]:
+    return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
+
+
 def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
     """Text block summarising a region opener from its child_trace metadata."""
 
@@ -44,29 +58,15 @@ def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
     return [TextBlock(span.label.split(":", 1)[-1], rows)]
 
 
-_BUILTINS_LOCK = Lock()
-_BUILTINS_REGISTERED = False
-
-
-def _format_ndarray(value: np.ndarray) -> list[OutputBlock]:
-    if _is_rgb_image_array(value):
-        height, width = value.shape[:2]
-        return [
-            ImageBlock(title=f"ndarray  {width}×{height}  RGB", array=value),
-            TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))]),
-        ]
-    return [TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))])]
-
-
-def _format_bytes(value: bytes) -> list[OutputBlock]:
-    return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
-
-
 def _region_step_formatter(
     span: StepSpan,
     last_image: np.ndarray | None,
 ) -> tuple[StepView, np.ndarray | None]:
     return StepView(span.label, _build_span_metadata(span), _region_summary_block(span)), last_image
+
+
+_BUILTINS_LOCK = Lock()
+_BUILTINS_REGISTERED = False
 
 
 def ensure_builtin_formatters_registered() -> None:
