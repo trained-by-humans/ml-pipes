@@ -19,7 +19,7 @@ __all__ = [
 
 _LAZY_EXPORTS = {
     "GroupBlock": (".views", "GroupBlock"),
-    "HtmlRenderer": (".renderer", "HtmlRenderer"),
+    "HtmlRenderer": (".html_renderer", "HtmlRenderer"),
     "ImageBlock": (".views", "ImageBlock"),
     "InspectionResult": (".artifacts", "InspectionResult"),
     "InspectionSerializer": (".artifacts", "InspectionSerializer"),
@@ -33,7 +33,8 @@ _LAZY_EXPORTS = {
 
 if TYPE_CHECKING:
     from ml_pipes.inspection.artifacts import InspectionResult, InspectionSerializer
-    from ml_pipes.inspection.renderer import HtmlRenderer, Orientation, Renderer
+    from ml_pipes.inspection.html_renderer import HtmlRenderer
+    from ml_pipes.inspection.renderer import Orientation, Renderer
     from ml_pipes.inspection.inspector import PipelineInspector
     from ml_pipes.inspection.views import GroupBlock, ImageBlock, OutputBlock, StepView, TextBlock
 

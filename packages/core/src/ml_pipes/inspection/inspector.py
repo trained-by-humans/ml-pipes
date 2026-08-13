@@ -34,12 +34,13 @@ from ml_pipes.inspection.views import (
 ValueT = TypeVar("ValueT")
 _DEFAULT_GROUP_PREVIEW_LIMIT = 12
 _DEFAULT_LIST_PREVIEW_LIMIT = 6
+_DEFAULT_TEXT_PREVIEW_LIMIT = 120
 _LIST_TITLE_RE = re.compile(
     r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
 )
 
 if TYPE_CHECKING:
-    from ml_pipes.inspection.renderer import HtmlRenderer
+    from ml_pipes.inspection.html_renderer import HtmlRenderer
 
 
 def _is_primitive_tuple(value: tuple[Any, ...]) -> bool:
@@ -52,7 +53,7 @@ class PipelineInspector:
 
     def __init__(self) -> None:
         from ml_pipes.inspection._builtin_formatters import ensure_builtin_formatters_registered
-        from ml_pipes.inspection.renderer import HtmlRenderer
+        from ml_pipes.inspection.html_renderer import HtmlRenderer
 
         ensure_builtin_formatters_registered()
         self._renderer: HtmlRenderer = HtmlRenderer()
@@ -210,7 +211,7 @@ class PipelineInspector:
 
         name = type(value).__name__
         text = value if isinstance(value, str) else repr(value)
-        return [TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
+        return [TextBlock(name, [("", text)])]
 
     def _list_to_group(
         self,
@@ -286,7 +287,11 @@ class PipelineInspector:
         *,
         group_preview_limit: int = _DEFAULT_GROUP_PREVIEW_LIMIT,
         list_preview_limit: int = _DEFAULT_LIST_PREVIEW_LIMIT,
+        text_preview_limit: int = _DEFAULT_TEXT_PREVIEW_LIMIT,
     ) -> list[OutputBlock]:
+        def preview_text(text: str) -> str:
+            return text[:text_preview_limit] + ("…" if len(text) > text_preview_limit else "")
+
         def preview_group(block: GroupBlock) -> GroupBlock:
             if len(block.children) <= group_preview_limit:
                 return block
@@ -324,9 +329,9 @@ class PipelineInspector:
                     dim=block.dim,
                 )
 
-            if item_groups and not all(self._is_scalar_item_group(item) for item in item_groups):
+            if item_groups:
                 rows = [
-                    (item.title, _summarize_blocks(item.children))
+                    (item.title, self._list_item_summary(item.children))
                     for item in item_groups[:list_preview_limit]
                 ]
                 if count > list_preview_limit:
@@ -336,6 +341,12 @@ class PipelineInspector:
             return TextBlock(self._list_placeholder_title(label, item_type, count), [("", "…")], dim=block.dim)
 
         def compact_block(block: OutputBlock) -> OutputBlock:
+            if isinstance(block, TextBlock):
+                return TextBlock(
+                    title=block.title,
+                    rows=[(key, preview_text(value)) for key, value in block.rows],
+                    dim=block.dim,
+                )
             if not isinstance(block, GroupBlock):
                 return block
 
@@ -384,6 +395,13 @@ class PipelineInspector:
         title = f"list  ×{count}"
         return f"{label}: {title}" if label else title
 
+    def _list_item_summary(self, blocks: list[OutputBlock]) -> str:
+        if len(blocks) == 1:
+            text_block = self._anonymous_single_row_text_block(blocks[0])
+            if text_block is not None:
+                return text_block.rows[0][1]
+        return _summarize_blocks(blocks)
+
     def _list_placeholder_title(self, label: str | None, item_type: str, count: int) -> str:
         title = f"list[{item_type}]  ×{count}"
         return f"{label}: {title}" if label else title
@@ -416,9 +434,3 @@ class PipelineInspector:
     def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
         text_block = self._anonymous_single_row_text_block(block)
         return text_block is not None and text_block.title == type(value).__name__
-
-    def _is_scalar_item_group(self, block: GroupBlock) -> bool:
-        return (
-            len(block.children) == 1
-            and self._anonymous_single_row_text_block(block.children[0]) is not None
-        )

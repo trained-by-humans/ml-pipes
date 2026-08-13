@@ -15,6 +15,28 @@ StepFormatter = Callable[
     tuple[StepView, np.ndarray | None],
 ]
 AnyValueFormatter = ValueFormatter[Any]
+FormatterT = TypeVar("FormatterT")
+
+
+def _best_subclass_formatter_match(
+    requested_type: type[Any],
+    formatters: dict[type[Any], FormatterT],
+) -> tuple[int, FormatterT] | None:
+    best: tuple[int, FormatterT] | None = None
+    mro = requested_type.mro()
+    fallback_depth = len(mro)
+
+    for registered_type, formatter in formatters.items():
+        if not issubclass(requested_type, registered_type):
+            continue
+        try:
+            depth = mro.index(registered_type)
+        except ValueError:
+            depth = fallback_depth
+        if best is None or depth < best[0]:
+            best = (depth, formatter)
+
+    return best
 
 
 class FormatterRegistry:
@@ -62,13 +84,8 @@ class FormatterRegistry:
             if formatter is not None:
                 return formatter
 
-        for registered_type, formatter in self.value_formatters().items():
-            if issubclass(value_type, registered_type):
-                return formatter
-
-        if self._parent is not None:
-            return self._parent._find_subclass_value_formatter(value_type)
-        return None
+        match = self._find_subclass_value_formatter_match(value_type)
+        return match[1] if match is not None else None
 
     def find_step_formatter(self, operator_type: type[Any]) -> StepFormatter | None:
         formatter = self.get_step_formatter(operator_type)
@@ -80,13 +97,8 @@ class FormatterRegistry:
             if formatter is not None:
                 return formatter
 
-        for registered_type, formatter in self.step_formatters().items():
-            if issubclass(operator_type, registered_type):
-                return formatter
-
-        if self._parent is not None:
-            return self._parent._find_subclass_step_formatter(operator_type)
-        return None
+        match = self._find_subclass_step_formatter_match(operator_type)
+        return match[1] if match is not None else None
 
     def _find_exact_value_formatter(self, value_type: type[Any]) -> AnyValueFormatter | None:
         formatter = self.get_value_formatter(value_type)
@@ -97,12 +109,8 @@ class FormatterRegistry:
         return None
 
     def _find_subclass_value_formatter(self, value_type: type[Any]) -> AnyValueFormatter | None:
-        for registered_type, formatter in self.value_formatters().items():
-            if issubclass(value_type, registered_type):
-                return formatter
-        if self._parent is not None:
-            return self._parent._find_subclass_value_formatter(value_type)
-        return None
+        match = self._find_subclass_value_formatter_match(value_type)
+        return match[1] if match is not None else None
 
     def _find_exact_step_formatter(self, operator_type: type[Any]) -> StepFormatter | None:
         formatter = self.get_step_formatter(operator_type)
@@ -113,9 +121,37 @@ class FormatterRegistry:
         return None
 
     def _find_subclass_step_formatter(self, operator_type: type[Any]) -> StepFormatter | None:
-        for registered_type, formatter in self.step_formatters().items():
-            if issubclass(operator_type, registered_type):
-                return formatter
-        if self._parent is not None:
-            return self._parent._find_subclass_step_formatter(operator_type)
-        return None
+        match = self._find_subclass_step_formatter_match(operator_type)
+        return match[1] if match is not None else None
+
+    def _find_subclass_value_formatter_match(
+        self,
+        value_type: type[Any],
+    ) -> tuple[int, AnyValueFormatter] | None:
+        local_match = _best_subclass_formatter_match(value_type, self.value_formatters())
+        parent_match = (
+            self._parent._find_subclass_value_formatter_match(value_type)
+            if self._parent is not None
+            else None
+        )
+        if local_match is None:
+            return parent_match
+        if parent_match is None:
+            return local_match
+        return local_match if local_match[0] <= parent_match[0] else parent_match
+
+    def _find_subclass_step_formatter_match(
+        self,
+        operator_type: type[Any],
+    ) -> tuple[int, StepFormatter] | None:
+        local_match = _best_subclass_formatter_match(operator_type, self.step_formatters())
+        parent_match = (
+            self._parent._find_subclass_step_formatter_match(operator_type)
+            if self._parent is not None
+            else None
+        )
+        if local_match is None:
+            return parent_match
+        if parent_match is None:
+            return local_match
+        return local_match if local_match[0] <= parent_match[0] else parent_match

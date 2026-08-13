@@ -111,7 +111,7 @@ def test_html_renderer_show_displays_html_in_jupyter(
 
     monkeypatch.setitem(sys.modules, "IPython", fake_ipython_module)
     monkeypatch.setitem(sys.modules, "IPython.display", fake_display_module)
-    monkeypatch.setattr("ml_pipes.inspection.renderer._IN_JUPYTER", True)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", True)
     monkeypatch.setattr(
         HtmlRenderer,
         "render",
@@ -131,9 +131,9 @@ def test_html_renderer_show_announces_saved_report_and_browser_open_outside_jupy
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ml_pipes.inspection.renderer._IN_JUPYTER", False)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", False)
     monkeypatch.setattr(
-        "ml_pipes.inspection.renderer.tempfile.mkstemp",
+        "ml_pipes.inspection.html_renderer.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
     )
 
@@ -143,7 +143,7 @@ def test_html_renderer_show_announces_saved_report_and_browser_open_outside_jupy
         opened["uri"] = uri
         return True
 
-    monkeypatch.setattr("ml_pipes.inspection.renderer.webbrowser.open", fake_open)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer.webbrowser.open", fake_open)
 
     HtmlRenderer().show(
         [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("label", "spam")])])]
@@ -166,12 +166,12 @@ def test_html_renderer_show_warns_when_browser_launch_is_not_confirmed_outside_j
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("ml_pipes.inspection.renderer._IN_JUPYTER", False)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer._IN_JUPYTER", False)
     monkeypatch.setattr(
-        "ml_pipes.inspection.renderer.tempfile.mkstemp",
+        "ml_pipes.inspection.html_renderer.tempfile.mkstemp",
         _fake_mkstemp_factory(tmp_path),
     )
-    monkeypatch.setattr("ml_pipes.inspection.renderer.webbrowser.open", lambda _uri: False)
+    monkeypatch.setattr("ml_pipes.inspection.html_renderer.webbrowser.open", lambda _uri: False)
 
     HtmlRenderer().show(
         [StepView(label="0:Example", operator_config={}, blocks=[TextBlock("dict", [("label", "spam")])])]
@@ -251,6 +251,32 @@ def test_pipeline_inspector_formats_mapping_as_group_blocks():
     started_at = blocks[0].children[1]
     assert isinstance(started_at, TextBlock)
     assert started_at.rows == [("started_at", "2.5")]
+
+
+def test_pipeline_inspector_keeps_full_scalar_text_before_compaction():
+    text = "x" * 121
+
+    blocks = PipelineInspector()._value_to_blocks(text)
+
+    assert blocks == [TextBlock("str", [("", text)])]
+
+
+def test_pipeline_inspector_build_views_trims_long_scalar_text_during_compaction():
+    text = "x" * 121
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=text,
+            )
+        ]
+    )
+
+    views = PipelineInspector().build_views(result)
+
+    assert views[0].blocks == [TextBlock("str", [("", ("x" * 120) + "…")])]
 
 
 def test_pipeline_inspector_keeps_all_mapping_members_before_compaction():
@@ -431,6 +457,27 @@ def test_pipeline_inspector_build_views_summarizes_list_of_mappings_without_gene
     views = PipelineInspector().build_views(result)
 
     assert views[0].blocks == [TextBlock("list  ×2", [("[0]", "dict  label spam"), ("[1]", "dict  label ham")])]
+
+
+def test_pipeline_inspector_build_views_summarizes_list_of_strings_with_registered_formatter():
+    inspector = PipelineInspector().register_value_formatter(
+        str,
+        lambda value: [TextBlock("str", [("", value)])],
+    )
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=["hello", "world"],
+            )
+        ]
+    )
+
+    views = inspector.build_views(result)
+
+    assert views[0].blocks == [TextBlock("list  ×2", [("[0]", "hello"), ("[1]", "world")])]
 
 
 def test_pipeline_inspector_build_views_preserves_metadata_for_list_of_image_records():
@@ -619,6 +666,31 @@ def test_formatter_registry_prefers_exact_parent_value_formatter_before_local_su
     assert formatter(_Packet("spam")) == [TextBlock("packet", [("label", "spam")])]
 
 
+def test_formatter_registry_prefers_more_specific_parent_value_formatter_before_local_object_fallback():
+    class _PacketBase:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+    class _Packet(_PacketBase):
+        pass
+
+    parent = FormatterRegistry()
+    parent.register_value_formatter(
+        _PacketBase,
+        lambda value: [TextBlock("base", [("label", value.label)])],
+    )
+    child = FormatterRegistry(parent=parent)
+    child.register_value_formatter(
+        object,
+        lambda value: [TextBlock("fallback", [("label", type(value).__name__)])],
+    )
+
+    formatter = child.find_value_formatter(_Packet)
+
+    assert formatter is not None
+    assert formatter(_Packet("spam")) == [TextBlock("base", [("label", "spam")])]
+
+
 def test_pipeline_inspector_register_step_formatter_overrides_step_rendering():
     class _PacketOp:
         pass
@@ -699,5 +771,55 @@ def test_formatter_registry_prefers_exact_parent_step_formatter_before_local_sub
         None,
     )
     assert view.operator_config == {"source": "exact"}
+    assert view.blocks == [TextBlock("packet", [("label", "spam")])]
+    assert last_image is None
+
+
+def test_formatter_registry_prefers_more_specific_parent_step_formatter_before_local_object_fallback():
+    class _PacketOpBase:
+        pass
+
+    class _PacketOp(_PacketOpBase):
+        pass
+
+    parent = FormatterRegistry()
+    parent.register_step_formatter(
+        _PacketOpBase,
+        lambda span, last_image: (
+            StepView(
+                label=span.label,
+                operator_config={"source": "base"},
+                blocks=[TextBlock("packet", [("label", str(span.output_value))])],
+            ),
+            last_image,
+        ),
+    )
+    child = FormatterRegistry(parent=parent)
+    child.register_step_formatter(
+        object,
+        lambda span, last_image: (
+            StepView(
+                label=span.label,
+                operator_config={"source": "fallback"},
+                blocks=[TextBlock("packet", [("label", str(span.output_value))])],
+            ),
+            last_image,
+        ),
+    )
+
+    formatter = child.find_step_formatter(_PacketOp)
+
+    assert formatter is not None
+    view, last_image = formatter(
+        StepSpan(
+            label="0:PacketOp",
+            start_time=0.0,
+            duration_s=0.01,
+            output_value="spam",
+            operator_type=_PacketOp,
+        ),
+        None,
+    )
+    assert view.operator_config == {"source": "base"}
     assert view.blocks == [TextBlock("packet", [("label", "spam")])]
     assert last_image is None

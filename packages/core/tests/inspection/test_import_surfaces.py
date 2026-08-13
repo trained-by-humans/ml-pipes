@@ -103,3 +103,28 @@ def test_pipeline_inspector_follows_imported_package_chain_without_vision_or_onn
     assert lines[2] == "scores"
     assert "(2, 3)" in lines[3]
     assert lines[4] == "[]"
+
+
+def test_type_only_inspection_exports_import_without_inspection_extra() -> None:
+    result = _run_python(
+        "import importlib.abc\n"
+        "import sys\n"
+        "from typing import get_args\n"
+        "blocked = {'cv2'}\n"
+        "class Blocker(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, fullname, path=None, target=None):\n"
+        "        if fullname in blocked or any(fullname.startswith(name + '.') for name in blocked):\n"
+        "            raise ModuleNotFoundError(f\"No module named {fullname!r}\")\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, Blocker())\n"
+        "from ml_pipes.inspection import Orientation, Renderer\n"
+        "print(Renderer.__name__)\n"
+        "print(get_args(Orientation))\n"
+        "print('cv2' in sys.modules)\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    lines = result.stdout.strip().splitlines()
+    assert lines[0] == "Renderer"
+    assert lines[1] == "('horizontal', 'vertical')"
+    assert lines[2] == "False"

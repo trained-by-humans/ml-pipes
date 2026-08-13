@@ -79,6 +79,7 @@ def test_core_import_does_not_require_inspection_extras() -> None:
                 "ml_pipes.inspection._global_registry",
                 "ml_pipes.inspection.registry",
                 "ml_pipes.inspection.renderer",
+                "ml_pipes.inspection.html_renderer",
                 "ml_pipes.inspection.plot_renderer",
                 "ml_pipes.inspection.inspector",
                 "ml_pipes.inspection.views",
