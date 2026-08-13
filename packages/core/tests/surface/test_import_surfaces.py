@@ -76,7 +76,8 @@ def test_core_import_does_not_require_inspection_extras() -> None:
             for name in sys.modules
             if name in {
                 "ml_pipes.inspection._builtin_formatters",
-                "ml_pipes.inspection._formatter_registry",
+                "ml_pipes.inspection._global_registry",
+                "ml_pipes.inspection.registry",
                 "ml_pipes.inspection.renderer",
                 "ml_pipes.inspection.plot_renderer",
                 "ml_pipes.inspection.inspector",

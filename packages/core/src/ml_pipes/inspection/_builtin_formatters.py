@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from ml_pipes.inspection._formatter_registry import (
+from ml_pipes.inspection._global_registry import (
     register_step_formatter,
     register_value_formatter,
 )

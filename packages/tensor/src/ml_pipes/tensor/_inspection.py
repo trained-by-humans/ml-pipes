@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from ml_pipes.inspection._deps import load_cv2
-from ml_pipes.inspection._formatter_registry import register_value_formatter
+from ml_pipes.inspection._global_registry import register_value_formatter
 from ml_pipes.inspection.views import ImageBlock, OutputBlock, TextBlock, _make_grid
 
 from .types import TensorPayload, TensorRegistry

@@ -16,6 +16,7 @@ from ml_pipes.inspection import (
     StepView,
     TextBlock,
 )
+from ml_pipes.inspection.registry import FormatterRegistry
 from ml_pipes.tracing import StepSpan
 
 
@@ -374,6 +375,49 @@ def test_pipeline_inspector_register_value_formatter_overrides_value_rendering()
     assert blocks == [TextBlock("packet", [("label", "spam")])]
 
 
+def test_formatter_registry_uses_parent_value_formatter_when_local_registry_has_none():
+    class _Packet:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+    parent = FormatterRegistry()
+    parent.register_value_formatter(
+        _Packet,
+        lambda value: [TextBlock("packet", [("label", value.label)])],
+    )
+    child = FormatterRegistry(parent=parent)
+
+    formatter = child.find_value_formatter(_Packet)
+
+    assert formatter is not None
+    assert formatter(_Packet("spam")) == [TextBlock("packet", [("label", "spam")])]
+
+
+def test_formatter_registry_prefers_exact_parent_value_formatter_before_local_subclass_formatter():
+    class _PacketBase:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+    class _Packet(_PacketBase):
+        pass
+
+    parent = FormatterRegistry()
+    parent.register_value_formatter(
+        _Packet,
+        lambda value: [TextBlock("packet", [("label", value.label)])],
+    )
+    child = FormatterRegistry(parent=parent)
+    child.register_value_formatter(
+        _PacketBase,
+        lambda value: [TextBlock("base", [("label", value.label)])],
+    )
+
+    formatter = child.find_value_formatter(_Packet)
+
+    assert formatter is not None
+    assert formatter(_Packet("spam")) == [TextBlock("packet", [("label", "spam")])]
+
+
 def test_pipeline_inspector_register_step_formatter_overrides_step_rendering():
     class _PacketOp:
         pass
@@ -406,3 +450,53 @@ def test_pipeline_inspector_register_step_formatter_overrides_step_rendering():
     assert len(views) == 1
     assert views[0].operator_config == {"source": "custom"}
     assert views[0].blocks == [TextBlock("packet", [("label", "spam")])]
+
+
+def test_formatter_registry_prefers_exact_parent_step_formatter_before_local_subclass_formatter():
+    class _PacketOpBase:
+        pass
+
+    class _PacketOp(_PacketOpBase):
+        pass
+
+    parent = FormatterRegistry()
+    parent.register_step_formatter(
+        _PacketOp,
+        lambda span, last_image: (
+            StepView(
+                label=span.label,
+                operator_config={"source": "exact"},
+                blocks=[TextBlock("packet", [("label", str(span.output_value))])],
+            ),
+            last_image,
+        ),
+    )
+    child = FormatterRegistry(parent=parent)
+    child.register_step_formatter(
+        _PacketOpBase,
+        lambda span, last_image: (
+            StepView(
+                label=span.label,
+                operator_config={"source": "base"},
+                blocks=[TextBlock("packet", [("label", str(span.output_value))])],
+            ),
+            last_image,
+        ),
+    )
+
+    formatter = child.find_step_formatter(_PacketOp)
+
+    assert formatter is not None
+    view, last_image = formatter(
+        StepSpan(
+            label="0:PacketOp",
+            start_time=0.0,
+            duration_s=0.01,
+            output_value="spam",
+            operator_type=_PacketOp,
+        ),
+        None,
+    )
+    assert view.operator_config == {"source": "exact"}
+    assert view.blocks == [TextBlock("packet", [("label", "spam")])]
+    assert last_image is None
