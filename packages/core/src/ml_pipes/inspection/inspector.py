@@ -306,16 +306,19 @@ class PipelineInspector:
             label, item_type, count = parts
             item_groups = self._item_groups(block.children)
             preview_item_groups = item_groups[:group_preview_limit]
-            images_by_item = [self._collect_image_blocks(item.children) for item in preview_item_groups]
-            if preview_item_groups and all(images_by_item):
-                first_title = images_by_item[0][0].title.split("  ")[0]
-                title = f"{first_title}  ×{count}"
-                if label:
-                    title = f"{label}: {title}"
+            preview_images = [self._preview_item_image_block(item) for item in preview_item_groups]
+            if preview_item_groups and all(image is not None for image in preview_images):
+                images = [image for image in preview_images if image is not None]
+                title = self._image_grid_title(
+                    label,
+                    images[0].title.split("  ")[0],
+                    count,
+                    shown_count=len(images),
+                )
                 return ImageBlock(
                     title=title,
                     array=_make_grid(
-                        [image.array for item_images in images_by_item for image in item_images],
+                        [image.array for image in images],
                         divider=2,
                     ),
                     dim=block.dim,
@@ -361,14 +364,21 @@ class PipelineInspector:
                 groups.append(child)
         return groups
 
-    def _collect_image_blocks(self, blocks: list[OutputBlock]) -> list[ImageBlock]:
-        images: list[ImageBlock] = []
-        for block in blocks:
-            if isinstance(block, ImageBlock):
-                images.append(block)
-            elif isinstance(block, GroupBlock):
-                images.extend(self._collect_image_blocks(block.children))
-        return images
+    def _preview_item_image_block(self, item: GroupBlock) -> ImageBlock | None:
+        if not item.children:
+            return None
+        first_child = item.children[0]
+        if not isinstance(first_child, ImageBlock):
+            return None
+
+        metadata_title = first_child.title.split("  ")[0]
+        for child in item.children[1:]:
+            if not isinstance(child, TextBlock):
+                return None
+            if child.title not in {"", metadata_title}:
+                return None
+
+        return first_child
 
     def _list_summary_title(self, label: str | None, count: int) -> str:
         title = f"list  ×{count}"
@@ -376,6 +386,19 @@ class PipelineInspector:
 
     def _list_placeholder_title(self, label: str | None, item_type: str, count: int) -> str:
         title = f"list[{item_type}]  ×{count}"
+        return f"{label}: {title}" if label else title
+
+    def _image_grid_title(
+        self,
+        label: str | None,
+        item_title: str,
+        count: int,
+        *,
+        shown_count: int,
+    ) -> str:
+        title = f"{item_title}  ×{count}"
+        if shown_count < count:
+            title = f"{title}  (showing {shown_count} out of {count})"
         return f"{label}: {title}" if label else title
 
     def _recursive_reference_block(self, value: Any) -> TextBlock:

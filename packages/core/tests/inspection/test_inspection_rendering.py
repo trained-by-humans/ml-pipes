@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+import numpy as np
 import pytest
 
 from ml_pipes.inspection import (
     GroupBlock,
     HtmlRenderer,
+    ImageBlock,
     InspectionResult,
     PipelineInspector,
     StepView,
@@ -429,6 +431,65 @@ def test_pipeline_inspector_build_views_summarizes_list_of_mappings_without_gene
     views = PipelineInspector().build_views(result)
 
     assert views[0].blocks == [TextBlock("list  ×2", [("[0]", "dict  label spam"), ("[1]", "dict  label ham")])]
+
+
+def test_pipeline_inspector_build_views_preserves_metadata_for_list_of_image_records():
+    payload = [
+        {
+            "label": "cat",
+            "score": 0.91,
+            "crop": np.zeros((4, 4, 3), dtype=np.uint8),
+        },
+        {
+            "label": "dog",
+            "score": 0.87,
+            "crop": np.zeros((4, 4, 3), dtype=np.uint8),
+        },
+    ]
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=payload,
+            )
+        ]
+    )
+
+    views = PipelineInspector().build_views(result)
+
+    assert len(views) == 1
+    assert views[0].blocks == [
+        TextBlock(
+            "list  ×2",
+            [
+                ("[0]", "dict  label cat  |  score 0.91  |  +1 more"),
+                ("[1]", "dict  label dog  |  score 0.87  |  +1 more"),
+            ],
+        )
+    ]
+
+
+def test_pipeline_inspector_build_views_marks_truncated_image_grid_preview():
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:Example",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=[np.zeros((4, 4, 3), dtype=np.uint8) for _ in range(13)],
+            )
+        ]
+    )
+
+    views = PipelineInspector().build_views(result)
+
+    assert len(views) == 1
+    assert len(views[0].blocks) == 1
+    block = views[0].blocks[0]
+    assert isinstance(block, ImageBlock)
+    assert block.title == "ndarray  ×13  (showing 12 out of 13)"
 
 
 def test_pipeline_inspector_keeps_all_list_items_before_compaction():
