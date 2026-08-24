@@ -15,9 +15,6 @@ For the cross-package package catalogs, see
 |---|---|
 | `ImagePayload` | Main image boundary type. |
 | `ResizeTransform` | Carries resize metadata needed later for projection back to source-image space. |
-| `Detections` | Typed detection result. |
-| `Segmentations` | Typed segmentation result. |
-| `DensityPrediction` | Typed density-map result. |
 | `TileRect` | Describes one tile in original-image coordinates. |
 
 ## Input And Preprocessing
@@ -36,7 +33,8 @@ For the cross-package package catalogs, see
 |---|---|
 | `ConvertBoxFormat(src="boxes", from_=..., to="xyxy", as_=None)` | Converts between `xyxy`, `xywh`, and `cxcywh` box formats. |
 | `NMS(...)` | Confidence filtering plus per-class non-maximum suppression on registry tensors. |
-| `NMM(iou_threshold=0.5)` | Merges overlapping detections instead of discarding them. |
+| `NMM(boxes="boxes", scores="scores", classes="classes", ...)` | Merges overlapping registry detections instead of discarding them. |
+| `FilterTensorsByBoxArea(...)` | Filters one or more tensors by `xyxy` box area. |
 | `FilterTensorsByScore(...)` | Filters one or more tensors by a score threshold. |
 | `FilterTensorsByClasses(...)` | Filters one or more tensors by allowed class ids. |
 | `FilterTensorsByMasksArea(...)` | Filters one or more tensors by mask area. |
@@ -49,41 +47,28 @@ For the cross-package package catalogs, see
 | `ProjectMasks(...)` | Projects prototype-style masks back to the source image space. |
 | `ProjectRoIMasks(...)` | Projects per-instance RoI masks back to the source image space. |
 
-## Prediction Outputs And Filtering
-
-| Operator | Input -> Output | Notes |
-|---|---|---|
-| `ToDetections(...)` | `TensorRegistry` -> `Detections` | Finalizes a detection result. |
-| `ToSegmentations(...)` | `TensorRegistry` -> `Segmentations` | Finalizes a segmentation result. |
-| `FilterPredictions(predicate)` | prediction -> prediction | Filters typed prediction objects with a custom predicate. |
-| `FilterPredictionsByClass(classes)` | prediction -> prediction | Filters typed prediction objects by class id. |
-| `FilterPredictionsByScore(min_score)` | prediction -> prediction | Filters typed prediction objects by score. |
-| `FilterPredictionsByArea(...)` | prediction -> prediction | Filters typed prediction objects by box area. |
-| `MapPredictionsToObjects(fields, at=None)` | prediction -> `list[dict]` | Converts typed predictions into per-object mappings. |
-
 ## Tiling
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
 | `Tile(slice_wh, overlap_wh=(0, 0))` | `ImagePayload` -> `(list[ImagePayload], list[TileRect])` | Slices an image into overlapping crops for tiled inference. |
-| `Stitch()` | `(list[Detections], list[TileRect])` -> `Detections` | Remaps tile-local detections back to the original image space. |
+| `Stitch(...)` | `(list[TensorRegistry], list[TileRect])` -> `TensorRegistry` | Remaps tile-local detection tensors back to the original image space. |
 | `TileRect` | value type | Describes one tile in original-image coordinates. |
 
 ## Rendering And Side Effects
 
 | Operator | Notes |
 |---|---|
-| `DrawBoxes(...)` | Draws detection boxes on an image while passing detections through. |
-| `DrawMasks(...)` | Overlays segmentation masks on an image while passing segmentations through. |
+| `DrawBoxes(...)` | Draws configured detection tensors on an image while passing the registry through. |
+| `DrawMasks(...)` | Overlays configured mask tensors while passing the registry through. |
 | `SaveImage(output_path, at=None)` | Saves an image payload to disk as a side effect. |
-| `LogDetections(...)` | Logs detection objects as JSON as a side effect. |
+| `LogDetections(...)` | Logs configured detection tensors as JSON as a side effect. |
 
 ## Density
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
-| `ToDensityPrediction(src="density")` | `TensorRegistry` -> `DensityPrediction` | Finalizes a density-map result. |
-| `ClampDensity()` | `DensityPrediction` -> `DensityPrediction` | Clamps density values to non-negative values. |
-| `SumDensity()` | `DensityPrediction` -> `float` | Sums the density map into one count. |
-| `DensityToHeatmap(...)` | `(ImagePayload, DensityPrediction)` -> `(ImagePayload, ImagePayload)` | Converts a density map into a colored heatmap aligned to the source image. |
+| `ClampDensity(src="density", as_=None)` | `TensorRegistry` -> `TensorRegistry` | Clamps a density tensor to non-negative values. |
+| `SumDensity(src="density")` | `TensorRegistry` -> `float` | Sums a density tensor into one count. |
+| `DensityToHeatmap(src="density", ...)` | `(ImagePayload, TensorRegistry)` -> `(ImagePayload, ImagePayload)` | Converts a density tensor into a colored heatmap aligned to the source image. |
 | `BlendImages(...)` | `(ImagePayload, ImagePayload)` -> `ImagePayload` | Blends a source image with an overlay image. |

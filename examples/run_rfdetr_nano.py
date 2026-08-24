@@ -36,16 +36,15 @@ from ml_pipes.tensor import (
     Scale,
     Softmax,
     Squeeze,
+    TensorRegistry,
 )
 from ml_pipes.vision import (
     ConvertBoxFormat,
-    Detections,
     ImagePayload,
     NMS,
     Normalize,
     ProjectBoxes,
     Resize,
-    ToDetections,
 )
 
 MODEL_URL = "https://huggingface.co/onnx-community/rfdetr_nano-ONNX/resolve/main/onnx/model.onnx"
@@ -56,7 +55,7 @@ MODEL_NAME = "rfdetr_nano.onnx"
 INPUT_SIZE = (640, 640)
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detections]:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline(
         [
             Resize(target_size=INPUT_SIZE, mode="resize", interpolation="linear"),
@@ -76,7 +75,6 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detecti
             NMS(conf_threshold=0.25, iou_threshold=1.0, max_detections=20),
             Recall("resize_transform"),
             ProjectBoxes(),
-            ToDetections(),
         ],
         auto_validate=True,
     )

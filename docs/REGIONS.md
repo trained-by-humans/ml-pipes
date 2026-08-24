@@ -33,7 +33,6 @@ pipeline = Pipeline([
     Infer("model.onnx"),
     Distribute(),
     UnBatch(),
-    ToDetections(),
 ])
 ```
 
@@ -107,7 +106,7 @@ from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Distribute, Extract, Infer
 from ml_pipes.standard import Batch, UnBatch
 from ml_pipes.tensor import Collate
-from ml_pipes.vision import NMS, Normalize, Resize, ToDetections
+from ml_pipes.vision import NMS, Normalize, Resize
 
 
 pipeline = Pipeline([
@@ -120,7 +119,6 @@ pipeline = Pipeline([
     UnBatch(),
     Extract("boxes", "scores", "classes"),
     NMS(),
-    ToDetections(),
 ])
 ```
 
@@ -146,7 +144,7 @@ Example:
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Extract, Infer
 from ml_pipes.standard import Gather, Pick, Recall, Scatter, Store
-from ml_pipes.vision import NMS, Normalize, Resize, Stitch, Tile, ToDetections
+from ml_pipes.vision import NMS, Normalize, Resize, Stitch, Tile
 
 
 pipeline = Pipeline([
@@ -159,7 +157,6 @@ pipeline = Pipeline([
     Infer("model.onnx"),
     Extract("boxes", "scores", "classes"),
     NMS(),
-    ToDetections(),
     Gather(),
     Recall("tile_rects"),
     Stitch(),

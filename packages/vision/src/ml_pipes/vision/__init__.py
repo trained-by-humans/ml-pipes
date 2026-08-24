@@ -3,24 +3,19 @@ from __future__ import annotations
 from .detection import (
     ConvertBoxFormat,
     DrawBoxes,
+    FilterTensorsByBoxArea,
     FilterTensorsByClasses,
     FilterTensorsByScore,
     LogDetections,
     NMM,
     NMS,
     ProjectBoxes,
-    ToDetections,
 )
-from .density import BlendImages, ClampDensity, DensityPrediction, DensityToHeatmap, SumDensity, ToDensityPrediction
+from .density import BlendImages, ClampDensity, DensityToHeatmap, SumDensity
 from .ops import (
     ConvertColorSpace,
     Decode,
-    FilterPredictions,
-    FilterPredictionsByArea,
-    FilterPredictionsByClass,
-    FilterPredictionsByScore,
     LoadFile,
-    MapPredictionsToObjects,
     Normalize,
     Resize,
     SaveImage,
@@ -34,11 +29,10 @@ from .segmentation import (
     ProjectRoIMasks,
     ReconstructMasks,
     ResizeMasks,
-    ToSegmentations,
     WeightMasksByScores,
 )
 from .tiling import Stitch, Tile, TileRect
-from .types import Detections, ImagePayload, Prediction, ResizeTransform, Segmentations
+from .types import ImagePayload, ResizeTransform
 
 __all__ = [
     "BlendImages",
@@ -46,28 +40,21 @@ __all__ = [
     "ConvertBoxFormat",
     "ConvertColorSpace",
     "Decode",
-    "DensityPrediction",
     "DensityToHeatmap",
-    "Detections",
     "DrawBoxes",
     "DrawMasks",
-    "FilterPredictions",
-    "FilterPredictionsByArea",
-    "FilterPredictionsByClass",
-    "FilterPredictionsByScore",
+    "FilterTensorsByBoxArea",
     "FilterTensorsByClasses",
     "FilterTensorsByMasksArea",
     "FilterTensorsByScore",
     "ImagePayload",
     "LoadFile",
     "LogDetections",
-    "MapPredictionsToObjects",
     "MasksToBoxes",
     "MeanMaskScores",
     "NMM",
     "NMS",
     "Normalize",
-    "Prediction",
     "ProjectBoxes",
     "ProjectMasks",
     "ProjectRoIMasks",
@@ -76,14 +63,10 @@ __all__ = [
     "ResizeMasks",
     "ResizeTransform",
     "SaveImage",
-    "Segmentations",
     "Stitch",
     "SumDensity",
     "Tile",
     "TileRect",
-    "ToDensityPrediction",
-    "ToDetections",
-    "ToSegmentations",
     "WeightMasksByScores",
 ]
 

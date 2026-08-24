@@ -70,10 +70,10 @@ At a high level, a common flow looks like this:
 ├─ Extract / Distribute -> Slice -> ArgMax -> ...          │
 └────────┬─────────────────────────────────────────────────┘
          |
-         | ToDetections / ToSegmentations / ...
+         | Vision postprocess / visualization / logging
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Task Result Domain                                       │
+│ Vision Domain                                             │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -98,7 +98,7 @@ from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Extract, Infer
 from ml_pipes.standard import Pick, Recall, Store
 from ml_pipes.tensor import ArgMax, GatherScores, Slice, Squeeze, Transpose
-from ml_pipes.vision import ConvertBoxFormat, Decode, LoadFile, NMS, Normalize, ProjectBoxes, Resize, ToDetections
+from ml_pipes.vision import ConvertBoxFormat, Decode, LoadFile, NMS, Normalize, ProjectBoxes, Resize
 
 pipeline = Pipeline([
     LoadFile(),
@@ -119,7 +119,6 @@ pipeline = Pipeline([
     NMS(),
     Recall("resize_transform"),
     ProjectBoxes(),
-    ToDetections(),
 ])
 ```
 

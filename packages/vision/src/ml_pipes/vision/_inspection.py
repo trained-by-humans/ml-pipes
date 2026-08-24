@@ -17,7 +17,7 @@ from ml_pipes.inspection.views import (
 from ml_pipes.tracing import StepSpan
 
 from .tiling import Tile, TileRect
-from .types import Detections, ImagePayload, ResizeTransform, Segmentations
+from .types import ImagePayload, ResizeTransform
 
 
 def _fmt_floats(seq: Any, precision: int = 3) -> str:
@@ -31,24 +31,6 @@ def _image_to_rgb(value: ImagePayload) -> np.ndarray:
     if value.color_space != "BGR":
         return value.array
     return load_cv2().cvtColor(value.array, load_cv2().COLOR_BGR2RGB)
-
-
-def _format_segmentations(value: Segmentations) -> list[OutputBlock]:
-    name = type(value).__name__
-    count = len(value.boxes)
-    rows = [(f"[{index}]", f"cls={value.classes[index]}  score={value.scores[index]:.2f}  mask✓") for index in range(min(count, 6))]
-    if count > 6:
-        rows.append(("…", f"+{count - 6} more"))
-    return [TextBlock(f"{name} ({count})", rows)]
-
-
-def _format_detections(value: Detections) -> list[OutputBlock]:
-    name = type(value).__name__
-    count = len(value.boxes)
-    rows = [(f"[{index}]", f"cls={value.classes[index]}  score={value.scores[index]:.2f}") for index in range(min(count, 6))]
-    if count > 6:
-        rows.append(("…", f"+{count - 6} more"))
-    return [TextBlock(f"{name} ({count})", rows)]
 
 
 def _format_image(value: ImagePayload) -> list[OutputBlock]:
@@ -137,9 +119,7 @@ def _format_tile_step(
 
 
 def register_inspection_formatters() -> None:
-    register_value_formatter(Detections, _format_detections)
     register_value_formatter(ImagePayload, _format_image)
     register_value_formatter(ResizeTransform, _format_resize_transform)
-    register_value_formatter(Segmentations, _format_segmentations)
     register_value_formatter(TileRect, _format_tile_rect)
     register_step_formatter(Tile, _format_tile_step)

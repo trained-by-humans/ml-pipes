@@ -437,11 +437,6 @@ def _extract_shape(value: Any) -> str | None:
             for n, t in zip(value.names, value.tensors)
         )
         return f"{name} {{{entries}}}"
-    # Detections / Segmentations
-    if hasattr(value, "boxes") and hasattr(value, "scores"):
-        n = len(value.boxes)
-        suffix = " + masks" if hasattr(value, "masks") else ""
-        return f"{name} ({n}{suffix})"
     # bytes
     if isinstance(value, bytes):
         return f"{name} ({len(value)} B)"

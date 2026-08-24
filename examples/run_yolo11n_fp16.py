@@ -38,23 +38,22 @@ from ml_pipes.tensor import (
     Slice,
     Squeeze,
     Transpose,
+    TensorRegistry,
 )
 from ml_pipes.vision import (
     ConvertBoxFormat,
-    Detections,
     ImagePayload,
     NMS,
     Normalize,
     ProjectBoxes,
     Resize,
-    ToDetections,
 )
 
 MODEL_URL = "https://huggingface.co/webnn/yolo11n/resolve/main/onnx/yolo11n_fp16.onnx"
 MODEL_NAME = "yolo11n_fp16.onnx"
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detections]:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline(
         [
             Resize(
@@ -82,7 +81,6 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Detecti
             NMS(),
             Recall("resize_transform"),
             ProjectBoxes(),
-            ToDetections(),
         ],
         auto_validate=True,
     )

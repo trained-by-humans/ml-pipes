@@ -265,15 +265,14 @@ Pick(0),
 NMS(),
 Recall("resize_transform"),
 ProjectBoxes(),
-ToDetections(),
 ```
 
 In `ml-pipes`, `Store(...)` and `Recall(...)` are the usual way to carry that
 metadata through the pipeline.
 
-This is where the scaffold turns raw model outputs into final values your
-application can use: first back into source-image coordinates, then into
-objects such as `Detections`.
+This is where the scaffold turns raw model outputs into source-image
+coordinates and leaves the named prediction tensors available for rendering,
+logging, or application-specific export.
 
 ## Putting The Flow Together
 
@@ -307,7 +306,6 @@ pipeline = Pipeline([
     NMS(),
     Recall("resize_transform"),
     ProjectBoxes(),
-    ToDetections(),
 ])
 ```
 

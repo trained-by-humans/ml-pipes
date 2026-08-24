@@ -25,11 +25,7 @@ from ml_pipes.core import (
     inline,
 )
 from ml_pipes.standard import Recall
-from ml_pipes.vision import (
-    LogDetections,
-    MapPredictionsToObjects,
-    ToSegmentations,
-)
+from ml_pipes.vision import LogDetections
 from ml_pipes.torch import (
     ToNumpyRegistry,
     TorchArgMax,
@@ -200,17 +196,6 @@ def build_torch_postprocess_pipeline(
     input_path: Path,
     output_path: Path,
 ) -> Pipeline[TorchTensorRegistry, object]:
-    record_fields = {
-        "index": lambda p: list(range(len(p.classes))),
-        "class_id": "classes",
-        "class_name": lambda p, names=bundle.class_names: [
-            names[int(class_id)] if 0 <= int(class_id) < len(names) else str(class_id) for class_id in p.classes
-        ],
-        "score": "scores",
-        "area": lambda p: [int(np.asarray(mask, dtype=bool).sum()) for mask in p.masks],
-        "box": "boxes",
-    }
-
     if bundle.task == "panoptic":
         postprocess_pipeline = Pipeline([
             Recall("image_shape"),
@@ -236,9 +221,7 @@ def build_torch_postprocess_pipeline(
             ),
             TorchMasksToBoxes(as_="boxes"),
             ToNumpyRegistry(),
-            ToSegmentations(),
             inline(visualize_and_store(output_path, bundle.class_names)),
-            MapPredictionsToObjects(fields=record_fields, at=1),
             LogDetections(bundle.model_id, input_path, output_path, at=1),
         ])
     else:
@@ -253,20 +236,18 @@ def build_torch_postprocess_pipeline(
                 k=_TOP_K,
                 values_as="top_scores",
                 row_indices_as="query_indices",
-                col_indices_as="class_ids",
+                col_indices_as="classes",
             ),
             TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
-            TorchBinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="binary_masks"),
+            TorchBinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="masks"),
             TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
-            TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="final_scores"),
-            TorchFilterTensorsByMasksArea("final_scores", "class_ids", masks="binary_masks", min_area=1),
-            TorchFilterTensorsByScore("binary_masks", "class_ids", score="final_scores", min_score=_SCORE_THRESHOLD),
-            TorchSortTensorsBy("binary_masks", "class_ids", by="final_scores"),
-            TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
+            TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="scores"),
+            TorchFilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=1),
+            TorchFilterTensorsByScore("masks", "classes", score="scores", min_score=_SCORE_THRESHOLD),
+            TorchSortTensorsBy("masks", "classes", by="scores"),
+            TorchMasksToBoxes(masks="masks", as_="boxes"),
             ToNumpyRegistry(),
-            ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
             inline(visualize_and_store(output_path, bundle.class_names)),
-            MapPredictionsToObjects(fields=record_fields, at=1),
             LogDetections(bundle.model_id, input_path, output_path, at=1),
         ])
 

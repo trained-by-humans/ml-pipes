@@ -1,33 +1,11 @@
 from __future__ import annotations
 
-import dataclasses
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar
-
 import numpy as np
-import numpy.typing as npt
-
-if TYPE_CHECKING:
-    from typing_extensions import Self
-else:  # pragma: no cover
-    try:
-        from typing import Self
-    except ImportError:
-        Self = TypeVar("Self")
 
 __all__ = [
-    "BoxPrediction",
-    "ClassPrediction",
-    "Detections",
-    "FilterablePrediction",
     "ImagePayload",
-    "Prediction",
-    "PredictionIndices",
-    "PredictionMask",
     "ResizeTransform",
-    "ScorePrediction",
-    "Segmentations",
 ]
 
 
@@ -83,65 +61,3 @@ class ResizeTransform:
     pad: tuple[float, float]
     original_shape: tuple[int, int]
     resized_shape: tuple[int, int]
-
-
-PredictionMask: TypeAlias = Sequence[bool] | npt.NDArray[np.bool_]
-PredictionIndices: TypeAlias = Sequence[int] | npt.NDArray[np.integer[Any]]
-
-
-class FilterablePrediction(Protocol):
-    def filter(self, mask: PredictionMask) -> Self:
-        ...
-
-
-class ClassPrediction(FilterablePrediction, Protocol):
-    classes: Sequence[int]
-
-
-class ScorePrediction(FilterablePrediction, Protocol):
-    scores: Sequence[float]
-
-
-class BoxPrediction(FilterablePrediction, Protocol):
-    boxes: Sequence[Sequence[float]]
-
-
-@dataclass
-class Prediction:
-    """Base class for all typed prediction outputs."""
-
-    def filter(self, mask: PredictionMask) -> Self:
-        kept: list[int] = []
-        for i, keep in enumerate(mask):
-            if not isinstance(keep, (bool, np.bool_)):
-                raise TypeError("Prediction.filter expects a boolean mask; use select() for integer indices.")
-            if bool(keep):
-                kept.append(i)
-        return self._slice(kept)
-
-    def select(self, indices: PredictionIndices) -> Self:
-        kept: list[int] = []
-        for index in indices:
-            if isinstance(index, (bool, np.bool_)):
-                raise TypeError("Prediction.select expects integer indices; use filter() for boolean masks.")
-            kept.append(int(index))
-        return self._slice(kept)
-
-    def _slice(self, kept: Sequence[int]) -> Self:
-        sliced = {
-            field.name: [getattr(self, field.name)[i] for i in kept]
-            for field in dataclasses.fields(self)
-        }
-        return type(self)(**sliced)
-
-
-@dataclass
-class Detections(Prediction):
-    boxes: Sequence[Sequence[float]]
-    scores: Sequence[float]
-    classes: Sequence[int]
-
-
-@dataclass
-class Segmentations(Detections):
-    masks: Sequence[np.ndarray]

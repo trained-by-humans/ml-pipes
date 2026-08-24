@@ -116,8 +116,8 @@ The nearby package crossings are:
 - `Extract()` from `ml_pipes.onnx` creates a `TensorRegistry`
 - `ToNumpy()` and `ToNumpyRegistry()` from `ml_pipes.torch` return back to the
   Tensor domain
-- `ToDetections()`, `ToSegmentations()`, and `ToDensityPrediction()` from
-  `ml_pipes.vision` finalize typed task results
+- Vision operators postprocess, render, or log named prediction tensors while
+  keeping them in the registry
 
 At a high level, a common flow looks like this:
 
@@ -141,10 +141,10 @@ At a high level, a common flow looks like this:
 ├─ Squeeze -> Slice -> Softmax -> ArgMax -> FilterTensors  │
 └────────┬─────────────────────────────────────────────────┘
          |
-         | ToDetections / ToSegmentations / ...
+         | Vision postprocess / visualization / logging
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Task Result Domain                                       │
+│ Vision Domain                                             │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -161,7 +161,7 @@ tensors to a task package.
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Extract
 from ml_pipes.tensor import ArgMax, GatherScores, Slice, Squeeze, Transpose
-from ml_pipes.vision import ConvertBoxFormat, ToDetections
+from ml_pipes.vision import ConvertBoxFormat
 
 pipeline = Pipeline([
     ...,
@@ -173,7 +173,6 @@ pipeline = Pipeline([
     ArgMax("scores", as_="classes"),
     GatherScores("scores", "classes"),
     ConvertBoxFormat(from_="cxcywh"),
-    ToDetections(),
 ])
 ```
 

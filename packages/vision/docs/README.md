@@ -1,7 +1,7 @@
 # Vision Task And Media Domain
 
-`ml_pipes.vision` owns image inputs, reusable vision semantics, and typed
-vision outputs inside `ml-pipes`.
+`ml_pipes.vision` owns image inputs, reusable vision semantics, and vision
+postprocess inside `ml-pipes`.
 
 For the full package surface and operator catalog, see [`INDEX.md`](./INDEX.md).
 
@@ -18,13 +18,11 @@ For the full package surface and operator catalog, see [`INDEX.md`](./INDEX.md).
 `ml_pipes.vision` focuses on the vision-specific stages around
 inference: preprocessing before the runtime step, and task-specific
 postprocess after the Tensor domain. It carries the value types and operators
-that keep image semantics, resize/projection metadata, tiling, and typed
-vision results explicit.
+that keep image semantics, resize/projection metadata, and tiling explicit.
 
 Use this package when a pipeline starts from image inputs, needs
-vision-specific preprocessing before inference, or needs final tensors turned
-into typed vision results such as detections, segmentations, or density
-predictions.
+vision-specific preprocessing before inference, or needs task-specific tensor
+postprocess for detections, segmentations, or density estimation.
 
 > [!NOTE]
 > Vision does not own runtime execution or generic tensor-space operators.
@@ -37,21 +35,15 @@ predictions.
   `ResizeTransform`.
 - Keep image and task semantics here, and hand off shared tensor math or
   runtime execution to their owning packages.
-- Return typed predictions instead of anonymous dicts so downstream filtering,
-  logging, and rendering stay coherent.
+- Keep finalized task tensors in `TensorRegistry` so filtering, logging, and
+  rendering use the same named tensor boundary.
 - Make side-effect operators opt-in and pass-through so pipelines can stay
   explicit about where files or logs are produced.
 
-## Intermediate And Terminal Values
+## Package Values
 
-Vision values usually fall into two groups: intermediate values that carry
-image or geometry state through the pipeline, and terminal values that
-represent finalized task results.
-
-### Intermediate Values
-
-`ImagePayload`, `ResizeTransform`, and `TileRect` are the main intermediate
-values in this package.
+`ImagePayload`, `ResizeTransform`, and `TileRect` are the package dataclasses
+that carry image, geometry, and tiling state through a pipeline.
 
 `ImagePayload` keeps image data together with color-space and layout metadata
 during preprocessing and rendering. `ResizeTransform` records geometry changes
@@ -59,15 +51,6 @@ from steps such as `Resize()` so later operators such as `ProjectBoxes()` or
 `ProjectMasks()` can map model-space results back to the source image space.
 `TileRect` records where each tile came from so `Stitch()` can merge
 tile-local results back into one full-image result.
-
-### Terminal Values
-
-`Detections`, `Segmentations`, and `DensityPrediction` are the terminal
-task-result values in this package.
-
-These values mark the point where tensor-space results become typed vision
-results that later steps can filter, render, log, or map into user-facing
-objects.
 
 ## Where Vision Fits
 
@@ -100,21 +83,13 @@ At a high level, a common flow looks like this:
          | TensorRegistry
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Typed Prediction Conversion                              │
-├─ ToDetections / ToSegmentations / ToDensityPrediction    │
-└────────┬─────────────────────────────────────────────────┘
-         |
-         | typed predictions
-         ▼
-┌──────────────────────────────────────────────────────────┐
-│ Typed Prediction Processing                              │
-├─ FilterPredictions / DrawBoxes / SaveImage / ...         │
+│ Registry Rendering And Side Effects                       │
+├─ NMM / DrawBoxes / DrawMasks / LogDetections / ...        │
 └──────────────────────────────────────────────────────────┘
 ```
 
-That split keeps image preparation, vision-specific tensor postprocess, typed
-prediction conversion, and prediction-side processing as separate reusable
-stages.
+That split keeps image preparation, vision-specific tensor postprocess, and
+registry-based rendering or side effects as separate reusable stages.
 
 ## Using Vision In Pipelines
 
@@ -148,13 +123,12 @@ This is the front half of many example pipelines, including
 
 After runtime and shared tensor postprocess, Vision handles the remaining
 vision-specific work: project boxes or masks, reconstruct or resize masks when
-needed, apply vision-specific filtering, and convert the registry values into
-typed predictions.
+needed, and apply vision-specific filtering while preserving the registry.
 
 ```python
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import Recall
-from ml_pipes.vision import ConvertBoxFormat, NMS, ProjectBoxes, ToDetections
+from ml_pipes.vision import ConvertBoxFormat, NMS, ProjectBoxes
 
 pipeline = Pipeline([
     ...,
@@ -162,34 +136,32 @@ pipeline = Pipeline([
     NMS(),
     Recall("resize_transform"),
     ProjectBoxes(),
-    ToDetections(),
 ])
 ```
 
-For segmentation pipelines, the same package owns mask reconstruction,
-projection, and final `ToSegmentations(...)` handoff. See
+For segmentation pipelines, the same package owns mask reconstruction and
+projection. See
 [`examples/run_yolo11n_seg.py`](../../../examples/run_yolo11n_seg.py).
 
-### Prediction-Based Operators
+### Visualizing Predictions
 
-Once Vision has converted registry values into typed predictions, later Vision
-operators can work on those typed results directly. This is where
-prediction-side filtering, rendering, logging, mapping, or saving usually
-happens.
+Once postprocess has finalized the registry tensors, Vision rendering and
+logging operators consume the configured tensor names directly. Apply aligned
+filters before this point with `FilterTensors`, `FilterTensorsByScore`,
+`FilterTensorsByClasses`, or `FilterTensorsByMasksArea`.
 
-For example, after `ToDetections()` the pipeline can recall the source image,
-draw the detections, and save the rendered image:
+For example, the pipeline can recall the source image, draw the registry's
+detections, and save the rendered image:
 
 ```python
 from pathlib import Path
 
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import Recall
-from ml_pipes.vision import DrawBoxes, SaveImage, ToDetections
+from ml_pipes.vision import DrawBoxes, SaveImage
 
 pipeline = Pipeline([
     ...,
-    ToDetections(),
     Recall("source_image", prepend=True),
     DrawBoxes(),
     SaveImage(Path("result.jpg"), at=0),

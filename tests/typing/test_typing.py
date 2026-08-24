@@ -34,12 +34,8 @@ def test_mypy_pipeline_generics_smoke() -> None:
 
     search_path = os.pathsep.join([*(str(path) for path in PACKAGE_SRC_DIRS), str(ROOT / "examples")])
     env = os.environ.copy()
-    env["MYPYPATH"] = (
-        search_path if not env.get("MYPYPATH") else search_path + os.pathsep + env["MYPYPATH"]
-    )
-    env["PYTHONPATH"] = (
-        search_path if not env.get("PYTHONPATH") else search_path + os.pathsep + env["PYTHONPATH"]
-    )
+    env["MYPYPATH"] = search_path
+    env["PYTHONPATH"] = search_path
 
     result = subprocess.run(
         [
@@ -48,11 +44,12 @@ def test_mypy_pipeline_generics_smoke() -> None:
             "mypy",
             "--config-file",
             os.devnull,
+            "--cache-dir",
+            "/private/tmp/ml-pipes-mypy-cache",
+            "--explicit-package-bases",
             "--python-version",
             f"{sys.version_info.major}.{sys.version_info.minor}",
             "tests/typing/pipeline_generics_case.py",
-            "tests/typing/draw_operator_generics_case.py",
-            "tests/typing/map_predictions_to_objects_case.py",
         ],
         cwd=ROOT,
         env=env,
@@ -80,6 +77,8 @@ def test_mypy_torch_operator_generics_smoke() -> None:
             "mypy",
             "--config-file",
             os.devnull,
+            "--cache-dir",
+            "/private/tmp/ml-pipes-mypy-cache",
             "--python-version",
             f"{sys.version_info.major}.{sys.version_info.minor}",
             "tests/typing/torch_operator_generics_case.py",

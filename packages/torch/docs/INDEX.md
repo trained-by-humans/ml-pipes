@@ -97,8 +97,8 @@ For the cross-package package catalogs, see
 ## Vision Postprocess Operators
 
 These mirror the NumPy-side postprocess operators in `ml_pipes.vision`. For
-projection back to image space and typed outputs such as `ToDetections()` or
-`ToSegmentations()`, see the vision package index.
+projection back to image space, rendering, and logging, see the vision package
+index.
 
 | Operator | Notes |
 |---|---|

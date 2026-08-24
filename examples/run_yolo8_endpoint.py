@@ -28,20 +28,25 @@ from ml_pipes.core import (
     Embed,
     Pipeline,
 )
-from ml_pipes.vision import (
-    Decode,
-    MapPredictionsToObjects,
-)
+from ml_pipes.tensor import TensorRegistry
+from ml_pipes.vision import Decode
 
 HOST = "localhost"
 PORT = 5000
+
+
+def _detection_records(registry: TensorRegistry) -> list[dict[str, object]]:
+    return [
+        {"box": box.tolist(), "score": float(score), "class_id": int(class_id)}
+        for box, score, class_id in zip(registry["boxes"], registry["scores"], registry["classes"], strict=True)
+    ]
 
 
 def build_pipeline(model_path: Path) -> Pipeline[bytes, list[dict[str, object]]]:
     return Pipeline([
         Decode(),
         Embed(yolo8_inference_pipeline(model_path)),
-        MapPredictionsToObjects(fields={"box": "boxes", "score": "scores", "class_id": "classes"}),
+        _detection_records,
     ], auto_validate=True)
 
 

@@ -1,51 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeAlias, TypeVar, cast, get_args, get_origin, overload
+from typing import Any, Generic, Literal, TypeVar
 
 import numpy as np
 
-from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.operator import Operator
 from ml_pipes.standard import SideEffectOp
 from ml_pipes.tensor import TensorPayload
-from ml_pipes.validation import PipelineValidationError
-from .types import (
-    BoxPrediction,
-    ClassPrediction,
-    ImagePayload,
-    Prediction,
-    PredictionMask,
-    ResizeTransform,
-    ScorePrediction,
-)
+from .types import ImagePayload, ResizeTransform
 
 __all__ = [
     "ConvertColorSpace",
     "Decode",
-    "FilterPredictions",
-    "FilterPredictionsByArea",
-    "FilterPredictionsByClass",
-    "FilterPredictionsByScore",
     "ImagePayload",
     "LoadFile",
-    "MapPredictionsToObjects",
     "Normalize",
-    "Prediction",
     "Resize",
     "ResizeTransform",
     "SaveImage",
 ]
 
-PredictionT = TypeVar("PredictionT", bound=Prediction)
-ClassPredictionT = TypeVar("ClassPredictionT", bound=ClassPrediction)
-ScorePredictionT = TypeVar("ScorePredictionT", bound=ScorePrediction)
-BoxPredictionT = TypeVar("BoxPredictionT", bound=BoxPrediction)
 PayloadT = TypeVar("PayloadT")
-ObjectPrefixT = TypeVar("ObjectPrefixT")
-ObjectIndexT = TypeVar("ObjectIndexT", bound=int | None)
-ObjectMapping: TypeAlias = dict[str, object]
 
 
 @Operator
@@ -253,51 +229,6 @@ class Normalize:
                 final_layout = f"N{self.output_layout}"
 
         return TensorPayload(array=tensor, layout=final_layout, dtype=str(tensor.dtype))
-
-
-
-
-@Operator
-class FilterPredictions(Generic[PredictionT]):
-    def __init__(self, predicate: Callable[[PredictionT], PredictionMask]):
-        self.predicate = predicate
-
-    def __call__(self, prediction: PredictionT) -> PredictionT:
-        return prediction.filter(self.predicate(prediction))
-
-
-@Operator
-class FilterPredictionsByClass:
-    def __init__(self, classes: Collection[int]):
-        self.classes = frozenset(classes)
-
-    def __call__(self, prediction: ClassPredictionT) -> ClassPredictionT:
-        return prediction.filter([class_id in self.classes for class_id in prediction.classes])
-
-
-@Operator
-class FilterPredictionsByScore:
-    def __init__(self, min_score: float):
-        self.min_score = min_score
-
-    def __call__(self, prediction: ScorePredictionT) -> ScorePredictionT:
-        return prediction.filter([score >= self.min_score for score in prediction.scores])
-
-
-@Operator
-class FilterPredictionsByArea:
-    def __init__(self, min_area: float = 0, max_area: float | None = None):
-        self.min_area = min_area
-        self.max_area = max_area
-
-    def __call__(self, prediction: BoxPredictionT) -> BoxPredictionT:
-        return prediction.filter([
-            (x2 - x1) * (y2 - y1) >= self.min_area
-            and (self.max_area is None or (x2 - x1) * (y2 - y1) <= self.max_area)
-            for x1, y1, x2, y2 in prediction.boxes
-        ])
-
-
 @Operator
 class SaveImage(SideEffectOp[PayloadT], Generic[PayloadT]):
     def __init__(self, output_path: str | Path, at: int | None = None):
@@ -316,129 +247,3 @@ class SaveImage(SideEffectOp[PayloadT], Generic[PayloadT]):
         written = cv2.imwrite(str(self.output_path), image_payload.array)
         if not written:
             raise ValueError(f"Failed to write image: {self.output_path}")
-
-
-@Operator
-class MapPredictionsToObjects(Generic[ObjectIndexT, PredictionT]):
-    @overload
-    def __init__(
-        self: "MapPredictionsToObjects[None, PredictionT]",
-        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
-        at: None = None,
-    ) -> None:
-        ...
-
-    @overload
-    def __init__(
-        self: "MapPredictionsToObjects[Literal[1], PredictionT]",
-        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
-        at: Literal[1],
-    ) -> None:
-        ...
-
-    @overload
-    def __init__(
-        self: "MapPredictionsToObjects[int, PredictionT]",
-        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
-        at: int,
-    ) -> None:
-        ...
-
-    def __init__(
-        self,
-        fields: Mapping[str, str | Callable[[PredictionT], Sequence[object]]],
-        at: int | None = None,
-    ) -> None:
-        self.fields = fields
-        self.at = at
-
-    @overload
-    def __call__(
-        self: "MapPredictionsToObjects[None, PredictionT]",
-        payload: PredictionT,
-    ) -> list[ObjectMapping]:
-        ...
-
-    @overload
-    def __call__(
-        self: "MapPredictionsToObjects[Literal[1], PredictionT]",
-        payload: tuple[ObjectPrefixT, PredictionT],
-    ) -> tuple[ObjectPrefixT, list[ObjectMapping]]:
-        ...
-
-    @overload
-    def __call__(self, payload: object) -> Any:
-        ...
-
-    def __call__(self, payload: object) -> Any:
-        prediction_arrays = self._resolve_prediction_value(payload)
-        columns: dict[str, Sequence[object]] = {}
-        for field_name, source in self.fields.items():
-            if isinstance(source, str):
-                try:
-                    column = getattr(prediction_arrays, source)
-                except AttributeError as exc:
-                    raise AttributeError(
-                        f"MapPredictionsToObjects field {field_name!r} references missing attribute "
-                        f"{source!r} on {type(prediction_arrays).__name__}"
-                    ) from exc
-            else:
-                column = source(prediction_arrays)
-            columns[field_name] = column
-
-        lengths = {len(column) for column in columns.values()}
-        if len(lengths) > 1:
-            raise ValueError(
-                f"MapPredictionsToObjects requires equal-length collections, got lengths {sorted(lengths)}"
-            )
-
-        records: list[dict[str, object]] = []
-        field_names = tuple(columns.keys())
-        rows = zip(*(columns[field_name] for field_name in field_names), strict=True)
-        for row in rows:
-            records.append(dict(zip(field_names, row, strict=True)))
-        if self.at is not None:
-            payload_tuple = cast(tuple[object, ...], payload)
-            return payload_tuple[:self.at] + (records,) + payload_tuple[self.at + 1 :]
-        return records
-
-    def resolve_contract(
-        self,
-        upstream_annotation: Any,
-        validation_error_type: type[Exception],
-    ) -> tuple[tuple[Any, ...], Any]:
-        if self.at is None:
-            if upstream_annotation is not Any and is_assignable(upstream_annotation, Prediction):
-                return (upstream_annotation,), list[ObjectMapping]
-            return (Any,), Any
-
-        if upstream_annotation is Any:
-            return (Any,), Any
-
-        if get_origin(upstream_annotation) is tuple:
-            parts = get_args(upstream_annotation)
-        elif isinstance(upstream_annotation, tuple):
-            parts = upstream_annotation
-        else:
-            return (Any,), Any
-
-        normalized_index = self.at if self.at >= 0 else len(parts) + self.at
-        if normalized_index < 0 or normalized_index >= len(parts):
-            error_type = validation_error_type or PipelineValidationError
-            raise error_type(
-                f"MapPredictionsToObjects(at={self.at}) is out of bounds for "
-                f"{upstream_annotation} (length {len(parts)})"
-            )
-        if not is_assignable(parts[normalized_index], Prediction):
-            return (Any,), Any
-        updated_parts = parts[:normalized_index] + (list[ObjectMapping],) + parts[normalized_index + 1 :]
-        return (upstream_annotation,), updated_parts
-
-    def _resolve_prediction_value(self, payload: object) -> PredictionT:
-        if self.at is None:
-            return cast(PredictionT, payload)
-        if not isinstance(payload, tuple):
-            raise TypeError(
-                f"MapPredictionsToObjects(at={self.at}) requires a tuple payload, got {type(payload)!r}"
-            )
-        return cast(PredictionT, payload[self.at])

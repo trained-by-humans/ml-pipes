@@ -55,7 +55,6 @@ from ml_pipes.vision import (
     ImagePayload,
     Normalize,
     SumDensity,
-    ToDensityPrediction,
 )
 
 CSRNET_MODEL_NAME = "csrnet_shanghaitech_b_rootstrap.pth"
@@ -195,12 +194,11 @@ def build_pipeline(
         Extract("output0", as_="density"),
         Squeeze("density", axis=(0, 1)),
         AsType(src="density", dtype="float32"),
-        ToDensityPrediction("density"),
         ClampDensity(),
-        Store("density_prediction"),
+        Store("density_registry"),
         SumDensity(),
         Store("count"),
-        Recall("density_prediction", prepend=True),
+        Recall("density_registry", prepend=True),
         Pick(0),
         Recall("source_frame", prepend=True),
         DensityToHeatmap(),

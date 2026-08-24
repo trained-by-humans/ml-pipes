@@ -4,7 +4,7 @@ import json
 import sys
 from collections.abc import Collection
 from pathlib import Path
-from typing import Any, Generic, Literal, TextIO, TypeAlias, TypeVar, get_args, get_origin
+from typing import Any, Generic, Literal, TextIO, TypeVar, get_args, get_origin
 
 import numpy as np
 
@@ -13,23 +13,21 @@ from ml_pipes.operator import Operator
 from ml_pipes.standard import SideEffectOp
 from ml_pipes.tensor import FilterTensors, TensorRegistry
 from ml_pipes.validation import PipelineValidationError
-from .types import Detections, ImagePayload, ResizeTransform
+from .types import ImagePayload, ResizeTransform
 
 __all__ = [
     "ConvertBoxFormat",
     "DrawBoxes",
+    "FilterTensorsByBoxArea",
     "FilterTensorsByClasses",
     "FilterTensorsByScore",
     "LogDetections",
     "NMM",
     "NMS",
     "ProjectBoxes",
-    "ToDetections",
 ]
 
-DetectT = TypeVar("DetectT", bound=Detections)
 PayloadT = TypeVar("PayloadT")
-ObjectMapping: TypeAlias = dict[str, object]
 
 
 def _is_unresolved_object_list(annotation: Any) -> bool:
@@ -180,16 +178,28 @@ class NMS:
 
 @Operator
 class NMM:
-    def __init__(self, iou_threshold: float = 0.5) -> None:
+    def __init__(
+        self,
+        boxes: str = "boxes",
+        scores: str = "scores",
+        classes: str = "classes",
+        iou_threshold: float = 0.5,
+    ) -> None:
+        self.boxes = boxes
+        self.scores = scores
+        self.classes = classes
         self.iou_threshold = iou_threshold
 
-    def __call__(self, detections: Detections) -> Detections:
-        if not detections.boxes:
-            return detections
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        boxes = registry[self.boxes]
+        scores = registry[self.scores]
+        classes = registry[self.classes]
+        if boxes.shape[0] == 0:
+            return registry
 
-        boxes = np.array(detections.boxes, dtype=np.float32)
-        scores = np.array(detections.scores, dtype=np.float32)
-        classes = np.array(detections.classes, dtype=np.int32)
+        computation_dtype = np.result_type(boxes.dtype, scores.dtype, np.float32)
+        computation_boxes = np.asarray(boxes, dtype=computation_dtype)
+        computation_scores = np.asarray(scores, dtype=computation_dtype)
 
         merged_boxes: list[list[float]] = []
         merged_scores: list[float] = []
@@ -197,7 +207,7 @@ class NMM:
 
         for class_id in np.unique(classes):
             idx = np.where(classes == class_id)[0]
-            ordered = idx[np.argsort(scores[idx])[::-1]]
+            ordered = idx[np.argsort(computation_scores[idx])[::-1]]
             consumed = np.zeros(len(ordered), dtype=bool)
 
             for i, current in enumerate(ordered):
@@ -207,7 +217,7 @@ class NMM:
                 remaining_mask[i] = False
                 remaining = ordered[remaining_mask]
                 if remaining.size > 0:
-                    ious = NMS._compute_iou(boxes[current], boxes[remaining])
+                    ious = NMS._compute_iou(computation_boxes[current], computation_boxes[remaining])
                     overlap_pos = np.where(ious >= self.iou_threshold)[0]
                     group = np.array([current, *remaining[overlap_pos]])
                     for pos in overlap_pos:
@@ -215,15 +225,23 @@ class NMM:
                 else:
                     group = np.array([current])
 
-                group_boxes = boxes[group]
-                group_scores = scores[group]
-                weights = group_scores / group_scores.sum()
+                group_boxes = computation_boxes[group]
+                group_scores = computation_scores[group]
+                score_sum = float(group_scores.sum())
+                weights = (
+                    group_scores / score_sum
+                    if score_sum > 0
+                    else np.full(group_scores.shape, 1.0 / group_scores.size, dtype=computation_dtype)
+                )
                 merged_box = (group_boxes * weights[:, None]).sum(axis=0).tolist()
                 merged_boxes.append(merged_box)
-                merged_scores.append(float(detections.scores[int(current)]))
+                merged_scores.append(float(scores[int(current)]))
                 merged_classes.append(int(class_id))
 
-        return Detections(boxes=merged_boxes, scores=merged_scores, classes=merged_classes)
+        registry[self.boxes] = np.asarray(merged_boxes, dtype=boxes.dtype).reshape(-1, 4)
+        registry[self.scores] = np.asarray(merged_scores, dtype=scores.dtype)
+        registry[self.classes] = np.asarray(merged_classes, dtype=classes.dtype)
+        return registry
 
 
 @Operator
@@ -270,6 +288,32 @@ class FilterTensorsByClasses:
 
 
 @Operator
+class FilterTensorsByBoxArea:
+    def __init__(
+        self,
+        *srcs: str,
+        boxes: str = "boxes",
+        min_area: float = 0,
+        max_area: float | None = None,
+        as_: str | tuple[str, ...] | None = None,
+    ):
+        all_srcs = (boxes,) + tuple(src for src in srcs if src != boxes)
+
+        def keep(values: np.ndarray) -> np.ndarray:
+            areas = self._areas(values)
+            return areas >= min_area if max_area is None else (areas >= min_area) & (areas <= max_area)
+
+        self._inner = FilterTensors(*all_srcs, by=boxes, predicate=keep, as_=as_)
+
+    @staticmethod
+    def _areas(boxes: np.ndarray) -> np.ndarray:
+        return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        return self._inner(registry)
+
+
+@Operator
 class ProjectBoxes:
     def __init__(self, src: str = "boxes"):
         self.src = src
@@ -289,24 +333,13 @@ class ProjectBoxes:
 
 
 @Operator
-class ToDetections:
-    def __init__(self, boxes: str = "boxes", scores: str = "scores", classes: str = "classes"):
-        self.boxes = boxes
-        self.scores = scores
-        self.classes = classes
-
-    def __call__(self, registry: TensorRegistry) -> Detections:
-        return Detections(
-            boxes=registry[self.boxes].tolist(),
-            scores=registry[self.scores].tolist(),
-            classes=registry[self.classes].tolist(),
-        )
-
-
-@Operator
 class DrawBoxes:
     def __init__(
         self,
+        boxes: str = "boxes",
+        scores: str = "scores",
+        classes: str = "classes",
+        *,
         class_names: list[str] | tuple[str, ...] | None = None,
         color: tuple[int, int, int] = (0, 255, 0),
         thickness: int = 2,
@@ -316,14 +349,20 @@ class DrawBoxes:
         self.color = color
         self.thickness = thickness
         self.font_scale = font_scale
+        self.boxes = boxes
+        self.scores = scores
+        self.classes = classes
 
-    def __call__(self, source_image: ImagePayload, detections: DetectT) -> tuple[ImagePayload, DetectT]:
+    def __call__(self, source_image: ImagePayload, registry: TensorRegistry) -> tuple[ImagePayload, TensorRegistry]:
         import cv2
 
         image = source_image.array.copy()
-        for box, score, class_id in zip(detections.boxes, detections.scores, detections.classes, strict=True):
+        color = self.color[::-1] if source_image.color_space == "RGB" else self.color
+        for box, score, class_id in zip(
+            registry[self.boxes], registry[self.scores], registry[self.classes], strict=True
+        ):
             x1, y1, x2, y2 = [int(round(coord)) for coord in box]
-            cv2.rectangle(image, (x1, y1), (x2, y2), self.color, self.thickness)
+            cv2.rectangle(image, (x1, y1), (x2, y2), color, self.thickness)
             label = self._format_label(int(class_id), float(score))
             text_origin_y = y1 - 8 if y1 > 18 else y1 + 18
             cv2.putText(
@@ -332,12 +371,12 @@ class DrawBoxes:
                 (x1, text_origin_y),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 self.font_scale,
-                self.color,
+                color,
                 max(1, self.thickness - 1),
                 cv2.LINE_AA,
             )
 
-        return ImagePayload(array=image, color_space="BGR", layout="HWC"), detections
+        return ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout), registry
 
     def _format_label(self, class_id: int, score: float) -> str:
         if self.class_names is not None and 0 <= class_id < len(self.class_names):
@@ -354,6 +393,10 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
         model_path: str | Path,
         image_path: str | Path,
         annotated_image_path: str | Path,
+        boxes: str = "boxes",
+        scores: str = "scores",
+        classes: str = "classes",
+        *,
         indent: int = 2,
         stream: TextIO | None = None,
         at: int | None = None,
@@ -364,17 +407,26 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
         self.indent = indent
         self.stream = stream or sys.stdout
         self.at = at
+        self.boxes = boxes
+        self.scores = scores
+        self.classes = classes
 
     def effect(self, payload: PayloadT) -> None:
         payload_value: Any = payload
-        prediction_objects = payload_value[self.at] if self.at is not None else payload_value
+        registry = payload_value[self.at] if self.at is not None else payload_value
+        detections = [
+            {"box": box.tolist(), "score": float(score), "class_id": int(class_id)}
+            for box, score, class_id in zip(
+                registry[self.boxes], registry[self.scores], registry[self.classes], strict=True
+            )
+        ]
         print(
             json.dumps(
                 {
                     "model": str(self.model_path),
                     "image": str(self.image_path),
                     "annotated_image": str(self.annotated_image_path),
-                    "detections": prediction_objects,
+                    "detections": detections,
                 },
                 indent=self.indent,
             ),
@@ -386,11 +438,8 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
         upstream_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
-        concrete_objects = list[ObjectMapping]
         if self.at is None:
-            if upstream_annotation is Any or _is_unresolved_object_list(upstream_annotation):
-                return (concrete_objects,), concrete_objects
-            return (upstream_annotation,), upstream_annotation
+            return (TensorRegistry,), TensorRegistry
 
         if upstream_annotation is Any:
             return (Any,), Any
@@ -410,8 +459,4 @@ class LogDetections(SideEffectOp[PayloadT], Generic[PayloadT]):
                 f"{upstream_annotation} (length {len(parts)})"
             )
 
-        logged_annotation = parts[normalized_index]
-        if logged_annotation is Any or _is_unresolved_object_list(logged_annotation):
-            logged_annotation = concrete_objects
-        updated_parts = parts[:normalized_index] + (logged_annotation,) + parts[normalized_index + 1 :]
-        return (upstream_annotation,), updated_parts
+        return (upstream_annotation,), upstream_annotation

@@ -84,8 +84,7 @@ generic tensor helpers that are worth keeping on-device, including transpose,
 scale, filtering, and mapping stages. It also carries a narrow set of
 Torch-native vision postprocess operators such as box-format conversion, mask
 reconstruction, filtering, resizing, and NMS. Vision still owns image
-payloads, projection, rendering, and typed outputs such as `ToDetections()`
-and `ToSegmentations()`.
+payloads, projection, rendering, and logging of registry-backed predictions.
 
 One common mixed flow looks like this:
 
@@ -106,7 +105,7 @@ One common mixed flow looks like this:
         ▼
 ┌─────────────────────────────────────────────┐
 │ NumPy Domain                                │
-├─ ToDetections / Visualization / Logging     │
+├─ Vision postprocess / Visualization / Logging│
 └─────────────────────────────────────────────┘
 ```
 
@@ -162,7 +161,6 @@ during the postprocess.
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.vision import ToSegmentations
 from ml_pipes.torch import (
     ToNumpyRegistry,
     ToTorchRegistry,
@@ -184,14 +182,13 @@ pipeline = Pipeline([
     ...,
     TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
     ToNumpyRegistry(),
-    ToSegmentations(scores="final_scores", classes="class_ids", masks="binary_masks"),
 ])
 ```
 
 The canonical example is
 [`examples/torch/run_mask2former_torch_postprocess.py`](../../../examples/torch/run_mask2former_torch_postprocess.py),
 which keeps mask resizing, query scoring, filtering, winner assignment, and
-mask-to-box conversion in Torch before converting back to NumPy segmentations.
+mask-to-box conversion in Torch before converting back to a NumPy registry.
 
 ### Custom Torch Stage In A Mixed Pipeline
 

@@ -6,19 +6,18 @@ import urllib.request
 from pathlib import Path
 
 from ml_pipes.core import Pipeline
+from ml_pipes.tensor import TensorRegistry
 from ml_pipes.standard import (
     Recall,
     Store,
 )
 from ml_pipes.vision import (
     Decode,
-    Detections,
     DrawBoxes,
     DrawMasks,
     ImagePayload,
     LoadFile,
     SaveImage,
-    Segmentations,
 )
 
 ASSETS_DIR = Path(__file__).resolve().parent / ".example_assets"
@@ -135,7 +134,7 @@ def decode() -> Pipeline[str | Path, ImagePayload]:
 def visualize_and_store(
     output_path: Path,
     class_names: list[str] | None = None,
-) -> Pipeline[Segmentations, tuple[ImagePayload, Segmentations]]:
+) -> Pipeline[TensorRegistry, tuple[ImagePayload, TensorRegistry]]:
     return Pipeline([
         Recall("source_image", prepend=True),
         DrawMasks(class_names=class_names),
@@ -147,7 +146,7 @@ def visualize_and_store(
 def visualize_detections_and_store(
     output_path: Path,
     class_names: list[str] | None = None,
-) -> Pipeline[Detections, tuple[ImagePayload, Detections]]:
+) -> Pipeline[TensorRegistry, tuple[ImagePayload, TensorRegistry]]:
     return Pipeline([
         Recall("source_image", prepend=True),
         DrawBoxes(class_names=class_names),

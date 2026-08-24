@@ -7,17 +7,16 @@ import numpy as np
 from ml_pipes.tensor import TensorRegistry
 from ml_pipes.vision import (
     ConvertBoxFormat,
-    Detections,
     DrawBoxes,
+    FilterTensorsByBoxArea,
     FilterTensorsByClasses,
     FilterTensorsByScore,
     ImagePayload,
     LogDetections,
+    NMM,
     NMS,
     ProjectBoxes,
     ResizeTransform,
-    Segmentations,
-    ToDetections,
 )
 
 
@@ -69,6 +68,19 @@ def test_filter_tensors_by_classes_can_write_to_new_keys():
     assert result["classes"].tolist() == [0, 1, 2]
 
 
+def test_filter_tensors_by_box_area_filters_aligned_registry_values():
+    registry = _make_registry(
+        boxes=[[0, 0, 1, 1], [0, 0, 4, 4]],
+        scores=[0.4, 0.9],
+        classes=[0, 1],
+    )
+
+    result = FilterTensorsByBoxArea("scores", "classes", min_area=4)(registry)
+
+    assert result["boxes"].tolist() == [[0.0, 0.0, 4.0, 4.0]]
+    assert np.allclose(result["scores"], [0.9])
+
+
 def test_convert_box_format_cxcywh_to_xyxy():
     registry = TensorRegistry({"boxes": np.array([[10.0, 20.0, 4.0, 6.0]], dtype=np.float32)})
 
@@ -115,6 +127,34 @@ def test_nms_kept_as_records_original_kept_indices():
     assert result["kept"].tolist() == [0, 2]
 
 
+def test_nmm_uses_uniform_weights_when_overlapping_scores_are_zero():
+    registry = _make_registry(
+        boxes=[[0, 0, 2, 2], [2, 2, 4, 4]],
+        scores=[0.0, 0.0],
+        classes=[1, 1],
+    )
+
+    result = NMM(iou_threshold=0.0)(registry)
+
+    assert np.allclose(result["boxes"], [[1.0, 1.0, 3.0, 3.0]])
+    assert result["boxes"].dtype == np.float32
+    assert result["scores"].dtype == np.float32
+    assert result["classes"].dtype == np.int32
+
+
+def test_draw_boxes_preserves_rgb_metadata_and_translates_bgr_color():
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    registry = _make_registry([[0, 0, 3, 3]], [0.9], [1])
+
+    result, _ = DrawBoxes(color=(1, 2, 3), thickness=1)(
+        ImagePayload(array=image, color_space="RGB", layout="HWC"), registry
+    )
+
+    assert result.color_space == "RGB"
+    assert result.layout == "HWC"
+    assert result.array[0, 0].tolist() == [3, 2, 1]
+
+
 def test_project_boxes_reverses_padding_and_scale():
     registry = _make_registry(
         boxes=[[30.0, 40.0, 110.0, 120.0]],
@@ -151,68 +191,48 @@ def test_project_boxes_clips_to_original_bounds():
     assert result["boxes"].tolist() == [[0.0, 0.0, 200.0, 100.0]]
 
 
-def test_to_detections_converts_registry_to_detections():
-    registry = _make_registry(
-        boxes=[[1.0, 2.0, 3.0, 4.0]],
-        scores=[0.9],
-        classes=[1],
-    )
-
-    result = ToDetections()(registry)
-
-    assert isinstance(result, Detections)
-    assert result.boxes == [[1.0, 2.0, 3.0, 4.0]]
-    assert np.allclose(result.scores, [0.9])
-    assert result.classes == [1]
-
-
 def test_draw_boxes_draws_on_source_image():
     image = np.zeros((32, 32, 3), dtype=np.uint8)
     source = ImagePayload(array=image, color_space="BGR", layout="HWC")
-    detections = Detections(
-        boxes=[[4.0, 4.0, 20.0, 20.0]],
-        scores=[0.9],
-        classes=[1],
-    )
+    registry = _make_registry([[4.0, 4.0, 20.0, 20.0]], [0.9], [1])
 
-    result, returned_detections = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(source, detections)
+    result, returned_registry = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(source, registry)
 
     assert result.array.shape == image.shape
     assert result.color_space == "BGR"
     assert result.layout == "HWC"
     assert np.any(result.array != 0)
-    assert returned_detections is detections
+    assert returned_registry is registry
 
 
-def test_draw_boxes_preserves_segmentations_instance():
+def test_draw_boxes_accepts_source_names_before_rendering_options():
     image = np.zeros((32, 32, 3), dtype=np.uint8)
-    source = ImagePayload(array=image, color_space="BGR", layout="HWC")
-    segmentations = Segmentations(
-        boxes=[[4.0, 4.0, 20.0, 20.0]],
-        scores=[0.9],
-        classes=[1],
-        masks=[np.zeros((32, 32), dtype=bool)],
+    registry = TensorRegistry({
+        "candidate_boxes": np.array([[4, 4, 20, 20]], dtype=np.float32),
+        "candidate_scores": np.array([0.9], dtype=np.float32),
+        "candidate_classes": np.array([1], dtype=np.int32),
+    })
+
+    result, returned_registry = DrawBoxes("candidate_boxes", "candidate_scores", "candidate_classes", class_names=["zero", "one"])(
+        ImagePayload(array=image, color_space="BGR", layout="HWC"), registry
     )
 
-    result, returned_segmentations = DrawBoxes(class_names=["zero", "one"], color=(0, 255, 0))(source, segmentations)
-
-    assert result.array.shape == image.shape
     assert np.any(result.array != 0)
-    assert returned_segmentations is segmentations
+    assert returned_registry is registry
 
 
 def test_log_detections_prints_json_and_returns_input():
     stream = io.StringIO()
-    detections = [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "class_id": 1}]
+    registry = _make_registry([[1.0, 2.0, 3.0, 4.0]], [0.9], [1])
 
     result = LogDetections(
         model_path="model.onnx",
         image_path="image.jpg",
         annotated_image_path="image_model.jpg",
         stream=stream,
-    )(detections)
+    )(registry)
 
-    assert result is detections
+    assert result is registry
     output = stream.getvalue()
     assert '"model": "model.onnx"' in output
     assert '"image": "image.jpg"' in output
@@ -221,10 +241,7 @@ def test_log_detections_prints_json_and_returns_input():
 
 def test_log_detections_at_one_prints_json_and_returns_input():
     stream = io.StringIO()
-    payload = (
-        "prefix",
-        [{"box": [1.0, 2.0, 3.0, 4.0], "score": 0.9, "class_id": 1}],
-    )
+    payload = ("prefix", _make_registry([[1.0, 2.0, 3.0, 4.0]], [0.9], [1]))
 
     result = LogDetections(
         model_path="model.onnx",

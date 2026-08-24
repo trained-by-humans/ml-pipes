@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from ml_pipes.operator import Operator
-from .types import Detections, ImagePayload
+from ml_pipes.tensor import TensorRegistry
+from .types import ImagePayload
 
 
 @dataclass(frozen=True)
@@ -80,7 +83,7 @@ class Tile:
 
 @Operator
 class Stitch:
-    """Reassemble per-tile Detections into a single global Detections.
+    """Reassemble per-tile detection registries into one global registry.
 
     Remaps each tile's box coordinates from tile-local space back to the
     original image coordinate system and concatenates all detections.
@@ -88,20 +91,44 @@ class Stitch:
     Apply NMS() or NMM() after Stitch to deduplicate cross-tile detections.
     """
 
+    def __init__(self, boxes: str = "boxes", scores: str = "scores", classes: str = "classes") -> None:
+        self.boxes = boxes
+        self.scores = scores
+        self.classes = classes
+
     def __call__(
         self,
-        detections: "list[Detections]",
-        tile_rects: "list[TileRect]",
-    ) -> "Detections":
-        all_boxes: list[list[float]] = []
-        all_scores: list[float] = []
-        all_classes: list[int] = []
+        registries: list[TensorRegistry],
+        tile_rects: list[TileRect],
+    ) -> TensorRegistry:
+        if len(registries) != len(tile_rects):
+            raise ValueError("Stitch requires one TensorRegistry per TileRect")
 
-        for dets, rect in zip(detections, tile_rects):
-            offset = [rect.x1, rect.y1, rect.x1, rect.y1]
-            for box in dets.boxes:
-                all_boxes.append([b + o for b, o in zip(box, offset)])
-            all_scores.extend(dets.scores)
-            all_classes.extend(dets.classes)
+        if not registries:
+            return TensorRegistry(
+                {
+                    self.boxes: np.zeros((0, 4), dtype=np.float32),
+                    self.scores: np.zeros((0,), dtype=np.float32),
+                    self.classes: np.zeros((0,), dtype=np.int32),
+                }
+            )
 
-        return Detections(boxes=all_boxes, scores=all_scores, classes=all_classes)
+        box_dtype = registries[0][self.boxes].dtype
+        score_dtype = registries[0][self.scores].dtype
+        class_dtype = registries[0][self.classes].dtype
+        all_boxes = []
+        all_scores = []
+        all_classes = []
+        for registry, rect in zip(registries, tile_rects, strict=True):
+            offset = np.asarray([rect.x1, rect.y1, rect.x1, rect.y1], dtype=box_dtype)
+            all_boxes.append(registry[self.boxes] + offset)
+            all_scores.append(registry[self.scores])
+            all_classes.append(registry[self.classes])
+
+        return TensorRegistry(
+            {
+                self.boxes: np.concatenate(all_boxes, axis=0) if all_boxes else np.zeros((0, 4), dtype=box_dtype),
+                self.scores: np.concatenate(all_scores, axis=0) if all_scores else np.zeros((0,), dtype=score_dtype),
+                self.classes: np.concatenate(all_classes, axis=0) if all_classes else np.zeros((0,), dtype=class_dtype),
+            }
+        )

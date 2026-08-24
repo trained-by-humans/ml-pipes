@@ -42,7 +42,7 @@ input value + fresh context
 ```
 
 The pipeline engine itself is payload-agnostic. Image payloads, tensor
-payloads, registries, detections, and data-preparation values are ordinary
+payloads, registries, and data-preparation values are ordinary
 operator inputs and outputs, not special pipeline modes.
 
 ## Main Components

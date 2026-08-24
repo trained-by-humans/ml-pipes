@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import TypeVar
-
 import numpy as np
 
 from ml_pipes.operator import Operator
 from ml_pipes.tensor import FilterTensors, TensorRegistry
-from .types import ImagePayload, ResizeTransform, Segmentations
+from .types import ImagePayload, ResizeTransform
 
 __all__ = [
     "DrawMasks",
@@ -17,12 +15,8 @@ __all__ = [
     "ProjectRoIMasks",
     "ReconstructMasks",
     "ResizeMasks",
-    "ToSegmentations",
     "WeightMasksByScores",
 ]
-
-SegT = TypeVar("SegT", bound=Segmentations)
-
 
 def _flatten_leading_dim(array: np.ndarray) -> np.ndarray:
     leading = int(array.shape[0])
@@ -237,42 +231,26 @@ class ProjectRoIMasks:
 
 
 @Operator
-class ToSegmentations:
-    def __init__(
-        self,
-        boxes: str = "boxes",
-        scores: str = "scores",
-        classes: str = "classes",
-        masks: str = "masks",
-    ):
-        self.boxes = boxes
-        self.scores = scores
-        self.classes = classes
-        self.masks = masks
-
-    def __call__(self, registry: TensorRegistry) -> Segmentations:
-        return Segmentations(
-            boxes=registry[self.boxes].tolist(),
-            scores=registry[self.scores].tolist(),
-            classes=registry[self.classes].tolist(),
-            masks=list(registry[self.masks]),
-        )
-
-
-@Operator
 class DrawMasks:
     def __init__(
         self,
+        masks: str = "masks",
+        classes: str = "classes",
+        *,
         class_names: list[str] | tuple[str, ...] | None = None,
         alpha: float = 0.45,
     ):
         self.class_names = tuple(class_names) if class_names is not None else None
         self.alpha = alpha
+        self.masks = masks
+        self.classes = classes
 
-    def __call__(self, source_image: ImagePayload, segmentations: SegT) -> tuple[ImagePayload, SegT]:
+    def __call__(self, source_image: ImagePayload, registry: TensorRegistry) -> tuple[ImagePayload, TensorRegistry]:
         image = source_image.array.copy()
-        for mask, class_id in zip(segmentations.masks, segmentations.classes, strict=True):
+        for mask, class_id in zip(registry[self.masks], registry[self.classes], strict=True):
             color = np.asarray(self._class_color(int(class_id)), dtype=np.float32)
+            if source_image.color_space == "RGB":
+                color = color[::-1]
             mask_bool = np.asarray(mask, dtype=bool)
             if mask_bool.ndim != 2:
                 raise ValueError(f"Expected 2D segmentation mask, got shape {mask_bool.shape}")
@@ -280,7 +258,7 @@ class DrawMasks:
                 blended = (1.0 - self.alpha) * image[mask_bool].astype(np.float32) + self.alpha * color
                 image[mask_bool] = blended.astype(np.uint8)
 
-        return ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout), segmentations
+        return ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout), registry
 
     def _class_color(self, class_id: int) -> tuple[int, int, int]:
         return (

@@ -38,16 +38,15 @@ from ml_pipes.tensor import (
     Slice,
     Squeeze,
     Transpose,
+    TensorRegistry,
 )
 from ml_pipes.vision import (
     ConvertBoxFormat,
-    Detections,
     ImagePayload,
     NMS,
     Normalize,
     ProjectBoxes,
     Resize,
-    ToDetections,
 )
 
 BUNDLED_MODEL_PATH = ASSETS_DIR / "yolov8n.onnx"
@@ -56,7 +55,7 @@ BUNDLED_MODEL_PATH = ASSETS_DIR / "yolov8n.onnx"
 def yolo8_inference_pipeline(
     model_path: Path,
     conf_threshold: float = 0.25,
-) -> Pipeline[ImagePayload, Detections]:
+) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline(
         [
             Resize((640, 640)),
@@ -75,7 +74,6 @@ def yolo8_inference_pipeline(
             NMS(conf_threshold=conf_threshold),
             Recall("resize_transform"),
             ProjectBoxes(),
-            ToDetections(),
         ],
         auto_validate=True,
     )

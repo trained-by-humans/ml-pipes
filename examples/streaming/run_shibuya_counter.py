@@ -50,14 +50,13 @@ from ml_pipes.tensor import (
     GatherScores,
     Slice,
     Squeeze,
+    TensorRegistry,
     Transpose,
 )
 from ml_pipes.vision import (
     ConvertBoxFormat,
-    Detections,
     DrawBoxes,
-    FilterPredictionsByArea,
-    FilterPredictionsByClass,
+    FilterTensorsByBoxArea,
     FilterTensorsByClasses,
     ImagePayload,
     NMS,
@@ -67,18 +66,17 @@ from ml_pipes.vision import (
     Resize,
     Stitch,
     Tile,
-    ToDetections,
 )
 
 _PERSON_CLASS_ID = 0  # COCO: person
 _MAX_PERSON_AREA = 1_000  # px² — keeps the count focused on smaller pedestrians in the crowd
 
 
-def _count_detections(detections: Detections) -> int:
-    return len(detections.boxes)
+def _count_detections(registry: TensorRegistry) -> int:
+    return len(registry["boxes"])
 
 
-def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePayload, Detections]:
+def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline([
         Resize((640, 640)),
         Store("resize_transform", source=1),
@@ -102,7 +100,6 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePa
         NMS(conf_threshold=conf_threshold),
         Recall("resize_transform"),
         ProjectBoxes(),
-        ToDetections(),
     ])
 
 
@@ -128,8 +125,7 @@ def build_pipeline(
     ], auto_validate=True) if tile else _infer_pipeline(model_path, conf_threshold)
 
     postprocess = Pipeline([
-        FilterPredictionsByClass({_PERSON_CLASS_ID}),
-        FilterPredictionsByArea(max_area=_MAX_PERSON_AREA),
+        FilterTensorsByBoxArea("scores", "classes", max_area=_MAX_PERSON_AREA),
         Store("filtered_detections"),
         Map(_count_detections),
         Store("count"),

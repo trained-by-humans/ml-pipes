@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 
@@ -9,36 +9,12 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import assert_type
 
-from ml_pipes.vision import (
-    DrawBoxes,
-    DrawMasks,
-)
-from ml_pipes.vision import (
-    Detections,
-    ImagePayload,
-    Segmentations,
-)
-
-
-@dataclass
-class RichDetections(Detections):
-    labels: list[str]
+from ml_pipes.tensor import TensorRegistry
+from ml_pipes.vision import DrawBoxes, DrawMasks, ImagePayload
 
 
 source = ImagePayload(array=np.zeros((8, 8, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
-rich_detections = RichDetections(
-    boxes=[[1.0, 1.0, 6.0, 6.0]],
-    scores=[0.9],
-    classes=[1],
-    labels=["person"],
-)
-segmentations = Segmentations(
-    boxes=[[1.0, 1.0, 6.0, 6.0]],
-    scores=[0.9],
-    classes=[1],
-    masks=[np.zeros((8, 8), dtype=bool)],
-)
+registry = cast(TensorRegistry, None)
 
-assert_type(DrawBoxes()(source, rich_detections), tuple[ImagePayload, RichDetections])
-assert_type(DrawBoxes()(source, segmentations), tuple[ImagePayload, Segmentations])
-assert_type(DrawMasks()(source, segmentations), tuple[ImagePayload, Segmentations])
+assert_type(DrawBoxes()(source, registry), tuple[ImagePayload, TensorRegistry])
+assert_type(DrawMasks()(source, registry), tuple[ImagePayload, TensorRegistry])

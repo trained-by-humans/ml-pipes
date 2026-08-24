@@ -38,6 +38,7 @@ from ml_pipes.tensor import (
     Slice,
     Squeeze,
     Transpose,
+    TensorRegistry,
 )
 from ml_pipes.vision import (
     ConvertBoxFormat,
@@ -48,8 +49,6 @@ from ml_pipes.vision import (
     ProjectMasks,
     ReconstructMasks,
     Resize,
-    Segmentations,
-    ToSegmentations,
 )
 
 MODEL_URL = "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n-seg.onnx"
@@ -60,7 +59,7 @@ MODEL_NAME = "yolo11n-seg.onnx"
 NUM_MASKS = 32
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segmentations]:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline(
         [
             Resize((640, 640)),
@@ -85,7 +84,6 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segment
             ProjectBoxes(),
             Recall("resize_transform"),
             ProjectMasks(),
-            ToSegmentations(),
         ],
         auto_validate=True,
     )
