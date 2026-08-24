@@ -86,3 +86,8 @@ __all__ = [
     "ToSegmentations",
     "WeightMasksByScores",
 ]
+
+from ._inspection import register_inspection_formatters as _register_inspection_formatters
+
+
+_register_inspection_formatters()

@@ -152,13 +152,13 @@ def test_validate_release_metadata_accepts_valid_manifests(
     )
 
 
-def test_package_manifest_captures_optional_internal_dependencies_on_current_manifests() -> None:
+def test_package_manifest_matches_current_optional_internal_dependency_shape() -> None:
     module = _load_validate_release_metadata_module()
 
     core_manifest = module._package_manifest("core", "ml-pipes-core")
     meta_manifest = module._package_manifest("meta", "ml-pipes")
 
-    assert any(
+    assert not any(
         dependency.source == "project.optional-dependencies.inspection"
         for dependency in core_manifest.internal_dependency_requirements
     )

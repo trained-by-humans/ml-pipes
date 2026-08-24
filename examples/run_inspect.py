@@ -112,7 +112,7 @@ def run_inspection_error() -> InspectionResult:
 def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
     inspector = PipelineInspector()
     if args.save_html:
-        saved = inspector.save_to_html(result, args.save_html)
+        saved = inspector.save(result, args.save_html)
         print(f"Inspection report saved to: {saved}", file=sys.stderr)
     elif args.dump:
         saved = InspectionSerializer().dump(result, args.dump)
@@ -120,7 +120,7 @@ def show_result(result: InspectionResult, args: argparse.Namespace) -> None:
     elif args.print_only:
         pass
     else:
-        inspector.show_in_browser(result)
+        inspector.show(result)
 
 
 # ---------------------------------------------------------------------------

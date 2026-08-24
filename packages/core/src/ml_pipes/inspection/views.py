@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
+from ml_pipes.inspection._deps import load_cv2
 from ml_pipes.tracing import StepSpan
+
+
+class Summarizable(Protocol):
+    def summary(self) -> str: ...
 
 
 @dataclass
@@ -15,6 +20,9 @@ class ImageBlock:
     dim: bool = False
     overlay_array: np.ndarray | None = None
 
+    def summary(self) -> str:
+        return self.title
+
 
 @dataclass
 class TextBlock:
@@ -22,12 +30,36 @@ class TextBlock:
     rows: list[tuple[str, str]]
     dim: bool = False
 
+    def summary(self) -> str:
+        summary = self.title
+        rows = self.rows[:3] if self.title == "dict" else self.rows[:1]
+        if rows:
+            row_summaries = [(f"{key} {value}".rstrip() if key else f"{value}") for key, value in rows]
+            if summary:
+                summary += "  " + "  |  ".join(row_summaries)
+            else:
+                summary = "  |  ".join(row_summaries)
+        return summary
+
 
 @dataclass
 class GroupBlock:
     title: str
     children: list["OutputBlock"]
     dim: bool = False
+
+    def summary(self) -> str:
+        summary = self.title
+        child_summaries = [child.summary() for child in self.children[:2]]
+        if child_summaries:
+            if summary:
+                summary += "  " + "  |  ".join(child_summaries)
+            else:
+                summary = "  |  ".join(child_summaries)
+        if len(self.children) > 2:
+            suffix = f"+{len(self.children) - 2} more"
+            summary = f"{summary}  |  {suffix}" if summary else suffix
+        return summary
 
 
 OutputBlock = ImageBlock | TextBlock | GroupBlock
@@ -41,18 +73,15 @@ class StepView:
     error: bool = False
     children: list["StepView"] = field(default_factory=list)
 
+    def summary(self) -> str:
+        summary = _summarize_blocks(self.blocks)
+        if summary:
+            return summary
+        return "[ERROR]" if self.error else ""
 
-class Renderer(Protocol):
-    """Anything that can turn a list of StepViews into an output format."""
 
-    def render(self, views: list[StepView]) -> Any: ...
-
-
-OutputFormatter = Callable[[Any], list[OutputBlock]]
-SpanFormatter = Callable[
-    [StepSpan, np.ndarray | None],
-    tuple[StepView, np.ndarray | None],
-]
+def _summarize_blocks(blocks: list[OutputBlock]) -> str:
+    return "  |  ".join(block.summary() for block in blocks)
 
 
 def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
@@ -69,9 +98,7 @@ def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
     grid = np.full((gh, gw, 3), 180, dtype=np.uint8)
     for idx, img in enumerate(images):
         if img.shape[:2] != (h, w):
-            import cv2
-
-            img = cv2.resize(img, (w, h))
+            img = load_cv2().resize(img, (w, h))
         r, c = divmod(idx, cols)
         y = r * (h + divider)
         x = c * (w + divider)
@@ -108,13 +135,3 @@ def _build_span_metadata(span: StepSpan) -> dict[str, Any]:
     metadata = dict(span.operator_config)
     metadata.update({f"attributes.{key}": value for key, value in span.attributes.items()})
     return metadata
-
-
-def _flatten_step_views(views: list[StepView], depth: int = 0) -> list[tuple[StepView, int]]:
-    """Pre-order traversal of a StepView tree, each entry paired with its depth."""
-
-    flat = []
-    for view in views:
-        flat.append((view, depth))
-        flat.extend(_flatten_step_views(view.children, depth + 1))
-    return flat

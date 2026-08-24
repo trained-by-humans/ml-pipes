@@ -58,6 +58,7 @@ def test_inspection_component_surface_is_curated() -> None:
         "ImageBlock",
         "InspectionResult",
         "InspectionSerializer",
+        "Orientation",
         "OutputBlock",
         "PipelineInspector",
         "Renderer",

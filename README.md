@@ -178,9 +178,19 @@ from ml_pipes.inspection import PipelineInspector
 
 image_path = "image.jpg"
 result = pipeline.inspect(image_path)
+
+# Store the raw inspection for debugging later
 result.dump("inspection.pkl")
-PipelineInspector().show_in_browser(result, orientation="horizontal")
+
+# Or use PipelineInspector to inspect the result
+html = PipelineInspector().render(result, orientation="horizontal")
+PipelineInspector().save(result, "inspection.html", orientation="horizontal")
+PipelineInspector().show(result, orientation="horizontal")
 ```
+
+Install the shared inspection renderer extra together with the package chain
+you inspect, for example `ml-pipes[inspection,onnx,vision]`. Specialized
+inspection formatting follows the package modules you import.
 
 You can save the inspection result and open it in a browser:
 

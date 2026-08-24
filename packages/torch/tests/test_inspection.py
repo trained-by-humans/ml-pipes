@@ -1,47 +1,19 @@
 from __future__ import annotations
 
-import importlib
-import os
-
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes.torch.types import TorchTensorRegistry
-
-_STRICT_OPTIONAL_IMPORTS_ENV = "ML_PIPES_STRICT_OPTIONAL_IMPORTS"
-
-
-def _strict_optional_imports_enabled() -> bool:
-    value = os.getenv(_STRICT_OPTIONAL_IMPORTS_ENV, "")
-    return value.lower() not in {"", "0", "false"}
-
-
-def _import_optional_dependency(module_name: str) -> None:
-    if _strict_optional_imports_enabled():
-        importlib.import_module(module_name)
-        return
-
-    pytest.importorskip(module_name)
+from ml_pipes.inspection import InspectionResult
+from ml_pipes.torch import TorchTensorRegistry
+from ml_pipes.tracing import StepSpan
 
 
 def _inspection_tools():
-    # These formatting assertions exercise core's optional inspection stack.
-    _import_optional_dependency("cv2")
-    _import_optional_dependency("ml_pipes.onnx")
-    _import_optional_dependency("ml_pipes.vision")
-
     from ml_pipes.inspection import ImageBlock, PipelineInspector, TextBlock
 
-    try:
-        inspector = PipelineInspector()
-    except ImportError as exc:  # pragma: no cover - depends on optional extras
-        if _strict_optional_imports_enabled():
-            raise
-        pytest.skip(str(exc))
-
-    return ImageBlock, TextBlock, inspector
+    return ImageBlock, TextBlock, PipelineInspector()
 
 
 def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry():
@@ -53,7 +25,7 @@ def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry()
         }
     )
 
-    blocks = inspector._output_to_blocks(registry)
+    blocks = inspector._value_to_blocks(registry)
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)
@@ -66,7 +38,7 @@ def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry()
 
 def test_pipeline_inspector_formats_primitive_tuple_as_single_block():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    blocks = inspector._output_to_blocks((480, 640))
+    blocks = inspector._value_to_blocks((480, 640))
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)
@@ -79,7 +51,7 @@ def test_pipeline_inspector_formats_rgb_ndarray_as_image():
     image = np.zeros((4, 6, 3), dtype=np.uint8)
     image[:, :, 0] = 255
 
-    blocks = inspector._output_to_blocks(image)
+    blocks = inspector._value_to_blocks(image)
 
     assert len(blocks) == 2
     assert isinstance(blocks[0], ImageBlock)
@@ -92,7 +64,7 @@ def test_pipeline_inspector_formats_rgb_ndarray_as_image():
 
 def test_pipeline_inspector_formats_non_image_ndarray_as_text():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    blocks = inspector._output_to_blocks(np.zeros((2, 3), dtype=np.float32))
+    blocks = inspector._value_to_blocks(np.zeros((2, 3), dtype=np.float32))
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)
@@ -102,17 +74,24 @@ def test_pipeline_inspector_formats_non_image_ndarray_as_text():
 
 def test_pipeline_inspector_formats_list_of_dicts():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    blocks = inspector._output_to_blocks(
-        [
-            {"class_id": 1, "score": 0.9},
-            {"class_id": 2, "score": 0.8},
-        ]
+    views = inspector.build_views(
+        InspectionResult(
+            [
+                StepSpan(
+                    label="0:Example",
+                    start_time=0.0,
+                    duration_s=0.01,
+                    output_value=[
+                        {"class_id": 1, "score": 0.9},
+                        {"class_id": 2, "score": 0.8},
+                    ],
+                )
+            ]
+        )
     )
 
-    assert len(blocks) == 1
-    assert isinstance(blocks[0], TextBlock)
-    assert blocks[0].title == "list  ×2"
-    assert blocks[0].rows == [
+    assert len(views) == 1
+    assert views[0].blocks == [TextBlock("list  ×2", [
         ("[0]", "dict  class_id 1  |  score 0.9"),
         ("[1]", "dict  class_id 2  |  score 0.8"),
-    ]
+    ])]

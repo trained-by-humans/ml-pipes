@@ -750,7 +750,7 @@ def main() -> int:
 
     if args.inspect_html is not None and sample_count > 0:
         inspection = pipeline.inspect(raw_rows)
-        saved = PipelineInspector().save_to_html(
+        saved = PipelineInspector().save(
             inspection,
             args.inspect_html,
             orientation=args.inspect_orientation,

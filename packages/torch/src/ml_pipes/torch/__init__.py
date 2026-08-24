@@ -106,3 +106,8 @@ __all__ = [
     "TorchTensorPayload",
     "TorchTensorRegistry",
 ]
+
+from ._inspection import register_inspection_formatters as _register_inspection_formatters
+
+
+_register_inspection_formatters()

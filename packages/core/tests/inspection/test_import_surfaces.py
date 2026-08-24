@@ -64,3 +64,67 @@ def test_inspection_result_html_repr_falls_back_without_inspection_extras() -> N
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip() == "None"
+
+
+def test_pipeline_inspector_follows_imported_package_chain_without_vision_or_onnx() -> None:
+    result = _run_python(
+        "import importlib.abc\n"
+        "import sys\n"
+        "import numpy as np\n"
+        "blocked = {'ml_pipes.onnx', 'ml_pipes.vision'}\n"
+        "class Blocker(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, fullname, path=None, target=None):\n"
+        "        if fullname in blocked or any(fullname.startswith(name + '.') for name in blocked):\n"
+        "            raise ModuleNotFoundError(f\"No module named {fullname!r}\")\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, Blocker())\n"
+        "from ml_pipes.inspection import PipelineInspector\n"
+        "inspector = PipelineInspector()\n"
+        "from ml_pipes.tensor import TensorRegistry\n"
+        "blocks = inspector._value_to_blocks(\n"
+        "    TensorRegistry({'scores': np.zeros((2, 3), dtype=np.float32)})\n"
+        ")\n"
+        "print(type(blocks[0]).__name__)\n"
+        "print(blocks[0].title)\n"
+        "print(blocks[0].rows[0][0])\n"
+        "print(blocks[0].rows[0][1])\n"
+        "unexpected = sorted(\n"
+        "    name\n"
+        "    for name in sys.modules\n"
+        "    if name in blocked or any(name.startswith(blocked_name + '.') for blocked_name in blocked)\n"
+        ")\n"
+        "print(unexpected)\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    lines = result.stdout.strip().splitlines()
+    assert lines[0] == "TextBlock"
+    assert lines[1] == "TensorRegistry"
+    assert lines[2] == "scores"
+    assert "(2, 3)" in lines[3]
+    assert lines[4] == "[]"
+
+
+def test_type_only_inspection_exports_import_without_inspection_extra() -> None:
+    result = _run_python(
+        "import importlib.abc\n"
+        "import sys\n"
+        "from typing import get_args\n"
+        "blocked = {'cv2'}\n"
+        "class Blocker(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, fullname, path=None, target=None):\n"
+        "        if fullname in blocked or any(fullname.startswith(name + '.') for name in blocked):\n"
+        "            raise ModuleNotFoundError(f\"No module named {fullname!r}\")\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, Blocker())\n"
+        "from ml_pipes.inspection import Orientation, Renderer\n"
+        "print(Renderer.__name__)\n"
+        "print(get_args(Orientation))\n"
+        "print('cv2' in sys.modules)\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    lines = result.stdout.strip().splitlines()
+    assert lines[0] == "Renderer"
+    assert lines[1] == "('horizontal', 'vertical')"
+    assert lines[2] == "False"

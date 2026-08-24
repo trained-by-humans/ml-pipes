@@ -3,60 +3,44 @@
 from __future__ import annotations
 
 import dataclasses
-import os
-import sys
-import tempfile
-import webbrowser
+import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
 
 from ml_pipes.inspection.artifacts import InspectionResult
+from ml_pipes.inspection._global_registry import global_formatter_registry
+from ml_pipes.inspection.registry import (
+    FormatterRegistry,
+    StepFormatter,
+    ValueFormatter,
+)
+from ml_pipes.inspection.renderer import _normalize_orientation
+from ml_pipes.tracing import StepSpan
 from ml_pipes.inspection.views import (
     GroupBlock,
     ImageBlock,
     OutputBlock,
-    OutputFormatter,
-    Renderer,
-    SpanFormatter,
     StepView,
     TextBlock,
     _apply_image_carry,
     _build_span_metadata,
     _make_grid,
+    _summarize_blocks,
 )
 
-_IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
+ValueT = TypeVar("ValueT")
+_DEFAULT_GROUP_PREVIEW_LIMIT = 12
+_DEFAULT_LIST_PREVIEW_LIMIT = 6
+_DEFAULT_TEXT_PREVIEW_LIMIT = 120
+_LIST_TITLE_RE = re.compile(
+    r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
+)
 
-
-def _block_summary(blocks: list[OutputBlock]) -> str:
-    """Collapse a block list to a single short string for list-item rows."""
-
-    parts = []
-    for block in blocks:
-        if isinstance(block, ImageBlock):
-            parts.append(block.title)
-        elif isinstance(block, TextBlock):
-            summary = block.title
-            rows = block.rows[:3] if block.title == "dict" else block.rows[:1]
-            if rows:
-                row_summaries = [(f"{key} {value}".rstrip() if key else f"{value}") for key, value in rows]
-                if summary:
-                    summary += "  " + "  |  ".join(row_summaries)
-                else:
-                    summary = "  |  ".join(row_summaries)
-            parts.append(summary)
-        else:
-            summary = block.title
-            child_summaries = [_block_summary([child]) for child in block.children[:2]]
-            if child_summaries:
-                summary += "  " + "  |  ".join(child_summaries)
-            if len(block.children) > 2:
-                summary += f"  |  +{len(block.children) - 2} more"
-            parts.append(summary)
-    return "  |  ".join(parts)
+if TYPE_CHECKING:
+    from ml_pipes.inspection.html_renderer import HtmlRenderer
 
 
 def _is_primitive_tuple(value: tuple[Any, ...]) -> bool:
@@ -68,96 +52,109 @@ class PipelineInspector:
     """Converts an InspectionResult into views and renders them."""
 
     def __init__(self) -> None:
-        from ml_pipes.inspection.formatters import default_output_formatters, default_span_formatters
+        from ml_pipes.inspection._builtin_formatters import ensure_builtin_formatters_registered
+        from ml_pipes.inspection.html_renderer import HtmlRenderer
 
-        self._output_fmts: dict[type, OutputFormatter] = default_output_formatters()
-        self._span_fmts: dict[type, SpanFormatter] = default_span_formatters()
+        ensure_builtin_formatters_registered()
+        self._renderer: HtmlRenderer = HtmlRenderer()
+        self._formatters = FormatterRegistry(parent=global_formatter_registry())
 
-    def register_output_formatter(self, type_: type, formatter: OutputFormatter) -> "PipelineInspector":
-        """Register a formatter for *type_* output values. Returns self for chaining."""
+    def register_value_formatter(
+        self,
+        value_type: type[ValueT],
+        formatter: ValueFormatter[ValueT],
+    ) -> "PipelineInspector":
+        """Register a formatter for inspected values of *value_type*. Returns self for chaining."""
 
-        self._output_fmts[type_] = formatter
+        self._formatters.register_value_formatter(value_type, formatter)
         return self
 
-    def register_span_formatter(self, operator_type: type, formatter: SpanFormatter) -> "PipelineInspector":
-        """Register a span-level formatter for *operator_type*. Returns self for chaining."""
+    def register_step_formatter(self, operator_type: type[Any], formatter: StepFormatter) -> "PipelineInspector":
+        """Register a formatter for inspected steps of *operator_type*. Returns self for chaining."""
 
-        self._span_fmts[operator_type] = formatter
+        self._formatters.register_step_formatter(operator_type, formatter)
         return self
 
-    def _find_output_formatter(self, value: Any) -> OutputFormatter | None:
-        value_type = type(value)
-        return self._output_fmts.get(value_type) or next(
-            (
-                formatter
-                for registered_type, formatter in self._output_fmts.items()
-                if issubclass(value_type, registered_type)
-            ),
-            None,
-        )
+    def build_views(self, result: InspectionResult) -> list[StepView]:
+        """Prepare the intermediate StepView tree from spans for built-in or custom renderers."""
 
-    def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
-        return (
-            isinstance(block, TextBlock)
-            and block.title == type(value).__name__
-            and len(block.rows) == 1
-            and block.rows[0][0] == ""
-        )
+        views, _ = self._trace_to_views(result, None)
+        return views
 
-    def _recursive_reference_block(self, value: Any) -> TextBlock:
-        return TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])
-
-    def _named_block(
+    def render(
         self,
-        name: str,
-        value: Any,
-        active_ids: set[int],
-    ) -> OutputBlock:
-        blocks = self._output_to_blocks(value, active_ids)
-        if len(blocks) == 1:
-            block = blocks[0]
-            if isinstance(block, GroupBlock):
-                return GroupBlock(
-                    title=f"{name}: {block.title}",
-                    children=block.children,
-                    dim=block.dim,
-                )
-            if self._is_scalar_field_block(block, value):
-                return TextBlock("", [(name, block.rows[0][1])], dim=block.dim)
+        result: InspectionResult,
+        orientation: str = "horizontal",
+    ) -> str:
+        """Return the built-in self-contained HTML report."""
 
-        return GroupBlock(
-            title=f"{name}: {type(value).__name__}",
-            children=blocks,
+        return self._renderer.render(
+            self.build_views(result),
+            orientation=_normalize_orientation(orientation),
         )
 
-    def _mapping_to_group(
+    def save(
         self,
-        title: str,
-        value: Mapping[Any, Any],
-        active_ids: set[int],
-    ) -> GroupBlock:
-        items = list(value.items())
-        children = [self._named_block(str(key), item, active_ids) for key, item in items[:12]]
-        if len(items) > 12:
-            children.append(TextBlock("…", [("", f"+{len(items) - 12} more")]))
-        return GroupBlock(title=title, children=children)
+        result: InspectionResult,
+        path: str | Path,
+        orientation: str = "horizontal",
+    ) -> Path:
+        """Write the built-in HTML report to *path* and return it."""
 
-    def _dataclass_to_group(
-        self,
-        value: Any,
-        title: str | None = None,
-        *,
-        active_ids: set[int],
-    ) -> GroupBlock:
-        return GroupBlock(
-            title=title or type(value).__name__,
-            children=[
-                self._named_block(field.name, getattr(value, field.name), active_ids)
-                for field in dataclasses.fields(value)
-            ],
+        return self._renderer.save(
+            self.build_views(result),
+            path,
+            orientation=_normalize_orientation(orientation),
         )
 
-    def _output_to_blocks(
+    def show(
+        self,
+        result: InspectionResult,
+        orientation: str = "horizontal",
+    ) -> None:
+        """Display the result inline in Jupyter or open a browser report otherwise."""
+
+        self._renderer.show(
+            self.build_views(result),
+            orientation=_normalize_orientation(orientation),
+        )
+
+    def _trace_to_views(
+        self,
+        trace: Any,
+        last_image: np.ndarray | None,
+    ) -> tuple[list[StepView], np.ndarray | None]:
+        if trace is None:
+            return [], last_image
+        views = []
+        for span in trace.spans:
+            view, last_image = self._span_to_view(span, last_image)
+            views.append(view)
+        return views, last_image
+
+    def _span_to_view(
+        self,
+        span: StepSpan,
+        last_image: np.ndarray | None,
+    ) -> tuple[StepView, np.ndarray | None]:
+        if span.error:
+            children, _ = self._trace_to_views(span.child_trace, last_image)
+            return StepView(span.label, _build_span_metadata(span), [], error=True, children=children), last_image
+
+        op_type = span.operator_type
+        formatter = self._formatters.find_step_formatter(op_type) if op_type is not None else None
+        if formatter is not None:
+            view, image_to_carry = formatter(span, last_image)
+            children, _ = self._trace_to_views(span.child_trace, image_to_carry)
+            return dataclasses.replace(view, children=children), image_to_carry
+
+        raw_blocks = self._value_to_blocks(span.output_value)
+        compacted_blocks = self._compact_blocks(raw_blocks)
+        blocks, image_to_carry = _apply_image_carry(compacted_blocks, last_image)
+        children, _ = self._trace_to_views(span.child_trace, image_to_carry)
+        return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
+
+    def _value_to_blocks(
         self,
         value: Any,
         active_ids: set[int] | None = None,
@@ -170,37 +167,25 @@ class PipelineInspector:
                 return [TextBlock(type(value).__name__, [("", str(value))])]
             blocks: list[OutputBlock] = []
             for item in value:
-                blocks.extend(self._output_to_blocks(item, active_ids))
+                blocks.extend(self._value_to_blocks(item, active_ids))
             return blocks
 
         if isinstance(value, list) and value:
-            list_max = 6
-            formatter = self._find_output_formatter(value[0])
-            if formatter is not None:
-                all_blocks = [formatter(item) for item in value]
-                first = all_blocks[0]
-                if first and isinstance(first[0], ImageBlock):
-                    grid = _make_grid(
-                        [block.array for blocks in all_blocks for block in blocks if isinstance(block, ImageBlock)],
-                        divider=2,
+            value_id = id(value)
+            if value_id in active_ids:
+                return [
+                    GroupBlock(
+                        title=f"list[{type(value[0]).__name__}]  ×{len(value)}",
+                        children=[self._recursive_reference_block(value)],
                     )
-                    return [ImageBlock(title=f"{first[0].title.split('  ')[0]}  ×{len(value)}", array=grid)]
-                rows = [(f"[{i}]", _block_summary(blocks)) for i, blocks in enumerate(all_blocks[:list_max])]
-                if len(value) > list_max:
-                    rows.append(("…", f"+{len(value) - list_max} more"))
-                return [TextBlock(f"list  ×{len(value)}", rows)]
-            if isinstance(value[0], Mapping) or (dataclasses.is_dataclass(value[0]) and not isinstance(value[0], type)):
-                rows = [
-                    (f"[{i}]", _block_summary(self._output_to_blocks(item, active_ids)))
-                    for i, item in enumerate(value[:list_max])
                 ]
-                if len(value) > list_max:
-                    rows.append(("…", f"+{len(value) - list_max} more"))
-                return [TextBlock(f"list  ×{len(value)}", rows)]
-            item_type = type(value[0]).__name__
-            return [TextBlock(f"list[{item_type}]  ×{len(value)}", [("", "…")])]
+            active_ids.add(value_id)
+            try:
+                return [self._list_to_group(value, active_ids)]
+            finally:
+                active_ids.remove(value_id)
 
-        formatter = self._find_output_formatter(value)
+        formatter = self._formatters.find_value_formatter(type(value))
         if formatter is not None:
             return formatter(value)
 
@@ -226,112 +211,226 @@ class PipelineInspector:
 
         name = type(value).__name__
         text = value if isinstance(value, str) else repr(value)
-        return [TextBlock(name, [("", text[:120] + ("…" if len(text) > 120 else ""))])]
+        return [TextBlock(name, [("", text)])]
 
-    def _span_to_view(
+    def _list_to_group(
         self,
-        span: StepSpan,
-        last_image: np.ndarray | None,
-    ) -> tuple[StepView, np.ndarray | None]:
-        if span.error:
-            children, _ = self._trace_to_views(span.child_trace, last_image)
-            return StepView(span.label, _build_span_metadata(span), [], error=True, children=children), last_image
-
-        op_type = span.operator_type
-        formatter = (
-            self._span_fmts.get(op_type) or (
-                next(
-                    (
-                        fmt
-                        for registered_type, fmt in self._span_fmts.items()
-                        if issubclass(op_type, registered_type)
-                    ),
-                    None,
+        value: list[Any],
+        active_ids: set[int],
+    ) -> GroupBlock:
+        return GroupBlock(
+            title=f"list[{type(value[0]).__name__}]  ×{len(value)}",
+            children=[
+                GroupBlock(
+                    title=f"[{index}]",
+                    children=self._value_to_blocks(item, active_ids),
                 )
-                if op_type is not None else None
-            )
+                for index, item in enumerate(value)
+            ],
         )
-        if formatter is not None:
-            view, image_to_carry = formatter(span, last_image)
-            children, _ = self._trace_to_views(span.child_trace, image_to_carry)
-            return dataclasses.replace(view, children=children), image_to_carry
 
-        raw_blocks = self._output_to_blocks(span.output_value)
-        blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
-        children, _ = self._trace_to_views(span.child_trace, image_to_carry)
-        return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
-
-    def _trace_to_views(
+    def _mapping_to_group(
         self,
-        trace: Any,
-        last_image: np.ndarray | None,
-    ) -> tuple[list[StepView], np.ndarray | None]:
-        if trace is None:
-            return [], last_image
-        views = []
-        for span in trace.spans:
-            view, last_image = self._span_to_view(span, last_image)
-            views.append(view)
-        return views, last_image
+        title: str,
+        value: Mapping[Any, Any],
+        active_ids: set[int],
+    ) -> GroupBlock:
+        return GroupBlock(
+            title=title,
+            children=[
+                self._member_block(str(key), item, active_ids)
+                for key, item in value.items()
+            ],
+        )
 
-    def build_views(self, result: InspectionResult) -> list[StepView]:
-        """Convert spans to a display-ready StepView tree."""
-
-        views, _ = self._trace_to_views(result, None)
-        return views
-
-    def render(self, result: InspectionResult, renderer: Renderer) -> Any:
-        """Pass the view tree to *renderer* and return its output."""
-
-        return renderer.render(self.build_views(result))
-
-    def to_html(self, result: InspectionResult, orientation: str = "horizontal") -> str:
-        """Return a self-contained HTML string."""
-
-        from ml_pipes.inspection.html_renderer import HtmlRenderer
-
-        return HtmlRenderer(orientation=orientation).render(self.build_views(result))
-
-    def save_to_html(
+    def _dataclass_to_group(
         self,
-        result: InspectionResult,
-        path: str | Path,
-        orientation: str = "horizontal",
-    ) -> Path:
-        """Write an HTML report to *path* and return it."""
+        value: Any,
+        title: str | None = None,
+        *,
+        active_ids: set[int],
+    ) -> GroupBlock:
+        return GroupBlock(
+            title=title or type(value).__name__,
+            children=[
+                self._member_block(field.name, getattr(value, field.name), active_ids)
+                for field in dataclasses.fields(value)
+            ],
+        )
 
-        from ml_pipes.inspection.html_renderer import HtmlRenderer
-
-        return HtmlRenderer(orientation=orientation).save(self.build_views(result), path)
-
-    def show(
+    def _member_block(
         self,
-        result: InspectionResult,
-        cols: int = 6,
-        orientation: str = "horizontal",
-    ) -> None:
-        """Display the result."""
+        name: str,
+        value: Any,
+        active_ids: set[int],
+    ) -> OutputBlock:
+        blocks = self._value_to_blocks(value, active_ids)
+        if len(blocks) == 1:
+            block = blocks[0]
+            if isinstance(block, GroupBlock):
+                return GroupBlock(
+                    title=f"{name}: {block.title}",
+                    children=block.children,
+                    dim=block.dim,
+                )
+            if self._is_scalar_field_block(block, value):
+                return TextBlock("", [(name, block.rows[0][1])], dim=block.dim)
 
-        if _IN_JUPYTER:
-            from IPython.display import HTML, display
+        return GroupBlock(
+            title=f"{name}: {type(value).__name__}",
+            children=blocks,
+        )
 
-            display(HTML(self.to_html(result, orientation=orientation)))
-        else:
-            del cols
-            self.show_in_browser(result, orientation=orientation)
+    def _compact_blocks(
+        self,
+        blocks: list[OutputBlock],
+        *,
+        group_preview_limit: int = _DEFAULT_GROUP_PREVIEW_LIMIT,
+        list_preview_limit: int = _DEFAULT_LIST_PREVIEW_LIMIT,
+        text_preview_limit: int = _DEFAULT_TEXT_PREVIEW_LIMIT,
+    ) -> list[OutputBlock]:
+        def preview_text(text: str) -> str:
+            return text[:text_preview_limit] + ("…" if len(text) > text_preview_limit else "")
 
-    def show_in_browser(self, result: InspectionResult, orientation: str = "horizontal") -> None:
-        """Save the HTML report to a temp file, announce it, and open it in the default browser."""
-
-        fd, tmp = tempfile.mkstemp(suffix=".html", prefix="ml_pipes_inspect_")
-        os.close(fd)
-        out = self.save_to_html(result, tmp, orientation=orientation)
-        uri = out.as_uri()
-        print(f"Inspection report saved to: {out}", file=sys.stderr)
-        print("Opening inspection report in browser...", file=sys.stderr)
-        opened = webbrowser.open(uri)
-        if opened is False:
-            print(
-                "Browser launch was not confirmed. If nothing opened, use the saved report path above.",
-                file=sys.stderr,
+        def preview_group(block: GroupBlock) -> GroupBlock:
+            if len(block.children) <= group_preview_limit:
+                return block
+            return GroupBlock(
+                title=block.title,
+                children=block.children[:group_preview_limit] + [
+                    TextBlock("…", [("", f"+{len(block.children) - group_preview_limit} more")], dim=block.dim)
+                ],
+                dim=block.dim,
             )
+
+        def compact_list_group(block: GroupBlock) -> OutputBlock:
+            parts = self._list_title_parts(block.title)
+            if parts is None:
+                return block
+
+            label, item_type, count = parts
+            item_groups = self._item_groups(block.children)
+            preview_item_groups = item_groups[:group_preview_limit]
+            preview_images = [self._preview_item_image_block(item) for item in preview_item_groups]
+            if preview_item_groups and all(image is not None for image in preview_images):
+                images = [image for image in preview_images if image is not None]
+                title = self._image_grid_title(
+                    label,
+                    images[0].title.split("  ")[0],
+                    count,
+                    shown_count=len(images),
+                )
+                return ImageBlock(
+                    title=title,
+                    array=_make_grid(
+                        [image.array for image in images],
+                        divider=2,
+                    ),
+                    dim=block.dim,
+                )
+
+            if item_groups:
+                rows = [
+                    (item.title, self._list_item_summary(item.children))
+                    for item in item_groups[:list_preview_limit]
+                ]
+                if count > list_preview_limit:
+                    rows.append(("…", f"+{count - list_preview_limit} more"))
+                return TextBlock(self._list_summary_title(label, count), rows, dim=block.dim)
+
+            return TextBlock(self._list_placeholder_title(label, item_type, count), [("", "…")], dim=block.dim)
+
+        def compact_block(block: OutputBlock) -> OutputBlock:
+            if isinstance(block, TextBlock):
+                return TextBlock(
+                    title=block.title,
+                    rows=[(key, preview_text(value)) for key, value in block.rows],
+                    dim=block.dim,
+                )
+            if not isinstance(block, GroupBlock):
+                return block
+
+            compacted = GroupBlock(
+                title=block.title,
+                children=[compact_block(child) for child in block.children],
+                dim=block.dim,
+            )
+            list_compacted = compact_list_group(compacted)
+            if isinstance(list_compacted, GroupBlock):
+                return preview_group(list_compacted)
+            return list_compacted
+
+        return [compact_block(block) for block in blocks]
+
+    def _list_title_parts(self, title: str) -> tuple[str | None, str, int] | None:
+        match = _LIST_TITLE_RE.fullmatch(title)
+        if match is None:
+            return None
+        return match.group("label"), match.group("item_type"), int(match.group("count"))
+
+    def _item_groups(self, children: list[OutputBlock]) -> list[GroupBlock]:
+        groups: list[GroupBlock] = []
+        for child in children:
+            if isinstance(child, GroupBlock) and child.title.startswith("[") and child.title.endswith("]"):
+                groups.append(child)
+        return groups
+
+    def _preview_item_image_block(self, item: GroupBlock) -> ImageBlock | None:
+        if not item.children:
+            return None
+        first_child = item.children[0]
+        if not isinstance(first_child, ImageBlock):
+            return None
+
+        metadata_title = first_child.title.split("  ")[0]
+        for child in item.children[1:]:
+            if not isinstance(child, TextBlock):
+                return None
+            if child.title not in {"", metadata_title}:
+                return None
+
+        return first_child
+
+    def _list_summary_title(self, label: str | None, count: int) -> str:
+        title = f"list  ×{count}"
+        return f"{label}: {title}" if label else title
+
+    def _list_item_summary(self, blocks: list[OutputBlock]) -> str:
+        if len(blocks) == 1:
+            text_block = self._anonymous_single_row_text_block(blocks[0])
+            if text_block is not None:
+                return text_block.rows[0][1]
+        return _summarize_blocks(blocks)
+
+    def _list_placeholder_title(self, label: str | None, item_type: str, count: int) -> str:
+        title = f"list[{item_type}]  ×{count}"
+        return f"{label}: {title}" if label else title
+
+    def _image_grid_title(
+        self,
+        label: str | None,
+        item_title: str,
+        count: int,
+        *,
+        shown_count: int,
+    ) -> str:
+        title = f"{item_title}  ×{count}"
+        if shown_count < count:
+            title = f"{title}  (showing {shown_count} out of {count})"
+        return f"{label}: {title}" if label else title
+
+    def _recursive_reference_block(self, value: Any) -> TextBlock:
+        return TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])
+
+    def _anonymous_single_row_text_block(self, block: OutputBlock) -> TextBlock | None:
+        if (
+            isinstance(block, TextBlock)
+            and len(block.rows) == 1
+            and block.rows[0][0] == ""
+        ):
+            return block
+        return None
+
+    def _is_scalar_field_block(self, block: OutputBlock, value: Any) -> bool:
+        text_block = self._anonymous_single_row_text_block(block)
+        return text_block is not None and text_block.title == type(value).__name__

@@ -23,6 +23,10 @@ for the framework overview, installation model, and end-to-end examples.
 | Public modules    | `ml_pipes.core`, `ml_pipes.standard`, `ml_pipes.validation`, `ml_pipes.tracing`, `ml_pipes.collectors`, `ml_pipes.factory`, `ml_pipes.benchmark`, `ml_pipes.inspection`                |
 | Content           | pipeline composition; generic flow-control and data operators; validation, tracing, inspection, benchmarking, factory, and CLI tooling                                                 |
 
+The `inspection` optional install adds the shared inspection renderer
+dependencies only. Package-owned inspection formatting comes from the package
+modules you also install and import.
+
 See
 [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
 for direct package installs, umbrella profiles, and the full package matrix.

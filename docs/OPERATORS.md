@@ -211,9 +211,9 @@ from ml_pipes.inspection import PipelineInspector, TextBlock
 
 pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
 result = pipeline.inspect("  Hello World  ")
-inspector = PipelineInspector().register_output_formatter(
+inspector = PipelineInspector().register_value_formatter(
     str,
-    lambda value: [TextBlock("", [("", value)])],
+    lambda value: [TextBlock("str", [("", value)])],
 )
 
 views = inspector.build_views(result)
