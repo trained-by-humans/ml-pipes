@@ -110,14 +110,7 @@ class Stitch:
             raise ValueError("Stitch requires one TensorRegistry per TileRect")
 
         if not registries:
-            tensors = {self.boxes: np.zeros((0, 4), dtype=np.float32)}
-            tensors.update(
-                {
-                    src: np.zeros((0,), dtype=np.int32 if src == "classes" else np.float32)
-                    for src in self.srcs
-                }
-            )
-            return TensorRegistry(tensors)
+            raise ValueError("Stitch requires at least one tile registry")
 
         box_dtype = registries[0][self.boxes].dtype
         all_tensors = {src: [] for src in self.srcs}

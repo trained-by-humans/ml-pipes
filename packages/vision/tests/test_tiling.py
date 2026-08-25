@@ -90,3 +90,8 @@ def test_stitch_then_nmm_operates_on_registry_in_place() -> None:
 def test_stitch_rejects_mismatched_tile_metadata() -> None:
     with pytest.raises(ValueError, match="one TensorRegistry"):
         Stitch(boxes="boxes")([_registry([])], [])
+
+
+def test_stitch_rejects_empty_tile_results() -> None:
+    with pytest.raises(ValueError, match="at least one tile registry"):
+        Stitch("scores", "classes")([], [])
