@@ -56,7 +56,7 @@ All operators in this section read and write named fields in a
 | Operator | Input -> Output | Notes |
 |---|---|---|
 | `Tile(slice_wh, overlap_wh=(0, 0))` | `ImagePayload` -> `(list[ImagePayload], list[TileRect])` | Slices an image into overlapping crops for tiled inference. |
-| `Stitch(...)` | `(list[TensorRegistry], list[TileRect])` -> `TensorRegistry` | Remaps tile-local detection tensors back to the original image space. |
+| `Stitch(*srcs, boxes="boxes")` | `(list[TensorRegistry], list[TileRect])` -> `TensorRegistry` | Remaps boxes and concatenates explicitly configured aligned tensors. |
 | `TileRect` | value type | Describes one tile in original-image coordinates. |
 
 ## Rendering And Side Effects

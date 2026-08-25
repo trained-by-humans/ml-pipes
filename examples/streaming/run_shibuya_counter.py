@@ -114,7 +114,7 @@ def build_pipeline(
         Inline(_infer_pipeline(model_path, conf_threshold)),
         Gather(),
         Recall("tile_rects"),
-        Stitch(),
+        Stitch("scores", "classes"),
         NMM(iou_threshold=0.5),
     ], auto_validate=True) if tile else _infer_pipeline(model_path, conf_threshold)
 

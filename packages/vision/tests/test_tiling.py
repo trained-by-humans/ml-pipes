@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from ml_pipes.tensor import TensorRegistry
 from ml_pipes.vision import ImagePayload, NMM, Stitch, Tile, TileRect
@@ -32,7 +33,7 @@ def _registry(boxes: list[list[float]], scores: list[float] | None = None, class
 
 
 def test_stitch_offsets_and_concatenates_tensor_registries() -> None:
-    result = Stitch()(
+    result = Stitch("scores", "classes")(
         [_registry([[10, 10, 50, 50]]), _registry([[5, 5, 30, 30]])],
         [TileRect(0, 0, 320, 320), TileRect(320, 0, 640, 320)],
     )
@@ -41,9 +42,43 @@ def test_stitch_offsets_and_concatenates_tensor_registries() -> None:
     assert np.allclose(result["scores"], [0.9, 0.9])
 
 
+def test_stitch_omits_unconfigured_tensors() -> None:
+    registry = _registry([[10, 10, 50, 50]])
+    registry["masks"] = np.ones((1, 2, 2), dtype=bool)
+
+    result = Stitch("scores", "classes")([registry], [TileRect(0, 0, 320, 320)])
+
+    assert set(result.keys()) == {"boxes", "scores", "classes"}
+
+
+def test_stitch_concatenates_configured_aligned_tensors() -> None:
+    first = _registry([[10, 10, 50, 50]])
+    second = _registry([[5, 5, 30, 30]])
+    first["embeddings"] = np.array([[1.0, 2.0]], dtype=np.float32)
+    second["embeddings"] = np.array([[3.0, 4.0]], dtype=np.float32)
+
+    result = Stitch("scores", "classes", "embeddings")(
+        [first, second],
+        [TileRect(0, 0, 320, 320), TileRect(320, 0, 640, 320)],
+    )
+
+    assert np.allclose(result["embeddings"], [[1.0, 2.0], [3.0, 4.0]])
+
+
+def test_stitch_rejects_unaligned_configured_tensors() -> None:
+    registry = _registry([[10, 10, 50, 50]])
+    registry["embeddings"] = np.ones((2, 4), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="must align with boxes"):
+        Stitch("scores", "classes", "embeddings")([registry], [TileRect(0, 0, 320, 320)])
+
+
 def test_stitch_then_nmm_operates_on_registry_in_place() -> None:
     box = [[10, 10, 100, 100]]
-    stitched = Stitch()([_registry(box, [0.9]), _registry(box, [0.8])], [TileRect(0, 0, 640, 640)] * 2)
+    stitched = Stitch("scores", "classes")(
+        [_registry(box, [0.9]), _registry(box, [0.8])],
+        [TileRect(0, 0, 640, 640)] * 2,
+    )
 
     result = NMM(iou_threshold=0.5)(stitched)
 
@@ -53,7 +88,5 @@ def test_stitch_then_nmm_operates_on_registry_in_place() -> None:
 
 
 def test_stitch_rejects_mismatched_tile_metadata() -> None:
-    import pytest
-
     with pytest.raises(ValueError, match="one TensorRegistry"):
-        Stitch()([_registry([])], [])
+        Stitch(boxes="boxes")([_registry([])], [])

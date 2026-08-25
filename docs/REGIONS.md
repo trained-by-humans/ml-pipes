@@ -159,7 +159,7 @@ pipeline = Pipeline([
     NMS(),
     Gather(),
     Recall("tile_rects"),
-    Stitch(),
+    Stitch("scores", "classes"),
 ])
 ```
 

@@ -30,7 +30,7 @@ def test_tile_scatter_gather_stitch_pipeline():
         _PassRegistry(),
         Gather(),
         Recall("tile_rects"),
-        Stitch(),
+        Stitch("scores", "classes"),
         NMM(),
     ])
 

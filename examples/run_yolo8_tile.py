@@ -68,7 +68,7 @@ def yolo8_tiled_pipeline(
         Inline(yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)),
         Gather(),
         Recall("tile_rects"),
-        Stitch(),
+        Stitch("scores", "classes"),
         NMM(iou_threshold=iou_threshold),
     ], auto_validate=True)
 
