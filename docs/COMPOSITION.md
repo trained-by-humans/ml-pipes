@@ -225,20 +225,10 @@ detection = Pipeline([
 Use this outside a pipeline definition to join existing named pipelines.
 
 ```python
-decode = Pipeline([Decode(), Store("source_image")])
+decode = Pipeline([Decode()])
 preprocess = Pipeline([Resize((640, 640)), Normalize()])
 infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
-postprocess = Pipeline([
-    FilterTensorsByClasses(
-        "boxes",
-        "scores",
-        classes="classes",
-        keep_classes={0},
-    ),
-    NMS(),
-    Recall("source_image", prepend=True),
-    DrawBoxes(class_names=["person"]),
-])
+postprocess = Pipeline([NMS()])
 
 detection = decode >> preprocess >> infer >> postprocess
 ```
@@ -281,13 +271,25 @@ Use these inside `Pipeline([...])` to merge another named pipeline.
 
 ```python
 preprocess = Pipeline([Resize((640, 640)), Normalize()])
+infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
+postprocess = Pipeline([
+    FilterTensorsByClasses(
+        "boxes",
+        "scores",
+        classes="classes",
+        keep_classes={0},
+    ),
+    NMS(),
+    Recall("source_image", prepend=True),
+    DrawBoxes(class_names=["person"]),
+])
 
 detection = Pipeline([
     Decode(),
+    Store("source_image"),
     inline(preprocess),
-    Infer("model.onnx"),
-    Extract("boxes", "scores", "classes"),
-    NMS(),
+    inline(infer),
+    inline(postprocess),
 ])
 ```
 
@@ -296,14 +298,22 @@ detection = Pipeline([
 Use this outside a pipeline definition to merge existing named pipelines.
 
 ```python
-infer_stage = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
-project_stage = Pipeline([Recall("transform"), ProjectBoxes(), NMS()])
+decode = Pipeline([Decode(), Store("source_image")])
+preprocess = Pipeline([Resize((640, 640)), Normalize()])
+infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
+postprocess = Pipeline([
+    FilterTensorsByClasses(
+        "boxes",
+        "scores",
+        classes="classes",
+        keep_classes={0},
+    ),
+    NMS(),
+    Recall("source_image", prepend=True),
+    DrawBoxes(class_names=["person"]),
+])
 
-detection = (
-    Pipeline([Resize((640, 640)), Store("transform", source=1), Pick(0), Normalize()])
-    + infer_stage
-    + project_stage
-)
+detection = decode + preprocess + infer + postprocess
 ```
 
 #### In place: `pipeline.extend([...])`
