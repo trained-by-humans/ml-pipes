@@ -43,18 +43,16 @@ from examples.run_yolo8_tile import yolo8_tiled_pipeline
 
 from ml_pipes.core import Pipeline
 from ml_pipes.factory import pipeline_factory
-from ml_pipes.vision import (
-    Detections,
-    ImagePayload,
-)
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
+from ml_pipes.tensor import TensorRegistry
+from ml_pipes.vision import ImagePayload
 
 
 @pipeline_factory
 def yolo8_plain_benchmark_pipeline(
     model_path: Path | None = None,
     output_path: Path | None = None,
-) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+) -> Pipeline[str | Path, tuple[ImagePayload, TensorRegistry]]:
     resolved_model_path = resolve_model_path(model_path, BUNDLED_MODEL_PATH)
     resolved_output_path = output_path or build_output_path(ASSETS_DIR, "run_yolo8_benchmark_sweep_plain.jpg", resolved_model_path.name)
     return (
@@ -70,7 +68,7 @@ def yolo8_tiled_benchmark_pipeline(
     output_path: Path | None = None,
     slice_wh: tuple[int, int] = (320, 320),
     overlap_wh: tuple[int, int] = (80, 80),
-) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+) -> Pipeline[str | Path, tuple[ImagePayload, TensorRegistry]]:
     resolved_model_path = resolve_model_path(model_path, BUNDLED_MODEL_PATH)
     resolved_output_path = output_path or build_output_path(ASSETS_DIR, "run_yolo8_benchmark_sweep_tiled.jpg", resolved_model_path.name)
     return (
