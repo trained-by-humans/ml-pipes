@@ -187,8 +187,8 @@ def main() -> int:
         futures = {pool.submit(pipeline, p): p for p in image_paths}
         for future in as_completed(futures):
             path = futures[future]
-            detections = future.result()
-            print(f"  {path.name}: {len(detections.boxes)} detections")
+            registry = future.result()
+            print(f"  {path.name}: {len(registry['boxes'])} detections")
     elapsed = time.perf_counter() - t0
 
     print(
