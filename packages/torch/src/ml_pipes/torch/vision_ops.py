@@ -16,7 +16,7 @@ __all__ = [
     "TorchFilterTensorsByMasksArea",
     "TorchWeightMasksByScores",
     "TorchResizeMasks",
-    "TorchMeanMaskedScores",
+    "TorchMeanMaskScores",
     "TorchMasksToBoxes",
     "TorchReconstructMasks",
     "TorchNMS",
@@ -182,7 +182,7 @@ class TorchResizeMasks:
 
 
 @Operator
-class TorchMeanMaskedScores:
+class TorchMeanMaskScores:
     """Computes one score per instance by averaging dense mask scores over its mask."""
 
     def __init__(

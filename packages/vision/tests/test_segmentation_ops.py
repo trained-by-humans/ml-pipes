@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from ml_pipes.tensor import TensorRegistry
 from ml_pipes.vision import (
@@ -8,7 +9,7 @@ from ml_pipes.vision import (
     FilterTensorsByMasksArea,
     ImagePayload,
     MasksToBoxes,
-    MeanMaskedScores,
+    MeanMaskScores,
     ProjectMasks,
     ProjectRoIMasks,
     ReconstructMasks,
@@ -69,7 +70,7 @@ def test_resize_masks_to_image_resizes_mask_stack():
     assert result["resized_masks"].dtype == np.float32
 
 
-def test_mean_masked_scores_computes_mean_over_mask_support():
+def test_mean_mask_scores_computes_mean_over_mask_support():
     registry = TensorRegistry(
         {
             "selected_masks": np.array(
@@ -88,12 +89,12 @@ def test_mean_masked_scores_computes_mean_over_mask_support():
         }
     )
 
-    result = MeanMaskedScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
+    result = MeanMaskScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert np.allclose(result["mean_mask_scores"], [0.75, 0.5])
 
 
-def test_mean_masked_scores_handles_empty_masks():
+def test_mean_mask_scores_handles_empty_masks():
     registry = TensorRegistry(
         {
             "selected_masks": np.zeros((0, 2, 2), dtype=np.float32),
@@ -101,7 +102,7 @@ def test_mean_masked_scores_handles_empty_masks():
         }
     )
 
-    result = MeanMaskedScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
+    result = MeanMaskScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert result["mean_mask_scores"].shape == (0,)
     assert result["mean_mask_scores"].dtype == np.float64
@@ -257,6 +258,25 @@ def test_draw_masks_draws_on_source_image():
     assert result.layout == "HWC"
     assert np.any(result.array != 0)
     assert returned_registry is registry
+
+
+def test_draw_masks_accepts_class_agnostic_masks():
+    mask = np.zeros((4, 4), dtype=bool)
+    mask[1:3, 1:3] = True
+    registry = TensorRegistry({"masks": np.asarray([mask])})
+
+    result, returned_registry = DrawMasks(classes=None)(
+        ImagePayload(array=np.zeros((4, 4, 3), dtype=np.uint8), color_space="BGR", layout="HWC"),
+        registry,
+    )
+
+    assert np.any(result.array != 0)
+    assert returned_registry is registry
+
+
+def test_draw_masks_requires_classes_when_class_names_are_configured():
+    with pytest.raises(ValueError, match="class_names requires a classes tensor"):
+        DrawMasks(classes=None, class_names=["person"])
 
 
 def test_draw_masks_translates_bgr_palette_for_rgb_images():

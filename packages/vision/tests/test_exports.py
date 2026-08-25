@@ -21,7 +21,7 @@ def test_vision_component_surface_is_curated() -> None:
         "LoadFile",
         "LogDetections",
         "MasksToBoxes",
-        "MeanMaskedScores",
+        "MeanMaskScores",
         "NMM",
         "NMS",
         "Normalize",

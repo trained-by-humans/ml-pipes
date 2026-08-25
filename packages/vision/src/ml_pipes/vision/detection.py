@@ -92,6 +92,8 @@ class NMS:
         iou_threshold: float = 0.45,
         max_detections: int = 300,
     ):
+        if classes is None:
+            raise ValueError("NMS requires a classes tensor")
         self.boxes = boxes
         self.scores = scores
         self.classes = classes
@@ -338,13 +340,15 @@ class DrawBoxes:
         self,
         boxes: str = "boxes",
         scores: str = "scores",
-        classes: str = "classes",
+        classes: str | None = "classes",
         *,
         class_names: list[str] | tuple[str, ...] | None = None,
         color: tuple[int, int, int] = (0, 255, 0),
         thickness: int = 2,
         font_scale: float = 0.5,
     ):
+        if class_names is not None and classes is None:
+            raise ValueError("DrawBoxes class_names requires a classes tensor")
         self.class_names = tuple(class_names) if class_names is not None else None
         self.color = color
         self.thickness = thickness
@@ -358,12 +362,11 @@ class DrawBoxes:
 
         image = source_image.array.copy()
         color = self.color[::-1] if source_image.color_space == "RGB" else self.color
-        for box, score, class_id in zip(
-            registry[self.boxes], registry[self.scores], registry[self.classes], strict=True
-        ):
+        class_ids = registry[self.classes] if self.classes is not None else (None,) * len(registry[self.boxes])
+        for box, score, class_id in zip(registry[self.boxes], registry[self.scores], class_ids, strict=True):
             x1, y1, x2, y2 = [int(round(coord)) for coord in box]
             cv2.rectangle(image, (x1, y1), (x2, y2), color, self.thickness)
-            label = self._format_label(int(class_id), float(score))
+            label = self._format_label(int(class_id), float(score)) if class_id is not None else f"{score:.2f}"
             text_origin_y = y1 - 8 if y1 > 18 else y1 + 18
             cv2.putText(
                 image,

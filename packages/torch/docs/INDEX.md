@@ -109,6 +109,6 @@ NumPy-side rendering, see the vision package index.
 | `TorchFilterTensorsByMasksArea(...)` | Filters one or more tensors by mask area. |
 | `TorchWeightMasksByScores(...)` | Weights masks by per-instance scores. |
 | `TorchResizeMasks(...)` | Resizes instance masks to an image shape. |
-| `TorchMeanMaskedScores(...)` | Computes one score per instance from dense mask scores over foreground masks. |
+| `TorchMeanMaskScores(...)` | Computes one score per instance from dense mask scores over foreground masks. |
 | `TorchMasksToBoxes(...)` | Derives boxes from binary masks. |
 | `TorchReconstructMasks(coefficients, prototypes, as_)` | Reconstructs instance masks from coefficients and prototypes. |

@@ -29,7 +29,7 @@ from ml_pipes.torch import (
     TorchGatherScores,
     TorchInfer,
     TorchMasksToBoxes,
-    TorchMeanMaskedScores,
+    TorchMeanMaskScores,
     TorchMultiplyTensors,
     TorchNMS,
     TorchResizeMasks,
@@ -219,7 +219,7 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
         Recall("image_shape"),
         TorchResizeMasks(masks="weighted_masks", as_="resized_masks"),
         TorchBinarizeTensorByThreshold("resized_masks", threshold=0.5, as_="binary_masks"),
-        TorchMeanMaskedScores(
+        TorchMeanMaskScores(
             mask_scores="resized_masks",
             masks="binary_masks",
             as_="mean_mask_scores",

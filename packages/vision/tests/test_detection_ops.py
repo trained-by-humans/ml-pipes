@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 
 import numpy as np
+import pytest
 
 from ml_pipes.tensor import TensorRegistry
 from ml_pipes.vision import (
@@ -142,6 +143,11 @@ def test_nmm_uses_uniform_weights_when_overlapping_scores_are_zero():
     assert result["classes"].dtype == np.int32
 
 
+def test_nms_requires_classes_tensor():
+    with pytest.raises(ValueError, match="requires a classes tensor"):
+        NMS(classes=None)
+
+
 def test_draw_boxes_preserves_rgb_metadata_and_translates_bgr_color():
     image = np.zeros((4, 4, 3), dtype=np.uint8)
     registry = _make_registry([[0, 0, 3, 3]], [0.9], [1])
@@ -153,6 +159,28 @@ def test_draw_boxes_preserves_rgb_metadata_and_translates_bgr_color():
     assert result.color_space == "RGB"
     assert result.layout == "HWC"
     assert result.array[0, 0].tolist() == [3, 2, 1]
+
+
+def test_draw_boxes_accepts_class_agnostic_detections():
+    registry = TensorRegistry(
+        {
+            "boxes": np.array([[0, 0, 3, 3]], dtype=np.float32),
+            "scores": np.array([0.9], dtype=np.float32),
+        }
+    )
+
+    result, returned_registry = DrawBoxes(classes=None)(
+        ImagePayload(array=np.zeros((4, 4, 3), dtype=np.uint8), color_space="BGR", layout="HWC"),
+        registry,
+    )
+
+    assert np.any(result.array != 0)
+    assert returned_registry is registry
+
+
+def test_draw_boxes_requires_classes_when_class_names_are_configured():
+    with pytest.raises(ValueError, match="class_names requires a classes tensor"):
+        DrawBoxes(classes=None, class_names=["person"])
 
 
 def test_project_boxes_reverses_padding_and_scale():

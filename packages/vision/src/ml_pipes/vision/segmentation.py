@@ -10,7 +10,7 @@ __all__ = [
     "DrawMasks",
     "FilterTensorsByMasksArea",
     "MasksToBoxes",
-    "MeanMaskedScores",
+    "MeanMaskScores",
     "ProjectMasks",
     "ProjectRoIMasks",
     "ReconstructMasks",
@@ -81,7 +81,7 @@ class ResizeMasks:
 
 
 @Operator
-class MeanMaskedScores:
+class MeanMaskScores:
     """Computes one score per instance by averaging dense mask scores over its mask."""
 
     def __init__(
@@ -233,11 +233,13 @@ class DrawMasks:
     def __init__(
         self,
         masks: str = "masks",
-        classes: str = "classes",
+        classes: str | None = "classes",
         *,
         class_names: list[str] | tuple[str, ...] | None = None,
         alpha: float = 0.45,
     ):
+        if class_names is not None and classes is None:
+            raise ValueError("DrawMasks class_names requires a classes tensor")
         self.class_names = tuple(class_names) if class_names is not None else None
         self.alpha = alpha
         self.masks = masks
@@ -245,7 +247,9 @@ class DrawMasks:
 
     def __call__(self, source_image: ImagePayload, registry: TensorRegistry) -> tuple[ImagePayload, TensorRegistry]:
         image = source_image.array.copy()
-        for mask, class_id in zip(registry[self.masks], registry[self.classes], strict=True):
+        masks = registry[self.masks]
+        class_ids = registry[self.classes] if self.classes is not None else range(len(masks))
+        for mask, class_id in zip(masks, class_ids, strict=True):
             color = np.asarray(self._class_color(int(class_id)), dtype=np.float32)
             if source_image.color_space == "RGB":
                 color = color[::-1]
