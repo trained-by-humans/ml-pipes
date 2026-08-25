@@ -15,9 +15,6 @@ For the cross-package package catalogs, see
 |---|---|
 | `ImagePayload` | Main image boundary type. |
 | `ResizeTransform` | Carries resize metadata needed later for projection back to source-image space. |
-| `Detections` | Typed detection result. |
-| `Segmentations` | Typed segmentation result. |
-| `DensityPrediction` | Typed density-map result. |
 | `TileRect` | Describes one tile in original-image coordinates. |
 
 ## Input And Preprocessing
@@ -32,58 +29,50 @@ For the cross-package package catalogs, see
 
 ## Detection And Segmentation Registry Helpers
 
-| Operator | Notes |
-|---|---|
-| `ConvertBoxFormat(src="boxes", from_=..., to="xyxy", as_=None)` | Converts between `xyxy`, `xywh`, and `cxcywh` box formats. |
-| `NMS(...)` | Confidence filtering plus per-class non-maximum suppression on registry tensors. |
-| `NMM(iou_threshold=0.5)` | Merges overlapping detections instead of discarding them. |
-| `FilterTensorsByScore(...)` | Filters one or more tensors by a score threshold. |
-| `FilterTensorsByClasses(...)` | Filters one or more tensors by allowed class ids. |
-| `FilterTensorsByMasksArea(...)` | Filters one or more tensors by mask area. |
-| `WeightMasksByScores(...)` | Weights masks by per-instance scores. |
-| `ResizeMasks(...)` | Resizes instance masks to an image shape. |
-| `MeanMaskScores(...)` | Computes mean scores over masks or masked areas. |
-| `MasksToBoxes(...)` | Derives boxes from binary masks. |
-| `ReconstructMasks(coefficients, prototypes, as_)` | Reconstructs instance masks from coefficients and prototypes. |
-| `ProjectBoxes(src="boxes")` | Projects model-space boxes back to the original image space. |
-| `ProjectMasks(...)` | Projects prototype-style masks back to the source image space. |
-| `ProjectRoIMasks(...)` | Projects per-instance RoI masks back to the source image space. |
-
-## Prediction Outputs And Filtering
+All operators in this section read and write named fields in a
+`TensorRegistry`. By convention detection fields are `boxes`, `scores`, and
+`classes`; segmentation registries can additionally carry `masks`.
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
-| `ToDetections(...)` | `TensorRegistry` -> `Detections` | Finalizes a detection result. |
-| `ToSegmentations(...)` | `TensorRegistry` -> `Segmentations` | Finalizes a segmentation result. |
-| `FilterPredictions(predicate)` | prediction -> prediction | Filters typed prediction objects with a custom predicate. |
-| `FilterPredictionsByClass(classes)` | prediction -> prediction | Filters typed prediction objects by class id. |
-| `FilterPredictionsByScore(min_score)` | prediction -> prediction | Filters typed prediction objects by score. |
-| `FilterPredictionsByArea(...)` | prediction -> prediction | Filters typed prediction objects by box area. |
-| `MapPredictionsToObjects(fields, at=None)` | prediction -> `list[dict]` | Converts typed predictions into per-object mappings. |
+| `ConvertBoxFormat(...)` | `TensorRegistry` -> `TensorRegistry` | Converts between `xyxy`, `xywh`, and `cxcywh` box formats. |
+| `NMS(...)` | `TensorRegistry` -> `TensorRegistry` | Applies confidence filtering and per-class non-maximum suppression. |
+| `NMM(*srcs, ...)` | `TensorRegistry` -> `TensorRegistry` | Merges overlapping boxes. Configured aligned tensors retain the highest-scoring row from each merge group. |
+| `FilterTensorsByScore(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by score threshold. |
+| `FilterTensorsByClasses(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by allowed class ids. |
+| `FilterTensorsByBoxArea(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by `xyxy` box area. |
+| `FilterTensorsByMasksArea(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by foreground mask area. |
+| `ProjectBoxes(src="boxes")` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects model-space boxes into source-image coordinates. |
+| `ReconstructMasks(...)` | `TensorRegistry` -> `TensorRegistry` | Reconstructs instance masks from coefficients and prototypes. |
+| `ProjectMasks(...)` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects prototype-style masks into source-image space. |
+| `ProjectRoIMasks(...)` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects per-instance RoI masks into source-image space. |
+| `ResizeMasks(...)` | `(TensorRegistry, image_shape)` -> `TensorRegistry` | Resizes instance masks to an image shape. |
+| `MasksToBoxes(...)` | `TensorRegistry` -> `TensorRegistry` | Derives boxes from binary masks. |
+| `WeightMasksByScores(...)` | `TensorRegistry` -> `TensorRegistry` | Weights masks by per-instance scores. |
+| `MeanMaskScores(...)` | `TensorRegistry` -> `TensorRegistry` | Computes one score per instance from dense mask scores over foreground masks. |
 
 ## Tiling
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
 | `Tile(slice_wh, overlap_wh=(0, 0))` | `ImagePayload` -> `(list[ImagePayload], list[TileRect])` | Slices an image into overlapping crops for tiled inference. |
-| `Stitch()` | `(list[Detections], list[TileRect])` -> `Detections` | Remaps tile-local detections back to the original image space. |
+| `Stitch(*srcs, boxes="boxes")` | `(list[TensorRegistry], list[TileRect])` -> `TensorRegistry` | Remaps boxes and concatenates explicitly configured aligned tensors. |
 | `TileRect` | value type | Describes one tile in original-image coordinates. |
 
 ## Rendering And Side Effects
 
 | Operator | Notes |
 |---|---|
-| `DrawBoxes(...)` | Draws detection boxes on an image while passing detections through. |
-| `DrawMasks(...)` | Overlays segmentation masks on an image while passing segmentations through. |
+| `DrawBoxes(...)` | Draws configured boxes and scores; classes are optional unless `class_names` is set. |
+| `DrawMasks(...)` | Overlays configured masks; classes are optional unless `class_names` is set. |
 | `SaveImage(output_path, at=None)` | Saves an image payload to disk as a side effect. |
-| `LogDetections(...)` | Logs detection objects as JSON as a side effect. |
+| `LogDetections(...)` | Logs configured detection tensors as JSON as a side effect. |
 
 ## Density
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
-| `ToDensityPrediction(src="density")` | `TensorRegistry` -> `DensityPrediction` | Finalizes a density-map result. |
-| `ClampDensity()` | `DensityPrediction` -> `DensityPrediction` | Clamps density values to non-negative values. |
-| `SumDensity()` | `DensityPrediction` -> `float` | Sums the density map into one count. |
-| `DensityToHeatmap(...)` | `(ImagePayload, DensityPrediction)` -> `(ImagePayload, ImagePayload)` | Converts a density map into a colored heatmap aligned to the source image. |
+| `ClampDensity(src="density", as_=None)` | `TensorRegistry` -> `TensorRegistry` | Clamps a density tensor to non-negative values. |
+| `SumDensity(src="density")` | `TensorRegistry` -> `float` | Sums a density tensor into one count. |
+| `DensityToHeatmap(src="density", ...)` | `(ImagePayload, TensorRegistry)` -> `(ImagePayload, ImagePayload)` | Converts a density tensor into a colored heatmap aligned to the source image. |
 | `BlendImages(...)` | `(ImagePayload, ImagePayload)` -> `ImagePayload` | Blends a source image with an overlay image. |

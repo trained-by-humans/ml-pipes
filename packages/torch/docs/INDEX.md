@@ -96,9 +96,9 @@ For the cross-package package catalogs, see
 
 ## Vision Postprocess Operators
 
-These mirror the NumPy-side postprocess operators in `ml_pipes.vision`. For
-projection back to image space and typed outputs such as `ToDetections()` or
-`ToSegmentations()`, see the vision package index.
+These mirror NumPy-side postprocess operators in `ml_pipes.vision` so tensor
+values can remain on-device. For image payloads, source-image projection, and
+NumPy-side rendering, see the vision package index.
 
 | Operator | Notes |
 |---|---|
@@ -109,6 +109,6 @@ projection back to image space and typed outputs such as `ToDetections()` or
 | `TorchFilterTensorsByMasksArea(...)` | Filters one or more tensors by mask area. |
 | `TorchWeightMasksByScores(...)` | Weights masks by per-instance scores. |
 | `TorchResizeMasks(...)` | Resizes instance masks to an image shape. |
-| `TorchMeanMaskScores(...)` | Computes mean scores over masks or masked areas. |
+| `TorchMeanMaskScores(...)` | Computes one score per instance from dense mask scores over foreground masks. |
 | `TorchMasksToBoxes(...)` | Derives boxes from binary masks. |
 | `TorchReconstructMasks(coefficients, prototypes, as_)` | Reconstructs instance masks from coefficients and prototypes. |

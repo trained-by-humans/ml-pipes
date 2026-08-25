@@ -11,18 +11,12 @@ from ml_pipes.vision import (
     ConvertBoxFormat,
     DrawBoxes,
     DrawMasks,
-    FilterPredictions,
-    FilterPredictionsByArea,
-    FilterPredictionsByClass,
-    FilterPredictionsByScore,
     FilterTensorsByClasses,
     FilterTensorsByMasksArea,
     FilterTensorsByScore,
     ImagePayload,
     LogDetections,
-    MapPredictionsToObjects,
     MasksToBoxes,
-    MeanMaskScores,
     NMM,
     NMS,
     ProjectBoxes,
@@ -32,8 +26,6 @@ from ml_pipes.vision import (
     ResizeMasks,
     ResizeTransform,
     SaveImage,
-    ToDetections,
-    ToSegmentations,
     WeightMasksByScores,
 )
 
@@ -65,22 +57,9 @@ def test_empty_detection_pipeline_preserves_empty_outputs(tmp_path) -> None:
         NMS(kept_as="kept"),
         Recall("resize_transform"),
         ProjectBoxes(),
-        ToDetections(),
         NMM(iou_threshold=0.5),
-        FilterPredictions(predicate=lambda prediction: [True] * len(prediction.classes)),
-        FilterPredictionsByClass({0, 1}),
-        FilterPredictionsByScore(min_score=0.1),
-        FilterPredictionsByArea(min_area=1.0),
         Recall("source_image", prepend=True),
         DrawBoxes(class_names=["zero", "one"]),
-        MapPredictionsToObjects(
-            fields={
-                "box": "boxes",
-                "score": "scores",
-                "class_id": "classes",
-            },
-            at=1,
-        ),
         LogDetections(
             model_path="model.onnx",
             image_path="image.jpg",
@@ -95,7 +74,8 @@ def test_empty_detection_pipeline_preserves_empty_outputs(tmp_path) -> None:
 
     assert output_path.is_file()
     assert isinstance(result[0], ImagePayload)
-    assert result[1] == []
+    assert isinstance(result[1], TensorRegistry)
+    assert result[1]["boxes"].shape == (0, 4)
     assert np.array_equal(result[0].array, image.array)
     assert '"detections": []' in stream.getvalue()
 
@@ -127,7 +107,6 @@ def test_empty_segmentation_pipeline_preserves_empty_outputs(tmp_path) -> None:
         WeightMasksByScores(masks="masks", scores="scores", as_="weighted_masks"),
         Recall("image_shape"),
         ResizeMasks(masks="weighted_masks", as_="resized_masks"),
-        MeanMaskScores(masks="resized_masks", binary_masks=None, as_="mean_mask_scores"),
         FilterTensorsByMasksArea("scores", "classes", masks="resized_masks", min_area=1),
         FilterTensorsByScore("resized_masks", "classes", score="scores", min_score=0.5),
         MasksToBoxes(masks="resized_masks", as_="boxes"),
@@ -137,21 +116,8 @@ def test_empty_segmentation_pipeline_preserves_empty_outputs(tmp_path) -> None:
         ProjectMasks(masks="weighted_masks", boxes="boxes", mask_threshold=0.0),
         Recall("resize_transform"),
         ProjectRoIMasks(masks="masks", boxes="boxes", mask_threshold=0.0),
-        ToSegmentations(masks="masks"),
-        FilterPredictions(predicate=lambda prediction: [True] * len(prediction.classes)),
-        FilterPredictionsByClass({0, 1}),
-        FilterPredictionsByScore(min_score=0.1),
-        FilterPredictionsByArea(min_area=1.0),
         Recall("source_image", prepend=True),
         DrawMasks(alpha=0.6),
-        MapPredictionsToObjects(
-            fields={
-                "box": "boxes",
-                "score": "scores",
-                "class_id": "classes",
-            },
-            at=1,
-        ),
         LogDetections(
             model_path="model.onnx",
             image_path="image.jpg",
@@ -166,6 +132,7 @@ def test_empty_segmentation_pipeline_preserves_empty_outputs(tmp_path) -> None:
 
     assert output_path.is_file()
     assert isinstance(result[0], ImagePayload)
-    assert result[1] == []
+    assert isinstance(result[1], TensorRegistry)
+    assert result[1]["masks"].shape[0] == 0
     assert np.array_equal(result[0].array, image.array)
     assert '"detections": []' in stream.getvalue()

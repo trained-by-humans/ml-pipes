@@ -17,7 +17,7 @@ It captures the operator-by-operator view of that call, including:
 from ml_pipes.collectors import PrintCollector
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Infer
-from ml_pipes.vision import Decode, NMS, Normalize, Resize, ToDetections
+from ml_pipes.vision import Decode, NMS, Normalize, Resize
 
 
 pipeline = Pipeline([
@@ -26,7 +26,6 @@ pipeline = Pipeline([
     Normalize(),
     Infer("model.onnx"),
     NMS(),
-    ToDetections(),
 ])
 pipeline.set_tracing(PrintCollector())
 
@@ -43,7 +42,6 @@ Output:
   2:Normalize                    2.22ms  (  4.6%)
   3:Infer                       43.90ms  ( 90.0%)
   4:NMS                          0.21ms  (  0.4%)
-  5:ToDetections                 0.02ms  (  0.0%)
   total                         48.73ms
 ```
 

@@ -44,11 +44,9 @@ from ml_pipes.factory import (
     pipeline_factory,
     data_factory,
 )
-from ml_pipes.vision import (
-    Detections,
-    ImagePayload,
-)
 from ml_pipes.benchmark import InputFn
+from ml_pipes.tensor import TensorRegistry
+from ml_pipes.vision import ImagePayload
 
 
 @pipeline_factory
@@ -59,7 +57,7 @@ def yolo8_tiled_benchmark_pipeline(
     overlap_wh: tuple[int, int] = (80, 80),
     conf_threshold: float = 0.25,
     max_concurrency: int = 4,
-) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+) -> Pipeline[str | Path, tuple[ImagePayload, TensorRegistry]]:
     """Tiled YOLOv8 pipeline — the target pipeline for CLI benchmarking."""
     from examples.run_yolo8_tile import yolo8_tiled_pipeline
 

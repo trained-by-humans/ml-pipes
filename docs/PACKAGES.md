@@ -99,7 +99,7 @@ handoffs are:
 |--------|---------|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
 | Vision | ONNX    | `TensorPayload -> RuntimeOutputs`                                       | `Normalize()` prepares model input, then `Infer()` runs ONNX Runtime                         |
 | ONNX   | Tensor  | `RuntimeOutputs -> TensorRegistry`                                      | `Extract()` pulls named outputs into shared postprocess                                      |
-| Tensor | Vision  | `TensorRegistry -> Detections`, `Segmentations`, or `DensityPrediction` | Finalize task results with `ToDetections()`, `ToSegmentations()`, or `ToDensityPrediction()` |
+| Tensor | Vision  | `TensorRegistry -> TensorRegistry` | Vision operators postprocess, render, or log named prediction tensors in the registry |
 | Tensor | Torch   | `TensorPayload -> TorchTensorPayload`                                   | `ToTorch()` crosses a `TensorPayload` into the Torch domain                                  |
 | Torch  | Tensor  | `TorchTensorRegistry -> TensorRegistry`                                 | `ToNumpyRegistry()` hands Torch results back to NumPy-side packages                          |
 

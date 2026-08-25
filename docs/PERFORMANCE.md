@@ -144,10 +144,9 @@ pipeline = Pipeline([
     Normalize(),
     Infer(model),
     ...,
-    ToDetections(),
-    Gather(),                     # ◀ rejoins with list[Detections]
+    Gather(),                     # ◀ rejoins with list[TensorRegistry]
     Recall("tile_rects"),
-    Stitch(),
+    Stitch("scores", "classes", boxes="boxes"),
     NMM(iou_threshold=0.5),
 ])
 ```
@@ -249,7 +248,6 @@ pipeline = Pipeline([
     UnBatch(),                      # ◀ each thread resumes with its own result
     Recall("transform"),
     ProjectBoxes(),
-    ToDetections(),
 ])
 
 with ThreadPoolExecutor(max_workers=8) as pool:

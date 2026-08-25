@@ -102,7 +102,6 @@ Pipeline([
     NMS(),
     Recall("resize_transform"),
     ProjectBoxes(),
-    ToDetections(),
 ])
 ```
 

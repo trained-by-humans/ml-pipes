@@ -90,6 +90,7 @@ jobs:
             tests/scripts/github/test_stage_release_artifacts.py \
             packages/core/tests/validation/test_validation.py \
             packages/core/tests/cli/test_cli.py \
+            packages/core/tests/description/test_description.py \
             packages/tensor/tests/test_registry_ops.py \
             packages/onnx/tests/test_runtime.py \
             packages/vision/tests/test_image_ops.py

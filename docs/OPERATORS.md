@@ -374,8 +374,8 @@ inspect, trace, and benchmark as standalone boundaries.
 - A useful pattern is the carry-forward tuple: return the original value
   together with a new derived value when later pipeline steps are expected to
   keep using both. Rendering is a good example: an operator can return
-  `(rendered_image, detections)` so later steps can save the image while still
-  rendering, filtering, or logging the detections in different ways.
+  `(rendered_image, registry)` so later steps can save the image while still
+  rendering, filtering, or logging named prediction tensors in different ways.
 - In-place mutation is acceptable when the payload is already mutation-oriented
   and that keeps the pipeline clearer.
 - Use a registry-style payload when many operators cooperatively read and write

@@ -39,8 +39,8 @@ from ml_pipes.standard import (
     Scatter,
     Store,
 )
+from ml_pipes.tensor import TensorRegistry
 from ml_pipes.vision import (
-    Detections,
     ImagePayload,
     NMM,
     Stitch,
@@ -55,7 +55,7 @@ def yolo8_tiled_pipeline(
     overlap_wh: tuple[int, int] = (40, 40),
     max_concurrency: int = 4,
     iou_threshold: float = 0.4,
-) -> Pipeline[ImagePayload, Detections]:
+) -> Pipeline[ImagePayload, TensorRegistry]:
     """Tiled YOLOv8 inference pipeline.
 
     Tiles → parallel inference per tile → stitch → NMM to suppress cross-tile duplicates.
@@ -68,7 +68,7 @@ def yolo8_tiled_pipeline(
         Inline(yolo8_inference_pipeline(model_path, conf_threshold=conf_threshold)),
         Gather(),
         Recall("tile_rects"),
-        Stitch(),
+        Stitch("scores", "classes"),
         NMM(iou_threshold=iou_threshold),
     ], auto_validate=True)
 

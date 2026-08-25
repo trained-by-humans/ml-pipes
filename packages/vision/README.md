@@ -1,7 +1,7 @@
 # ml-pipes-vision
 
-`ml-pipes-vision` adds image-oriented pipeline stages and typed vision outputs
-to `ml-pipes`.
+`ml-pipes-vision` adds image-oriented pipeline stages and vision tensor
+postprocess to `ml-pipes`.
 
 Use this package for the parts of a pipeline that start with image inputs,
 prepare them for inference, and turn model results back into user-facing
@@ -21,7 +21,7 @@ an `ml-pipes` pipeline.
 | Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/docs/INDEX.md)           |
 | Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                                  |
 | Public modules | `ml_pipes.vision`                                                                                                   |
-| Content        | image input handling; preprocessing; typed vision predictions; tiling; rendering and logging                        |
+| Content        | image input handling; preprocessing; vision tensor postprocess; tiling; rendering and logging                      |
 
 See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
 for direct package installs, umbrella profiles, and the full package matrix.

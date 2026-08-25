@@ -11,7 +11,7 @@ For the full package surface, aliases, and operator catalog, see
 | Dimension       | Classification                                                          |
 |-----------------|-------------------------------------------------------------------------|
 | Role / Function | `Inference (Scaffold)`                                                  |
-| Task Type       | Mostly `Vision`; reusable across other tensor-returning inference flows |
+| Task Type       | General (any tensor-based task)                                         |
 | Data Type       | `Tensors`                                                               |
 
 ## Scope And Use Cases
@@ -112,12 +112,12 @@ runtime step itself.
 
 The nearby package crossings are:
 
-- `Normalize()` from `ml_pipes.vision` creates a `TensorPayload`
+- Task-package preprocessing creates a `TensorPayload`
 - `Extract()` from `ml_pipes.onnx` creates a `TensorRegistry`
 - `ToNumpy()` and `ToNumpyRegistry()` from `ml_pipes.torch` return back to the
   Tensor domain
-- `ToDetections()`, `ToSegmentations()`, and `ToDensityPrediction()` from
-  `ml_pipes.vision` finalize typed task results
+- Task packages interpret, render, log, or otherwise finalize named tensors in
+  the registry
 
 At a high level, a common flow looks like this:
 
@@ -141,10 +141,10 @@ At a high level, a common flow looks like this:
 ├─ Squeeze -> Slice -> Softmax -> ArgMax -> FilterTensors  │
 └────────┬─────────────────────────────────────────────────┘
          |
-         | ToDetections / ToSegmentations / ...
+         | TensorRegistry
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Task Result Domain                                       │
+│ Specific Task Domain (Vision, Language, etc.)             │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -161,7 +161,7 @@ tensors to a task package.
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Extract
 from ml_pipes.tensor import ArgMax, GatherScores, Slice, Squeeze, Transpose
-from ml_pipes.vision import ConvertBoxFormat, ToDetections
+from ml_pipes.vision import ConvertBoxFormat, NMS
 
 pipeline = Pipeline([
     ...,
@@ -173,7 +173,7 @@ pipeline = Pipeline([
     ArgMax("scores", as_="classes"),
     GatherScores("scores", "classes"),
     ConvertBoxFormat(from_="cxcywh"),
-    ToDetections(),
+    NMS(),
 ])
 ```
 
@@ -190,7 +190,6 @@ For the full guide on how to build scaffolding around the model, see
 - [`docs/README.md`](../../../docs/README.md) for the shared framework docs index
 - [`REGIONS.md`](../../../docs/REGIONS.md) for batching and regions
 - [`Torch guide`](../../torch/docs/README.md) for Torch/NumPy crossover pipelines
-- [`Vision guide`](../../vision/docs/README.md) for task-specific tensor operations and typed results in vision pipelines
 - [`examples/README.md`](../../../examples/README.md) for runnable pipeline entry points
   - [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py)
   - [`examples/run_rfdetr_nano.py`](../../../examples/run_rfdetr_nano.py)

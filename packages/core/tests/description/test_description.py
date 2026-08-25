@@ -26,8 +26,6 @@ from ml_pipes.standard import (
 )
 from ml_pipes.tensor import AsType
 from ml_pipes.vision import (
-    FilterPredictionsByClass,
-    FilterPredictionsByScore,
     FilterTensorsByClasses,
     FilterTensorsByScore,
 )
@@ -538,20 +536,6 @@ def test_describe_preserves_extract_constructor_config(as_value, expected_args, 
 
 
 def test_describe_captures_wrapper_constructor_args():
-    assert Pipeline([FilterPredictionsByClass({0, 2})]).describe().operators[0].passed_args == {
-        "classes": {0, 2},
-    }
-    assert repr(Pipeline([FilterPredictionsByClass({0, 2})])) == _pipeline_text(
-        "FilterPredictionsByClass({0, 2})"
-    )
-
-    assert Pipeline([FilterPredictionsByScore(0.7)]).describe().operators[0].passed_args == {
-        "min_score": 0.7,
-    }
-    assert repr(Pipeline([FilterPredictionsByScore(0.7)])) == _pipeline_text(
-        "FilterPredictionsByScore(0.7)"
-    )
-
     assert Pipeline([FilterTensorsByScore("boxes", score="scores", min_score=0.75)]).describe().operators[0].passed_args == {
         "srcs": ("boxes",),
         "score": "scores",

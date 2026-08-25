@@ -25,7 +25,7 @@ from ml_pipes.tracing import (
     TracingConfig,
 )
 from ml_pipes.tracing import PendingSpan, freeze_trace
-from ml_pipes.tensor import TensorPayload
+from ml_pipes.tensor import TensorPayload, TensorRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +364,24 @@ def test_shapes_recorded_for_tensor_payload():
     assert cap.traces[0].spans[0].input_shape == "TensorPayload (1, 3, 640, 640)"
 
 
+def test_shapes_recorded_for_tensor_registry():
+    registry = TensorRegistry(
+        {
+            "boxes": np.zeros((2, 4), dtype=np.float32),
+            "scores": np.zeros((2,), dtype=np.float32),
+        }
+    )
+
+    def _passthrough(value: Any) -> Any:
+        return value
+
+    p, cap = _make_pipeline([_passthrough], capture_shapes=True)
+    assert p(registry) is registry
+
+    assert cap.traces[0].spans[0].input_shape == "TensorRegistry {boxes: (2, 4), scores: (2,)}"
+    assert cap.traces[0].spans[0].output_shape == "TensorRegistry {boxes: (2, 4), scores: (2,)}"
+
+
 # ---------------------------------------------------------------------------
 # Batch — traced path span structure
 # ---------------------------------------------------------------------------
@@ -650,11 +668,10 @@ def test_merge_traces_propagates_error_flag():
 def test_inspect_with_lambda_operator_is_serializable():
     import pickle
     from ml_pipes.inspection import InspectionSerializer
-    from ml_pipes.vision import FilterPredictions
-    from ml_pipes.vision import Detections
+    from ml_pipes.tensor import FilterTensors, TensorRegistry
 
-    pred = Detections(boxes=[[0,0,1,1],[1,1,2,2]], scores=[0.9, 0.4], classes=[0, 1])
-    p = Pipeline([FilterPredictions(predicate=lambda d: [s > 0.5 for s in d.scores])])
+    pred = TensorRegistry({"scores": np.array([0.9, 0.4], dtype=np.float32)})
+    p = Pipeline([FilterTensors("scores", by="scores", predicate=lambda scores: scores > 0.5)])
     result = p.inspect(pred)
 
     data = InspectionSerializer().dumps(result)

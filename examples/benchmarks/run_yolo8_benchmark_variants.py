@@ -52,17 +52,16 @@ from ml_pipes.tensor import (
     GatherScores,
     Slice,
     Squeeze,
+    TensorRegistry,
     Transpose,
 )
 from ml_pipes.vision import (
     ConvertBoxFormat,
-    Detections,
     ImagePayload,
     NMS,
     Normalize,
     ProjectBoxes,
     Resize,
-    ToDetections,
 )
 from ml_pipes.benchmark import BenchmarkBuilder, BenchmarkResult
 
@@ -79,7 +78,7 @@ YOLO8_MODELS: dict[str, tuple[str, str | None]] = {
 def yolo8_variant_inference_pipeline(
     model_path: Path,
     conf_threshold: float = 0.25,
-) -> Pipeline[ImagePayload, Detections]:
+) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline(
         [
             Resize((640, 640)),
@@ -98,7 +97,6 @@ def yolo8_variant_inference_pipeline(
             NMS(conf_threshold=conf_threshold),
             Recall("resize_transform"),
             ProjectBoxes(),
-            ToDetections(),
         ],
         auto_validate=True,
     )
@@ -109,7 +107,7 @@ def yolo8_variant_pipeline(
     model_path: Path | None = None,
     output_path: Path | None = None,
     conf_threshold: float = 0.25,
-) -> Pipeline[str | Path, tuple[ImagePayload, Detections]]:
+) -> Pipeline[str | Path, tuple[ImagePayload, TensorRegistry]]:
     default_model_name, default_model_url = YOLO8_MODELS["n"]
     resolved_model_path = resolve_model_path(model_path, ASSETS_DIR / default_model_name, default_model_url)
     resolved_output_path = output_path or build_output_path(ASSETS_DIR, "run_yolo8_benchmark_variants.jpg", resolved_model_path.name)

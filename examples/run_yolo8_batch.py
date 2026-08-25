@@ -46,17 +46,16 @@ from ml_pipes.tensor import (
     Slice,
     Squeeze,
     Transpose,
+    TensorRegistry,
 )
 from ml_pipes.vision import (
     ConvertBoxFormat,
     Decode,
-    Detections,
     LoadFile,
     NMS,
     Normalize,
     ProjectBoxes,
     Resize,
-    ToDetections,
 )
 
 MODEL_NAME = "yolov8n_dynamic.onnx"
@@ -89,7 +88,7 @@ def _ensure_yolov8n_dynamic_model() -> Path:
 
 
 def build_pipeline(model_path: Path, batch_size: int, timeout: float,
-                   serialize: bool = False) -> Pipeline[str | Path, Detections]:
+                   serialize: bool = False) -> Pipeline[str | Path, TensorRegistry]:
     return Pipeline([
         LoadFile(),
         Decode(),
@@ -113,7 +112,6 @@ def build_pipeline(model_path: Path, batch_size: int, timeout: float,
         NMS(),
         Recall("resize_transform"),
         ProjectBoxes(),
-        ToDetections(),
     ], auto_validate=True)
 
 
@@ -189,8 +187,8 @@ def main() -> int:
         futures = {pool.submit(pipeline, p): p for p in image_paths}
         for future in as_completed(futures):
             path = futures[future]
-            detections = future.result()
-            print(f"  {path.name}: {len(detections.boxes)} detections")
+            registry = future.result()
+            print(f"  {path.name}: {len(registry['boxes'])} detections")
     elapsed = time.perf_counter() - t0
 
     print(

@@ -36,6 +36,7 @@ from ml_pipes.standard import (
 from ml_pipes.tensor import (
     MapTensor,
     Squeeze,
+    TensorRegistry,
 )
 from ml_pipes.vision import (
     FilterTensorsByScore,
@@ -44,8 +45,6 @@ from ml_pipes.vision import (
     ProjectBoxes,
     ProjectRoIMasks,
     Resize,
-    Segmentations,
-    ToSegmentations,
 )
 
 MODEL_URL = (
@@ -60,7 +59,7 @@ _IMAGENET_MEAN_BGR = (102.9801, 115.9465, 122.7717)
 CONF_THRESHOLD = 0.7
 
 
-def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segmentations]:
+def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline(
         [
             Resize((800, 800)),
@@ -82,7 +81,6 @@ def build_inference_pipeline(model_path: Path) -> Pipeline[ImagePayload, Segment
             Squeeze("masks", axis=1),  # (N, 1, 28, 28) → (N, 28, 28)
             Recall("resize_transform"),
             ProjectRoIMasks(),  # 28×28 RoI masks → full-image binary masks
-            ToSegmentations()
         ],
         auto_validate=True,
     )

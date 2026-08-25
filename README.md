@@ -43,23 +43,21 @@ shown in [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py):
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Extract, Infer
 from ml_pipes.standard import Pick, Recall, Store
-from ml_pipes.tensor import ArgMax, GatherRows, Slice, Squeeze, Transpose
+from ml_pipes.tensor import ArgMax, GatherRows, Slice, Squeeze, TensorRegistry, Transpose
 from ml_pipes.vision import (
     ConvertBoxFormat,
-    Detections,
     ImagePayload,
     NMS,
     Normalize,
     ProjectBoxes,
     Resize,
-    ToDetections,
 )
 
 
 def yolo8_inference_pipeline(
     model_path: Path,
     conf_threshold: float = 0.25,
-) -> Pipeline[ImagePayload, Detections]:
+) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline(
         [
             Resize((640, 640)),
@@ -78,7 +76,6 @@ def yolo8_inference_pipeline(
             NMS(conf_threshold=conf_threshold),
             Recall("resize_transform"),
             ProjectBoxes(),
-            ToDetections(),
         ],
         auto_validate=True,
     )
@@ -161,7 +158,7 @@ print(contract.output_type)
 
 ```text
 str | pathlib.Path
-tuple[ml_pipes.vision.types.ImagePayload, ml_pipes.vision.types.Detections]
+tuple[ml_pipes.vision.types.ImagePayload, ml_pipes.tensor.types.TensorRegistry]
 ```
 
 Try it: [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py)
@@ -259,10 +256,9 @@ pipeline.set_tracing(None)
   16:NMS                            0.22ms  ( 1.3%)
   17:Recall                         0.00ms  ( 0.0%)
   18:ProjectBoxes                   0.05ms  ( 0.3%)
-  19:ToDetections                   0.02ms  ( 0.1%)
-  20:Recall                         0.00ms  ( 0.0%)
-  21:DrawBoxes                      0.21ms  ( 1.3%)
-  22:SaveImage                      1.86ms  (11.1%)
+  19:Recall                         0.00ms  ( 0.0%)
+  20:DrawBoxes                      0.21ms  ( 1.3%)
+  21:SaveImage                      1.86ms  (11.1%)
   total                            16.76ms
 ```
 

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import TypeVar
-
 import numpy as np
 
 from ml_pipes.operator import Operator
 from ml_pipes.tensor import FilterTensors, TensorRegistry
-from .types import ImagePayload, ResizeTransform, Segmentations
+from .types import ImagePayload, ResizeTransform
 
 __all__ = [
     "DrawMasks",
@@ -17,12 +15,8 @@ __all__ = [
     "ProjectRoIMasks",
     "ReconstructMasks",
     "ResizeMasks",
-    "ToSegmentations",
     "WeightMasksByScores",
 ]
-
-SegT = TypeVar("SegT", bound=Segmentations)
-
 
 def _flatten_leading_dim(array: np.ndarray) -> np.ndarray:
     leading = int(array.shape[0])
@@ -88,26 +82,24 @@ class ResizeMasks:
 
 @Operator
 class MeanMaskScores:
+    """Computes one score per instance by averaging dense mask scores over its mask."""
+
     def __init__(
         self,
+        mask_scores: str = "mask_scores",
         masks: str = "masks",
-        binary_masks: str | None = "binary_masks",
         *,
         as_: str,
     ):
+        self.mask_scores = mask_scores
         self.masks = masks
-        self.binary_masks = binary_masks
         self.as_ = as_
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        mask_scores = registry[self.mask_scores]
         masks = registry[self.masks]
-        if self.binary_masks is None:
-            registry[self.as_] = _flatten_leading_dim(masks).mean(axis=1)
-            return registry
-
-        binary_masks = registry[self.binary_masks]
-        areas = _flatten_leading_dim(binary_masks).sum(axis=1)
-        mask_sums = _flatten_leading_dim(masks * binary_masks).sum(axis=1)
+        areas = _flatten_leading_dim(masks).sum(axis=1)
+        mask_sums = _flatten_leading_dim(mask_scores * masks).sum(axis=1)
         registry[self.as_] = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
         return registry
 
@@ -237,42 +229,30 @@ class ProjectRoIMasks:
 
 
 @Operator
-class ToSegmentations:
-    def __init__(
-        self,
-        boxes: str = "boxes",
-        scores: str = "scores",
-        classes: str = "classes",
-        masks: str = "masks",
-    ):
-        self.boxes = boxes
-        self.scores = scores
-        self.classes = classes
-        self.masks = masks
-
-    def __call__(self, registry: TensorRegistry) -> Segmentations:
-        return Segmentations(
-            boxes=registry[self.boxes].tolist(),
-            scores=registry[self.scores].tolist(),
-            classes=registry[self.classes].tolist(),
-            masks=list(registry[self.masks]),
-        )
-
-
-@Operator
 class DrawMasks:
     def __init__(
         self,
+        masks: str = "masks",
+        classes: str | None = "classes",
+        *,
         class_names: list[str] | tuple[str, ...] | None = None,
         alpha: float = 0.45,
     ):
+        if class_names is not None and classes is None:
+            raise ValueError("DrawMasks class_names requires a classes tensor")
         self.class_names = tuple(class_names) if class_names is not None else None
         self.alpha = alpha
+        self.masks = masks
+        self.classes = classes
 
-    def __call__(self, source_image: ImagePayload, segmentations: SegT) -> tuple[ImagePayload, SegT]:
+    def __call__(self, source_image: ImagePayload, registry: TensorRegistry) -> tuple[ImagePayload, TensorRegistry]:
         image = source_image.array.copy()
-        for mask, class_id in zip(segmentations.masks, segmentations.classes, strict=True):
+        masks = registry[self.masks]
+        class_ids = registry[self.classes] if self.classes is not None else range(len(masks))
+        for mask, class_id in zip(masks, class_ids, strict=True):
             color = np.asarray(self._class_color(int(class_id)), dtype=np.float32)
+            if source_image.color_space == "RGB":
+                color = color[::-1]
             mask_bool = np.asarray(mask, dtype=bool)
             if mask_bool.ndim != 2:
                 raise ValueError(f"Expected 2D segmentation mask, got shape {mask_bool.shape}")
@@ -280,7 +260,7 @@ class DrawMasks:
                 blended = (1.0 - self.alpha) * image[mask_bool].astype(np.float32) + self.alpha * color
                 image[mask_bool] = blended.astype(np.uint8)
 
-        return ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout), segmentations
+        return ImagePayload(array=image, color_space=source_image.color_space, layout=source_image.layout), registry
 
     def _class_color(self, class_id: int) -> tuple[int, int, int]:
         return (
