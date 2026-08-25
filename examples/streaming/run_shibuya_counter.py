@@ -90,12 +90,6 @@ def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePa
         Slice("preds", slice(4, None), as_="scores"),
         ArgMax("scores", as_="classes"),
         GatherScores("scores", "classes"),
-        FilterTensorsByClasses(
-            "boxes",
-            "scores",
-            "classes",
-            keep_classes={_PERSON_CLASS_ID},
-        ),
         ConvertBoxFormat(from_="cxcywh"),
         NMS(conf_threshold=conf_threshold),
         Recall("resize_transform"),
@@ -125,6 +119,12 @@ def build_pipeline(
     ], auto_validate=True) if tile else _infer_pipeline(model_path, conf_threshold)
 
     postprocess = Pipeline([
+        FilterTensorsByClasses(
+            "boxes",
+            "scores",
+            "classes",
+            keep_classes={_PERSON_CLASS_ID},
+        ),
         FilterTensorsByBoxArea("scores", "classes", max_area=_MAX_PERSON_AREA),
         Store("filtered_detections"),
         Map(_count_detections),
