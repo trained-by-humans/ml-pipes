@@ -29,23 +29,27 @@ For the cross-package package catalogs, see
 
 ## Detection And Segmentation Registry Helpers
 
-| Operator | Notes |
-|---|---|
-| `ConvertBoxFormat(src="boxes", from_=..., to="xyxy", as_=None)` | Converts between `xyxy`, `xywh`, and `cxcywh` box formats. |
-| `NMS(...)` | Confidence filtering plus per-class non-maximum suppression on registry tensors. |
-| `NMM(boxes="boxes", scores="scores", classes="classes", ...)` | Merges overlapping registry detections instead of discarding them. |
-| `FilterTensorsByBoxArea(...)` | Filters one or more tensors by `xyxy` box area. |
-| `FilterTensorsByScore(...)` | Filters one or more tensors by a score threshold. |
-| `FilterTensorsByClasses(...)` | Filters one or more tensors by allowed class ids. |
-| `FilterTensorsByMasksArea(...)` | Filters one or more tensors by mask area. |
-| `WeightMasksByScores(...)` | Weights masks by per-instance scores. |
-| `ResizeMasks(...)` | Resizes instance masks to an image shape. |
-| `MeanMaskScores(...)` | Computes mean scores over masks or masked areas. |
-| `MasksToBoxes(...)` | Derives boxes from binary masks. |
-| `ReconstructMasks(coefficients, prototypes, as_)` | Reconstructs instance masks from coefficients and prototypes. |
-| `ProjectBoxes(src="boxes")` | Projects model-space boxes back to the original image space. |
-| `ProjectMasks(...)` | Projects prototype-style masks back to the source image space. |
-| `ProjectRoIMasks(...)` | Projects per-instance RoI masks back to the source image space. |
+All operators in this section read and write named fields in a
+`TensorRegistry`. By convention detection fields are `boxes`, `scores`, and
+`classes`; segmentation registries can additionally carry `masks`.
+
+| Operator | Input -> Output | Notes |
+|---|---|---|
+| `ConvertBoxFormat(...)` | `TensorRegistry` -> `TensorRegistry` | Converts between `xyxy`, `xywh`, and `cxcywh` box formats. |
+| `NMS(...)` | `TensorRegistry` -> `TensorRegistry` | Applies confidence filtering and per-class non-maximum suppression. |
+| `NMM(...)` | `TensorRegistry` -> `TensorRegistry` | Merges overlapping boxes instead of discarding them. |
+| `FilterTensorsByScore(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by score threshold. |
+| `FilterTensorsByClasses(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by allowed class ids. |
+| `FilterTensorsByBoxArea(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by `xyxy` box area. |
+| `FilterTensorsByMasksArea(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by foreground mask area. |
+| `ProjectBoxes(src="boxes")` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects model-space boxes into source-image coordinates. |
+| `ReconstructMasks(...)` | `TensorRegistry` -> `TensorRegistry` | Reconstructs instance masks from coefficients and prototypes. |
+| `ProjectMasks(...)` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects prototype-style masks into source-image space. |
+| `ProjectRoIMasks(...)` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects per-instance RoI masks into source-image space. |
+| `ResizeMasks(...)` | `(TensorRegistry, image_shape)` -> `TensorRegistry` | Resizes instance masks to an image shape. |
+| `MasksToBoxes(...)` | `TensorRegistry` -> `TensorRegistry` | Derives boxes from binary masks. |
+| `WeightMasksByScores(...)` | `TensorRegistry` -> `TensorRegistry` | Weights masks by per-instance scores. |
+| `MeanMaskScores(...)` | `TensorRegistry` -> `TensorRegistry` | Computes mean scores over masks or masked areas. |
 
 ## Tiling
 

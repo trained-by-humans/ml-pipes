@@ -96,9 +96,9 @@ For the cross-package package catalogs, see
 
 ## Vision Postprocess Operators
 
-These mirror the NumPy-side postprocess operators in `ml_pipes.vision`. For
-projection back to image space, rendering, and logging, see the vision package
-index.
+These mirror NumPy-side postprocess operators in `ml_pipes.vision` so tensor
+values can remain on-device. For image payloads, source-image projection, and
+NumPy-side rendering, see the vision package index.
 
 | Operator | Notes |
 |---|---|

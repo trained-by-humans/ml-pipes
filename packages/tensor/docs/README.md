@@ -161,7 +161,7 @@ tensors to a task package.
 from ml_pipes.core import Pipeline
 from ml_pipes.onnx import Extract
 from ml_pipes.tensor import ArgMax, GatherScores, Slice, Squeeze, Transpose
-from ml_pipes.vision import ConvertBoxFormat
+from ml_pipes.vision import ConvertBoxFormat, NMS
 
 pipeline = Pipeline([
     ...,
@@ -173,6 +173,7 @@ pipeline = Pipeline([
     ArgMax("scores", as_="classes"),
     GatherScores("scores", "classes"),
     ConvertBoxFormat(from_="cxcywh"),
+    NMS(),
 ])
 ```
 

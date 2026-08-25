@@ -9,7 +9,7 @@ For the full package surface and operator catalog, see [`INDEX.md`](./INDEX.md).
 
 | Dimension       | Classification                      |
 |-----------------|-------------------------------------|
-| Role / Function | `Data prep`, `Inference (Scaffold)` |
+| Role / Function | `Inference`                          |
 | Task Type       | `Vision`                            |
 | Data Type       | `Media`, `Tensors`                  |
 
@@ -23,6 +23,11 @@ that keep image semantics, resize/projection metadata, and tiling explicit.
 Use this package when a pipeline starts from image inputs, needs
 vision-specific preprocessing before inference, or needs task-specific tensor
 postprocess for detections, segmentations, or density estimation.
+
+Detection and segmentation values stay in `TensorRegistry` throughout these
+operations. Operators declare the named fields they consume—such as `boxes`,
+`scores`, `classes`, and `masks`—rather than requiring a local result
+container.
 
 > [!NOTE]
 > Vision does not own runtime execution or generic tensor-space operators.
@@ -51,6 +56,14 @@ from steps such as `Resize()` so later operators such as `ProjectBoxes()` or
 `ProjectMasks()` can map model-space results back to the source image space.
 `TileRect` records where each tile came from so `Stitch()` can merge
 tile-local results back into one full-image result.
+
+### Tensor Results
+
+`TensorRegistry` is the primary detection and segmentation result value. It
+holds aligned, named arrays without imposing a fixed object schema: detection
+pipelines commonly use `boxes`, `scores`, and `classes`, while segmentation
+pipelines add `masks`. Density estimation likewise remains in the registry,
+usually under `density`.
 
 ## Where Vision Fits
 
@@ -128,12 +141,13 @@ needed, and apply vision-specific filtering while preserving the registry.
 ```python
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import Recall
-from ml_pipes.vision import ConvertBoxFormat, NMS, ProjectBoxes
+from ml_pipes.vision import ConvertBoxFormat, FilterTensorsByScore, NMS, ProjectBoxes
 
 pipeline = Pipeline([
     ...,
     ConvertBoxFormat(from_="cxcywh"),
     NMS(),
+    FilterTensorsByScore("boxes", "classes", score="scores", min_score=0.5),
     Recall("resize_transform"),
     ProjectBoxes(),
 ])
@@ -171,7 +185,9 @@ pipeline = Pipeline([
 ### Tile Large Images And Stitch Results Back
 
 Use the Vision package when inference must happen over tiles rather than one
-full-frame image.
+full-frame image. Each tile produces a `TensorRegistry`; after gathering
+results, `Stitch()` remaps tile-local boxes and combines the aligned fields
+before `NMS()` or `NMM()` deduplicates overlaps.
 
 ```python
 from ml_pipes.core import Inline, Pipeline
