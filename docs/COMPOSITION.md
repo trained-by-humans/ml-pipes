@@ -225,10 +225,20 @@ detection = Pipeline([
 Use this outside a pipeline definition to join existing named pipelines.
 
 ```python
-decode = Pipeline([Decode()])
+decode = Pipeline([Decode(), Store("source_image")])
 preprocess = Pipeline([Resize((640, 640)), Normalize()])
 infer = Pipeline([Infer("model.onnx"), Extract("boxes", "scores", "classes")])
-postprocess = Pipeline([NMS()])
+postprocess = Pipeline([
+    FilterTensorsByClasses(
+        "boxes",
+        "scores",
+        classes="classes",
+        keep_classes={0},
+    ),
+    NMS(),
+    Recall("source_image", prepend=True),
+    DrawBoxes(class_names=["person"]),
+])
 
 detection = decode >> preprocess >> infer >> postprocess
 ```

@@ -9,7 +9,7 @@ For the full package surface and operator signatures, see [`INDEX.md`](./INDEX.m
 | Dimension       | Classification                                                                   |
 |-----------------|----------------------------------------------------------------------------------|
 | Role / Function | `Inference (Scaffold)`                                                           |
-| Task Type       | Mostly `Vision`, but reusable wherever an exported model accepts `TensorPayload` |
+| Task Type       | General (any tensor-based task)                                                   |
 | Data Type       | `Tensors`                                                                        |
 
 ## Scope And Use Cases
@@ -28,8 +28,8 @@ The package is responsible for:
 - support batch operation by splitting one batched runtime call back into per-sample outputs
 
 > [!NOTE]
-> ONNX does not own preprocessing, generic tensor postprocess, or typed task
-results.
+> ONNX does not own preprocessing, generic tensor postprocess, or task-specific
+> results.
 
 ## Design Principles
 
@@ -39,8 +39,8 @@ results.
 - Make provider choice, layout expectations, optional dtype checks, and
   serialization explicit.
 - Keep model outputs raw until another package interprets them.
-- Hand off tensor math to `ml_pipes.tensor` and task semantics to packages such
-  as `ml_pipes.vision`.
+- Hand off tensor math to `ml_pipes.tensor` and task semantics to the owning
+  task package.
 
 ## Where ONNX Fits
 
@@ -70,10 +70,10 @@ At a high level, a common flow looks like this:
 ├─ Extract / Distribute -> Slice -> ArgMax -> ...          │
 └────────┬─────────────────────────────────────────────────┘
          |
-         | Vision postprocess / visualization / logging
+         | TensorRegistry
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Vision Domain                                             │
+│ Specific Task Domain (Vision, Language, etc.)             │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -91,7 +91,7 @@ per-sample flow.
 Use this shape when one pipeline run should correspond to one input sample and
 one downstream result flow. Upstream preparation produces one
 `TensorPayload`, `Infer(...)` runs once, and the extracted outputs continue
-through the normal Tensor and Vision postprocess.
+through the normal Tensor and task-specific postprocess.
 
 ```python
 from ml_pipes.core import Pipeline

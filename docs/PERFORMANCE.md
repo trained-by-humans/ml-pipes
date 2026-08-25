@@ -146,7 +146,7 @@ pipeline = Pipeline([
     ...,
     Gather(),                     # ◀ rejoins with list[TensorRegistry]
     Recall("tile_rects"),
-    Stitch("scores", "classes"),
+    Stitch("scores", "classes", boxes="boxes"),
     NMM(iou_threshold=0.5),
 ])
 ```

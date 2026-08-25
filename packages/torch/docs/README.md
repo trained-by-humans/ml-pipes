@@ -105,13 +105,12 @@ One common mixed flow looks like this:
         ▼
 ┌─────────────────────────────────────────────┐
 │ NumPy Domain                                │
-├─ Vision postprocess / Visualization / Logging│
+├─ Visualization / Logging / Task finalization │
 └─────────────────────────────────────────────┘
 ```
 
-That split keeps Torch execution explicit while still letting the rest of the
-pipeline stay in the packages that already own NumPy-side postprocess and typed
-task results.
+That split keeps Torch execution explicit while still handing off to the
+packages that own visualization, logging, and task finalization.
 
 ## Using Torch In Pipelines
 
