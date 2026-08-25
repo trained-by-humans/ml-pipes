@@ -10,7 +10,7 @@ __all__ = [
     "DrawMasks",
     "FilterTensorsByMasksArea",
     "MasksToBoxes",
-    "MeanMaskScores",
+    "MeanMaskedScores",
     "ProjectMasks",
     "ProjectRoIMasks",
     "ReconstructMasks",
@@ -81,27 +81,25 @@ class ResizeMasks:
 
 
 @Operator
-class MeanMaskScores:
+class MeanMaskedScores:
+    """Computes one score per instance by averaging dense mask scores over its mask."""
+
     def __init__(
         self,
+        mask_scores: str = "mask_scores",
         masks: str = "masks",
-        binary_masks: str | None = "binary_masks",
         *,
         as_: str,
     ):
+        self.mask_scores = mask_scores
         self.masks = masks
-        self.binary_masks = binary_masks
         self.as_ = as_
 
     def __call__(self, registry: TensorRegistry) -> TensorRegistry:
+        mask_scores = registry[self.mask_scores]
         masks = registry[self.masks]
-        if self.binary_masks is None:
-            registry[self.as_] = _flatten_leading_dim(masks).mean(axis=1)
-            return registry
-
-        binary_masks = registry[self.binary_masks]
-        areas = _flatten_leading_dim(binary_masks).sum(axis=1)
-        mask_sums = _flatten_leading_dim(masks * binary_masks).sum(axis=1)
+        areas = _flatten_leading_dim(masks).sum(axis=1)
+        mask_sums = _flatten_leading_dim(mask_scores * masks).sum(axis=1)
         registry[self.as_] = np.where(areas > 0, mask_sums / np.clip(areas, 1, None), 0.0)
         return registry
 

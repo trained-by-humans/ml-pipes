@@ -49,7 +49,7 @@ All operators in this section read and write named fields in a
 | `ResizeMasks(...)` | `(TensorRegistry, image_shape)` -> `TensorRegistry` | Resizes instance masks to an image shape. |
 | `MasksToBoxes(...)` | `TensorRegistry` -> `TensorRegistry` | Derives boxes from binary masks. |
 | `WeightMasksByScores(...)` | `TensorRegistry` -> `TensorRegistry` | Weights masks by per-instance scores. |
-| `MeanMaskScores(...)` | `TensorRegistry` -> `TensorRegistry` | Computes mean scores over masks or masked areas. |
+| `MeanMaskedScores(...)` | `TensorRegistry` -> `TensorRegistry` | Computes one score per instance from dense mask scores over foreground masks. |
 
 ## Tiling
 

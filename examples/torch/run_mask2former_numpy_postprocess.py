@@ -42,7 +42,7 @@ from ml_pipes.vision import (
     FilterTensorsByScore,
     LogDetections,
     MasksToBoxes,
-    MeanMaskScores,
+    MeanMaskedScores,
     ResizeMasks,
     WeightMasksByScores,
 )
@@ -240,7 +240,7 @@ def build_numpy_postprocess_pipeline(
             ),
             SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
             BinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="masks"),
-            MeanMaskScores(masks="selected_masks", as_="mean_mask_scores"),
+            MeanMaskedScores(mask_scores="selected_masks", masks="masks", as_="mean_mask_scores"),
             MultiplyTensors("top_scores", "mean_mask_scores", as_="scores"),
             FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=1),
             FilterTensorsByScore("masks", "classes", score="scores", min_score=_SCORE_THRESHOLD),

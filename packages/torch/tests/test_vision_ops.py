@@ -10,7 +10,7 @@ from ml_pipes.torch import (
     TorchFilterTensorsByMasksArea,
     TorchFilterTensorsByScore,
     TorchMasksToBoxes,
-    TorchMeanMaskScores,
+    TorchMeanMaskedScores,
     TorchNMS,
     TorchReconstructMasks,
     TorchResizeMasks,
@@ -73,7 +73,7 @@ def test_torch_resize_masks_to_image_resizes_mask_stack():
     assert registry["resized_masks"].dtype == torch.float32
 
 
-def test_torch_mean_mask_scores_computes_mean_over_binary_support():
+def test_torch_mean_masked_scores_computes_mean_over_mask_support():
     registry = TorchTensorRegistry(
         {
             "selected_masks": torch.tensor(
@@ -83,7 +83,7 @@ def test_torch_mean_mask_scores_computes_mean_over_binary_support():
                 ],
                 dtype=torch.float32,
             ),
-            "binary_masks": torch.tensor(
+            "masks": torch.tensor(
                 [
                     [[False, True], [True, False]],
                     [[True, False], [False, True]],
@@ -93,29 +93,20 @@ def test_torch_mean_mask_scores_computes_mean_over_binary_support():
         }
     )
 
-    TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+    TorchMeanMaskedScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert torch.allclose(registry["mean_mask_scores"], torch.tensor([0.75, 0.5]))
 
 
-def test_torch_mean_mask_scores_handles_empty_masks():
+def test_torch_mean_masked_scores_handles_empty_masks():
     registry = TorchTensorRegistry(
         {
             "selected_masks": torch.zeros((0, 2, 2), dtype=torch.float32),
-            "binary_masks": torch.zeros((0, 2, 2), dtype=torch.bool),
+            "masks": torch.zeros((0, 2, 2), dtype=torch.bool),
         }
     )
 
-    result = TorchMeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
-
-    assert tuple(result["mean_mask_scores"].shape) == (0,)
-    assert result["mean_mask_scores"].dtype == torch.float32
-
-
-def test_torch_mean_mask_scores_handles_empty_masks_without_binary_masks():
-    registry = TorchTensorRegistry({"selected_masks": torch.zeros((0, 2, 2), dtype=torch.float32)})
-
-    result = TorchMeanMaskScores(masks="selected_masks", binary_masks=None, as_="mean_mask_scores")(registry)
+    result = TorchMeanMaskedScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert tuple(result["mean_mask_scores"].shape) == (0,)
     assert result["mean_mask_scores"].dtype == torch.float32

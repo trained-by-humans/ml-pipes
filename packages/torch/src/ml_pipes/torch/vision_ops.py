@@ -16,7 +16,7 @@ __all__ = [
     "TorchFilterTensorsByMasksArea",
     "TorchWeightMasksByScores",
     "TorchResizeMasks",
-    "TorchMeanMaskScores",
+    "TorchMeanMaskedScores",
     "TorchMasksToBoxes",
     "TorchReconstructMasks",
     "TorchNMS",
@@ -182,37 +182,28 @@ class TorchResizeMasks:
 
 
 @Operator
-class TorchMeanMaskScores:
-    """Computes one mean score per mask from dense mask values.
-
-    If `binary_masks` is provided, the mean is computed only over pixels where
-    the binary mask is True. If `binary_masks` is None, the mean is computed
-    over all pixels in each dense mask.
-    """
+class TorchMeanMaskedScores:
+    """Computes one score per instance by averaging dense mask scores over its mask."""
 
     def __init__(
         self,
+        mask_scores: str = "mask_scores",
         masks: str = "masks",
-        binary_masks: str | None = "binary_masks",
         *,
         as_: str,
     ):
+        self.mask_scores = mask_scores
         self.masks = masks
-        self.binary_masks = binary_masks
         self.as_ = as_
 
     def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+        mask_scores = registry[self.mask_scores]
         masks = registry[self.masks]
-        if self.binary_masks is None:
-            registry[self.as_] = masks.flatten(1).mean(dim=1)
-            return registry
-
-        binary_masks = registry[self.binary_masks]
-        areas = binary_masks.flatten(1).sum(dim=1)
+        areas = masks.flatten(1).sum(dim=1)
         registry[self.as_] = torch.where(
             areas > 0,
-            (masks * binary_masks).flatten(1).sum(dim=1) / areas.clamp_min(1).to(masks.dtype),
-            torch.zeros((masks.shape[0],), dtype=masks.dtype, device=masks.device),
+            (mask_scores * masks).flatten(1).sum(dim=1) / areas.clamp_min(1).to(mask_scores.dtype),
+            torch.zeros((mask_scores.shape[0],), dtype=mask_scores.dtype, device=mask_scores.device),
         )
         return registry
 

@@ -8,7 +8,7 @@ from ml_pipes.vision import (
     FilterTensorsByMasksArea,
     ImagePayload,
     MasksToBoxes,
-    MeanMaskScores,
+    MeanMaskedScores,
     ProjectMasks,
     ProjectRoIMasks,
     ReconstructMasks,
@@ -69,7 +69,7 @@ def test_resize_masks_to_image_resizes_mask_stack():
     assert result["resized_masks"].dtype == np.float32
 
 
-def test_mean_mask_scores_computes_mean_over_binary_support():
+def test_mean_masked_scores_computes_mean_over_mask_support():
     registry = TensorRegistry(
         {
             "selected_masks": np.array(
@@ -79,7 +79,7 @@ def test_mean_mask_scores_computes_mean_over_binary_support():
                 ],
                 dtype=np.float32,
             ),
-            "binary_masks": np.array(
+            "masks": np.array(
                 [
                     [[False, True], [True, False]],
                     [[True, False], [False, True]],
@@ -88,32 +88,23 @@ def test_mean_mask_scores_computes_mean_over_binary_support():
         }
     )
 
-    result = MeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+    result = MeanMaskedScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert np.allclose(result["mean_mask_scores"], [0.75, 0.5])
 
 
-def test_mean_mask_scores_handles_empty_masks():
+def test_mean_masked_scores_handles_empty_masks():
     registry = TensorRegistry(
         {
             "selected_masks": np.zeros((0, 2, 2), dtype=np.float32),
-            "binary_masks": np.zeros((0, 2, 2), dtype=bool),
+            "masks": np.zeros((0, 2, 2), dtype=bool),
         }
     )
 
-    result = MeanMaskScores(masks="selected_masks", as_="mean_mask_scores")(registry)
+    result = MeanMaskedScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert result["mean_mask_scores"].shape == (0,)
     assert result["mean_mask_scores"].dtype == np.float64
-
-
-def test_mean_mask_scores_handles_empty_masks_without_binary_masks():
-    registry = TensorRegistry({"selected_masks": np.zeros((0, 2, 2), dtype=np.float32)})
-
-    result = MeanMaskScores(masks="selected_masks", binary_masks=None, as_="mean_mask_scores")(registry)
-
-    assert result["mean_mask_scores"].shape == (0,)
-    assert result["mean_mask_scores"].dtype == np.float32
 
 
 def test_masks_to_boxes_converts_masks_to_xyxy():
