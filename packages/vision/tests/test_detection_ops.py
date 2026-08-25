@@ -143,6 +143,24 @@ def test_nmm_uses_uniform_weights_when_overlapping_scores_are_zero():
     assert result["classes"].dtype == np.int32
 
 
+def test_nmm_keeps_configured_aligned_tensors_from_each_group_winner():
+    registry = _make_registry(
+        boxes=[[0, 0, 2, 2], [0, 0, 2, 2], [10, 10, 12, 12]],
+        scores=[0.8, 0.9, 0.7],
+        classes=[1, 1, 1],
+    )
+    registry["embeddings"] = np.array([[8, 0], [9, 0], [7, 0]], dtype=np.float32)
+    registry["masks"] = np.array([[[True]], [[False]], [[True]]])
+
+    result = NMM("embeddings", "masks", iou_threshold=0.5)(registry)
+
+    assert result["boxes"].shape == (2, 4)
+    assert np.allclose(result["scores"], [0.9, 0.7])
+    assert result["classes"].tolist() == [1, 1]
+    assert result["embeddings"].tolist() == [[9.0, 0.0], [7.0, 0.0]]
+    assert result["masks"].tolist() == [[[False]], [[True]]]
+
+
 def test_nms_requires_classes_tensor():
     with pytest.raises(ValueError, match="requires a classes tensor"):
         NMS(classes=None)

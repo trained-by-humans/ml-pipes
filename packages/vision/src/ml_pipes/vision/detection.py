@@ -182,11 +182,13 @@ class NMS:
 class NMM:
     def __init__(
         self,
+        *srcs: str,
         boxes: str = "boxes",
         scores: str = "scores",
         classes: str = "classes",
         iou_threshold: float = 0.5,
     ) -> None:
+        self.srcs = tuple(dict.fromkeys((boxes, scores, classes, *srcs)))
         self.boxes = boxes
         self.scores = scores
         self.classes = classes
@@ -204,8 +206,7 @@ class NMM:
         computation_scores = np.asarray(scores, dtype=computation_dtype)
 
         merged_boxes: list[list[float]] = []
-        merged_scores: list[float] = []
-        merged_classes: list[int] = []
+        winner_indices: list[int] = []
 
         for class_id in np.unique(classes):
             idx = np.where(classes == class_id)[0]
@@ -237,12 +238,12 @@ class NMM:
                 )
                 merged_box = (group_boxes * weights[:, None]).sum(axis=0).tolist()
                 merged_boxes.append(merged_box)
-                merged_scores.append(float(scores[int(current)]))
-                merged_classes.append(int(class_id))
+                winner_indices.append(int(current))
 
+        winners = np.asarray(winner_indices, dtype=np.intp)
+        for src in self.srcs:
+            registry[src] = registry[src][winners]
         registry[self.boxes] = np.asarray(merged_boxes, dtype=boxes.dtype).reshape(-1, 4)
-        registry[self.scores] = np.asarray(merged_scores, dtype=scores.dtype)
-        registry[self.classes] = np.asarray(merged_classes, dtype=classes.dtype)
         return registry
 
 

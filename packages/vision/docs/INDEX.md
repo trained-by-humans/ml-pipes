@@ -37,7 +37,7 @@ All operators in this section read and write named fields in a
 |---|---|---|
 | `ConvertBoxFormat(...)` | `TensorRegistry` -> `TensorRegistry` | Converts between `xyxy`, `xywh`, and `cxcywh` box formats. |
 | `NMS(...)` | `TensorRegistry` -> `TensorRegistry` | Applies confidence filtering and per-class non-maximum suppression. |
-| `NMM(...)` | `TensorRegistry` -> `TensorRegistry` | Merges overlapping boxes instead of discarding them. |
+| `NMM(*srcs, ...)` | `TensorRegistry` -> `TensorRegistry` | Merges overlapping boxes. Configured aligned tensors retain the highest-scoring row from each merge group. |
 | `FilterTensorsByScore(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by score threshold. |
 | `FilterTensorsByClasses(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by allowed class ids. |
 | `FilterTensorsByBoxArea(...)` | `TensorRegistry` -> `TensorRegistry` | Filters aligned fields by `xyxy` box area. |

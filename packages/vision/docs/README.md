@@ -189,8 +189,9 @@ full-frame image. Each tile produces a `TensorRegistry`; after gathering
 results, `Stitch()` remaps tile-local boxes and concatenates the explicitly
 configured aligned tensors, for example `Stitch("scores", "classes",
 "embeddings")`. Extra spatial tensors are only
-concatenated, not projected into full-image coordinates. NMS and NMM still
-operate only on boxes, scores, and classes.
+concatenated, not projected into full-image coordinates. NMS operates on
+boxes, scores, and classes. Pass any additional aligned fields to NMM so it
+keeps the highest-scoring row from each merged group.
 
 ```python
 from ml_pipes.core import Inline, Pipeline
@@ -205,8 +206,8 @@ pipeline = Pipeline([
     Inline(tile_pipeline),
     Gather(),
     Recall("tile_rects"),
-    Stitch("scores", "classes"),
-    NMM(iou_threshold=0.4),
+    Stitch("scores", "classes", "embeddings"),
+    NMM("embeddings", iou_threshold=0.4),
 ])
 ```
 
