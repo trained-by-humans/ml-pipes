@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from ml_pipes.tensor import TensorRegistry
-from ml_pipes.vision import ClampDensity, DensityToHeatmap, ImagePayload, ProjectDensity, ResizeTransform, SumDensity
+from ml_pipes.vision import ClampDensity, DensityToHeatmap, ProjectDensity, ResizeTransform, SumDensity
 
 
 def _registry(density: np.ndarray) -> TensorRegistry:
@@ -30,16 +30,25 @@ def test_clamp_density_can_write_to_a_new_name() -> None:
     assert np.array_equal(registry["clamped"], [[0.0, 2.0]])
 
 
-def test_density_to_heatmap_reads_configured_registry_tensor() -> None:
-    source = ImagePayload(array=np.zeros((24, 32, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+def test_density_to_heatmap_applies_turbo_colormap_by_default() -> None:
     registry = TensorRegistry({"estimated_density": np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32)})
 
-    returned_source, heatmap = DensityToHeatmap(src="estimated_density")(source, registry)
+    heatmap = DensityToHeatmap(src="estimated_density")(registry)
 
-    assert returned_source is source
-    assert heatmap.array.shape == source.array.shape
+    assert heatmap.array.shape == (2, 2, 3)
     assert heatmap.color_space == "BGR"
+    assert heatmap.layout == "HWC"
     assert np.any(heatmap.array)
+
+
+def test_density_to_heatmap_returns_gray_image_without_a_colormap() -> None:
+    registry = TensorRegistry({"estimated_density": np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32)})
+
+    heatmap = DensityToHeatmap(src="estimated_density", colormap=None)(registry)
+
+    assert heatmap.array.shape == (2, 2)
+    assert heatmap.color_space == "GRAY"
+    assert heatmap.layout == "HW"
 
 
 def test_project_density_removes_letterbox_padding_and_preserves_sum() -> None:
