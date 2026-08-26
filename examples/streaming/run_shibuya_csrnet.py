@@ -42,7 +42,7 @@ from ml_pipes.onnx import (
     Extract,
     RuntimeOutputs,
 )
-from ml_pipes.standard import Pick, Recall, Store
+from ml_pipes.standard import Map, Pick, Recall, Store
 from ml_pipes.tensor import (
     AsType,
     Squeeze,
@@ -54,6 +54,8 @@ from ml_pipes.vision import (
     DensityToHeatmap,
     ImagePayload,
     Normalize,
+    ProjectDensity,
+    ResizeTransform,
     SumDensity,
 )
 
@@ -177,12 +179,21 @@ class CSRNetInfer:
         )
 
 
-def build_pipeline(
-    model: Any,
-    device: str,
-) -> Pipeline[ImagePayload, ImagePayload]:
+def extract_shape_as_transformation(source_image: ImagePayload) -> tuple[ImagePayload, ResizeTransform]:
+    return source_image, ResizeTransform(
+        scale=(1.0, 1.0),
+        pad=(0.0, 0.0),
+        original_shape=source_image.spatial_shape,
+        resized_shape=source_image.spatial_shape,
+    )
+
+
+def build_pipeline(model: Any, device: str) -> Pipeline[ImagePayload, ImagePayload]:
     return Pipeline([
         Store("source_frame"),
+        Map(extract_shape_as_transformation),
+        Store("resize_transform", source=1),
+        Pick(0),
         Normalize(
             scale=1.0 / 255.0,
             mean=_IMAGENET_MEAN_RGB,
@@ -195,13 +206,15 @@ def build_pipeline(
         Squeeze("density", axis=(0, 1)),
         AsType(src="density", dtype="float32"),
         ClampDensity(),
+        Recall("resize_transform"),
+        ProjectDensity(),
         Store("density_registry"),
         SumDensity(),
         Store("count"),
         Recall("density_registry", prepend=True),
         Pick(0),
-        Recall("source_frame", prepend=True),
         DensityToHeatmap(),
+        Recall("source_frame", prepend=True),
         BlendImages(),
         Recall("count"),
         DrawCount(counter="People", decimals=1),

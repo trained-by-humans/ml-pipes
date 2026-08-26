@@ -63,6 +63,7 @@ All operators in this section read and write named fields in a
 
 | Operator | Notes |
 |---|---|
+| `BlendImages(...)` | Blends a source image with an overlay image. |
 | `DrawBoxes(...)` | Draws configured boxes and scores; classes are optional unless `class_names` is set. |
 | `DrawMasks(...)` | Overlays configured masks; classes are optional unless `class_names` is set. |
 | `SaveImage(output_path, at=None)` | Saves an image payload to disk as a side effect. |
@@ -74,5 +75,5 @@ All operators in this section read and write named fields in a
 |---|---|---|
 | `ClampDensity(src="density", as_=None)` | `TensorRegistry` -> `TensorRegistry` | Clamps a density tensor to non-negative values. |
 | `SumDensity(src="density")` | `TensorRegistry` -> `float` | Sums a density tensor into one count. |
-| `DensityToHeatmap(src="density", ...)` | `(ImagePayload, TensorRegistry)` -> `(ImagePayload, ImagePayload)` | Converts a density tensor into a colored heatmap aligned to the source image. |
-| `BlendImages(...)` | `(ImagePayload, ImagePayload)` -> `ImagePayload` | Blends a source image with an overlay image. |
+| `ProjectDensity(src="density", as_=None, ...)` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects model-space density into source-image space while preserving its sum. |
+| `DensityToHeatmap(src="density", ...)` | `TensorRegistry` -> `ImagePayload` | Converts a density tensor into a model- or source-space colored heatmap. |
