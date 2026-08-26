@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from ml_pipes.tensor import TensorRegistry
-from ml_pipes.vision import ClampDensity, DensityToHeatmap, ImagePayload, SumDensity
+from ml_pipes.vision import ClampDensity, DensityToHeatmap, ImagePayload, ProjectDensity, ResizeTransform, SumDensity
 
 
 def _registry(density: np.ndarray) -> TensorRegistry:
@@ -40,3 +40,18 @@ def test_density_to_heatmap_reads_configured_registry_tensor() -> None:
     assert heatmap.array.shape == source.array.shape
     assert heatmap.color_space == "BGR"
     assert np.any(heatmap.array)
+
+
+def test_project_density_removes_letterbox_padding_and_preserves_sum() -> None:
+    registry = _registry(np.array([[0.0, 0.0], [1.0, 3.0]], dtype=np.float32))
+    transform = ResizeTransform(
+        scale=(1.0, 1.0),
+        pad=(0.0, 1.0),
+        original_shape=(1, 2),
+        resized_shape=(2, 2),
+    )
+
+    ProjectDensity()(registry, transform)
+
+    assert registry["density"].shape == (1, 2)
+    assert np.isclose(registry["density"].sum(), 4.0)
