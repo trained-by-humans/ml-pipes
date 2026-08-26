@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from ml_pipes.tensor import TensorRegistry
-from ml_pipes.vision import ClampDensity, DensityToHeatmap, ProjectDensity, ResizeTransform, SumDensity
+from ml_pipes.vision import ClampDensity, DensityToHeatmap, DrawDensityOverlay, ImagePayload, ProjectDensity, ResizeTransform, SumDensity
 
 
 def _registry(density: np.ndarray) -> TensorRegistry:
@@ -49,6 +50,26 @@ def test_density_to_heatmap_returns_gray_image_without_a_colormap() -> None:
     assert heatmap.array.shape == (2, 2)
     assert heatmap.color_space == "GRAY"
     assert heatmap.layout == "HW"
+
+
+def test_draw_density_overlay_alpha_blends_source_aligned_density_without_mutating_registry() -> None:
+    source = ImagePayload(array=np.zeros((2, 2, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    registry = _registry(np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32))
+
+    image, returned_registry = DrawDensityOverlay(opacity=1.0)(source, registry)
+
+    assert image.array.shape == source.array.shape
+    assert image.color_space == source.color_space
+    assert np.any(image.array)
+    assert returned_registry is registry
+
+
+def test_draw_density_overlay_rejects_density_that_is_not_source_aligned() -> None:
+    source = ImagePayload(array=np.zeros((3, 3, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    registry = _registry(np.zeros((2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="source-aligned density"):
+        DrawDensityOverlay()(source, registry)
 
 
 def test_project_density_removes_letterbox_padding_and_preserves_sum() -> None:

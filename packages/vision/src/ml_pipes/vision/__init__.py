@@ -11,7 +11,7 @@ from .detection import (
     NMS,
     ProjectBoxes,
 )
-from .density import ClampDensity, DensityToHeatmap, ProjectDensity, SumDensity
+from .density import ClampDensity, DensityToHeatmap, DrawDensityOverlay, ProjectDensity, SumDensity
 from .ops import (
     BlendImages,
     ConvertColorSpace,
@@ -43,6 +43,7 @@ __all__ = [
     "Decode",
     "DensityToHeatmap",
     "DrawBoxes",
+    "DrawDensityOverlay",
     "DrawMasks",
     "FilterTensorsByBoxArea",
     "FilterTensorsByClasses",

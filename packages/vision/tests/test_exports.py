@@ -12,6 +12,7 @@ def test_vision_component_surface_is_curated() -> None:
         "Decode",
         "DensityToHeatmap",
         "DrawBoxes",
+        "DrawDensityOverlay",
         "DrawMasks",
         "FilterTensorsByBoxArea",
         "FilterTensorsByClasses",
