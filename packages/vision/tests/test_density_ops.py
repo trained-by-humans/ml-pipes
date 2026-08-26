@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from ml_pipes.tensor import TensorRegistry
-from ml_pipes.vision import ClampDensity, DensityToHeatmap, DrawDensityOverlay, ImagePayload, ProjectDensity, ResizeTransform, SumDensity
+from ml_pipes.vision import ClampDensity, DensityToHeatmap, DrawDensityOverlay, ImagePayload, ProjectDensityMap, ResizeTransform, SumDensity
 
 
 def _registry(density: np.ndarray) -> TensorRegistry:
@@ -72,7 +72,7 @@ def test_draw_density_overlay_rejects_density_that_is_not_source_aligned() -> No
         DrawDensityOverlay()(source, registry)
 
 
-def test_project_density_removes_letterbox_padding_and_preserves_sum() -> None:
+def test_project_density_map_removes_letterbox_padding_and_preserves_sum() -> None:
     registry = _registry(np.array([[0.0, 0.0], [1.0, 3.0]], dtype=np.float32))
     transform = ResizeTransform(
         scale=(1.0, 1.0),
@@ -81,7 +81,7 @@ def test_project_density_removes_letterbox_padding_and_preserves_sum() -> None:
         resized_shape=(2, 2),
     )
 
-    ProjectDensity()(registry, transform)
+    ProjectDensityMap()(registry, transform)
 
     assert registry["density"].shape == (1, 2)
     assert np.isclose(registry["density"].sum(), 4.0)

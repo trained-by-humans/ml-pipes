@@ -76,5 +76,5 @@ All operators in this section read and write named fields in a
 |---|---|---|
 | `ClampDensity(src="density", as_=None)` | `TensorRegistry` -> `TensorRegistry` | Clamps a density tensor to non-negative values. |
 | `SumDensity(src="density")` | `TensorRegistry` -> `float` | Sums a density tensor into one count. |
-| `ProjectDensity(src="density", as_=None, ...)` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects model-space density into source-image space while preserving its sum. |
+| `ProjectDensityMap(src="density", as_=None, ...)` | `(TensorRegistry, ResizeTransform)` -> `TensorRegistry` | Projects model-space density into source-image space while preserving its sum. |
 | `DensityToHeatmap(src="density", ...)` | `TensorRegistry` -> `ImagePayload` | Converts a density tensor into a model- or source-space colored heatmap. |

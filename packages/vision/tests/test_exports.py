@@ -27,7 +27,7 @@ def test_vision_component_surface_is_curated() -> None:
         "NMS",
         "Normalize",
         "ProjectBoxes",
-        "ProjectDensity",
+        "ProjectDensityMap",
         "ProjectMasks",
         "ProjectRoIMasks",
         "ReconstructMasks",

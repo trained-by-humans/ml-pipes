@@ -54,7 +54,7 @@ from ml_pipes.vision import (
     DensityToHeatmap,
     ImagePayload,
     Normalize,
-    ProjectDensity,
+    ProjectDensityMap,
     ResizeTransform,
     SumDensity,
 )
@@ -207,7 +207,7 @@ def build_pipeline(model: Any, device: str) -> Pipeline[ImagePayload, ImagePaylo
         AsType(src="density", dtype="float32"),
         ClampDensity(),
         Recall("resize_transform"),
-        ProjectDensity(),
+        ProjectDensityMap(),
         Store("density_registry"),
         SumDensity(),
         Store("count"),

@@ -39,7 +39,7 @@ class SumDensity:
 
 
 @Operator
-class ProjectDensity:
+class ProjectDensityMap:
     def __init__(
         self,
         src: str = "density",
@@ -54,7 +54,7 @@ class ProjectDensity:
     def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
         density = registry[self.src]
         if density.ndim != 2:
-            raise ValueError(f"ProjectDensity expects a 2D density tensor, got shape {density.shape}")
+            raise ValueError(f"ProjectDensityMap expects a 2D density tensor, got shape {density.shape}")
 
         model_height, model_width = transform.resized_shape
         source_height, source_width = transform.original_shape
@@ -70,7 +70,7 @@ class ProjectDensity:
         right = int(round((pad_x + content_width) * density_width / model_width))
         if top < 0 or left < 0 or bottom > density_height or right > density_width or top >= bottom or left >= right:
             raise ValueError(
-                "ProjectDensity received a ResizeTransform whose content region does not fit the density tensor"
+                "ProjectDensityMap received a ResizeTransform whose content region does not fit the density tensor"
             )
 
         content_density = density[top:bottom, left:right]

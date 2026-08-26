@@ -11,7 +11,7 @@ from .detection import (
     NMS,
     ProjectBoxes,
 )
-from .density import ClampDensity, DensityToHeatmap, DrawDensityOverlay, ProjectDensity, SumDensity
+from .density import ClampDensity, DensityToHeatmap, DrawDensityOverlay, ProjectDensityMap, SumDensity
 from .ops import (
     BlendImages,
     ConvertColorSpace,
@@ -58,7 +58,7 @@ __all__ = [
     "NMS",
     "Normalize",
     "ProjectBoxes",
-    "ProjectDensity",
+    "ProjectDensityMap",
     "ProjectMasks",
     "ProjectRoIMasks",
     "ReconstructMasks",
