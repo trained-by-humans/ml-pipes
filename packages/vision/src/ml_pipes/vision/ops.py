@@ -11,6 +11,7 @@ from ml_pipes.tensor import TensorPayload
 from .types import ImagePayload, ResizeTransform
 
 __all__ = [
+    "BlendImages",
     "ConvertColorSpace",
     "Decode",
     "ImagePayload",
@@ -171,6 +172,35 @@ class ConvertColorSpace:
             array=converted,
             color_space=self.output_color_space,
             layout=image_payload.layout,
+        )
+
+
+@Operator
+class BlendImages:
+    def __init__(self, base_weight: float = 0.60, overlay_weight: float = 0.40) -> None:
+        self.base_weight = base_weight
+        self.overlay_weight = overlay_weight
+
+    def __call__(self, source_image: ImagePayload, overlay_image: ImagePayload) -> ImagePayload:
+        import cv2
+
+        if source_image.layout != "HWC" or overlay_image.layout != "HWC":
+            raise ValueError("BlendImages expects HWC images")
+        if source_image.array.shape != overlay_image.array.shape:
+            raise ValueError(
+                f"BlendImages requires matching shapes, got {source_image.array.shape} and {overlay_image.array.shape}"
+            )
+        blended = cv2.addWeighted(
+            source_image.array,
+            self.base_weight,
+            overlay_image.array,
+            self.overlay_weight,
+            0.0,
+        )
+        return ImagePayload(
+            array=blended,
+            color_space=source_image.color_space,
+            layout=source_image.layout,
         )
 
 

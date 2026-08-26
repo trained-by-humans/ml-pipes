@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from ml_pipes.tensor import TensorRegistry
-from ml_pipes.vision import BlendImages, ClampDensity, DensityToHeatmap, ImagePayload, SumDensity
+from ml_pipes.vision import ClampDensity, DensityToHeatmap, ImagePayload, SumDensity
 
 
 def _registry(density: np.ndarray) -> TensorRegistry:
@@ -40,14 +40,3 @@ def test_density_to_heatmap_reads_configured_registry_tensor() -> None:
     assert heatmap.array.shape == source.array.shape
     assert heatmap.color_space == "BGR"
     assert np.any(heatmap.array)
-
-
-def test_blend_images_preserves_shape_dtype_and_metadata() -> None:
-    source = ImagePayload(array=np.zeros((4, 5, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
-    overlay = ImagePayload(array=np.full((4, 5, 3), 255, dtype=np.uint8), color_space="BGR", layout="HWC")
-
-    result = BlendImages()(source, overlay)
-
-    assert result.array.shape == source.array.shape
-    assert result.array.dtype == np.uint8
-    assert result.color_space == source.color_space

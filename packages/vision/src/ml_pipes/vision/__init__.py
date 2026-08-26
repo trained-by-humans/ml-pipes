@@ -11,8 +11,9 @@ from .detection import (
     NMS,
     ProjectBoxes,
 )
-from .density import BlendImages, ClampDensity, DensityToHeatmap, SumDensity
+from .density import ClampDensity, DensityToHeatmap, SumDensity
 from .ops import (
+    BlendImages,
     ConvertColorSpace,
     Decode,
     LoadFile,
