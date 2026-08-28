@@ -93,6 +93,45 @@ def test_global_value_formatter_applies_to_pipeline_inspectors() -> None:
     assert blocks == [TextBlock("packet", [("source", "global")])]
 
 
+def test_formatter_registry_requires_explicit_value_formatter_override() -> None:
+    registry = FormatterRegistry()
+    formatter = lambda _value: [TextBlock("packet", [])]
+
+    registry.register_value_formatter(str, formatter)
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "A value formatter is already registered for type 'builtins\\.str'\\. "
+            "Set allow_override=True to explicitly replace it\\."
+        ),
+    ):
+        registry.register_value_formatter(str, formatter)
+
+    registry.register_value_formatter(str, formatter, allow_override=True)
+
+
+def test_formatter_registry_requires_explicit_step_formatter_override() -> None:
+    class PacketOp:
+        pass
+
+    registry = FormatterRegistry()
+    formatter = lambda span, last_image: (
+        StepView(span.label, {}, [TextBlock("packet", [])]),
+        last_image,
+    )
+
+    registry.register_step_formatter(PacketOp, formatter)
+
+    with pytest.raises(
+        ValueError,
+        match="A step formatter is already registered.*allow_override=True to explicitly replace it",
+    ):
+        registry.register_step_formatter(PacketOp, formatter)
+
+    registry.register_step_formatter(PacketOp, formatter, allow_override=True)
+
+
 def test_pipeline_inspector_render_supports_vertical_orientation():
     html = PipelineInspector().render(_inspection_result(), orientation="vertical")
 

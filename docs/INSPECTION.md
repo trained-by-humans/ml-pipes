@@ -175,15 +175,19 @@ not change the pipeline or the captured `InspectionResult`.
 ```python
 from ml_pipes.inspection import PipelineInspector, TextBlock
 
+# Format values by type.
 inspector = PipelineInspector().register_value_formatter(
     str,
     lambda value: [TextBlock("str", [("", value)])],
 )
+# Format a complete operator step.
+inspector.register_step_formatter(MyOperator, format_my_operator_step)
 ```
 
-Use `inspector.register_step_formatter(operator_type, formatter)` when one
-operator needs a specialized representation of its complete step rather than
-the default formatting of its output value.
+> [!IMPORTANT]
+> Registering a formatter for the same type twice raises an error by default.
+> Set `allow_override=True` only when you intentionally want to replace that
+> inspector's existing formatter.
 
 ### Register Formatters Automatically
 
@@ -194,17 +198,24 @@ available to all inspectors, unless an inspector registers its own formatter
 for the same type.
 
 ```python
-from ml_pipes.inspection import TextBlock, register_value_formatter
+from ml_pipes.inspection import (
+    TextBlock,
+    register_step_formatter,
+    register_value_formatter,
+)
 
-
+# Register a value formatter at import time.
 register_value_formatter(
     Prediction,
     lambda value: [TextBlock("Prediction", [("label", value.label)])],
 )
+# Register an operator-step formatter at import time.
+register_step_formatter(MyOperator, format_my_operator_step)
 ```
 
-Use `register_step_formatter(operator_type, formatter)` for a global
-operator-specific formatter.
+> [!IMPORTANT]
+> The same duplicate-registration guard applies globally. Set
+> `allow_override=True` only when intentionally replacing a global formatter.
 
 ### Raw Image Arrays
 

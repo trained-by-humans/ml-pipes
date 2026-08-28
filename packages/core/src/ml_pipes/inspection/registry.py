@@ -18,6 +18,10 @@ AnyValueFormatter = ValueFormatter[Any]
 FormatterT = TypeVar("FormatterT")
 
 
+def _type_name(value_type: type[Any]) -> str:
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
 def _best_subclass_formatter_match(
     requested_type: type[Any],
     formatters: dict[type[Any], FormatterT],
@@ -58,12 +62,30 @@ class FormatterRegistry:
         self,
         value_type: type[ValueT],
         formatter: ValueFormatter[ValueT],
+        *,
+        allow_override: bool = False,
     ) -> None:
         with self._lock:
+            if value_type in self._value_formatters and not allow_override:
+                raise ValueError(
+                    f"A value formatter is already registered for type {_type_name(value_type)!r}. "
+                    "Set allow_override=True to explicitly replace it."
+                )
             self._value_formatters[value_type] = cast(AnyValueFormatter, formatter)
 
-    def register_step_formatter(self, operator_type: type[Any], formatter: StepFormatter) -> None:
+    def register_step_formatter(
+        self,
+        operator_type: type[Any],
+        formatter: StepFormatter,
+        *,
+        allow_override: bool = False,
+    ) -> None:
         with self._lock:
+            if operator_type in self._step_formatters and not allow_override:
+                raise ValueError(
+                    f"A step formatter is already registered for operator type {_type_name(operator_type)!r}. "
+                    "Set allow_override=True to explicitly replace it."
+                )
             self._step_formatters[operator_type] = formatter
 
     def get_value_formatter(self, value_type: type[Any]) -> AnyValueFormatter | None:
