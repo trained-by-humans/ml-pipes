@@ -17,6 +17,7 @@ from ml_pipes.inspection import (
     PipelineInspector,
     StepView,
     TextBlock,
+    ndarray_image_formatter,
 )
 from ml_pipes.inspection.registry import FormatterRegistry
 from ml_pipes.tracing import StepSpan
@@ -55,6 +56,29 @@ def test_pipeline_inspector_render_defaults_to_horizontal_orientation():
     html = PipelineInspector().render(_inspection_result())
 
     assert '<div class="insp-container insp-container--horizontal">' in html
+
+
+def test_pipeline_inspector_can_register_bgr_ndarray_image_formatter() -> None:
+    inspector = PipelineInspector().register_value_formatter(
+        np.ndarray,
+        ndarray_image_formatter(default_color_space="BGR"),
+    )
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:identity",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=np.full((2, 3, 3), (0, 0, 255), dtype=np.uint8),
+            )
+        ]
+    )
+
+    block = inspector.build_views(result)[0].blocks[0]
+
+    assert isinstance(block, ImageBlock)
+    assert block.title == "ndarray  3×2  BGR"
+    assert np.array_equal(block.array[0, 0], [255, 0, 0])
 
 
 def test_pipeline_inspector_render_supports_vertical_orientation():

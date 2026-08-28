@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -24,14 +24,34 @@ def _is_rgb_image_array(value: np.ndarray) -> bool:
     return value.dtype == np.uint8 and value.ndim == 3 and value.shape[-1] == 3
 
 
+def ndarray_image_formatter(
+    *,
+    default_color_space: Literal["RGB", "BGR"] = "RGB",
+) -> ValueFormatter[np.ndarray]:
+    """Create an ndarray formatter that previews HWC uint8 images in the given color space.
+
+    Bare ndarrays do not carry color-space metadata. Use this factory when an
+    application knows the convention its image arrays follow.
+    """
+
+    if default_color_space not in {"RGB", "BGR"}:
+        raise ValueError("default_color_space must be 'RGB' or 'BGR'")
+
+    def format_ndarray(value: np.ndarray) -> list[OutputBlock]:
+        if _is_rgb_image_array(value):
+            height, width = value.shape[:2]
+            image = value if default_color_space == "RGB" else np.ascontiguousarray(value[:, :, ::-1])
+            return [
+                ImageBlock(title=f"ndarray  {width}×{height}  {default_color_space}", array=image),
+                TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))]),
+            ]
+        return [TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))])]
+
+    return format_ndarray
+
+
 def _format_ndarray(value: np.ndarray) -> list[OutputBlock]:
-    if _is_rgb_image_array(value):
-        height, width = value.shape[:2]
-        return [
-            ImageBlock(title=f"ndarray  {width}×{height}  RGB", array=value),
-            TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))]),
-        ]
-    return [TextBlock("ndarray", [("shape", str(value.shape)), ("dtype", str(value.dtype))])]
+    return ndarray_image_formatter()(value)
 
 
 def _format_bytes(value: bytes) -> list[OutputBlock]:
