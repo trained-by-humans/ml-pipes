@@ -18,6 +18,7 @@ from ml_pipes.inspection import (
     StepView,
     TextBlock,
     ndarray_image_formatter,
+    register_value_formatter,
 )
 from ml_pipes.inspection.registry import FormatterRegistry
 from ml_pipes.tracing import StepSpan
@@ -79,6 +80,17 @@ def test_pipeline_inspector_can_register_bgr_ndarray_image_formatter() -> None:
     assert isinstance(block, ImageBlock)
     assert block.title == "ndarray  3×2  BGR"
     assert np.array_equal(block.array[0, 0], [255, 0, 0])
+
+
+def test_global_value_formatter_applies_to_pipeline_inspectors() -> None:
+    class Packet:
+        pass
+
+    register_value_formatter(Packet, lambda _value: [TextBlock("packet", [("source", "global")])])
+
+    blocks = PipelineInspector()._value_to_blocks(Packet())
+
+    assert blocks == [TextBlock("packet", [("source", "global")])]
 
 
 def test_pipeline_inspector_render_supports_vertical_orientation():
