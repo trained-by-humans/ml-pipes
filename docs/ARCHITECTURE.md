@@ -204,12 +204,16 @@ For trace lifecycle, built-in collectors, and custom collector patterns, see
 
 ### Inspection
 
-Inspection is built directly on top of tracing. `Pipeline.inspect()` runs the
-pipeline once with captured outputs and returns an `InspectionResult`.
-`PipelineInspector` then turns that artifact into terminal and HTML/browser
-output through formatters and renderers. Core owns the shared inspection
-artifact, registry, and renderers, while package-owned types register their
-specialized formatters from the owning package at import time.
+Each operator creates an explicit data boundary. Inspection builds on tracing
+at those boundaries: while a pipeline runs, tracing records a span for each
+operator, and `Pipeline.inspect()` captures that operator's output in the span.
+The resulting `InspectionResult` shows how values move through the operator
+chain.
+
+`PipelineInspector` turns the captured artifact into browser output through
+formatters and renderers. Core owns the shared inspection artifact, registry,
+and renderers, while package-owned types register their specialized formatters
+from the owning package at import time.
 
 Built on top of:
 
@@ -222,6 +226,8 @@ Main components:
 - `InspectionResult` as the captured inspection artifact
 - `PipelineInspector` as the display-oriented inspection layer
 - step formatters, value formatters, and renderers
+
+For inspection setup and user-facing APIs, see [INSPECTION.md](INSPECTION.md).
 
 ### Benchmarking
 

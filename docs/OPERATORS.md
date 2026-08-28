@@ -202,39 +202,6 @@ Pipeline([
 > Good operator names and readable constructor arguments make pipeline
 > descriptions easier to scan.
 
-### Inspection
-
-Inspection captures the value flowing through each operator boundary.
-
-```python
-from ml_pipes.inspection import PipelineInspector, TextBlock
-
-pipeline = Pipeline([strip_text, Lowercase(), SplitWords(delimiter=" ")])
-result = pipeline.inspect("  Hello World  ")
-inspector = PipelineInspector().register_value_formatter(
-    str,
-    lambda value: [TextBlock("str", [("", value)])],
-)
-
-views = inspector.build_views(result)
-label_width = max(len(view.label) for view in views)
-
-for view in views:
-    cell = view.blocks[0]
-    text = " | ".join(f"{key} {value}".strip() for key, value in cell.rows)
-    print(f"{view.label:<{label_width}} : {text}")
-```
-
-```text
-0:strip_text : Hello World
-1:Lowercase  : hello world
-2:SplitWords : [0] hello | [1] world
-```
-
-> [!TIP]
-> Inspection is easier to read when each operator marks one clear step instead
-> of hiding several steps inside one fused block.
-
 ### Tracing
 
 Tracing reports latency per operator step.
@@ -256,6 +223,28 @@ pipeline.set_tracing(None)
 > [!TIP]
 > Tracing is most useful when each timing line corresponds to one meaningful
 > step rather than a mixed block of work.
+
+### Inspection
+
+Every operator establishes a data boundary. Inspection builds on tracing at
+those boundaries: tracing records a span for each operator, and
+`Pipeline.inspect()` captures that operator's output in the span. The resulting
+`InspectionResult` shows how values move through the operator chain.
+
+```python
+from ml_pipes.inspection import PipelineInspector
+
+result = pipeline.inspect(value)
+PipelineInspector().show(result)
+```
+
+![Inspection report overview](../.github/assets/yolo8_tiled_inspection_overview.png)
+
+For setup, rendering, and custom formatters, see [INSPECTION.md](INSPECTION.md).
+
+> [!TIP]
+> Inspection is easier to read when each operator marks one clear step instead
+> of hiding several steps inside one fused block.
 
 ### Benchmark
 

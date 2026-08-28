@@ -173,23 +173,9 @@ individual steps.
 ```python
 from ml_pipes.inspection import PipelineInspector
 
-image_path = "image.jpg"
-result = pipeline.inspect(image_path)
-
-# Store the raw inspection for debugging later
-result.dump("inspection.pkl")
-
-# Or use PipelineInspector to inspect the result
-html = PipelineInspector().render(result, orientation="horizontal")
-PipelineInspector().save(result, "inspection.html", orientation="horizontal")
-PipelineInspector().show(result, orientation="horizontal")
+result = pipeline.inspect("image.jpg")
+PipelineInspector().show(result)
 ```
-
-Install the shared inspection renderer extra together with the package chain
-you inspect, for example `ml-pipes[inspection,onnx,vision]`. Specialized
-inspection formatting follows the package modules you import.
-
-You can save the inspection result and open it in a browser:
 
 <p align="center">
   <img
@@ -219,7 +205,7 @@ Inspection also supports larger outputs and drill-down interactions:
   </tr>
 </table>
 
-Try it: [examples/run_inspect.py](examples/run_inspect.py)
+Try it: [examples/run_inspect.py](examples/run_inspect.py).
 
 ### Tracing
 
