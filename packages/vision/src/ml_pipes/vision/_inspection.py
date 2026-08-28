@@ -12,7 +12,6 @@ from ml_pipes.inspection.views import (
     StepView,
     TextBlock,
     _apply_image_carry,
-    _make_grid,
 )
 from ml_pipes.tracing import StepSpan
 
@@ -69,6 +68,32 @@ def _format_tile_rect(value: TileRect) -> list[OutputBlock]:
     return [TextBlock("TileRect", [("origin", f"({value.x1}, {value.y1})"), ("size", f"{width}×{height}")])]
 
 
+def _make_tile_grid(
+    images: list[np.ndarray],
+    rects: list[TileRect],
+    divider: int = 0,
+) -> np.ndarray:
+    """Arrange tiles by their source-image rows and columns."""
+
+    row_origins = sorted({rect.y1 for rect in rects})
+    column_origins = sorted({rect.x1 for rect in rects})
+    rows = {origin: index for index, origin in enumerate(row_origins)}
+    columns = {origin: index for index, origin in enumerate(column_origins)}
+
+    h, w = images[0].shape[:2]
+    grid_height = len(rows) * h + divider * (len(rows) - 1)
+    grid_width = len(columns) * w + divider * (len(columns) - 1)
+    grid = np.full((grid_height, grid_width, 3), 180, dtype=np.uint8)
+    cv2 = load_cv2()
+    for image, rect in zip(images, rects, strict=True):
+        if image.shape[:2] != (h, w):
+            image = cv2.resize(image, (w, h))
+        y = rows[rect.y1] * (h + divider)
+        x = columns[rect.x1] * (w + divider)
+        grid[y:y + h, x:x + w] = image
+    return grid
+
+
 def _format_tiles_with_overlay(
     tiles: list[ImagePayload],
     rects: list[TileRect],
@@ -78,7 +103,7 @@ def _format_tiles_with_overlay(
     cv2 = load_cv2()
     tint = np.array([0.25, 0.45, 1.0], dtype=np.float32)
     tile_arrays = [_image_to_rgb(tile) for tile in tiles]
-    grid = _make_grid(tile_arrays, divider=2)
+    grid = _make_tile_grid(tile_arrays, rects, divider=2)
 
     height = max(rect.y2 for rect in rects)
     width = max(rect.x2 for rect in rects)

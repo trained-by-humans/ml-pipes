@@ -51,3 +51,21 @@ def test_pipeline_inspector_formats_tile_span_with_overlay() -> None:
     assert isinstance(views[0].blocks[0], ImageBlock)
     assert views[0].blocks[0].title.startswith("ImagePayload  ×")
     assert views[0].blocks[0].overlay_array is not None
+
+
+def test_tile_inspection_grid_follows_tile_rect_geometry() -> None:
+    pipeline = Pipeline([Tile(slice_wh=(4, 4), overlap_wh=(2, 2))])
+    payload = ImagePayload(
+        array=np.zeros((12, 18, 3), dtype=np.uint8),
+        color_space="RGB",
+        layout="HWC",
+    )
+
+    views = PipelineInspector().build_views(pipeline.inspect(payload))
+
+    block = views[0].blocks[0]
+    assert isinstance(block, ImageBlock)
+    # Eight source columns by five rows, with two-pixel dividers.
+    assert block.array.shape == (28, 46, 3)
+    assert block.overlay_array is not None
+    assert block.overlay_array.shape == (12, 18, 3)
