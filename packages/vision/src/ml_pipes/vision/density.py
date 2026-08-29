@@ -5,7 +5,17 @@ import numpy as np
 
 from ml_pipes.operator import Operator
 from ml_pipes.tensor import TensorRegistry
-from .types import ImagePayload
+from .types import ImagePayload, ResizeTransform
+
+
+def _normalize_density(density: np.ndarray, *, operator_name: str) -> np.ndarray:
+    density = np.maximum(density, 0)
+    if density.ndim != 2:
+        raise ValueError(f"{operator_name} expects a 2D density tensor, got shape {density.shape}")
+    height, width = density.shape
+    if density.size == 0 or float(density.max()) <= 0.0:
+        return np.zeros((height, width), dtype=np.uint8)
+    return cv2.normalize(density, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX).astype(np.uint8)
 
 
 @Operator
@@ -29,51 +39,103 @@ class SumDensity:
 
 
 @Operator
+class ProjectDensityMap:
+    def __init__(
+        self,
+        src: str = "density",
+        as_: str | None = None,
+        interpolation: int = cv2.INTER_LINEAR,
+    ) -> None:
+        self.src = src
+        self.as_ = as_ or src
+        self.interpolation = interpolation
+
+
+    def __call__(self, registry: TensorRegistry, transform: ResizeTransform) -> TensorRegistry:
+        density = registry[self.src]
+        if density.ndim != 2:
+            raise ValueError(f"ProjectDensityMap expects a 2D density tensor, got shape {density.shape}")
+
+        model_height, model_width = transform.resized_shape
+        source_height, source_width = transform.original_shape
+        scale_x, scale_y = transform.scale
+        pad_x, pad_y = transform.pad
+        content_height = int(round(source_height * scale_y))
+        content_width = int(round(source_width * scale_x))
+
+        density_height, density_width = density.shape
+        top = int(round(pad_y * density_height / model_height))
+        left = int(round(pad_x * density_width / model_width))
+        bottom = int(round((pad_y + content_height) * density_height / model_height))
+        right = int(round((pad_x + content_width) * density_width / model_width))
+        if top < 0 or left < 0 or bottom > density_height or right > density_width or top >= bottom or left >= right:
+            raise ValueError(
+                "ProjectDensityMap received a ResizeTransform whose content region does not fit the density tensor"
+            )
+
+        content_density = density[top:bottom, left:right]
+        projected = cv2.resize(
+            content_density.astype(np.float32, copy=False),
+            (source_width, source_height),
+            interpolation=self.interpolation,
+        )
+        content_sum = float(content_density.sum())
+        projected_sum = float(projected.sum())
+        if projected_sum != 0.0:
+            projected *= content_sum / projected_sum
+        registry[self.as_] = projected
+        return registry
+
+
+@Operator
 class DensityToHeatmap:
     def __init__(
         self,
         src: str = "density",
-        colormap: int = cv2.COLORMAP_TURBO,
-        interpolation: int = cv2.INTER_CUBIC,
+        colormap: int | None = cv2.COLORMAP_TURBO,
     ) -> None:
         self.src = src
         self.colormap = colormap
-        self.interpolation = interpolation
 
-    def __call__(self, source_image: ImagePayload, registry: TensorRegistry) -> tuple[ImagePayload, ImagePayload]:
-        height, width = source_image.array.shape[:2]
-        density = np.maximum(registry[self.src], 0)
-        if density.size == 0 or float(density.max()) <= 0.0:
-            heatmap = np.zeros((height, width, 3), dtype=np.uint8)
-        else:
-            normalized = cv2.normalize(density, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-            heatmap = cv2.applyColorMap(normalized.astype(np.uint8), self.colormap)
-            heatmap = cv2.resize(heatmap, (width, height), interpolation=self.interpolation)
-        return source_image, ImagePayload(array=heatmap, color_space="BGR", layout="HWC")
+    def __call__(self, registry: TensorRegistry) -> ImagePayload:
+        normalized = _normalize_density(registry[self.src], operator_name=type(self).__name__)
+        if self.colormap is None:
+            return ImagePayload(array=normalized, color_space="GRAY", layout="HW")
+        heatmap = cv2.applyColorMap(normalized, self.colormap)
+        return ImagePayload(array=heatmap, color_space="BGR", layout="HWC")
 
 
 @Operator
-class BlendImages:
-    def __init__(self, base_weight: float = 0.60, overlay_weight: float = 0.40) -> None:
-        self.base_weight = base_weight
-        self.overlay_weight = overlay_weight
+class DrawDensityOverlay:
+    def __init__(
+        self,
+        src: str = "density",
+        *,
+        colormap: int = cv2.COLORMAP_TURBO,
+        opacity: float = 0.40,
+    ) -> None:
+        if not 0.0 <= opacity <= 1.0:
+            raise ValueError("opacity must be between 0.0 and 1.0")
+        self.src = src
+        self.colormap = colormap
+        self.opacity = opacity
 
-    def __call__(self, source_image: ImagePayload, overlay_image: ImagePayload) -> ImagePayload:
-        if source_image.layout != "HWC" or overlay_image.layout != "HWC":
-            raise ValueError("BlendImages expects HWC images")
-        if source_image.array.shape != overlay_image.array.shape:
+    def __call__(self, source_image: ImagePayload, registry: TensorRegistry) -> tuple[ImagePayload, TensorRegistry]:
+        if source_image.layout != "HWC" or source_image.array.ndim != 3 or source_image.array.shape[2] != 3:
+            raise ValueError("DrawDensityOverlay expects an HWC three-channel source image")
+        if source_image.color_space not in {"BGR", "RGB"}:
+            raise ValueError(f"DrawDensityOverlay expects BGR or RGB source images, got {source_image.color_space}")
+
+        normalized = _normalize_density(registry[self.src], operator_name=type(self).__name__)
+        if normalized.shape != source_image.spatial_shape:
             raise ValueError(
-                f"BlendImages requires matching shapes, got {source_image.array.shape} and {overlay_image.array.shape}"
+                f"DrawDensityOverlay requires source-aligned density, got {normalized.shape} for image {source_image.spatial_shape}"
             )
-        blended = cv2.addWeighted(
-            source_image.array,
-            self.base_weight,
-            overlay_image.array,
-            self.overlay_weight,
-            0.0,
-        )
-        return ImagePayload(
-            array=blended,
-            color_space=source_image.color_space,
-            layout=source_image.layout,
-        )
+
+        heatmap = cv2.applyColorMap(normalized, self.colormap)
+        if source_image.color_space == "RGB":
+            heatmap = heatmap[..., ::-1]
+        alpha = (normalized.astype(np.float32) / 255.0 * self.opacity)[..., np.newaxis]
+        image = source_image.array.astype(np.float32)
+        blended = ((1.0 - alpha) * image + alpha * heatmap).astype(source_image.array.dtype)
+        return ImagePayload(array=blended, color_space=source_image.color_space, layout="HWC"), registry

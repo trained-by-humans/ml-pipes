@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from ml_pipes.tensor import TensorRegistry
-from ml_pipes.vision import BlendImages, ClampDensity, DensityToHeatmap, ImagePayload, SumDensity
+from ml_pipes.vision import ClampDensity, DensityToHeatmap, DrawDensityOverlay, ImagePayload, ProjectDensityMap, ResizeTransform, SumDensity
 
 
 def _registry(density: np.ndarray) -> TensorRegistry:
@@ -30,24 +31,57 @@ def test_clamp_density_can_write_to_a_new_name() -> None:
     assert np.array_equal(registry["clamped"], [[0.0, 2.0]])
 
 
-def test_density_to_heatmap_reads_configured_registry_tensor() -> None:
-    source = ImagePayload(array=np.zeros((24, 32, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+def test_density_to_heatmap_applies_turbo_colormap_by_default() -> None:
     registry = TensorRegistry({"estimated_density": np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32)})
 
-    returned_source, heatmap = DensityToHeatmap(src="estimated_density")(source, registry)
+    heatmap = DensityToHeatmap(src="estimated_density")(registry)
 
-    assert returned_source is source
-    assert heatmap.array.shape == source.array.shape
+    assert heatmap.array.shape == (2, 2, 3)
     assert heatmap.color_space == "BGR"
+    assert heatmap.layout == "HWC"
     assert np.any(heatmap.array)
 
 
-def test_blend_images_preserves_shape_dtype_and_metadata() -> None:
-    source = ImagePayload(array=np.zeros((4, 5, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
-    overlay = ImagePayload(array=np.full((4, 5, 3), 255, dtype=np.uint8), color_space="BGR", layout="HWC")
+def test_density_to_heatmap_returns_gray_image_without_a_colormap() -> None:
+    registry = TensorRegistry({"estimated_density": np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32)})
 
-    result = BlendImages()(source, overlay)
+    heatmap = DensityToHeatmap(src="estimated_density", colormap=None)(registry)
 
-    assert result.array.shape == source.array.shape
-    assert result.array.dtype == np.uint8
-    assert result.color_space == source.color_space
+    assert heatmap.array.shape == (2, 2)
+    assert heatmap.color_space == "GRAY"
+    assert heatmap.layout == "HW"
+
+
+def test_draw_density_overlay_alpha_blends_source_aligned_density_without_mutating_registry() -> None:
+    source = ImagePayload(array=np.zeros((2, 2, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    registry = _registry(np.array([[0.0, 1.0], [2.0, 4.0]], dtype=np.float32))
+
+    image, returned_registry = DrawDensityOverlay(opacity=1.0)(source, registry)
+
+    assert image.array.shape == source.array.shape
+    assert image.color_space == source.color_space
+    assert np.any(image.array)
+    assert returned_registry is registry
+
+
+def test_draw_density_overlay_rejects_density_that_is_not_source_aligned() -> None:
+    source = ImagePayload(array=np.zeros((3, 3, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    registry = _registry(np.zeros((2, 2), dtype=np.float32))
+
+    with pytest.raises(ValueError, match="source-aligned density"):
+        DrawDensityOverlay()(source, registry)
+
+
+def test_project_density_map_removes_letterbox_padding_and_preserves_sum() -> None:
+    registry = _registry(np.array([[0.0, 0.0], [1.0, 3.0]], dtype=np.float32))
+    transform = ResizeTransform(
+        scale=(1.0, 1.0),
+        pad=(0.0, 1.0),
+        original_shape=(1, 2),
+        resized_shape=(2, 2),
+    )
+
+    ProjectDensityMap()(registry, transform)
+
+    assert registry["density"].shape == (1, 2)
+    assert np.isclose(registry["density"].sum(), 4.0)

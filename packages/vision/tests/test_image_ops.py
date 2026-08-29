@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ml_pipes.vision import ConvertColorSpace, ImagePayload, Normalize, Resize
+from ml_pipes.vision import BlendImages, ConvertColorSpace, ImagePayload, Normalize, Resize
 
 
 def test_resize_op_can_do_plain_resize_without_padding():
@@ -86,6 +86,17 @@ def test_convert_color_space_rejects_unknown_source_color_space():
 
     with pytest.raises(ValueError, match="BGR/RGB input"):
         ConvertColorSpace("RGB")(payload)
+
+
+def test_blend_images_preserves_shape_dtype_and_metadata() -> None:
+    source = ImagePayload(array=np.zeros((4, 5, 3), dtype=np.uint8), color_space="BGR", layout="HWC")
+    overlay = ImagePayload(array=np.full((4, 5, 3), 255, dtype=np.uint8), color_space="BGR", layout="HWC")
+
+    result = BlendImages()(source, overlay)
+
+    assert result.array.shape == source.array.shape
+    assert result.array.dtype == np.uint8
+    assert result.color_space == source.color_space
 
 
 def test_normalize_op_can_keep_bgr_and_hwc_without_batch():
