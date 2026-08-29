@@ -56,6 +56,7 @@ def test_inspection_component_surface_is_curated() -> None:
         "GroupBlock",
         "HtmlRenderer",
         "ImageBlock",
+        "InspectionWarning",
         "InspectionResult",
         "InspectionSerializer",
         "Orientation",
@@ -65,6 +66,7 @@ def test_inspection_component_surface_is_curated() -> None:
         "StepView",
         "TextBlock",
         "ndarray_image_formatter",
+        "pydantic_model_formatter",
         "register_step_formatter",
         "register_value_formatter",
     ]

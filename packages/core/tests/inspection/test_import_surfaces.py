@@ -105,6 +105,36 @@ def test_pipeline_inspector_follows_imported_package_chain_without_vision_or_onn
     assert lines[4] == "[]"
 
 
+def test_pipeline_inspector_registers_pydantic_formatter_when_pydantic_is_available() -> None:
+    result = _run_python(
+        "import sys\n"
+        "from types import ModuleType\n"
+        "pydantic = ModuleType('pydantic')\n"
+        "class BaseModel:\n"
+        "    pass\n"
+        "pydantic.BaseModel = BaseModel\n"
+        "sys.modules['pydantic'] = pydantic\n"
+        "from ml_pipes.inspection import GroupBlock, PipelineInspector\n"
+        "class Response(BaseModel):\n"
+        "    model_fields = {'prediction_count': object()}\n"
+        "    def __init__(self):\n"
+        "        self.prediction_count = 2\n"
+        "blocks = PipelineInspector()._value_to_blocks(Response())\n"
+        "print(type(blocks[0]).__name__)\n"
+        "print(blocks[0].title)\n"
+        "print(blocks[0].children[0].rows[0][0])\n"
+        "print(blocks[0].children[0].rows[0][1])\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines() == [
+        "GroupBlock",
+        "Response",
+        "prediction_count",
+        "2",
+    ]
+
+
 def test_type_only_inspection_exports_import_without_inspection_extra() -> None:
     result = _run_python(
         "import importlib.abc\n"
