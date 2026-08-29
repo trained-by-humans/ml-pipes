@@ -64,4 +64,7 @@ def test_inspection_component_surface_is_curated() -> None:
         "Renderer",
         "StepView",
         "TextBlock",
+        "ndarray_image_formatter",
+        "register_step_formatter",
+        "register_value_formatter",
     ]

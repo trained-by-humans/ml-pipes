@@ -77,7 +77,7 @@ That property is read-only; attach or remove collectors through
 
 Tracing stays focused on runtime step timing, failures, and region structure.
 If you need per-step outputs and richer debug snapshots, use
-`Pipeline.inspect()` instead.
+[`Pipeline.inspect()` and the inspection guide](INSPECTION.md) instead.
 
 > [!NOTE]
 > The trace delivered to the collector is a frozen snapshot, so collectors can

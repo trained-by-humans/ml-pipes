@@ -22,6 +22,7 @@ Package-owned guides live under `packages/<name>/docs/`.
 ## Tooling
 
 - [VALIDATION.md](VALIDATION.md) for static pipeline contract checking
+- [INSPECTION.md](INSPECTION.md) for one-run output capture and rendering
 - [TRACING.md](TRACING.md) for one-run timing and collectors
 - [BENCHMARKING.md](BENCHMARKING.md) for repeated-run measurement and sweeps
 

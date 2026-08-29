@@ -318,11 +318,14 @@ stays the same.
   advanced hooks such as `resolve_contract(...)`, see
   [VALIDATION.md](VALIDATION.md).
 - Use `pipeline.inspect(sample_input)` to look at intermediate tensors and find
-  the first wrong step. For examples, see [run_inspect.py](../examples/run_inspect.py).
+  the first wrong step.
 - If local logic grows into reusable pipeline code, see
   [OPERATORS.md](OPERATORS.md) and [COMPOSITION.md](COMPOSITION.md).
 
 ## More Examples
+
+See [INSPECTION.md](INSPECTION.md) for usage and
+[run_inspect.py](../examples/run_inspect.py) for a runnable example.
 
 For segmentation variants or heavier postprocessing, see:
 
