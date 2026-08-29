@@ -374,6 +374,7 @@ def test_pydantic_model_formatter_renders_declared_v2_fields_without_limits():
     assert isinstance(predictions, GroupBlock)
     assert predictions.title == "predictions: list[dict]  ×13"
     assert len(predictions.children) == 13
+    assert [child.title for child in predictions.children[:3]] == ["[0]", "[1]", "[2]"]
 
 
 def test_pydantic_model_formatter_renders_declared_v1_fields():
@@ -456,9 +457,37 @@ def test_pydantic_model_formatter_applies_depth_and_item_limits():
     payload = list_group.children[1]
     assert isinstance(payload, GroupBlock)
     assert payload.children == [
-        TextBlock("", [("[0]", "person")]),
+        GroupBlock("[0]", [TextBlock("str", [("", "person")])]),
         TextBlock("…", [("", "+1 more")]),
     ]
+
+
+def test_pydantic_list_uses_standard_report_compaction():
+    inspector = PipelineInspector().register_value_formatter(
+        _PydanticBaseModel,
+        pydantic_model_formatter(),
+    )
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:response",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=_PydanticV2Model(
+                    "detected",
+                    [{"class": "person"} for _ in range(10)],
+                ),
+            )
+        ]
+    )
+
+    block = inspector.build_views(result)[0].blocks[0]
+
+    assert isinstance(block, GroupBlock)
+    predictions = block.children[1]
+    assert isinstance(predictions, TextBlock)
+    assert predictions.title == "payload: list  ×10"
+    assert predictions.rows[-1] == ("…", "+4 more")
 
 
 def test_pydantic_model_formatter_applies_node_limit_and_detects_cycles():

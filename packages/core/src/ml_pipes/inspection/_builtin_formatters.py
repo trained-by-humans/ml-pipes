@@ -148,6 +148,8 @@ def pydantic_model_formatter(
         state: _PydanticRenderState,
         depth: int,
         member_limit: int | None,
+        *,
+        wrap_items: bool = False,
     ) -> list[OutputBlock]:
         children: list[OutputBlock] = []
         shown = 0
@@ -158,7 +160,11 @@ def pydantic_model_formatter(
             if not state.can_add_node():
                 children.append(limit_block("node limit reached"))
                 break
-            children.append(render_member(name, item, state, depth))
+            if wrap_items:
+                state.add_node()
+                children.append(GroupBlock(title=name, children=render_value(item, state, depth)))
+            else:
+                children.append(render_member(name, item, state, depth))
             shown += 1
         return children
 
@@ -170,6 +176,8 @@ def pydantic_model_formatter(
         depth: int,
         member_limit: int | None,
         value: Any,
+        *,
+        wrap_items: bool = False,
     ) -> list[OutputBlock]:
         if max_depth is not None and depth >= max_depth:
             return [limit_block("maximum depth reached")]
@@ -184,7 +192,14 @@ def pydantic_model_formatter(
             return [
                 GroupBlock(
                     title=title,
-                    children=render_members(members, member_count, state, depth + 1, member_limit),
+                    children=render_members(
+                        members,
+                        member_count,
+                        state,
+                        depth + 1,
+                        member_limit,
+                        wrap_items=wrap_items,
+                    ),
                 )
             ]
         finally:
@@ -231,6 +246,7 @@ def pydantic_model_formatter(
                 depth,
                 max_items,
                 value,
+                wrap_items=True,
             )
 
         if not state.can_add_node():
