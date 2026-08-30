@@ -17,6 +17,9 @@ def register_value_formatter(
     *,
     allow_override: bool = False,
 ) -> None:
+    from ml_pipes.inspection._builtin_formatters import ensure_builtin_formatters_registered
+
+    ensure_builtin_formatters_registered()
     _GLOBAL_FORMATTER_REGISTRY.register_value_formatter(
         value_type,
         formatter,
@@ -30,6 +33,9 @@ def register_step_formatter(
     *,
     allow_override: bool = False,
 ) -> None:
+    from ml_pipes.inspection._builtin_formatters import ensure_builtin_formatters_registered
+
+    ensure_builtin_formatters_registered()
     _GLOBAL_FORMATTER_REGISTRY.register_step_formatter(
         operator_type,
         formatter,

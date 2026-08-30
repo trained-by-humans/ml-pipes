@@ -8,8 +8,7 @@ from typing import Any, Literal
 import numpy as np
 
 from ml_pipes.inspection._global_registry import (
-    register_step_formatter,
-    register_value_formatter,
+    global_formatter_registry,
 )
 from ml_pipes.inspection.registry import ValueFormatter
 from ml_pipes.region import RegionOpener
@@ -267,14 +266,15 @@ def _register_pydantic_base_model_formatter() -> None:
         return
 
     formatter = pydantic_model_formatter()
-    register_value_formatter(BaseModel, formatter)
+    registry = global_formatter_registry()
+    registry.register_value_formatter(BaseModel, formatter)
 
     try:
         from pydantic.v1 import BaseModel as PydanticV1BaseModel
     except ImportError:
         return
     if PydanticV1BaseModel is not BaseModel:
-        register_value_formatter(PydanticV1BaseModel, formatter)
+        registry.register_value_formatter(PydanticV1BaseModel, formatter)
 
 
 def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
@@ -316,8 +316,9 @@ def ensure_builtin_formatters_registered() -> None:
     with _BUILTINS_LOCK:
         if _BUILTINS_REGISTERED:
             return
-        register_value_formatter(np.ndarray, _format_ndarray)
-        register_value_formatter(bytes, _format_bytes)
-        register_step_formatter(RegionOpener, _region_step_formatter)
+        registry = global_formatter_registry()
+        registry.register_value_formatter(np.ndarray, _format_ndarray)
+        registry.register_value_formatter(bytes, _format_bytes)
+        registry.register_step_formatter(RegionOpener, _region_step_formatter)
         _register_pydantic_base_model_formatter()
         _BUILTINS_REGISTERED = True

@@ -171,6 +171,26 @@ def test_pipeline_inspector_registers_pydantic_v1_compatibility_formatter() -> N
     ]
 
 
+def test_global_formatter_registration_initializes_builtins_before_overriding_them() -> None:
+    result = _run_python(
+        "import numpy as np\n"
+        "from ml_pipes.inspection import register_step_formatter, register_value_formatter\n"
+        "from ml_pipes.inspection._global_registry import global_formatter_registry\n"
+        "from ml_pipes.inspection.views import TextBlock\n"
+        "from ml_pipes.region import RegionOpener\n"
+        "value_formatter = lambda _: [TextBlock('custom', [])]\n"
+        "step_formatter = lambda span, image: (None, image)\n"
+        "register_value_formatter(np.ndarray, value_formatter, allow_override=True)\n"
+        "register_step_formatter(RegionOpener, step_formatter, allow_override=True)\n"
+        "registry = global_formatter_registry()\n"
+        "print(registry.get_value_formatter(np.ndarray) is value_formatter)\n"
+        "print(registry.get_step_formatter(RegionOpener) is step_formatter)\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines() == ["True", "True"]
+
+
 def test_type_only_inspection_exports_import_without_inspection_extra() -> None:
     result = _run_python(
         "import importlib.abc\n"
