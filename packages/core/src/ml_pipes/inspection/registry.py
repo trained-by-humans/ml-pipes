@@ -63,13 +63,13 @@ class FormatterRegistry:
         value_type: type[ValueT],
         formatter: ValueFormatter[ValueT],
         *,
-        allow_override: bool = False,
+        override: bool = False,
     ) -> None:
         with self._lock:
-            if value_type in self._value_formatters and not allow_override:
+            if value_type in self._value_formatters and not override:
                 raise ValueError(
                     f"A value formatter is already registered for type {_type_name(value_type)!r}. "
-                    "Set allow_override=True to explicitly replace it."
+                    "Set override=True to explicitly replace it."
                 )
             self._value_formatters[value_type] = cast(AnyValueFormatter, formatter)
 
@@ -78,13 +78,13 @@ class FormatterRegistry:
         operator_type: type[Any],
         formatter: StepFormatter,
         *,
-        allow_override: bool = False,
+        override: bool = False,
     ) -> None:
         with self._lock:
-            if operator_type in self._step_formatters and not allow_override:
+            if operator_type in self._step_formatters and not override:
                 raise ValueError(
                     f"A step formatter is already registered for operator type {_type_name(operator_type)!r}. "
-                    "Set allow_override=True to explicitly replace it."
+                    "Set override=True to explicitly replace it."
                 )
             self._step_formatters[operator_type] = formatter
 

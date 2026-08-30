@@ -188,36 +188,8 @@ inspector.register_step_formatter(MyOperator, format_my_operator_step)
 
 > [!IMPORTANT]
 > Registering a formatter for the same type twice raises an error by default.
-> Set `allow_override=True` only when you intentionally want to replace that
+> Set `override=True` only when you intentionally want to replace that
 > inspector's existing formatter.
-
-### Register Formatters Automatically
-
-Register a formatter globally when it should be used every time your application
-or package inspects a pipeline. Register it once at import time instead of
-passing the formatter to each `PipelineInspector`. Global formatters are
-available to all inspectors, unless an inspector registers its own formatter
-for the same type.
-
-```python
-from ml_pipes.inspection import (
-    TextBlock,
-    register_step_formatter,
-    register_value_formatter,
-)
-
-# Register a value formatter at import time.
-register_value_formatter(
-    Prediction,
-    lambda value: [TextBlock("Prediction", [("label", value.label)])],
-)
-# Register an operator-step formatter at import time.
-register_step_formatter(MyOperator, format_my_operator_step)
-```
-
-> [!IMPORTANT]
-> The same duplicate-registration guard applies globally. Set
-> `allow_override=True` only when intentionally replacing a global formatter.
 
 ### Pydantic Models
 

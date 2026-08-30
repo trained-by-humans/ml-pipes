@@ -77,14 +77,14 @@ class PipelineInspector:
         value_type: type[ValueT],
         formatter: ValueFormatter[ValueT],
         *,
-        allow_override: bool = False,
+        override: bool = False,
     ) -> "PipelineInspector":
         """Register a formatter for inspected values of *value_type*. Returns self for chaining."""
 
         self._formatters.register_value_formatter(
             value_type,
             formatter,
-            allow_override=allow_override,
+            override=override,
         )
         return self
 
@@ -93,14 +93,14 @@ class PipelineInspector:
         operator_type: type[Any],
         formatter: StepFormatter,
         *,
-        allow_override: bool = False,
+        override: bool = False,
     ) -> "PipelineInspector":
         """Register a formatter for inspected steps of *operator_type*. Returns self for chaining."""
 
         self._formatters.register_step_formatter(
             operator_type,
             formatter,
-            allow_override=allow_override,
+            override=override,
         )
         return self
 

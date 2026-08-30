@@ -18,8 +18,6 @@ __all__ = [
     "TextBlock",
     "ndarray_image_formatter",
     "pydantic_model_formatter",
-    "register_step_formatter",
-    "register_value_formatter",
 ]
 
 _LAZY_EXPORTS = {
@@ -37,8 +35,6 @@ _LAZY_EXPORTS = {
     "TextBlock": (".views", "TextBlock"),
     "ndarray_image_formatter": ("._builtin_formatters", "ndarray_image_formatter"),
     "pydantic_model_formatter": ("._builtin_formatters", "pydantic_model_formatter"),
-    "register_step_formatter": ("._global_registry", "register_step_formatter"),
-    "register_value_formatter": ("._global_registry", "register_value_formatter"),
 }
 
 if TYPE_CHECKING:
@@ -47,7 +43,6 @@ if TYPE_CHECKING:
     from ml_pipes.inspection.renderer import Orientation, Renderer
     from ml_pipes.inspection.inspector import InspectionWarning, PipelineInspector
     from ml_pipes.inspection._builtin_formatters import ndarray_image_formatter, pydantic_model_formatter
-    from ml_pipes.inspection._global_registry import register_step_formatter, register_value_formatter
     from ml_pipes.inspection.views import GroupBlock, ImageBlock, OutputBlock, StepView, TextBlock
 
 

@@ -67,6 +67,6 @@ def test_inspection_component_surface_is_curated() -> None:
         "TextBlock",
         "ndarray_image_formatter",
         "pydantic_model_formatter",
-        "register_step_formatter",
-        "register_value_formatter",
     ]
+    assert not hasattr(inspection, "register_value_formatter")
+    assert not hasattr(inspection, "register_step_formatter")

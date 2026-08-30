@@ -15,7 +15,7 @@ def register_value_formatter(
     value_type: type[ValueT],
     formatter: ValueFormatter[ValueT],
     *,
-    allow_override: bool = False,
+    override: bool = False,
 ) -> None:
     from ml_pipes.inspection._builtin_formatters import ensure_builtin_formatters_registered
 
@@ -23,7 +23,7 @@ def register_value_formatter(
     _GLOBAL_FORMATTER_REGISTRY.register_value_formatter(
         value_type,
         formatter,
-        allow_override=allow_override,
+        override=override,
     )
 
 
@@ -31,7 +31,7 @@ def register_step_formatter(
     operator_type: type[Any],
     formatter: StepFormatter,
     *,
-    allow_override: bool = False,
+    override: bool = False,
 ) -> None:
     from ml_pipes.inspection._builtin_formatters import ensure_builtin_formatters_registered
 
@@ -39,5 +39,5 @@ def register_step_formatter(
     _GLOBAL_FORMATTER_REGISTRY.register_step_formatter(
         operator_type,
         formatter,
-        allow_override=allow_override,
+        override=override,
     )

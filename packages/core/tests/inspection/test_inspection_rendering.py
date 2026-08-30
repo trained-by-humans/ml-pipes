@@ -21,8 +21,8 @@ from ml_pipes.inspection import (
     TextBlock,
     ndarray_image_formatter,
     pydantic_model_formatter,
-    register_value_formatter,
 )
+from ml_pipes.inspection._global_registry import register_value_formatter
 from ml_pipes.inspection.registry import FormatterRegistry
 from ml_pipes.tracing import StepSpan
 
@@ -125,12 +125,12 @@ def test_formatter_registry_requires_explicit_value_formatter_override() -> None
         ValueError,
         match=(
             "A value formatter is already registered for type 'builtins\\.str'\\. "
-            "Set allow_override=True to explicitly replace it\\."
+            "Set override=True to explicitly replace it\\."
         ),
     ):
         registry.register_value_formatter(str, formatter)
 
-    registry.register_value_formatter(str, formatter, allow_override=True)
+    registry.register_value_formatter(str, formatter, override=True)
 
 
 def test_formatter_registry_requires_explicit_step_formatter_override() -> None:
@@ -147,11 +147,11 @@ def test_formatter_registry_requires_explicit_step_formatter_override() -> None:
 
     with pytest.raises(
         ValueError,
-        match="A step formatter is already registered.*allow_override=True to explicitly replace it",
+        match="A step formatter is already registered.*override=True to explicitly replace it",
     ):
         registry.register_step_formatter(PacketOp, formatter)
 
-    registry.register_step_formatter(PacketOp, formatter, allow_override=True)
+    registry.register_step_formatter(PacketOp, formatter, override=True)
 
 
 def test_pipeline_inspector_render_supports_vertical_orientation():
