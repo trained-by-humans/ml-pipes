@@ -266,7 +266,15 @@ def _register_pydantic_base_model_formatter() -> None:
     except ImportError:
         return
 
-    register_value_formatter(BaseModel, pydantic_model_formatter())
+    formatter = pydantic_model_formatter()
+    register_value_formatter(BaseModel, formatter)
+
+    try:
+        from pydantic.v1 import BaseModel as PydanticV1BaseModel
+    except ImportError:
+        return
+    if PydanticV1BaseModel is not BaseModel:
+        register_value_formatter(PydanticV1BaseModel, formatter)
 
 
 def _region_summary_block(span: StepSpan) -> list[OutputBlock]:

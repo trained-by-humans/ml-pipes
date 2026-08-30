@@ -135,6 +135,42 @@ def test_pipeline_inspector_registers_pydantic_formatter_when_pydantic_is_availa
     ]
 
 
+def test_pipeline_inspector_registers_pydantic_v1_compatibility_formatter() -> None:
+    result = _run_python(
+        "import sys\n"
+        "from types import ModuleType\n"
+        "pydantic = ModuleType('pydantic')\n"
+        "pydantic.__path__ = []\n"
+        "pydantic_v1 = ModuleType('pydantic.v1')\n"
+        "class BaseModel:\n"
+        "    pass\n"
+        "class PydanticV1BaseModel:\n"
+        "    pass\n"
+        "pydantic.BaseModel = BaseModel\n"
+        "pydantic_v1.BaseModel = PydanticV1BaseModel\n"
+        "sys.modules['pydantic'] = pydantic\n"
+        "sys.modules['pydantic.v1'] = pydantic_v1\n"
+        "from ml_pipes.inspection import GroupBlock, PipelineInspector\n"
+        "class Response(PydanticV1BaseModel):\n"
+        "    __fields__ = {'prediction_count': object()}\n"
+        "    def __init__(self):\n"
+        "        self.prediction_count = 2\n"
+        "blocks = PipelineInspector()._value_to_blocks(Response())\n"
+        "print(type(blocks[0]).__name__)\n"
+        "print(blocks[0].title)\n"
+        "print(blocks[0].children[0].rows[0][0])\n"
+        "print(blocks[0].children[0].rows[0][1])\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines() == [
+        "GroupBlock",
+        "Response",
+        "prediction_count",
+        "2",
+    ]
+
+
 def test_type_only_inspection_exports_import_without_inspection_extra() -> None:
     result = _run_python(
         "import importlib.abc\n"
