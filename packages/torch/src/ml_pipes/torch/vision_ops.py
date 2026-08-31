@@ -7,7 +7,7 @@ import torch
 
 from ml_pipes.operator import Operator
 from .tensor_ops import FilterTensors
-from .types import TorchTensorRegistry
+from .types import TensorRegistry
 
 __all__ = [
     "TorchConvertBoxFormat",
@@ -47,7 +47,7 @@ class TorchConvertBoxFormat:
         self.to = to
         self.as_ = as_ or src
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         boxes = registry[self.src]
         registry[self.as_] = self._convert(boxes, self.from_, self.to)
         return registry
@@ -94,7 +94,7 @@ class TorchFilterTensorsByScore:
             as_=as_,
         )
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
 
 
@@ -121,7 +121,7 @@ class TorchFilterTensorsByClasses:
             as_=as_,
         )
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
 
 
@@ -142,7 +142,7 @@ class TorchFilterTensorsByMasksArea:
             as_=as_,
         )
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
 
 
@@ -153,7 +153,7 @@ class TorchWeightMasksByScores:
         self.scores = scores
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         scores = registry[self.scores]
         masks = registry[self.masks]
         expanded_scores = scores.reshape((scores.shape[0],) + (1,) * (masks.ndim - 1))
@@ -169,7 +169,7 @@ class TorchResizeMasks:
         self.masks = masks
         self.as_ = as_ or masks
 
-    def __call__(self, registry: TorchTensorRegistry, image_shape: tuple[int, int]) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry, image_shape: tuple[int, int]) -> TensorRegistry:
         masks = registry[self.masks]
         resized = torch.nn.functional.interpolate(
             masks[:, None, :, :],
@@ -196,7 +196,7 @@ class TorchMeanMaskScores:
         self.masks = masks
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         mask_scores = registry[self.mask_scores]
         masks = registry[self.masks]
         areas = masks.flatten(1).sum(dim=1)
@@ -214,7 +214,7 @@ class TorchMasksToBoxes:
         self.masks = masks
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         masks = registry[self.masks]
         count = masks.shape[0]
         if count == 0:
@@ -242,7 +242,7 @@ class TorchReconstructMasks:
         self.prototypes = prototypes
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         coefficients = registry[self.coefficients]
         prototypes = registry[self.prototypes]
         channels, mask_h, mask_w = prototypes.shape
@@ -271,7 +271,7 @@ class TorchNMS:
         self.iou_threshold = iou_threshold
         self.max_detections = max_detections
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         boxes = registry[self.boxes]
         scores = registry[self.scores]
         classes = registry[self.classes]

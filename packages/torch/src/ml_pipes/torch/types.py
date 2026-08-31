@@ -57,7 +57,7 @@ def canonical_torch_device(device: str | torch.device) -> str:
 
 
 @dataclass(frozen=True)
-class TorchTensorPayload:
+class TensorPayload:
     array: torch.Tensor
     layout: str
     dtype: str
@@ -65,12 +65,12 @@ class TorchTensorPayload:
 
 
 @dataclass(frozen=True)
-class TorchRuntimeOutputs:
-    tensors: tuple[TorchTensorPayload, ...]
+class RuntimeOutputs:
+    tensors: tuple[TensorPayload, ...]
     names: tuple[str, ...]
 
 
-class TorchTensorRegistry:
+class TensorRegistry:
     """Mutable named store for intermediate torch tensors during post-processing."""
 
     def __init__(self, tensors: dict[str, torch.Tensor] | None = None):
@@ -94,4 +94,4 @@ class TorchTensorRegistry:
 
     def __repr__(self) -> str:
         shapes = {k: f"{tuple(v.shape)}@{v.device}" for k, v in self._tensors.items()}
-        return f"TorchTensorRegistry({shapes})"
+        return f"TensorRegistry({shapes})"

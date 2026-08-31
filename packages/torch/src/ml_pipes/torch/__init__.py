@@ -13,13 +13,13 @@ from .boundary_ops import (
     ToNumpyRegistry,
     ToTorch,
     ToTorchRegistry,
-    TorchSynchronizeTensors,
+    SynchronizeTensors,
 )
 from .runtime_ops import (
     Collate,
-    TorchDistribute,
-    TorchExtract,
-    TorchInfer,
+    Distribute,
+    Extract,
+    Infer,
 )
 from .tensor_ops import (
     ArgMax,
@@ -45,7 +45,7 @@ from .tensor_ops import (
     TopKIndices2D,
     Transpose,
 )
-from .types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
+from .types import RuntimeOutputs, TensorPayload, TensorRegistry
 from .vision_ops import (
     TorchConvertBoxFormat,
     TorchFilterTensorsByScore,
@@ -65,11 +65,11 @@ __all__ = [
     "ToNumpyRegistry",
     "ToTorch",
     "ToTorchRegistry",
-    "TorchSynchronizeTensors",
+    "SynchronizeTensors",
     "Collate",
-    "TorchDistribute",
-    "TorchExtract",
-    "TorchInfer",
+    "Distribute",
+    "Extract",
+    "Infer",
     "AsType",
     "ArgMax",
     "ApplyTensorMask",
@@ -102,9 +102,9 @@ __all__ = [
     "TorchMasksToBoxes",
     "TorchReconstructMasks",
     "TorchNMS",
-    "TorchRuntimeOutputs",
-    "TorchTensorPayload",
-    "TorchTensorRegistry",
+    "RuntimeOutputs",
+    "TensorPayload",
+    "TensorRegistry",
 ]
 
 from ._inspection import register_inspection_formatters as _register_inspection_formatters

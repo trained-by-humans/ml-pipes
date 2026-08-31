@@ -83,9 +83,9 @@ The following Tensor aliases also have direct Torch aliases:
 
 Torch-specific boundary and device operators (`ToTorch`, `ToNumpy`,
 `ToTorchRegistry`, `ToNumpyRegistry`, `ToDevice`, and
-`TorchSynchronizeTensors`) have no Tensor or Vision counterpart because they
+`SynchronizeTensors`) have no Tensor or Vision counterpart because they
 make entry to, exit from, and movement within the Torch domain explicit.
 
-Torch runtime operators (`TorchInfer`, `TorchExtract`, and
-`TorchDistribute`) parallel the ONNX runtime staging shape, not a Tensor or
+Torch runtime operators (`Infer`, `Extract`, and
+`Distribute`) parallel the ONNX runtime staging shape, not a Tensor or
 Vision operator.

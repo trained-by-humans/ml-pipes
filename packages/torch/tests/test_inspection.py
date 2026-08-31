@@ -6,7 +6,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from ml_pipes.inspection import InspectionResult
-from ml_pipes.torch import TorchTensorRegistry
+from ml_pipes.torch import TensorRegistry
 from ml_pipes.tracing import StepSpan
 
 
@@ -18,7 +18,7 @@ def _inspection_tools():
 
 def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry():
     ImageBlock, TextBlock, inspector = _inspection_tools()
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "class_queries_logits": torch.zeros((100, 81), dtype=torch.float32),
             "masks_queries_logits": torch.zeros((100, 96, 96), dtype=torch.float32),
@@ -29,7 +29,7 @@ def test_pipeline_inspector_formats_torch_tensor_registry_like_tensor_registry()
 
     assert len(blocks) == 1
     assert isinstance(blocks[0], TextBlock)
-    assert blocks[0].title == "TorchTensorRegistry"
+    assert blocks[0].title == "TensorRegistry"
     assert blocks[0].rows == [
         ("class_queries_logits", "(100, 81)@cpu"),
         ("masks_queries_logits", "(100, 96, 96)@cpu"),

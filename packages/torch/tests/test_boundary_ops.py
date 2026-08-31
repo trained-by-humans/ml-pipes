@@ -6,12 +6,12 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from ml_pipes.tensor import TensorPayload
-from ml_pipes.torch import ToDevice, ToNumpy, ToNumpyRegistry, ToTorch, ToTorchRegistry, TorchSynchronizeTensors
-from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
+from ml_pipes.torch import ToDevice, ToNumpy, ToNumpyRegistry, ToTorch, ToTorchRegistry, SynchronizeTensors
+from ml_pipes.torch.types import RuntimeOutputs, TensorPayload, TensorRegistry
 
 
-def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TorchTensorPayload:
-    return TorchTensorPayload(
+def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TensorPayload:
+    return TensorPayload(
         array=array,
         layout=layout,
         dtype=str(array.dtype).replace("torch.", ""),
@@ -79,7 +79,7 @@ def test_to_torch_registry_cpu_conversion_respects_copy_flag(copy: bool):
 
 @pytest.mark.parametrize("copy", COPY_FLAGS)
 def test_to_numpy_registry_cpu_conversion_respects_copy_flag(copy: bool):
-    registry = TorchTensorRegistry({"scores": torch.tensor([1.0, 2.0], dtype=torch.float32)})
+    registry = TensorRegistry({"scores": torch.tensor([1.0, 2.0], dtype=torch.float32)})
 
     result = ToNumpyRegistry(copy=copy)(registry)
     registry["scores"][0] = 9.0
@@ -120,7 +120,7 @@ def test_to_device_moves_payload_and_registry_to_requested_device(device: str):
     assert moved_payload.device == str(torch.device(device))
     assert moved_payload.array.device.type == torch.device(device).type
 
-    registry = TorchTensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
+    registry = TensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
     moved_registry = ToDevice(device)(registry)
     assert moved_registry["scores"].device.type == torch.device(device).type
 
@@ -134,7 +134,7 @@ def test_to_device_supports_tensor_sequences_and_runtime_outputs():
     moved_payloads = ToDevice("cpu")(payloads)
     assert moved_payloads[0].device == "cpu"
 
-    outputs = TorchRuntimeOutputs(
+    outputs = RuntimeOutputs(
         tensors=(_torch_payload(torch.ones((1, 2), dtype=torch.float32), layout="NC"),),
         names=("scores",),
     )
@@ -145,13 +145,13 @@ def test_to_device_supports_tensor_sequences_and_runtime_outputs():
 def test_torch_synchronize_tensors_passthrough_on_payload():
     payload = _torch_payload(torch.ones((1, 2), dtype=torch.float32))
 
-    result = TorchSynchronizeTensors()(payload)
+    result = SynchronizeTensors()(payload)
 
     assert result is payload
 
 
 def test_torch_synchronize_tensors_collects_devices_from_runtime_outputs(monkeypatch):
-    outputs = TorchRuntimeOutputs(
+    outputs = RuntimeOutputs(
         tensors=(
             _torch_payload(torch.ones((1, 2), dtype=torch.float32)),
             _torch_payload(torch.ones((1, 3), dtype=torch.float32)),
@@ -165,12 +165,12 @@ def test_torch_synchronize_tensors_collects_devices_from_runtime_outputs(monkeyp
         lambda device: seen.append(str(device)),
     )
 
-    result = TorchSynchronizeTensors()(outputs)
+    result = SynchronizeTensors()(outputs)
 
     assert result is outputs
     assert seen == ["cpu"]
 
 
 def test_torch_synchronize_tensors_rejects_non_torch_values():
-    with pytest.raises(TypeError, match="TorchSynchronizeTensors"):
-        TorchSynchronizeTensors()(123)
+    with pytest.raises(TypeError, match="SynchronizeTensors"):
+        SynchronizeTensors()(123)

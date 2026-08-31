@@ -131,7 +131,7 @@ At a high level, a common flow looks like this:
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Runtime Domain                                           │
-├─ Infer / TorchInfer / ...                                │
+├─ ml_pipes.onnx.Infer / ml_pipes.torch.Infer / ...   │
 └────────┬─────────────────────────────────────────────────┘
          |
          | Extract / ToNumpyRegistry

@@ -34,8 +34,8 @@ from ml_pipes.core import Pipeline  # noqa: E402
 from ml_pipes.standard import Recall  # noqa: E402
 from ml_pipes.tensor import ArgMax  # noqa: E402
 from ml_pipes.tensor import TensorPayload, TensorRegistry  # noqa: E402
-from ml_pipes.torch import ToTorch, ArgMax, TorchExtract, TorchInfer, Squeeze  # noqa: E402
-from ml_pipes.torch.types import TorchTensorRegistry  # noqa: E402
+from ml_pipes.torch import ToTorch, ArgMax, Extract, Infer, Squeeze  # noqa: E402
+from ml_pipes.torch.types import TensorRegistry  # noqa: E402
 from ml_pipes.vision import ImagePayload  # noqa: E402
 
 
@@ -89,7 +89,7 @@ def test_mask2former_infer_pipeline_preserves_stored_values_and_exposes_model_ou
     assert processor.last_image is not None
     assert processor.last_return_tensors == "np"
     assert processor.last_image.tolist() == [[[30, 20, 10], [60, 50, 40]]]
-    assert isinstance(registry, TorchTensorRegistry)
+    assert isinstance(registry, TensorRegistry)
     assert tuple(registry["class_queries_logits"].shape) == (2, 3)
     assert tuple(registry["masks_queries_logits"].shape) == (2, 3, 4)
     assert source_image.color_space == "BGR"
@@ -158,12 +158,12 @@ def test_mask2former_torch_infer_exposes_model_outputs() -> None:
     image = ImagePayload(array=np.zeros((3, 4, 3), dtype=np.uint8), color_space="RGB", layout="HWC")
 
     pixel_values = PrepareHFImageInputs(processor=processor, output_key="pixel_values")(image)
-    outputs = TorchInfer(
+    outputs = Infer(
         _FakeModel(),
         input_name="pixel_values",
         input_layout="NCHW",
     )(ToTorch(device="cpu")(pixel_values))
-    registry = TorchExtract("class_queries_logits", "masks_queries_logits")(outputs)
+    registry = Extract("class_queries_logits", "masks_queries_logits")(outputs)
     Squeeze("class_queries_logits", axis=0)(registry)
     Squeeze("masks_queries_logits", axis=0)(registry)
 
@@ -247,7 +247,7 @@ def test_numpy_panoptic_segments_filter_by_surviving_overlap() -> None:
 
 
 def test_torch_panoptic_segments_filter_by_surviving_overlap() -> None:
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "query_scores": torch.tensor([0.9, 0.8], dtype=torch.float32),
             "query_classes": torch.tensor([0, 1], dtype=torch.int64),
@@ -323,7 +323,7 @@ def test_numpy_panoptic_sequence_handles_all_queries_filtered() -> None:
 
 
 def test_torch_panoptic_sequence_handles_all_queries_filtered() -> None:
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "query_scores": torch.zeros((0,), dtype=torch.float32),
             "query_classes": torch.zeros((0,), dtype=torch.int64),

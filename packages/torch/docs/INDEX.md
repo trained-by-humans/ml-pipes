@@ -23,9 +23,9 @@ For the cross-package package catalogs, see
 
 | Surface | Notes |
 |---|---|
-| `TorchTensorPayload` | One-tensor Torch boundary type. |
-| `TorchTensorRegistry` | Multi-tensor Torch working set used by most postprocess operators in this package. |
-| `TorchRuntimeOutputs` | Value type used between Torch runtime invocation and output extraction or distribution. |
+| `TensorPayload` | One-tensor Torch boundary type. |
+| `TensorRegistry` | Multi-tensor Torch working set used by most postprocess operators in this package. |
+| `RuntimeOutputs` | Value type used between Torch runtime invocation and output extraction or distribution. |
 
 ## Public Aliases
 
@@ -39,20 +39,20 @@ For the cross-package package catalogs, see
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
-| `ToTorch(device="cpu", dtype=None, copy=False)` | `TensorPayload` -> `TorchTensorPayload` | Converts one NumPy tensor payload into the Torch domain. |
-| `ToNumpy(dtype=None, copy=False)` | `TorchTensorPayload` -> `TensorPayload` | Converts one Torch tensor payload back into the NumPy domain. |
-| `ToTorchRegistry(device="cpu", dtype=None, copy=False)` | `TensorRegistry` -> `TorchTensorRegistry` | Converts a tensor registry into the Torch domain. |
-| `ToNumpyRegistry(dtype=None, copy=False)` | `TorchTensorRegistry` -> `TensorRegistry` | Converts a Torch registry back into the NumPy domain. |
+| `ToTorch(device="cpu", dtype=None, copy=False)` | `tensor.TensorPayload` -> `torch.TensorPayload` | Converts one NumPy tensor payload into the Torch domain. |
+| `ToNumpy(dtype=None, copy=False)` | `torch.TensorPayload` -> `tensor.TensorPayload` | Converts one Torch tensor payload back into the NumPy domain. |
+| `ToTorchRegistry(device="cpu", dtype=None, copy=False)` | `tensor.TensorRegistry` -> `torch.TensorRegistry` | Converts a tensor registry into the Torch domain. |
+| `ToNumpyRegistry(dtype=None, copy=False)` | `torch.TensorRegistry` -> `tensor.TensorRegistry` | Converts a Torch registry back into the NumPy domain. |
 | `ToDevice(device)` | Torch values -> same Torch values | Moves Torch-backed payloads, registries, runtime outputs, or Torch sequences to another device. |
-| `TorchSynchronizeTensors()` | Torch values -> same Torch values | Forces synchronization at a chosen Torch boundary. |
+| `SynchronizeTensors()` | Torch values -> same Torch values | Forces synchronization at a chosen Torch boundary. |
 
 ## Model Runtime And Output Handling
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
-| `TorchInfer(model, input_name=None, input_layout="NCHW", ...)` | `TorchTensorPayload` -> `TorchRuntimeOutputs` | Runs a Torch module on one input payload. For the NumPy-side runtime mirror, see `ml_pipes.onnx`. |
-| `TorchExtract(*names, as_=...)` | `TorchRuntimeOutputs` -> `TorchTensorRegistry` | Extracts named Torch outputs into a Torch registry. |
-| `TorchDistribute()` | `TorchRuntimeOutputs` -> `list[TorchRuntimeOutputs]` | Splits a batched runtime output back into per-sample runtime outputs. |
+| `Infer(model, input_name=None, input_layout="NCHW", ...)` | `TensorPayload` -> `RuntimeOutputs` | Runs a Torch module on one input payload. For the NumPy-side runtime mirror, see `ml_pipes.onnx`. |
+| `Extract(*names, as_=...)` | `RuntimeOutputs` -> `TensorRegistry` | Extracts named Torch outputs into a Torch registry. |
+| `Distribute()` | `RuntimeOutputs` -> `list[RuntimeOutputs]` | Splits a batched runtime output back into per-sample runtime outputs. |
 
 ## Generic Tensor Operators
 
@@ -94,7 +94,7 @@ For the cross-package package catalogs, see
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
-| `Collate()` | `list[TorchTensorPayload]` -> `TorchTensorPayload` | Stacks or concatenates Torch payloads into one batched payload. |
+| `Collate()` | `list[TensorPayload]` -> `TensorPayload` | Stacks or concatenates Torch payloads into one batched payload. |
 
 ## Vision Postprocess Operators
 

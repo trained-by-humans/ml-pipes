@@ -16,11 +16,11 @@ from ml_pipes.torch import (
     TorchResizeMasks,
     TorchWeightMasksByScores,
 )
-from ml_pipes.torch.types import TorchTensorRegistry
+from ml_pipes.torch.types import TensorRegistry
 
 
 def test_torch_convert_box_format_cxcywh_to_xyxy():
-    registry = TorchTensorRegistry({"boxes": torch.tensor([[10.0, 20.0, 4.0, 6.0]], dtype=torch.float32)})
+    registry = TensorRegistry({"boxes": torch.tensor([[10.0, 20.0, 4.0, 6.0]], dtype=torch.float32)})
 
     result = TorchConvertBoxFormat(from_="cxcywh")(registry)
 
@@ -28,7 +28,7 @@ def test_torch_convert_box_format_cxcywh_to_xyxy():
 
 
 def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.5, 2.0], dtype=torch.float32),
             "masks": torch.tensor(
@@ -56,7 +56,7 @@ def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
 
 
 def test_torch_resize_masks_to_image_resizes_mask_stack():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "masks": torch.tensor(
                 [
@@ -74,7 +74,7 @@ def test_torch_resize_masks_to_image_resizes_mask_stack():
 
 
 def test_torch_mean_mask_scores_computes_mean_over_mask_support():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "selected_masks": torch.tensor(
                 [
@@ -99,7 +99,7 @@ def test_torch_mean_mask_scores_computes_mean_over_mask_support():
 
 
 def test_torch_mean_mask_scores_handles_empty_masks():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "selected_masks": torch.zeros((0, 2, 2), dtype=torch.float32),
             "masks": torch.zeros((0, 2, 2), dtype=torch.bool),
@@ -113,7 +113,7 @@ def test_torch_mean_mask_scores_handles_empty_masks():
 
 
 def test_torch_masks_to_boxes_converts_masks_to_xyxy():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "masks": torch.tensor(
                 [
@@ -132,7 +132,7 @@ def test_torch_masks_to_boxes_converts_masks_to_xyxy():
 
 
 def test_torch_filter_tensors_by_score_filters_parallel_tensors():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "query_scores": torch.tensor([0.9, 0.1], dtype=torch.float32),
             "query_classes": torch.tensor([1, 0], dtype=torch.int64),
@@ -154,7 +154,7 @@ def test_torch_filter_tensors_by_score_filters_parallel_tensors():
 
 
 def test_torch_filter_tensors_by_masks_area_filters_parallel_tensors():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "masks": torch.tensor(
                 [
@@ -176,7 +176,7 @@ def test_torch_filter_tensors_by_masks_area_filters_parallel_tensors():
 
 
 def test_torch_filter_tensors_by_masks_area_handles_empty_masks():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "masks": torch.zeros((0, 2, 2), dtype=torch.bool),
             "scores": torch.zeros((0,), dtype=torch.float32),
@@ -192,7 +192,7 @@ def test_torch_filter_tensors_by_masks_area_handles_empty_masks():
 
 
 def test_torch_filter_tensors_by_score_can_write_to_new_keys():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
@@ -212,7 +212,7 @@ def test_torch_filter_tensors_by_score_can_write_to_new_keys():
 
 
 def test_torch_filter_tensors_by_masks_area_can_write_to_new_keys():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "masks": torch.tensor(
                 [
@@ -241,7 +241,7 @@ def test_torch_filter_tensors_by_masks_area_can_write_to_new_keys():
 
 
 def test_torch_filter_tensors_by_classes_can_write_to_new_keys():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([0, 1, 2], dtype=torch.int64),
@@ -263,7 +263,7 @@ def test_torch_filter_tensors_by_classes_can_write_to_new_keys():
 def test_torch_reconstruct_masks_produces_correct_shape():
     coefficients = torch.ones((2, 3), dtype=torch.float32)
     prototypes = torch.ones((3, 4, 4), dtype=torch.float32)
-    registry = TorchTensorRegistry({"coefficients": coefficients, "prototypes": prototypes})
+    registry = TensorRegistry({"coefficients": coefficients, "prototypes": prototypes})
 
     result = TorchReconstructMasks("coefficients", "prototypes", as_="masks")(registry)
 
@@ -272,7 +272,7 @@ def test_torch_reconstruct_masks_produces_correct_shape():
 
 def test_torch_nms_keeps_overlapping_boxes_from_different_classes():
     pytest.importorskip("torchvision")
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "boxes": torch.tensor([[10, 10, 50, 50], [12, 12, 48, 48]], dtype=torch.float32),
             "scores": torch.tensor([0.95, 0.9], dtype=torch.float32),
@@ -288,7 +288,7 @@ def test_torch_nms_keeps_overlapping_boxes_from_different_classes():
 
 def test_torch_nms_suppresses_same_class_overlap():
     pytest.importorskip("torchvision")
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "boxes": torch.tensor([[10, 10, 50, 50], [12, 12, 48, 48], [100, 100, 140, 140]], dtype=torch.float32),
             "scores": torch.tensor([0.95, 0.85, 0.8], dtype=torch.float32),
@@ -304,7 +304,7 @@ def test_torch_nms_suppresses_same_class_overlap():
 
 def test_torch_nms_filters_and_stores_indices():
     pytest.importorskip("torchvision")
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "boxes": torch.tensor(
                 [[0, 0, 10, 10], [1, 1, 11, 11], [50, 50, 60, 60]],

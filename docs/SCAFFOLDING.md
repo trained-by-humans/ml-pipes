@@ -75,10 +75,10 @@ In `ml-pipes`, that model step can be as small as:
 
 ```python
 # ONNX Runtime
-Infer("model.onnx")
+onnx.Infer("model.onnx")
 
 # Torch-native model
-TorchInfer(model, input_layout="NCHW")
+torch.Infer(model, input_layout="NCHW")
 
 # Any other runtime
 RunMyModel()

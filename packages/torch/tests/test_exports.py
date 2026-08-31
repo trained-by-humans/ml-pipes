@@ -104,6 +104,13 @@ def test_ml_pipes_torch_does_not_export_prefixed_generic_operator_names() -> Non
         "TorchTopK",
         "TorchTopKIndices2D",
         "TorchTranspose",
+        "TorchSynchronizeTensors",
+        "TorchInfer",
+        "TorchExtract",
+        "TorchDistribute",
+        "TorchTensorPayload",
+        "TorchRuntimeOutputs",
+        "TorchTensorRegistry",
     )
 
     for name in removed_names:

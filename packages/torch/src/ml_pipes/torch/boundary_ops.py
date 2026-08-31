@@ -7,12 +7,13 @@ import torch
 
 from ml_pipes._typing.annotation import is_assignable
 from ml_pipes.operator import Operator
-from ml_pipes.tensor import TensorPayload, TensorRegistry
+from ml_pipes.tensor import TensorPayload as NumpyTensorPayload
+from ml_pipes.tensor import TensorRegistry as NumpyTensorRegistry
 
 from .types import (
-    TorchRuntimeOutputs,
-    TorchTensorPayload,
-    TorchTensorRegistry,
+    RuntimeOutputs,
+    TensorPayload,
+    TensorRegistry,
     canonical_torch_device,
     canonical_torch_dtype,
     resolve_torch_dtype,
@@ -24,19 +25,19 @@ __all__ = [
     "ToTorchRegistry",
     "ToNumpyRegistry",
     "ToDevice",
-    "TorchSynchronizeTensors",
+    "SynchronizeTensors",
 ]
 
 TorchTensorLike: TypeAlias = (
-    TorchTensorPayload
+    TensorPayload
     | torch.Tensor
-    | tuple[TorchTensorPayload, ...]
+    | tuple[TensorPayload, ...]
     | tuple[torch.Tensor, ...]
-    | list[TorchTensorPayload]
+    | list[TensorPayload]
     | list[torch.Tensor]
 )
-TorchTensorInput: TypeAlias = TorchTensorLike | TorchTensorRegistry
-TorchTransferInput: TypeAlias = TorchTensorInput | TorchRuntimeOutputs
+TorchTensorInput: TypeAlias = TorchTensorLike | TensorRegistry
+TorchTransferInput: TypeAlias = TorchTensorInput | RuntimeOutputs
 TorchTransferInputT = TypeVar("TorchTransferInputT", bound=TorchTransferInput)
 
 
@@ -49,11 +50,11 @@ def _synchronize_torch_device(device: torch.device) -> None:
 
 
 def _collect_torch_devices(value: object) -> set[torch.device]:
-    if isinstance(value, TorchTensorPayload):
+    if isinstance(value, TensorPayload):
         return {value.array.device}
-    if isinstance(value, TorchTensorRegistry):
+    if isinstance(value, TensorRegistry):
         return {tensor.device for tensor in value._tensors.values()}
-    if isinstance(value, TorchRuntimeOutputs):
+    if isinstance(value, RuntimeOutputs):
         return {tensor.array.device for tensor in value.tensors}
     if isinstance(value, torch.Tensor):
         return {value.device}
@@ -130,7 +131,7 @@ class ToTorch:
         self.dtype = dtype
         self.copy = copy
 
-    def __call__(self, tensor_payload: TensorPayload) -> TorchTensorPayload:
+    def __call__(self, tensor_payload: NumpyTensorPayload) -> TensorPayload:
         target_dtype = resolve_torch_dtype(self.dtype) if self.dtype is not None else None
         tensor = _convert_numpy_array_to_torch(
             tensor_payload.array,
@@ -138,7 +139,7 @@ class ToTorch:
             target_dtype=target_dtype,
             copy=self.copy,
         )
-        return TorchTensorPayload(
+        return TensorPayload(
             array=tensor,
             layout=tensor_payload.layout,
             dtype=canonical_torch_dtype(tensor.dtype),
@@ -152,14 +153,14 @@ class ToNumpy:
         self.dtype = dtype
         self.copy = copy
 
-    def __call__(self, tensor_payload: TorchTensorPayload) -> TensorPayload:
+    def __call__(self, tensor_payload: TensorPayload) -> NumpyTensorPayload:
         target_dtype = np.dtype(self.dtype) if self.dtype is not None else None
         array = _convert_torch_tensor_to_numpy(
             tensor_payload.array,
             target_dtype=target_dtype,
             copy=self.copy,
         )
-        return TensorPayload(array=array, layout=tensor_payload.layout, dtype=str(array.dtype))
+        return NumpyTensorPayload(array=array, layout=tensor_payload.layout, dtype=str(array.dtype))
 
 
 @Operator
@@ -169,7 +170,7 @@ class ToTorchRegistry:
         self.dtype = dtype
         self.copy = copy
 
-    def __call__(self, registry: TensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: NumpyTensorRegistry) -> TensorRegistry:
         target_dtype = resolve_torch_dtype(self.dtype) if self.dtype is not None else None
         tensors = {}
         for name, value in registry._tensors.items():
@@ -179,7 +180,7 @@ class ToTorchRegistry:
                 target_dtype=target_dtype,
                 copy=self.copy,
             )
-        return TorchTensorRegistry(tensors)
+        return TensorRegistry(tensors)
 
 
 @Operator
@@ -188,7 +189,7 @@ class ToNumpyRegistry:
         self.dtype = dtype
         self.copy = copy
 
-    def __call__(self, registry: TorchTensorRegistry) -> TensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> NumpyTensorRegistry:
         arrays = {}
         for name, tensor in registry._tensors.items():
             target_dtype = np.dtype(self.dtype) if self.dtype is not None else None
@@ -197,7 +198,7 @@ class ToNumpyRegistry:
                 target_dtype=target_dtype,
                 copy=self.copy,
             )
-        return TensorRegistry(arrays)
+        return NumpyTensorRegistry(arrays)
 
 
 @Operator
@@ -217,14 +218,14 @@ class ToDevice:
         return cast(TorchTransferInputT, self._move_value(value))
 
     def _move_value(self, value: TorchTransferInput) -> TorchTransferInput:
-        if isinstance(value, TorchTensorPayload):
+        if isinstance(value, TensorPayload):
             return self._move_payload(value)
-        if isinstance(value, TorchTensorRegistry):
+        if isinstance(value, TensorRegistry):
             for name, tensor in value._tensors.items():
                 value[name] = tensor.to(device=self.device)
             return value
-        if isinstance(value, TorchRuntimeOutputs):
-            return TorchRuntimeOutputs(
+        if isinstance(value, RuntimeOutputs):
+            return RuntimeOutputs(
                 tensors=tuple(self._move_payload(tensor) for tensor in value.tensors),
                 names=value.names,
             )
@@ -236,16 +237,16 @@ class ToDevice:
             return cast(TorchTensorLike, [self._move_sequence_item(item) for item in value])
         raise TypeError(f"ToDevice does not support value type {type(value)!r}")
 
-    def _move_sequence_item(self, value: object) -> TorchTensorPayload | torch.Tensor:
-        if isinstance(value, TorchTensorPayload):
+    def _move_sequence_item(self, value: object) -> TensorPayload | torch.Tensor:
+        if isinstance(value, TensorPayload):
             return self._move_payload(value)
         if isinstance(value, torch.Tensor):
             return value.to(device=self.device)
         raise TypeError(f"ToDevice does not support sequence item type {type(value)!r}")
 
-    def _move_payload(self, value: TorchTensorPayload) -> TorchTensorPayload:
+    def _move_payload(self, value: TensorPayload) -> TensorPayload:
         tensor = value.array.to(device=self.device)
-        return TorchTensorPayload(
+        return TensorPayload(
             array=tensor,
             layout=value.layout,
             dtype=canonical_torch_dtype(tensor.dtype),
@@ -254,7 +255,7 @@ class ToDevice:
 
 
 @Operator
-class TorchSynchronizeTensors:
+class SynchronizeTensors:
     def resolve_contract(self, upstream_annotation, error_type):
         if upstream_annotation is not Any and is_assignable(
             upstream_annotation,
@@ -266,7 +267,7 @@ class TorchSynchronizeTensors:
     def __call__(self, value: TorchTransferInputT) -> TorchTransferInputT:
         devices = _collect_torch_devices(value)
         if not devices:
-            raise TypeError(f"TorchSynchronizeTensors does not support value type {type(value)!r}")
+            raise TypeError(f"SynchronizeTensors does not support value type {type(value)!r}")
         for device in sorted(devices, key=str):
             _synchronize_torch_device(device)
         return value

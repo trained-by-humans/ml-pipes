@@ -45,7 +45,7 @@ from ml_pipes.torch import (
     TopKIndices2D,
     TorchWeightMasksByScores,
 )
-from ml_pipes.torch.types import TorchTensorRegistry
+from ml_pipes.torch.types import TensorRegistry
 from .mask2former_infer import (
     Mask2FormerBundle,
     add_mask2former_args,
@@ -136,7 +136,7 @@ class TorchPanopticSegmentsFromQueries:
         self.mask_threshold = mask_threshold
         self.overlap_threshold = overlap_threshold
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         kept_scores = registry[self.scores]
         kept_classes = registry[self.classes]
         kept_masks = registry[self.masks]
@@ -195,7 +195,7 @@ def build_torch_postprocess_pipeline(
     bundle: Mask2FormerBundle,
     input_path: Path,
     output_path: Path,
-) -> Pipeline[TorchTensorRegistry, object]:
+) -> Pipeline[TensorRegistry, object]:
     if bundle.task == "panoptic":
         postprocess_pipeline = Pipeline([
             Recall("image_shape"),

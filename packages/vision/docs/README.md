@@ -83,7 +83,7 @@ At a high level, a common flow looks like this:
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Runtime + Tensor Domains                                 │
-├─ Infer / TorchInfer -> Extract -> Slice -> ArgMax -> ... │
+├─ ml_pipes.onnx.Infer / ml_pipes.torch.Infer -> ... │
 └────────┬─────────────────────────────────────────────────┘
          |
          | TensorRegistry

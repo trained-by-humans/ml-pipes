@@ -27,11 +27,11 @@ from ml_pipes.torch import (
     TopKIndices2D,
     Transpose,
 )
-from ml_pipes.torch.types import TorchTensorPayload, TorchTensorRegistry
+from ml_pipes.torch.types import TensorPayload, TensorRegistry
 
 
-def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TorchTensorPayload:
-    return TorchTensorPayload(
+def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TensorPayload:
+    return TensorPayload(
         array=array,
         layout=layout,
         dtype=str(array.dtype).replace("torch.", ""),
@@ -44,7 +44,7 @@ def test_torch_as_type_supports_payload_registry_and_sequence_forms():
     cast_payload = AsType("float16")(payload)
     assert cast_payload.dtype == "float16"
 
-    registry = TorchTensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
+    registry = TensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
     AsType("float16", src="scores")(registry)
     assert registry["scores"].dtype == torch.float16
 
@@ -77,7 +77,7 @@ def test_torch_as_type_can_cast_single_tensor():
 
 
 def test_torch_as_type_can_write_named_registry_tensor_to_new_key():
-    registry = TorchTensorRegistry({"density": torch.tensor([[1.0, 2.0]], dtype=torch.float16)})
+    registry = TensorRegistry({"density": torch.tensor([[1.0, 2.0]], dtype=torch.float16)})
 
     result = AsType(src="density", dtype="float32", as_="density_fp32")(registry)
 
@@ -87,7 +87,7 @@ def test_torch_as_type_can_write_named_registry_tensor_to_new_key():
 
 
 def test_torch_as_type_without_src_rejects_registry_input():
-    registry = TorchTensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
+    registry = TensorRegistry({"scores": torch.ones((2,), dtype=torch.float32)})
 
     with pytest.raises(TypeError):
         AsType("float16")(registry)
@@ -106,7 +106,7 @@ def test_torch_as_type_rejects_as_without_src():
 
 
 def test_torch_argmax_and_multiply_tensors_work_on_registry():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([[0.1, 0.9], [0.8, 0.2]], dtype=torch.float32),
             "left": torch.tensor([[1.0], [2.0]], dtype=torch.float32),
@@ -122,7 +122,7 @@ def test_torch_argmax_and_multiply_tensors_work_on_registry():
 
 
 def test_torch_scale_multiplies_by_broadcastable_factors():
-    registry = TorchTensorRegistry({"preds": torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)})
+    registry = TensorRegistry({"preds": torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)})
 
     result = Scale("preds", by=(10.0, 100.0), as_="scaled_preds")(registry)
 
@@ -131,7 +131,7 @@ def test_torch_scale_multiplies_by_broadcastable_factors():
 
 
 def test_torch_squeeze_removes_size_one_batch_dim():
-    registry = TorchTensorRegistry({"preds": torch.zeros((1, 5, 10), dtype=torch.float32)})
+    registry = TensorRegistry({"preds": torch.zeros((1, 5, 10), dtype=torch.float32)})
 
     result = Squeeze("preds")(registry)
 
@@ -139,7 +139,7 @@ def test_torch_squeeze_removes_size_one_batch_dim():
 
 
 def test_torch_transpose_swaps_axes():
-    registry = TorchTensorRegistry({"preds": torch.zeros((5, 10), dtype=torch.float32)})
+    registry = TensorRegistry({"preds": torch.zeros((5, 10), dtype=torch.float32)})
 
     result = Transpose("preds")(registry)
 
@@ -147,7 +147,7 @@ def test_torch_transpose_swaps_axes():
 
 
 def test_torch_squeeze_supports_single_and_multiple_axes():
-    registry = TorchTensorRegistry({"preds": torch.zeros((1, 2, 1, 3), dtype=torch.float32)})
+    registry = TensorRegistry({"preds": torch.zeros((1, 2, 1, 3), dtype=torch.float32)})
 
     Squeeze("preds", axis=(0, 2))(registry)
 
@@ -155,14 +155,14 @@ def test_torch_squeeze_supports_single_and_multiple_axes():
 
 
 def test_torch_squeeze_rejects_non_unit_axis():
-    registry = TorchTensorRegistry({"preds": torch.zeros((1, 2, 1, 3), dtype=torch.float32)})
+    registry = TensorRegistry({"preds": torch.zeros((1, 2, 1, 3), dtype=torch.float32)})
 
     with pytest.raises(ValueError, match="cannot squeeze axis"):
         Squeeze("preds", axis=1)(registry)
 
 
 def test_torch_argmax_axis_zero_handles_empty_leading_dimension():
-    registry = TorchTensorRegistry({"scores": torch.zeros((0, 2, 3), dtype=torch.float32)})
+    registry = TensorRegistry({"scores": torch.zeros((0, 2, 3), dtype=torch.float32)})
 
     ArgMax("scores", axis=0, as_="classes")(registry)
 
@@ -172,7 +172,7 @@ def test_torch_argmax_axis_zero_handles_empty_leading_dimension():
 
 
 def test_torch_gather_scores_picks_class_score():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([[0.1, 0.9], [0.8, 0.2]], dtype=torch.float32),
             "classes": torch.tensor([1, 0], dtype=torch.int64),
@@ -185,7 +185,7 @@ def test_torch_gather_scores_picks_class_score():
 
 
 def test_torch_softmax_slice_sigmoid_argmax_and_gather_scores_work_on_registry():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "class_logits": torch.tensor([[1.0, 2.0, 0.0], [3.0, 0.5, -1.0]], dtype=torch.float32),
             "mask_logits": torch.tensor(
@@ -212,7 +212,7 @@ def test_torch_softmax_slice_sigmoid_argmax_and_gather_scores_work_on_registry()
 
 def test_torch_slice_extracts_column_range():
     data = torch.arange(12, dtype=torch.float32).reshape(3, 4)
-    registry = TorchTensorRegistry({"preds": data})
+    registry = TensorRegistry({"preds": data})
 
     result = Slice("preds", at=slice(None, 2), as_="boxes")(registry)
 
@@ -221,7 +221,7 @@ def test_torch_slice_extracts_column_range():
 
 
 def test_torch_softmax_sums_to_one_per_row():
-    registry = TorchTensorRegistry({"logits": torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32)})
+    registry = TensorRegistry({"logits": torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32)})
 
     result = Softmax("logits")(registry)
 
@@ -229,7 +229,7 @@ def test_torch_softmax_sums_to_one_per_row():
 
 
 def test_torch_softmax_handles_empty_reduction_axis():
-    registry = TorchTensorRegistry({"logits": torch.zeros((0, 2, 3), dtype=torch.float32)})
+    registry = TensorRegistry({"logits": torch.zeros((0, 2, 3), dtype=torch.float32)})
 
     result = Softmax("logits", axis=0)(registry)
 
@@ -238,7 +238,7 @@ def test_torch_softmax_handles_empty_reduction_axis():
 
 
 def test_torch_sigmoid_maps_zero_to_half():
-    registry = TorchTensorRegistry({"x": torch.tensor([[0.0]], dtype=torch.float32)})
+    registry = TensorRegistry({"x": torch.tensor([[0.0]], dtype=torch.float32)})
 
     result = Sigmoid("x")(registry)
 
@@ -246,7 +246,7 @@ def test_torch_sigmoid_maps_zero_to_half():
 
 
 def test_torch_sigmoid_is_stable_for_large_magnitude_values():
-    registry = TorchTensorRegistry({"x": torch.tensor([[-1000.0, 1000.0]], dtype=torch.float32)})
+    registry = TensorRegistry({"x": torch.tensor([[-1000.0, 1000.0]], dtype=torch.float32)})
 
     result = Sigmoid("x")(registry)
 
@@ -256,7 +256,7 @@ def test_torch_sigmoid_is_stable_for_large_magnitude_values():
 
 
 def test_torch_topk_and_topk_indices_2d_return_expected_values_and_indices():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.1, 0.7, 0.2, 0.8], dtype=torch.float32),
             "class_probs": torch.tensor(
@@ -286,7 +286,7 @@ def test_torch_topk_and_topk_indices_2d_return_expected_values_and_indices():
 
 
 def test_torch_sort_tensors_by_sorts_parallel_tensors():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.5, 0.9, 0.1], dtype=torch.float32),
             "classes": torch.tensor([5, 9, 1], dtype=torch.int64),
@@ -300,7 +300,7 @@ def test_torch_sort_tensors_by_sorts_parallel_tensors():
 
 
 def test_torch_filter_tensors_can_write_to_new_keys():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
@@ -321,7 +321,7 @@ def test_torch_filter_tensors_can_write_to_new_keys():
 
 
 def test_torch_sort_tensors_by_can_write_to_new_keys():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.5, 0.9, 0.1], dtype=torch.float32),
             "classes": torch.tensor([5, 9, 1], dtype=torch.int64),
@@ -336,7 +336,7 @@ def test_torch_sort_tensors_by_can_write_to_new_keys():
 
 
 def test_torch_apply_tensor_mask_applies_boolean_mask():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "keep": torch.tensor([True, False, True], dtype=torch.bool),
@@ -351,7 +351,7 @@ def test_torch_apply_tensor_mask_applies_boolean_mask():
 
 
 def test_torch_create_tensor_mask_writes_boolean_mask_from_predicate():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.2, 0.8, 0.5], dtype=torch.float32),
         }
@@ -364,7 +364,7 @@ def test_torch_create_tensor_mask_writes_boolean_mask_from_predicate():
 
 
 def test_torch_create_tensor_mask_places_numpy_predicate_output_on_source_device():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.2, 0.8, 0.5], dtype=torch.float32),
         }
@@ -382,7 +382,7 @@ def test_torch_create_tensor_mask_places_numpy_predicate_output_on_source_device
 
 
 def test_torch_create_tensor_mask_by_threshold_writes_boolean_mask():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "masks": torch.tensor(
                 [
@@ -412,7 +412,7 @@ def test_torch_binarize_tensor_is_alias():
 
 
 def test_torch_select_tensors_and_apply_tensor_mask_work_on_registry():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([4, 5, 6], dtype=torch.int64),
@@ -429,7 +429,7 @@ def test_torch_select_tensors_and_apply_tensor_mask_work_on_registry():
 
 
 def test_torch_apply_tensor_mask_can_write_to_new_keys():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([4, 5, 6], dtype=torch.int64),
@@ -450,7 +450,7 @@ def test_torch_apply_tensor_mask_can_write_to_new_keys():
 
 
 def test_torch_select_tensors_writes_to_new_key():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "indices": torch.tensor([1], dtype=torch.int64),
@@ -464,7 +464,7 @@ def test_torch_select_tensors_writes_to_new_key():
 
 
 def test_torch_select_tensors_rejects_boolean_mask():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "keep": torch.tensor([True, False, True], dtype=torch.bool),
@@ -476,7 +476,7 @@ def test_torch_select_tensors_rejects_boolean_mask():
 
 
 def test_torch_select_tensors_can_write_multiple_outputs():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([4, 5, 6], dtype=torch.int64),
@@ -497,7 +497,7 @@ def test_torch_select_tensors_can_write_multiple_outputs():
 
 
 def test_torch_filter_tensors_applies_predicate():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
@@ -510,7 +510,7 @@ def test_torch_filter_tensors_applies_predicate():
 
 
 def test_torch_filter_tensors_applies_to_multiple_keys():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "boxes": torch.tensor([[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3]], dtype=torch.float32),
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
@@ -532,7 +532,7 @@ def test_torch_filter_tensors_applies_to_multiple_keys():
 
 
 def test_torch_filter_tensors_rejects_integer_index_output():
-    registry = TorchTensorRegistry(
+    registry = TensorRegistry(
         {
             "scores": torch.tensor([0.9, 0.5, 0.8], dtype=torch.float32),
             "classes": torch.tensor([0, 1, 0], dtype=torch.int64),
@@ -548,7 +548,7 @@ def test_torch_filter_tensors_rejects_integer_index_output():
 
 
 def test_torch_map_tensor_applies_fn():
-    registry = TorchTensorRegistry({"mask_probs": torch.tensor([[0.1, 0.9]], dtype=torch.float32)})
+    registry = TensorRegistry({"mask_probs": torch.tensor([[0.1, 0.9]], dtype=torch.float32)})
 
     result = MapTensor("mask_probs", fn=lambda tensor: tensor + 1.0, as_="mapped_mask_probs")(registry)
 

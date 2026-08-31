@@ -26,7 +26,7 @@ Its scope covers three Torch-native slices:
   [`ml_pipes.tensor`](../../tensor/docs/README.md)
 - a narrow set of vision postprocess operators that mirrors part of
   [`ml_pipes.vision`](../../vision/docs/README.md) while values remain in
-  `TorchTensorRegistry`
+  `TensorRegistry`
 
 Pick this package instead of, or alongside, that NumPy-side package chain when
 a pipeline needs to:
@@ -73,13 +73,13 @@ In practice, that means the Torch crossing point is flexible:
   but move to a different device
 
 To keep mixed Torch and NumPy pipelines composable, the Torch domain mirrors
-the surrounding NumPy-side package shapes: `TorchTensorPayload` and
-`TorchTensorRegistry` mirror the Tensor package value models, while
-`TorchRuntimeOutputs` parallels the ONNX runtime handoff. The main addition
+the surrounding NumPy-side package shapes: `TensorPayload` and
+`TensorRegistry` mirror the Tensor package value models, while
+`RuntimeOutputs` parallels the ONNX runtime handoff. The main addition
 across these Torch values is `device`, which keeps placement explicit while
 the value is in the Torch domain.
 
-When values stay in `TorchTensorRegistry`, the package also mirrors the core
+When values stay in `TensorRegistry`, the package also mirrors the core
 generic tensor helpers that are worth keeping on-device, including transpose,
 scale, filtering, and mapping stages. It also carries a narrow set of
 Torch-native vision postprocess operators such as box-format conversion, mask
@@ -98,7 +98,7 @@ One common mixed flow looks like this:
         ▼
 ┌─────────────────────────────────────────────┐
 │ Torch Domain                                │
-├─ TorchInfer -> Torch... -> Torch... -> ...  │
+├─ Infer -> generic Tensor operators -> ... │
 └───────┬─────────────────────────────────────┘
         |
         | ToNumpy / ToNumpyRegistry
@@ -125,20 +125,20 @@ Use this shape when the main inference stage is Torch-native, or otherwise
 already produces Torch-backed outputs, but the surrounding image preparation
 and later task logic already fit the NumPy-side packages. Upstream steps
 prepare the input in NumPy, `ToTorch()` crosses into the Torch domain,
-`TorchInfer(...)` runs the model, and the outputs return to NumPy once
+`Infer(...)` runs the model, and the outputs return to NumPy once
 downstream packages need them.
 
 ```python
 from ml_pipes.core import Pipeline
 from ml_pipes.vision import Decode, Normalize, Resize
-from ml_pipes.torch import ToNumpyRegistry, ToTorch, TorchExtract, TorchInfer
+from ml_pipes.torch import ToNumpyRegistry, ToTorch, Extract, Infer
 
 pipeline = Pipeline([
     ...,
     Normalize(),
     ToTorch(device="cpu"),
-    TorchInfer(model, input_layout="NCHW"),
-    TorchExtract("output_0", as_="scores"),
+    Infer(model, input_layout="NCHW"),
+    Extract("output_0", as_="scores"),
     ToNumpyRegistry(),
     ...
 ])
@@ -149,7 +149,7 @@ already clear and standardized in NumPy.
 
 For models that expect a named input such as `pixel_values=...`, use
 `input_name="..."`. If the model returns a mapping of named tensors, those
-mapping keys become the runtime output names that `TorchExtract(...)` can
+mapping keys become the runtime output names that `Extract(...)` can
 select.
 
 ### Torch-Side Postprocess
@@ -225,19 +225,19 @@ leaving the Torch domain:
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.torch import ToDevice, ToTorch, TorchInfer
+from ml_pipes.torch import ToDevice, ToTorch, Infer
 
 pipeline = Pipeline([
     ToTorch(device="cpu"),
     ToDevice("cuda:0"),
-    TorchInfer(model, input_layout="NCHW"),
+    Infer(model, input_layout="NCHW"),
 ])
 ```
 
 `ToDevice` is intentionally coarse-grained:
 
-- for `TorchTensorPayload`, it moves the payload tensor
-- for `TorchTensorRegistry`, it moves all tensors currently stored in the
+- for `TensorPayload`, it moves the payload tensor
+- for `TensorRegistry`, it moves all tensors currently stored in the
   registry
 
 That makes it useful for stage-level placement, not for fine-grained
@@ -281,27 +281,27 @@ Torch GPU work can be asynchronous. A step may queue device work and return
 before the device has finished. If a later operator forces synchronization,
 the time can appear there instead.
 
-Use `TorchSynchronizeTensors()` when you want to force synchronization at a
+Use `SynchronizeTensors()` when you want to force synchronization at a
 chosen point in the pipeline:
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.torch import ArgMax, TorchInfer, TorchSynchronizeTensors
+from ml_pipes.torch import ArgMax, Infer, SynchronizeTensors
 
 pipeline = Pipeline([
     ...,
-    TorchInfer(model),
-    TorchSynchronizeTensors(),
+    Infer(model),
+    SynchronizeTensors(),
     ArgMax("logits", as_="classes"),
 ])
 ```
 
-`TorchSynchronizeTensors()` is a pass-through operator. It synchronizes the
+`SynchronizeTensors()` is a pass-through operator. It synchronizes the
 Torch device work associated with the current Torch-backed value so the next
 timed step sees completed work instead of queued work.
 
 > [!WARNING]
-> Without `TorchSynchronizeTensors()`, per-operator GPU timings are only
+> Without `SynchronizeTensors()`, per-operator GPU timings are only
 > suggestive. End-to-end wall-clock time is still real, but step attribution
 > may drift to the next operator that forces synchronization.
 
