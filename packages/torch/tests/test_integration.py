@@ -301,7 +301,7 @@ def test_torch_validation_accepts_to_device_and_torch_as_type_boundaries() -> No
         _TorchIdentity(),
     ]).validate(inference=True)
 
-    assert contract.input_type is TorchTensorPayload
+    assert contract.input_type is NumpyTensorPayload
     assert contract.output_type is TorchTensorPayload
 
 

@@ -8,8 +8,6 @@ from ml_pipes.torch import (
     ArgMax,
     ApplyTensorMask,
     AsType,
-    BinarizeTensor,
-    BinarizeTensorByThreshold,
     CreateTensorMask,
     CreateTensorMaskByThreshold,
     FilterTensors,
@@ -401,14 +399,6 @@ def test_torch_create_tensor_mask_by_threshold_writes_boolean_mask():
         [[False, True], [True, False]],
         [[False, False], [True, True]],
     ]
-
-
-def test_torch_binarize_tensor_by_threshold_is_alias():
-    assert BinarizeTensorByThreshold is CreateTensorMaskByThreshold
-
-
-def test_torch_binarize_tensor_is_alias():
-    assert BinarizeTensor is CreateTensorMask
 
 
 def test_torch_select_tensors_and_apply_tensor_mask_work_on_registry():
