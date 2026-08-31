@@ -3,6 +3,8 @@
 This page catalogs the Torch package surface in `ml_pipes.torch`.
 For package overview, scope, design principles, and usage patterns, see
 [`README.md`](./README.md).
+For the Tensor and Vision operator coverage matrix, see
+[`COVERAGE.md`](./COVERAGE.md).
 
 Internally, the package is organized into boundary, runtime, tensor, and
 vision-helper modules while the public import surface remains
