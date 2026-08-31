@@ -7,9 +7,7 @@ inference, device-aware execution, or postprocess that is worth keeping on the
 Torch side. In practice, it often sits between NumPy-oriented preparation or
 postprocess stages so mixed pipelines can move in and out of the Torch domain
 explicitly. It also mirrors the generic tensor registry helpers that are often
-worth keeping on-device during Torch-side postprocess, together with
-Torch-native vision-adjacent registry helpers such as box-format conversion,
-mask reconstruction, filtering, resizing, and NMS.
+worth keeping on-device during Torch-side postprocess.
 
 Operators can be used as plain callables, but this package is best used inside
 an `ml-pipes` pipeline.

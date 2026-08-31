@@ -9,7 +9,7 @@ For the full package surface, aliases, and operator signatures, see [`INDEX.md`]
 | Dimension       | Classification                                                      |
 |-----------------|---------------------------------------------------------------------|
 | Role / Function | `Inference (Scaffold)`                                              |
-| Task Type       | Mostly `Vision`; reusable across other tensor-based inference flows |
+| Task Type       | General; reusable across tensor-based inference flows                |
 | Data Type       | `Tensors`                                                           |
 
 ## Scope And Use Cases
@@ -18,15 +18,12 @@ This package owns the explicit Torch execution domain inside `ml-pipes`. Many
 of its practical use cases overlap with the NumPy-side package chain around
 runtime and postprocess.
 
-Its scope covers three Torch-native slices:
+Its scope covers two Torch-native slices:
 
 - a model runtime boundary parallel to
   [`ml_pipes.onnx`](../../onnx/docs/README.md)
 - generic tensor postprocess that mirrors
   [`ml_pipes.tensor`](../../tensor/docs/README.md)
-- a narrow set of vision postprocess operators that mirrors part of
-  [`ml_pipes.vision`](../../vision/docs/README.md) while values remain in
-  `TensorRegistry`
 
 Pick this package instead of, or alongside, that NumPy-side package chain when
 a pipeline needs to:
@@ -58,7 +55,7 @@ For broader background on the Torch vs NumPy runtime tradeoff, see the
 Torch is a separate execution domain that a pipeline can enter and leave
 explicitly at whichever stage benefits from Torch. A pipeline does not need to
 move wholesale into Torch: it can cross in for runtime, stay in Torch for
-several generic tensor or vision postprocess stages, then cross back out once
+several generic tensor postprocess stages, then cross back out once
 later steps fit the NumPy-side packages better.
 
 In practice, that means the Torch crossing point is flexible:
@@ -81,10 +78,8 @@ the value is in the Torch domain.
 
 When values stay in `TensorRegistry`, the package also mirrors the core
 generic tensor helpers that are worth keeping on-device, including transpose,
-scale, filtering, and mapping stages. It also carries a narrow set of
-Torch-native vision postprocess operators such as box-format conversion, mask
-reconstruction, filtering, resizing, and NMS. Vision still owns image
-payloads, projection, rendering, and logging of registry-backed predictions.
+scale, filtering, and mapping stages. Vision-specific Torch postprocess remains
+example-local until it has a dedicated package owner.
 
 One common mixed flow looks like this:
 
@@ -151,43 +146,6 @@ For models that expect a named input such as `pixel_values=...`, use
 `input_name="..."`. If the model returns a mapping of named tensors, those
 mapping keys become the runtime output names that `Extract(...)` can
 select.
-
-### Torch-Side Postprocess
-
-Use this shape when the postprocess itself is heavy enough to justify
-switching to Torch, or when large intermediate tensors should stay on-device
-during the postprocess.
-
-```python
-from ml_pipes.core import Pipeline
-from ml_pipes.torch import (
-    ToNumpyRegistry,
-    ToTorchRegistry,
-    TorchMasksToBoxes,
-    TorchResizeMasks,
-    Sigmoid,
-    Squeeze,
-    Softmax,
-)
-
-pipeline = Pipeline([
-    ...,
-    ToTorchRegistry(device="cuda:0"),
-    Squeeze("class_queries_logits", axis=0),
-    Squeeze("masks_queries_logits", axis=0),
-    TorchResizeMasks(masks="masks_queries_logits"),
-    Softmax("class_queries_logits", as_="class_probs"),
-    Sigmoid("masks_queries_logits", as_="mask_probs"),
-    ...,
-    TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
-    ToNumpyRegistry(),
-])
-```
-
-The canonical example is
-[`examples/torch/run_mask2former_torch_postprocess.py`](../../../examples/torch/run_mask2former_torch_postprocess.py),
-which keeps mask resizing, query scoring, filtering, winner assignment, and
-mask-to-box conversion in Torch before converting back to a NumPy registry.
 
 ### Custom Torch Stage In A Mixed Pipeline
 

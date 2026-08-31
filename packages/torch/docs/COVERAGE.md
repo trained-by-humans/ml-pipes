@@ -5,9 +5,8 @@ currently remain in the Torch domain through an equivalent
 `ml_pipes.torch` operator.
 
 `ml_pipes.tensor` has a complete generic-operator mirror. `ml_pipes.vision`
-has a deliberately narrow on-device postprocess mirror; image preparation,
-projection, tiling, rendering, logging, and density remain Vision-owned
-NumPy-side stages.
+has no equivalent in the Torch package; Torch-resident Vision helpers remain
+example-local until they have a dedicated package owner.
 
 An equivalent name here identifies the current Torch-side operator. It does
 not by itself guarantee behavioral conformance between NumPy and Torch
@@ -41,21 +40,21 @@ implementations; the conformance requirements are tracked by [issue
 | `ml_pipes.vision` | `Resize` | — |
 | `ml_pipes.vision` | `ConvertColorSpace` | — |
 | `ml_pipes.vision` | `Normalize` | — |
-| `ml_pipes.vision` | `ConvertBoxFormat` | `TorchConvertBoxFormat` |
-| `ml_pipes.vision` | `NMS` | `TorchNMS` |
+| `ml_pipes.vision` | `ConvertBoxFormat` | — |
+| `ml_pipes.vision` | `NMS` | — |
 | `ml_pipes.vision` | `NMM` | — |
-| `ml_pipes.vision` | `FilterTensorsByScore` | `TorchFilterTensorsByScore` |
-| `ml_pipes.vision` | `FilterTensorsByClasses` | `TorchFilterTensorsByClasses` |
+| `ml_pipes.vision` | `FilterTensorsByScore` | — |
+| `ml_pipes.vision` | `FilterTensorsByClasses` | — |
 | `ml_pipes.vision` | `FilterTensorsByBoxArea` | — |
-| `ml_pipes.vision` | `FilterTensorsByMasksArea` | `TorchFilterTensorsByMasksArea` |
+| `ml_pipes.vision` | `FilterTensorsByMasksArea` | — |
 | `ml_pipes.vision` | `ProjectBoxes` | — |
-| `ml_pipes.vision` | `ReconstructMasks` | `TorchReconstructMasks` |
+| `ml_pipes.vision` | `ReconstructMasks` | — |
 | `ml_pipes.vision` | `ProjectMasks` | — |
 | `ml_pipes.vision` | `ProjectRoIMasks` | — |
-| `ml_pipes.vision` | `ResizeMasks` | `TorchResizeMasks` |
-| `ml_pipes.vision` | `MasksToBoxes` | `TorchMasksToBoxes` |
-| `ml_pipes.vision` | `WeightMasksByScores` | `TorchWeightMasksByScores` |
-| `ml_pipes.vision` | `MeanMaskScores` | `TorchMeanMaskScores` |
+| `ml_pipes.vision` | `ResizeMasks` | — |
+| `ml_pipes.vision` | `MasksToBoxes` | — |
+| `ml_pipes.vision` | `WeightMasksByScores` | — |
+| `ml_pipes.vision` | `MeanMaskScores` | — |
 | `ml_pipes.vision` | `Tile` | — |
 | `ml_pipes.vision` | `Stitch` | — |
 | `ml_pipes.vision` | `BlendImages` | — |

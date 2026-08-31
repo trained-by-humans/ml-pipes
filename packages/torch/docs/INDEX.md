@@ -6,13 +6,11 @@ For package overview, scope, design principles, and usage patterns, see
 For the Tensor and Vision operator coverage matrix, see
 [`COVERAGE.md`](./COVERAGE.md).
 
-Internally, the package is organized into boundary, runtime, tensor, and
-vision-helper modules while the public import surface remains
-`ml_pipes.torch`.
+Internally, the package is organized into boundary, runtime, and tensor
+modules while the public import surface remains `ml_pipes.torch`.
 The package mirrors `ml_pipes.tensor` for shared tensor postprocess,
-`ml_pipes.onnx` for runtime staging shape, and `ml_pipes.vision` for
-Torch-native vision postprocess operators. Use those package indexes for the NumPy-side
-variants and for typed vision outputs.
+and `ml_pipes.onnx` for runtime staging shape. Use those package indexes for
+the NumPy-side variants and typed vision outputs.
 
 For framework-wide operator concepts, see
 [`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
@@ -95,22 +93,3 @@ For the cross-package package catalogs, see
 | Operator | Input -> Output | Notes |
 |---|---|---|
 | `Collate()` | `list[TensorPayload]` -> `TensorPayload` | Stacks or concatenates Torch payloads into one batched payload. |
-
-## Vision Postprocess Operators
-
-These mirror NumPy-side postprocess operators in `ml_pipes.vision` so tensor
-values can remain on-device. For image payloads, source-image projection, and
-NumPy-side rendering, see the vision package index.
-
-| Operator | Notes |
-|---|---|
-| `TorchConvertBoxFormat(src="boxes", from_=..., to="xyxy", as_=None)` | Converts between `xyxy`, `xywh`, and `cxcywh` box formats. |
-| `TorchNMS(...)` | Confidence filtering plus per-class non-maximum suppression on registry tensors. |
-| `TorchFilterTensorsByScore(...)` | Filters one or more tensors by a score threshold. |
-| `TorchFilterTensorsByClasses(...)` | Filters one or more tensors by allowed class ids. |
-| `TorchFilterTensorsByMasksArea(...)` | Filters one or more tensors by mask area. |
-| `TorchWeightMasksByScores(...)` | Weights masks by per-instance scores. |
-| `TorchResizeMasks(...)` | Resizes instance masks to an image shape. |
-| `TorchMeanMaskScores(...)` | Computes one score per instance from dense mask scores over foreground masks. |
-| `TorchMasksToBoxes(...)` | Derives boxes from binary masks. |
-| `TorchReconstructMasks(coefficients, prototypes, as_)` | Reconstructs instance masks from coefficients and prototypes. |

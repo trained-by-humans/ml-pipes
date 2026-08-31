@@ -6,8 +6,8 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from ml_pipes.core import Pipeline
-from ml_pipes.standard import Batch, Gather, Pick, Recall, Scatter, Store, UnBatch
-from ml_pipes.tensor import TensorPayload
+from ml_pipes.standard import Batch, Gather, Scatter, UnBatch
+from ml_pipes.tensor import TensorPayload as NumpyTensorPayload
 from ml_pipes.torch import (
     ToDevice,
     ToNumpy,
@@ -17,38 +17,28 @@ from ml_pipes.torch import (
     ArgMax,
     ApplyTensorMask,
     AsType,
-    BinarizeTensorByThreshold,
     Collate,
     CreateTensorMask,
     CreateTensorMaskByThreshold,
     Distribute,
     Extract,
-    TorchFilterTensorsByClasses,
-    TorchFilterTensorsByMasksArea,
-    TorchFilterTensorsByScore,
     GatherScores,
     Infer,
-    TorchMasksToBoxes,
-    TorchMeanMaskScores,
     MultiplyTensors,
-    TorchNMS,
-    TorchResizeMasks,
     SelectTensors,
     Sigmoid,
     Slice,
-    SortTensorsBy,
     Softmax,
     SynchronizeTensors,
     TopK,
     TopKIndices2D,
-    TorchWeightMasksByScores,
 )
-from ml_pipes.torch.types import RuntimeOutputs, TensorPayload, TensorRegistry
+from ml_pipes.torch.types import RuntimeOutputs, TensorPayload as TorchTensorPayload, TensorRegistry
 from ml_pipes.validation import PipelineValidationError
 
 
 class _TorchIdentity:
-    def __call__(self, value: TensorPayload) -> TensorPayload:
+    def __call__(self, value: TorchTensorPayload) -> TorchTensorPayload:
         return value
 
 
@@ -59,7 +49,7 @@ class _TorchIncrementRegistry:
 
 
 class _TensorPayloadPassthrough:
-    def __call__(self, value: TensorPayload) -> TensorPayload:
+    def __call__(self, value: NumpyTensorPayload) -> NumpyTensorPayload:
         return value
 
 
@@ -86,8 +76,8 @@ class _EmptyBatchedDetectionModule(torch.nn.Module):
         }
 
 
-def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TensorPayload:
-    return TensorPayload(
+def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TorchTensorPayload:
+    return TorchTensorPayload(
         array=array,
         layout=layout,
         dtype=str(array.dtype).replace("torch.", ""),
@@ -101,7 +91,7 @@ def test_numpy_torch_numpy_pipeline_composes() -> None:
         AsType("float16"),
         ToNumpy(),
     ])
-    payload = TensorPayload(
+    payload = NumpyTensorPayload(
         array=np.ones((1, 3, 4, 4), dtype=np.float32),
         layout="NCHW",
         dtype="float32",
@@ -109,7 +99,7 @@ def test_numpy_torch_numpy_pipeline_composes() -> None:
 
     result = pipeline(payload)
 
-    assert isinstance(result, TensorPayload)
+    assert isinstance(result, NumpyTensorPayload)
     assert result.layout == "NCHW"
     assert result.dtype == "float16"
     assert result.array.dtype == np.float16
@@ -139,7 +129,7 @@ def test_torch_infer_extract_and_registry_conversion_round_trip() -> None:
         Extract("scores", as_="scores"),
         ToNumpyRegistry(),
     ])
-    payload = TensorPayload(
+    payload = NumpyTensorPayload(
         array=np.ones((1, 3, 2, 2), dtype=np.float32),
         layout="NCHW",
         dtype="float32",
@@ -159,7 +149,7 @@ def test_torch_infer_and_distribute_preserve_empty_detection_axes_per_sample() -
         ),
         Distribute(),
     ])
-    payload = TensorPayload(
+    payload = NumpyTensorPayload(
         array=np.zeros((2, 3, 4, 4), dtype=np.float32),
         layout="NCHW",
         dtype="float32",
@@ -176,10 +166,8 @@ def test_torch_infer_and_distribute_preserve_empty_detection_axes_per_sample() -
         assert tuple(sample.tensors[3].array.shape) == (1, 0)
 
 
-def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
+def test_empty_torch_generic_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
     pipeline = Pipeline([
-        Store("image_shape", source=1),
-        Pick(0),
         ToTorch(),
         ToDevice("cpu"),
         SynchronizeTensors(),
@@ -207,39 +195,16 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
         ApplyTensorMask("top_scores", "class_ids", "query_indices", mask="score_keep"),
         SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
         MultiplyTensors("top_scores", "argmax_scores", as_="weighted_scores"),
-        TorchFilterTensorsByScore("selected_masks", "class_ids", "query_indices", score="weighted_scores", min_score=0.0),
-        TorchFilterTensorsByClasses(
-            "selected_masks",
-            "weighted_scores",
-            "query_indices",
-            classes="class_ids",
-            keep_classes={0, 1, 2},
-        ),
-        TorchWeightMasksByScores(masks="selected_masks", scores="weighted_scores", as_="weighted_masks"),
-        Recall("image_shape"),
-        TorchResizeMasks(masks="weighted_masks", as_="resized_masks"),
-        BinarizeTensorByThreshold("resized_masks", threshold=0.5, as_="binary_masks"),
-        TorchMeanMaskScores(
-            mask_scores="resized_masks",
-            masks="binary_masks",
-            as_="mean_mask_scores",
-        ),
-        TorchFilterTensorsByMasksArea("weighted_scores", "class_ids", masks="binary_masks", min_area=1),
-        TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
-        TorchNMS(boxes="boxes", scores="weighted_scores", classes="class_ids", kept_as="kept"),
-        SortTensorsBy("binary_masks", "class_ids", by="weighted_scores"),
         ToNumpyRegistry(),
     ])
-    payload = TensorPayload(
+    payload = NumpyTensorPayload(
         array=np.zeros((1, 3, 4, 4), dtype=np.float32),
         layout="NCHW",
         dtype="float32",
     )
 
-    result = pipeline((payload, (4, 5)))
+    result = pipeline(payload)
 
-    assert result["boxes"].shape == (0, 4)
-    assert result["boxes"].dtype == np.float32
     assert result["class_logits"].shape == (0, 3)
     assert result["class_probs"].shape == (0, 3)
     assert result["boxes_xyxy"].shape == (0, 4)
@@ -255,12 +220,6 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
     assert result["score_keep"].dtype == np.bool_
     assert result["selected_masks"].shape == (0, 2, 2)
     assert result["weighted_scores"].shape == (0,)
-    assert result["weighted_masks"].shape == (0, 2, 2)
-    assert result["resized_masks"].shape == (0, 4, 5)
-    assert result["mean_mask_scores"].shape == (0,)
-    assert result["binary_masks"].shape == (0, 4, 5)
-    assert result["binary_masks"].dtype == np.bool_
-    assert result["kept"].shape == (0,)
 
 
 def test_torch_batch_region_validates_and_runs() -> None:
@@ -276,7 +235,7 @@ def test_torch_batch_region_validates_and_runs() -> None:
     sample = _torch_payload(torch.ones((1, 3, 2, 2)))
     result = pipeline(sample)
 
-    assert contract.input_type is TensorPayload
+    assert contract.input_type is TorchTensorPayload
     assert isinstance(result, RuntimeOutputs)
     assert result.tensors[0].array.shape == (1, 3, 2, 2)
 
@@ -292,9 +251,9 @@ def test_torch_scatter_region_validates_and_runs() -> None:
 
     result = pipeline(payloads)
 
-    assert contract.input_type == list[TensorPayload]
+    assert contract.input_type == list[TorchTensorPayload]
     assert len(result) == 3
-    assert all(isinstance(item, TensorPayload) for item in result)
+    assert all(isinstance(item, TorchTensorPayload) for item in result)
 
 
 def test_torch_registry_conversion_handoff_back_to_numpy() -> None:
@@ -318,7 +277,7 @@ def test_torch_inspection_captures_device_shapes_and_operator_config() -> None:
         Infer(torch.nn.Identity().eval(), serialize=True),
         Extract("output_0", as_="scores"),
     ])
-    payload = TensorPayload(
+    payload = NumpyTensorPayload(
         array=np.ones((1, 3, 2, 2), dtype=np.float32),
         layout="NCHW",
         dtype="float32",
@@ -342,12 +301,12 @@ def test_torch_validation_accepts_to_device_and_torch_as_type_boundaries() -> No
         _TorchIdentity(),
     ]).validate(inference=True)
 
-    assert contract.input_type is TensorPayload
-    assert contract.output_type is TensorPayload
+    assert contract.input_type is TorchTensorPayload
+    assert contract.output_type is TorchTensorPayload
 
 
 def test_torch_validation_rejects_registry_op_after_to_device_payload() -> None:
     with pytest.raises(PipelineValidationError):
         Pipeline([ToDevice("cpu"), ArgMax("scores")]).validate(
-            pipeline_input_type=TensorPayload
+            pipeline_input_type=TorchTensorPayload
         )

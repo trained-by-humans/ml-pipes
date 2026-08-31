@@ -22,7 +22,6 @@ MODULE_PATHS = [
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "boundary_ops.py",
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "runtime_ops.py",
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "tensor_ops.py",
-    ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "vision_ops.py",
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "types.py",
 ]
 

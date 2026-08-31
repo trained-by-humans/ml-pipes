@@ -4,7 +4,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes.torch import (
+from examples.torch.torch_vision_helpers import (
     TorchConvertBoxFormat,
     TorchFilterTensorsByClasses,
     TorchFilterTensorsByMasksArea,
@@ -16,7 +16,7 @@ from ml_pipes.torch import (
     TorchResizeMasks,
     TorchWeightMasksByScores,
 )
-from ml_pipes.torch.types import TensorRegistry
+from ml_pipes.torch import TensorRegistry
 
 
 def test_torch_convert_box_format_cxcywh_to_xyxy():

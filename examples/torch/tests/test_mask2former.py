@@ -32,10 +32,10 @@ from examples.torch.run_mask2former_numpy_postprocess import PanopticSegmentsFro
 from examples.torch.run_mask2former_torch_postprocess import TorchPanopticSegmentsFromQueries  # noqa: E402
 from ml_pipes.core import Pipeline  # noqa: E402
 from ml_pipes.standard import Recall  # noqa: E402
-from ml_pipes.tensor import ArgMax  # noqa: E402
-from ml_pipes.tensor import TensorPayload, TensorRegistry  # noqa: E402
-from ml_pipes.torch import ToTorch, ArgMax, Extract, Infer, Squeeze  # noqa: E402
-from ml_pipes.torch.types import TensorRegistry  # noqa: E402
+from ml_pipes.tensor import ArgMax as NumpyArgMax  # noqa: E402
+from ml_pipes.tensor import TensorPayload as NumpyTensorPayload, TensorRegistry as NumpyTensorRegistry  # noqa: E402
+from ml_pipes.torch import ToTorch, ArgMax as TorchArgMax, Extract, Infer, Squeeze  # noqa: E402
+from ml_pipes.torch.types import TensorRegistry as TorchTensorRegistry  # noqa: E402
 from ml_pipes.vision import ImagePayload  # noqa: E402
 
 
@@ -89,7 +89,7 @@ def test_mask2former_infer_pipeline_preserves_stored_values_and_exposes_model_ou
     assert processor.last_image is not None
     assert processor.last_return_tensors == "np"
     assert processor.last_image.tolist() == [[[30, 20, 10], [60, 50, 40]]]
-    assert isinstance(registry, TensorRegistry)
+    assert isinstance(registry, TorchTensorRegistry)
     assert tuple(registry["class_queries_logits"].shape) == (2, 3)
     assert tuple(registry["masks_queries_logits"].shape) == (2, 3, 4)
     assert source_image.color_space == "BGR"
@@ -106,7 +106,7 @@ def test_prepare_hf_image_inputs_consumes_hugging_face_ready_array() -> None:
 
     assert processor.last_image is image.array
     assert processor.last_return_tensors == "np"
-    assert isinstance(result, TensorPayload)
+    assert isinstance(result, NumpyTensorPayload)
     assert result.layout == "NCHW"
     assert result.dtype == "float32"
     assert tuple(result.array.shape) == (1, 3, 3, 4)
@@ -147,7 +147,7 @@ def test_prepare_hf_image_inputs_supports_custom_contract() -> None:
         require_contiguous=False,
     )(image)
 
-    assert isinstance(result, TensorPayload)
+    assert isinstance(result, NumpyTensorPayload)
     assert result.layout == "NCHW"
     assert result.dtype == "float32"
     assert tuple(result.array.shape) == (1, 3, 5, 7)
@@ -190,7 +190,7 @@ def test_mask2former_boundary_pipeline_validates() -> None:
 
 
 def test_numpy_panoptic_segments_filter_by_surviving_overlap() -> None:
-    registry = TensorRegistry(
+    registry = NumpyTensorRegistry(
         {
             "query_scores": np.array([0.9, 0.8], dtype=np.float32),
             "query_classes": np.array([0, 1], dtype=np.int64),
@@ -247,7 +247,7 @@ def test_numpy_panoptic_segments_filter_by_surviving_overlap() -> None:
 
 
 def test_torch_panoptic_segments_filter_by_surviving_overlap() -> None:
-    registry = TensorRegistry(
+    registry = TorchTensorRegistry(
         {
             "query_scores": torch.tensor([0.9, 0.8], dtype=torch.float32),
             "query_classes": torch.tensor([0, 1], dtype=torch.int64),
@@ -298,7 +298,7 @@ def test_torch_panoptic_segments_filter_by_surviving_overlap() -> None:
 
 
 def test_numpy_panoptic_sequence_handles_all_queries_filtered() -> None:
-    registry = TensorRegistry(
+    registry = NumpyTensorRegistry(
         {
             "query_scores": np.zeros((0,), dtype=np.float32),
             "query_classes": np.zeros((0,), dtype=np.int64),
@@ -307,7 +307,7 @@ def test_numpy_panoptic_sequence_handles_all_queries_filtered() -> None:
         }
     )
 
-    ArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
+    NumpyArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
     result = PanopticSegmentsFromQueries(
         thing_class_ids=frozenset({0, 1}),
         scores="query_scores",
@@ -323,7 +323,7 @@ def test_numpy_panoptic_sequence_handles_all_queries_filtered() -> None:
 
 
 def test_torch_panoptic_sequence_handles_all_queries_filtered() -> None:
-    registry = TensorRegistry(
+    registry = TorchTensorRegistry(
         {
             "query_scores": torch.zeros((0,), dtype=torch.float32),
             "query_classes": torch.zeros((0,), dtype=torch.int64),
@@ -332,7 +332,7 @@ def test_torch_panoptic_sequence_handles_all_queries_filtered() -> None:
         }
     )
 
-    ArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
+    TorchArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
     result = TorchPanopticSegmentsFromQueries(
         thing_class_ids=frozenset({0, 1}),
         scores="query_scores",

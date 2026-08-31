@@ -47,7 +47,6 @@ from ml_pipes.vision import (
     WeightMasksByScores,
 )
 from ml_pipes.torch import ToNumpyRegistry
-from ml_pipes.torch.types import TensorRegistry
 from ml_pipes.tensor import TensorRegistry
 
 from .mask2former_infer import (

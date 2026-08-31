@@ -5,7 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes.tensor import TensorPayload
+from ml_pipes.tensor import TensorPayload as NumpyTensorPayload
 from ml_pipes.torch import ToDevice, ToNumpy, ToNumpyRegistry, ToTorch, ToTorchRegistry, SynchronizeTensors
 from ml_pipes.torch.types import RuntimeOutputs, TensorPayload, TensorRegistry
 
@@ -43,7 +43,7 @@ COPY_FLAGS = [
 
 @pytest.mark.parametrize("copy", COPY_FLAGS)
 def test_to_torch_cpu_conversion_respects_copy_flag(copy: bool):
-    payload = TensorPayload(
+    payload = NumpyTensorPayload(
         array=np.array([1.0, 2.0], dtype=np.float32),
         layout="N",
         dtype="float32",
@@ -90,7 +90,7 @@ def test_to_numpy_registry_cpu_conversion_respects_copy_flag(copy: bool):
 @pytest.mark.parametrize("device", NON_CPU_DEVICE_PARAMS)
 @pytest.mark.parametrize("copy", COPY_FLAGS)
 def test_to_torch_cross_device_conversion_detaches_from_numpy_source(device: str, copy: bool):
-    payload = TensorPayload(
+    payload = NumpyTensorPayload(
         array=np.array([1.0, 2.0], dtype=np.float32),
         layout="N",
         dtype="float32",

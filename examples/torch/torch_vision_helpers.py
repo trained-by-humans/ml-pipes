@@ -6,8 +6,7 @@ from typing import Literal, get_args
 import torch
 
 from ml_pipes.operator import Operator
-from .tensor_ops import FilterTensors
-from .types import TensorRegistry
+from ml_pipes.torch import FilterTensors, TensorRegistry
 
 __all__ = [
     "TorchConvertBoxFormat",

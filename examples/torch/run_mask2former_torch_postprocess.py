@@ -30,20 +30,14 @@ from ml_pipes.torch import (
     ToNumpyRegistry,
     ArgMax,
     BinarizeTensorByThreshold,
-    TorchFilterTensorsByMasksArea,
-    TorchFilterTensorsByScore,
     GatherScores,
-    TorchMasksToBoxes,
-    TorchMeanMaskScores,
     MultiplyTensors,
-    TorchResizeMasks,
     SelectTensors,
     Sigmoid,
     Slice,
     SortTensorsBy,
     Softmax,
     TopKIndices2D,
-    TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TensorRegistry
 from .mask2former_infer import (
@@ -51,6 +45,14 @@ from .mask2former_infer import (
     add_mask2former_args,
     build_mask2former_infer_pipeline,
     resolve_output_path,
+)
+from .torch_vision_helpers import (
+    TorchFilterTensorsByMasksArea,
+    TorchFilterTensorsByScore,
+    TorchMasksToBoxes,
+    TorchMeanMaskScores,
+    TorchResizeMasks,
+    TorchWeightMasksByScores,
 )
 
 _TOP_K = 100
