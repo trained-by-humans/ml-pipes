@@ -16,26 +16,26 @@ implementations; the conformance requirements are tracked by [issue
 
 | Target package | Operator | Equivalent Torch operator |
 |---|---|---|
-| `ml_pipes.tensor` | `AsType` | `TorchAsType` |
-| `ml_pipes.tensor` | `Squeeze` | `TorchSqueeze` |
-| `ml_pipes.tensor` | `Transpose` | `TorchTranspose` |
-| `ml_pipes.tensor` | `Slice` | `TorchSlice` |
-| `ml_pipes.tensor` | `Scale` | `TorchScale` |
-| `ml_pipes.tensor` | `GatherRows` | `TorchGatherRows` |
-| `ml_pipes.tensor` | `TopK` | `TorchTopK` |
-| `ml_pipes.tensor` | `TopKIndices2D` | `TorchTopKIndices2D` |
-| `ml_pipes.tensor` | `ArgMax` | `TorchArgMax` |
-| `ml_pipes.tensor` | `CreateTensorMask` | `TorchCreateTensorMask` |
-| `ml_pipes.tensor` | `CreateTensorMaskByThreshold` | `TorchCreateTensorMaskByThreshold` |
-| `ml_pipes.tensor` | `ApplyTensorMask` | `TorchApplyTensorMask` |
-| `ml_pipes.tensor` | `SelectTensors` | `TorchSelectTensors` |
-| `ml_pipes.tensor` | `FilterTensors` | `TorchFilterTensors` |
-| `ml_pipes.tensor` | `SortTensorsBy` | `TorchSortTensorsBy` |
-| `ml_pipes.tensor` | `Softmax` | `TorchSoftmax` |
-| `ml_pipes.tensor` | `Sigmoid` | `TorchSigmoid` |
-| `ml_pipes.tensor` | `MultiplyTensors` | `TorchMultiplyTensors` |
-| `ml_pipes.tensor` | `MapTensor` | `TorchMapTensor` |
-| `ml_pipes.tensor` | `Collate` | `TorchCollate` |
+| `ml_pipes.tensor` | `AsType` | `AsType` |
+| `ml_pipes.tensor` | `Squeeze` | `Squeeze` |
+| `ml_pipes.tensor` | `Transpose` | `Transpose` |
+| `ml_pipes.tensor` | `Slice` | `Slice` |
+| `ml_pipes.tensor` | `Scale` | `Scale` |
+| `ml_pipes.tensor` | `GatherRows` | `GatherRows` |
+| `ml_pipes.tensor` | `TopK` | `TopK` |
+| `ml_pipes.tensor` | `TopKIndices2D` | `TopKIndices2D` |
+| `ml_pipes.tensor` | `ArgMax` | `ArgMax` |
+| `ml_pipes.tensor` | `CreateTensorMask` | `CreateTensorMask` |
+| `ml_pipes.tensor` | `CreateTensorMaskByThreshold` | `CreateTensorMaskByThreshold` |
+| `ml_pipes.tensor` | `ApplyTensorMask` | `ApplyTensorMask` |
+| `ml_pipes.tensor` | `SelectTensors` | `SelectTensors` |
+| `ml_pipes.tensor` | `FilterTensors` | `FilterTensors` |
+| `ml_pipes.tensor` | `SortTensorsBy` | `SortTensorsBy` |
+| `ml_pipes.tensor` | `Softmax` | `Softmax` |
+| `ml_pipes.tensor` | `Sigmoid` | `Sigmoid` |
+| `ml_pipes.tensor` | `MultiplyTensors` | `MultiplyTensors` |
+| `ml_pipes.tensor` | `MapTensor` | `MapTensor` |
+| `ml_pipes.tensor` | `Collate` | `Collate` |
 | `ml_pipes.vision` | `LoadFile` | — |
 | `ml_pipes.vision` | `Decode` | — |
 | `ml_pipes.vision` | `Resize` | — |
@@ -75,9 +75,9 @@ The following Tensor aliases also have direct Torch aliases:
 
 | Target package | Operator | Equivalent Torch operator |
 |---|---|---|
-| `ml_pipes.tensor` | `GatherScores` | `TorchGatherScores` |
-| `ml_pipes.tensor` | `BinarizeTensor` | `TorchBinarizeTensor` |
-| `ml_pipes.tensor` | `BinarizeTensorByThreshold` | `TorchBinarizeTensorByThreshold` |
+| `ml_pipes.tensor` | `GatherScores` | `GatherScores` |
+| `ml_pipes.tensor` | `BinarizeTensor` | `BinarizeTensor` |
+| `ml_pipes.tensor` | `BinarizeTensorByThreshold` | `BinarizeTensorByThreshold` |
 
 ## Not Covered By This Matrix
 

@@ -165,19 +165,19 @@ from ml_pipes.torch import (
     ToTorchRegistry,
     TorchMasksToBoxes,
     TorchResizeMasks,
-    TorchSigmoid,
-    TorchSqueeze,
-    TorchSoftmax,
+    Sigmoid,
+    Squeeze,
+    Softmax,
 )
 
 pipeline = Pipeline([
     ...,
     ToTorchRegistry(device="cuda:0"),
-    TorchSqueeze("class_queries_logits", axis=0),
-    TorchSqueeze("masks_queries_logits", axis=0),
+    Squeeze("class_queries_logits", axis=0),
+    Squeeze("masks_queries_logits", axis=0),
     TorchResizeMasks(masks="masks_queries_logits"),
-    TorchSoftmax("class_queries_logits", as_="class_probs"),
-    TorchSigmoid("masks_queries_logits", as_="mask_probs"),
+    Softmax("class_queries_logits", as_="class_probs"),
+    Sigmoid("masks_queries_logits", as_="mask_probs"),
     ...,
     TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
     ToNumpyRegistry(),
@@ -286,13 +286,13 @@ chosen point in the pipeline:
 
 ```python
 from ml_pipes.core import Pipeline
-from ml_pipes.torch import TorchArgMax, TorchInfer, TorchSynchronizeTensors
+from ml_pipes.torch import ArgMax, TorchInfer, TorchSynchronizeTensors
 
 pipeline = Pipeline([
     ...,
     TorchInfer(model),
     TorchSynchronizeTensors(),
-    TorchArgMax("logits", as_="classes"),
+    ArgMax("logits", as_="classes"),
 ])
 ```
 

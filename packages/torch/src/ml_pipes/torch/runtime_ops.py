@@ -19,7 +19,7 @@ from .types import (
 __all__ = [
     "TorchInfer",
     "TorchExtract",
-    "TorchCollate",
+    "Collate",
     "TorchDistribute",
 ]
 
@@ -141,10 +141,10 @@ class TorchExtract:
 
 
 @Operator
-class TorchCollate:
+class Collate:
     def __call__(self, tensors: list[TorchTensorPayload]) -> TorchTensorPayload:
         if not tensors:
-            raise ValueError("TorchCollate received an empty list")
+            raise ValueError("Collate received an empty list")
         arrays = [tensor.array for tensor in tensors]
         if arrays[0].ndim == 4 and arrays[0].shape[0] == 1:
             batched = torch.cat(arrays, dim=0)

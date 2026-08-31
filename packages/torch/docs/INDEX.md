@@ -31,9 +31,9 @@ For the cross-package package catalogs, see
 
 | Public alias | Primary name | Note |
 |---|---|---|
-| `TorchGatherScores(...)` | `TorchGatherRows(...)` | `scores` comes from the common use of gathering one selected score from each row. |
-| `TorchBinarizeTensor(...)` | `TorchCreateTensorMask(...)` | `binarize` comes from older wording for turning a tensor into a boolean mask. |
-| `TorchBinarizeTensorByThreshold(...)` | `TorchCreateTensorMaskByThreshold(...)` | `binarize` comes from threshold-based boolean mask creation. |
+| `GatherScores(...)` | `GatherRows(...)` | `scores` comes from the common use of gathering one selected score from each row. |
+| `BinarizeTensor(...)` | `CreateTensorMask(...)` | `binarize` comes from older wording for turning a tensor into a boolean mask. |
+| `BinarizeTensorByThreshold(...)` | `CreateTensorMaskByThreshold(...)` | `binarize` comes from threshold-based boolean mask creation. |
 
 ## Domain Boundaries And Device Movement
 
@@ -60,41 +60,41 @@ For the cross-package package catalogs, see
 
 | Operator | Notes |
 |---|---|
-| `TorchAsType(dtype, src=None, as_=None)` | Casts a raw Torch tensor value or a named registry tensor to a new dtype. |
-| `TorchSqueeze(src, axis=None, as_=None)` | Removes unit dimensions from a named tensor. |
-| `TorchTranspose(src, axes=None, as_=None)` | Permutes tensor axes. |
-| `TorchSlice(src, at, as_=None)` | Slices a named tensor and stores the result back into the registry. |
-| `TorchScale(src, by, as_=None)` | Multiplies a tensor by a scalar or per-column factors. |
+| `AsType(dtype, src=None, as_=None)` | Casts a raw Torch tensor value or a named registry tensor to a new dtype. |
+| `Squeeze(src, axis=None, as_=None)` | Removes unit dimensions from a named tensor. |
+| `Transpose(src, axes=None, as_=None)` | Permutes tensor axes. |
+| `Slice(src, at, as_=None)` | Slices a named tensor and stores the result back into the registry. |
+| `Scale(src, by, as_=None)` | Multiplies a tensor by a scalar or per-column factors. |
 
 ### Ranking, Selection, And Masking
 
 | Operator | Notes |
 |---|---|
-| `TorchGatherRows(src, indices, as_=None)` | Row-wise gather driven by another registry tensor of indices. |
-| `TorchTopK(src, k, values_as, indices_as)` | Returns the top-k values and indices from a 1D tensor. |
-| `TorchTopKIndices2D(src, k, ...)` | Returns top-k values plus row and column indices from a 2D tensor. |
-| `TorchArgMax(src, axis=-1, as_=None)` | Computes argmax along an axis. |
-| `TorchCreateTensorMask(src, predicate, as_)` | Builds a boolean mask from a tensor. |
-| `TorchCreateTensorMaskByThreshold(src, threshold, as_=None)` | Convenience threshold-based mask creation. |
-| `TorchApplyTensorMask(*srcs, mask, as_=...)` | Applies one boolean mask across one or more tensors. |
-| `TorchSelectTensors(*srcs, indices, as_=...)` | Applies integer-index selection across one or more tensors. |
-| `TorchFilterTensors(*srcs, by, predicate, as_=...)` | Filters one or more tensors by a predicate on another tensor. |
-| `TorchSortTensorsBy(*srcs, by, descending=True, as_=...)` | Reorders one or more tensors by a ranking tensor. |
+| `GatherRows(src, indices, as_=None)` | Row-wise gather driven by another registry tensor of indices. |
+| `TopK(src, k, values_as, indices_as)` | Returns the top-k values and indices from a 1D tensor. |
+| `TopKIndices2D(src, k, ...)` | Returns top-k values plus row and column indices from a 2D tensor. |
+| `ArgMax(src, axis=-1, as_=None)` | Computes argmax along an axis. |
+| `CreateTensorMask(src, predicate, as_)` | Builds a boolean mask from a tensor. |
+| `CreateTensorMaskByThreshold(src, threshold, as_=None)` | Convenience threshold-based mask creation. |
+| `ApplyTensorMask(*srcs, mask, as_=...)` | Applies one boolean mask across one or more tensors. |
+| `SelectTensors(*srcs, indices, as_=...)` | Applies integer-index selection across one or more tensors. |
+| `FilterTensors(*srcs, by, predicate, as_=...)` | Filters one or more tensors by a predicate on another tensor. |
+| `SortTensorsBy(*srcs, by, descending=True, as_=...)` | Reorders one or more tensors by a ranking tensor. |
 
 ### Math And Mapping
 
 | Operator | Notes |
 |---|---|
-| `TorchSoftmax(src, axis=-1, as_=None)` | Softmax over a named tensor. |
-| `TorchSigmoid(src, as_=None)` | Element-wise sigmoid. |
-| `TorchMultiplyTensors(left, right, as_=None)` | Element-wise multiplication of two named tensors. |
-| `TorchMapTensor(src, fn, as_=None)` | Applies an arbitrary tensor-to-tensor mapping function. |
+| `Softmax(src, axis=-1, as_=None)` | Softmax over a named tensor. |
+| `Sigmoid(src, as_=None)` | Element-wise sigmoid. |
+| `MultiplyTensors(left, right, as_=None)` | Element-wise multiplication of two named tensors. |
+| `MapTensor(src, fn, as_=None)` | Applies an arbitrary tensor-to-tensor mapping function. |
 
 ### Batch Assembly
 
 | Operator | Input -> Output | Notes |
 |---|---|---|
-| `TorchCollate()` | `list[TorchTensorPayload]` -> `TorchTensorPayload` | Stacks or concatenates Torch payloads into one batched payload. |
+| `Collate()` | `list[TorchTensorPayload]` -> `TorchTensorPayload` | Stacks or concatenates Torch payloads into one batched payload. |
 
 ## Vision Postprocess Operators
 

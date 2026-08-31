@@ -34,7 +34,7 @@ from ml_pipes.core import Pipeline  # noqa: E402
 from ml_pipes.standard import Recall  # noqa: E402
 from ml_pipes.tensor import ArgMax  # noqa: E402
 from ml_pipes.tensor import TensorPayload, TensorRegistry  # noqa: E402
-from ml_pipes.torch import ToTorch, TorchArgMax, TorchExtract, TorchInfer, TorchSqueeze  # noqa: E402
+from ml_pipes.torch import ToTorch, ArgMax, TorchExtract, TorchInfer, Squeeze  # noqa: E402
 from ml_pipes.torch.types import TorchTensorRegistry  # noqa: E402
 from ml_pipes.vision import ImagePayload  # noqa: E402
 
@@ -164,8 +164,8 @@ def test_mask2former_torch_infer_exposes_model_outputs() -> None:
         input_layout="NCHW",
     )(ToTorch(device="cpu")(pixel_values))
     registry = TorchExtract("class_queries_logits", "masks_queries_logits")(outputs)
-    TorchSqueeze("class_queries_logits", axis=0)(registry)
-    TorchSqueeze("masks_queries_logits", axis=0)(registry)
+    Squeeze("class_queries_logits", axis=0)(registry)
+    Squeeze("masks_queries_logits", axis=0)(registry)
 
     assert tuple(registry["class_queries_logits"].shape) == (2, 3)
     assert tuple(registry["masks_queries_logits"].shape) == (2, 3, 4)
@@ -332,7 +332,7 @@ def test_torch_panoptic_sequence_handles_all_queries_filtered() -> None:
         }
     )
 
-    TorchArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
+    ArgMax("weighted_masks", axis=0, as_="winner_ids")(registry)
     result = TorchPanopticSegmentsFromQueries(
         thing_class_ids=frozenset({0, 1}),
         scores="query_scores",

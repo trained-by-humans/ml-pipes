@@ -4,7 +4,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes.torch import TorchCollate, TorchDistribute, TorchExtract, TorchInfer
+from ml_pipes.torch import Collate, TorchDistribute, TorchExtract, TorchInfer
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload
 
 
@@ -164,7 +164,7 @@ def test_torch_collate_matches_numpy_shape_semantics():
         _torch_payload(torch.zeros((1, 3, 8, 8))),
     ]
 
-    result = TorchCollate()(tensors)
+    result = Collate()(tensors)
 
     assert result.array.shape == (2, 3, 8, 8)
     assert result.layout == "NCHW"
@@ -177,14 +177,14 @@ def test_torch_collate_stacks_chw_tensors_adding_batch_dim():
         _torch_payload(torch.zeros((3, 8, 8), dtype=torch.float32), layout="CHW"),
     ]
 
-    result = TorchCollate()(tensors)
+    result = Collate()(tensors)
 
     assert tuple(result.array.shape) == (2, 3, 8, 8)
 
 
 def test_torch_collate_raises_on_empty_list():
     with pytest.raises(ValueError, match="empty"):
-        TorchCollate()([])
+        Collate()([])
 
 
 def test_torch_distribute_splits_batch_dim_into_per_sample_outputs():

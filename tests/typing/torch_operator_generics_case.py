@@ -9,7 +9,7 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import assert_type
 
-from ml_pipes.torch import ToDevice, TorchAsType, TorchSynchronizeTensors
+from ml_pipes.torch import ToDevice, AsType, TorchSynchronizeTensors
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
 
 
@@ -27,7 +27,7 @@ assert_type(ToDevice("cpu")([sample_tensor]), list[torch.Tensor])
 assert_type(TorchSynchronizeTensors()(sample_payload), TorchTensorPayload)
 assert_type(TorchSynchronizeTensors()(sample_outputs), TorchRuntimeOutputs)
 
-assert_type(TorchAsType("float16")(sample_payload), TorchTensorPayload)
-assert_type(TorchAsType("float16")(sample_tensor), torch.Tensor)
-assert_type(TorchAsType("float16")([sample_tensor]), list[torch.Tensor])
-assert_type(TorchAsType("float16", src="scores")(sample_registry), TorchTensorRegistry)
+assert_type(AsType("float16")(sample_payload), TorchTensorPayload)
+assert_type(AsType("float16")(sample_tensor), torch.Tensor)
+assert_type(AsType("float16")([sample_tensor]), list[torch.Tensor])
+assert_type(AsType("float16", src="scores")(sample_registry), TorchTensorRegistry)

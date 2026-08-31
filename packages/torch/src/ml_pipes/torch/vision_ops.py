@@ -6,7 +6,7 @@ from typing import Literal, get_args
 import torch
 
 from ml_pipes.operator import Operator
-from .tensor_ops import TorchFilterTensors
+from .tensor_ops import FilterTensors
 from .types import TorchTensorRegistry
 
 __all__ = [
@@ -87,7 +87,7 @@ class TorchFilterTensorsByScore:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (score,) + tuple(src for src in srcs if src != score)
-        self._inner = TorchFilterTensors(
+        self._inner = FilterTensors(
             *all_srcs,
             by=score,
             predicate=lambda scores: scores >= min_score,
@@ -111,7 +111,7 @@ class TorchFilterTensorsByClasses:
     ):
         all_srcs = (classes,) + tuple(src for src in srcs if src != classes)
         allowed = tuple(keep_classes)
-        self._inner = TorchFilterTensors(
+        self._inner = FilterTensors(
             *all_srcs,
             by=classes,
             predicate=lambda values: torch.isin(
@@ -135,7 +135,7 @@ class TorchFilterTensorsByMasksArea:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
-        self._inner = TorchFilterTensors(
+        self._inner = FilterTensors(
             *all_srcs,
             by=masks,
             predicate=lambda tensor: tensor.to(dtype=torch.bool).flatten(1).sum(dim=1) >= min_area,

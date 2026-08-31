@@ -13,7 +13,7 @@ from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, build_output_path
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import Store
 from ml_pipes.tensor import TensorPayload
-from ml_pipes.torch import ToTorch, TorchExtract, TorchInfer, TorchSqueeze
+from ml_pipes.torch import ToTorch, TorchExtract, TorchInfer, Squeeze
 from ml_pipes.torch.types import TorchTensorRegistry
 from ml_pipes.vision import (
     ConvertColorSpace,
@@ -157,8 +157,8 @@ def build_mask2former_infer_pipeline(
                 input_layout="NCHW",
             ),
             TorchExtract("class_queries_logits", "masks_queries_logits"),
-            TorchSqueeze("class_queries_logits", axis=0),
-            TorchSqueeze("masks_queries_logits", axis=0),
+            Squeeze("class_queries_logits", axis=0),
+            Squeeze("masks_queries_logits", axis=0),
         ]
     )
 

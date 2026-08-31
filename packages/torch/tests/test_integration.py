@@ -14,33 +14,33 @@ from ml_pipes.torch import (
     ToNumpyRegistry,
     ToTorch,
     ToTorchRegistry,
-    TorchArgMax,
-    TorchApplyTensorMask,
-    TorchAsType,
-    TorchBinarizeTensorByThreshold,
-    TorchCollate,
-    TorchCreateTensorMask,
-    TorchCreateTensorMaskByThreshold,
+    ArgMax,
+    ApplyTensorMask,
+    AsType,
+    BinarizeTensorByThreshold,
+    Collate,
+    CreateTensorMask,
+    CreateTensorMaskByThreshold,
     TorchDistribute,
     TorchExtract,
     TorchFilterTensorsByClasses,
     TorchFilterTensorsByMasksArea,
     TorchFilterTensorsByScore,
-    TorchGatherScores,
+    GatherScores,
     TorchInfer,
     TorchMasksToBoxes,
     TorchMeanMaskScores,
-    TorchMultiplyTensors,
+    MultiplyTensors,
     TorchNMS,
     TorchResizeMasks,
-    TorchSelectTensors,
-    TorchSigmoid,
-    TorchSlice,
-    TorchSortTensorsBy,
-    TorchSoftmax,
+    SelectTensors,
+    Sigmoid,
+    Slice,
+    SortTensorsBy,
+    Softmax,
     TorchSynchronizeTensors,
-    TorchTopK,
-    TorchTopKIndices2D,
+    TopK,
+    TopKIndices2D,
     TorchWeightMasksByScores,
 )
 from ml_pipes.torch.types import TorchRuntimeOutputs, TorchTensorPayload, TorchTensorRegistry
@@ -98,7 +98,7 @@ def _torch_payload(array: torch.Tensor, layout: str = "NCHW") -> TorchTensorPayl
 def test_numpy_torch_numpy_pipeline_composes() -> None:
     pipeline = Pipeline([
         ToTorch(),
-        TorchAsType("float16"),
+        AsType("float16"),
         ToNumpy(),
     ])
     payload = TensorPayload(
@@ -183,30 +183,30 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
         ToTorch(),
         ToDevice("cpu"),
         TorchSynchronizeTensors(),
-        TorchAsType("float32"),
+        AsType("float32"),
         TorchInfer(
             _EmptyDetectionModule().eval(),
             output_layouts=("NC", "NC", "NHW", "N"),
         ),
         TorchExtract("boxes", "class_logits", "mask_logits", "flat_scores"),
-        TorchSoftmax("class_logits", as_="class_probs"),
-        TorchSlice("boxes", slice(None, 4), as_="boxes_xyxy"),
-        TorchSigmoid("mask_logits", as_="mask_probs"),
-        TorchTopK("flat_scores", k=5, values_as="top_flat_scores", indices_as="top_flat_indices"),
-        TorchTopKIndices2D(
+        Softmax("class_logits", as_="class_probs"),
+        Slice("boxes", slice(None, 4), as_="boxes_xyxy"),
+        Sigmoid("mask_logits", as_="mask_probs"),
+        TopK("flat_scores", k=5, values_as="top_flat_scores", indices_as="top_flat_indices"),
+        TopKIndices2D(
             "class_probs",
             k=5,
             values_as="top_scores",
             row_indices_as="query_indices",
             col_indices_as="class_ids",
         ),
-        TorchArgMax("class_probs", as_="argmax_classes"),
-        TorchGatherScores("class_probs", "argmax_classes", as_="argmax_scores"),
-        TorchCreateTensorMask("top_scores", predicate=lambda tensor: tensor >= 0.0, as_="non_negative_keep"),
-        TorchCreateTensorMaskByThreshold("top_scores", threshold=0.5, as_="score_keep"),
-        TorchApplyTensorMask("top_scores", "class_ids", "query_indices", mask="score_keep"),
-        TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
-        TorchMultiplyTensors("top_scores", "argmax_scores", as_="weighted_scores"),
+        ArgMax("class_probs", as_="argmax_classes"),
+        GatherScores("class_probs", "argmax_classes", as_="argmax_scores"),
+        CreateTensorMask("top_scores", predicate=lambda tensor: tensor >= 0.0, as_="non_negative_keep"),
+        CreateTensorMaskByThreshold("top_scores", threshold=0.5, as_="score_keep"),
+        ApplyTensorMask("top_scores", "class_ids", "query_indices", mask="score_keep"),
+        SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+        MultiplyTensors("top_scores", "argmax_scores", as_="weighted_scores"),
         TorchFilterTensorsByScore("selected_masks", "class_ids", "query_indices", score="weighted_scores", min_score=0.0),
         TorchFilterTensorsByClasses(
             "selected_masks",
@@ -218,7 +218,7 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
         TorchWeightMasksByScores(masks="selected_masks", scores="weighted_scores", as_="weighted_masks"),
         Recall("image_shape"),
         TorchResizeMasks(masks="weighted_masks", as_="resized_masks"),
-        TorchBinarizeTensorByThreshold("resized_masks", threshold=0.5, as_="binary_masks"),
+        BinarizeTensorByThreshold("resized_masks", threshold=0.5, as_="binary_masks"),
         TorchMeanMaskScores(
             mask_scores="resized_masks",
             masks="binary_masks",
@@ -227,7 +227,7 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
         TorchFilterTensorsByMasksArea("weighted_scores", "class_ids", masks="binary_masks", min_area=1),
         TorchMasksToBoxes(masks="binary_masks", as_="boxes"),
         TorchNMS(boxes="boxes", scores="weighted_scores", classes="class_ids", kept_as="kept"),
-        TorchSortTensorsBy("binary_masks", "class_ids", by="weighted_scores"),
+        SortTensorsBy("binary_masks", "class_ids", by="weighted_scores"),
         ToNumpyRegistry(),
     ])
     payload = TensorPayload(
@@ -266,7 +266,7 @@ def test_empty_torch_postprocess_pipeline_keeps_empty_tensors_stable() -> None:
 def test_torch_batch_region_validates_and_runs() -> None:
     pipeline = Pipeline([
         Batch(size=2, timeout=0.01),
-        TorchCollate(),
+        Collate(),
         TorchInfer(torch.nn.Identity().eval()),
         TorchDistribute(),
         UnBatch(),
@@ -338,7 +338,7 @@ def test_torch_validation_accepts_to_device_and_torch_as_type_boundaries() -> No
         ToTorch(),
         ToDevice("cpu"),
         TorchSynchronizeTensors(),
-        TorchAsType("float16"),
+        AsType("float16"),
         _TorchIdentity(),
     ]).validate(inference=True)
 
@@ -348,6 +348,6 @@ def test_torch_validation_accepts_to_device_and_torch_as_type_boundaries() -> No
 
 def test_torch_validation_rejects_registry_op_after_to_device_payload() -> None:
     with pytest.raises(PipelineValidationError):
-        Pipeline([ToDevice("cpu"), TorchArgMax("scores")]).validate(
+        Pipeline([ToDevice("cpu"), ArgMax("scores")]).validate(
             pipeline_input_type=TorchTensorPayload
         )
