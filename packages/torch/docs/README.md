@@ -52,56 +52,43 @@ For broader background on the Torch vs NumPy runtime tradeoff, see the
 
 ## Where Torch Fits
 
-Torch is a separate execution domain that a pipeline can enter and leave
-explicitly at whichever stage benefits from Torch. A pipeline does not need to
-move wholesale into Torch: it can cross in for runtime, stay in Torch for
-several generic tensor postprocess stages, then cross back out once
-later steps fit the NumPy-side packages better.
+Torch is an explicit execution domain for the parts of a pipeline that benefit
+from a Torch model or Torch-native tensor computation. A pipeline can enter for
+inference, keep a generic postprocess segment on-device, and return to NumPy
+once later stages fit `ml_pipes.tensor` or `ml_pipes.vision` better.
 
-In practice, that means the Torch crossing point is flexible:
+- **Torch values** — `torch.TensorPayload` and `torch.TensorRegistry` mirror
+  Tensor values, while `torch.RuntimeOutputs` mirrors the ONNX runtime handoff;
+  each records its `device`.
+- **Conversion** — enter the Torch domain with `ToTorch()` or
+  `ToTorchRegistry()`, and return to NumPy with `ToNumpy()` or
+  `ToNumpyRegistry()`.
+- **Available operators** — once a value is in the appropriate Torch type, use
+  `Infer` for a Torch module, `Extract` / `Distribute` for runtime outputs, and
+  the generic Tensor-mirror operators for `torch.TensorRegistry`.
 
-- cross in with `ToTorch()` when the runtime stage itself is Torch-native
-- cross in with `ToTorchRegistry()` when a later postprocess segment should
-  stay on-device in Torch
-- cross back out with `ToNumpy()` or `ToNumpyRegistry()` as soon as the
-  remaining stages are better served by `ml_pipes.tensor` or
-  `ml_pipes.vision`
-- use `ToDevice()` inside the Torch domain when the stage should stay in Torch
-  but move to a different device
-
-To keep mixed Torch and NumPy pipelines composable, the Torch domain mirrors
-the surrounding NumPy-side package shapes: `TensorPayload` and
-`TensorRegistry` mirror the Tensor package value models, while
-`RuntimeOutputs` parallels the ONNX runtime handoff. The main addition
-across these Torch values is `device`, which keeps placement explicit while
-the value is in the Torch domain.
-
-When values stay in `TensorRegistry`, the package also mirrors the core
-generic tensor helpers that are worth keeping on-device, including transpose,
-scale, filtering, and mapping stages. Vision-specific Torch postprocess remains
-example-local until it has a dedicated package owner.
-
-One common mixed flow looks like this:
+For example, a Torch-native inference segment with optional Torch-side
+postprocess would look like this:
 
 ```text
-┌─────────────────────────────────────────────┐
-│ NumPy Domain                                │
-├─ Decode -> Resize -> Normalize -> ...       │
-└───────┬─────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ NumPy Domain                                 │
+├─ Decode -> Resize -> Normalize -> ...        │
+└───────┬──────────────────────────────────────┘
         |
-        | ToTorch / ToTorchRegistry
+        | ToTorch
         ▼
-┌─────────────────────────────────────────────┐
-│ Torch Domain                                │
-├─ Infer -> generic Tensor operators -> ... │
-└───────┬─────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Torch Domain                                 │
+├─ Infer -> generic Tensor operators -> ...    │
+└───────┬──────────────────────────────────────┘
         |
-        | ToNumpy / ToNumpyRegistry
+        | ToNumpyRegistry
         ▼
-┌─────────────────────────────────────────────┐
-│ NumPy Domain                                │
+┌──────────────────────────────────────────────┐
+│ NumPy Domain                                 │
 ├─ Visualization / Logging / Task finalization │
-└─────────────────────────────────────────────┘
+└──────────────────────────────────────────────┘
 ```
 
 That split keeps Torch execution explicit while still handing off to the
@@ -109,19 +96,14 @@ packages that own visualization, logging, and task finalization.
 
 ## Using Torch In Pipelines
 
-In practice, Torch usually appears in one of three pipeline shapes:
-- Torch-native inference stage inside an otherwise NumPy-oriented pipeline
-- Heavy postprocess stage in Torch before hand-off to NumPy
-- Custom Torch stage inserted into a larger mixed pipeline
-
 ### Torch-Native Inference
 
-Use this shape when the main inference stage is Torch-native, or otherwise
-already produces Torch-backed outputs, but the surrounding image preparation
-and later task logic already fit the NumPy-side packages. Upstream steps
-prepare the input in NumPy, `ToTorch()` crosses into the Torch domain,
-`Infer(...)` runs the model, and the outputs return to NumPy once
-downstream packages need them.
+Use this shape when preparation is NumPy-side but inference runs through a
+`torch.nn.Module`. `ToTorch()` crosses one input payload into the Torch
+domain, `Infer(...)` runs the model, and `Extract(...)` exposes the outputs as
+a `torch.TensorRegistry`. Continue with optional generic Torch postprocessing
+there, then use `ToNumpyRegistry()` before downstream packages need NumPy
+values.
 
 ```python
 from ml_pipes.core import Pipeline
@@ -134,13 +116,13 @@ pipeline = Pipeline([
     ToTorch(device="cpu"),
     Infer(model, input_layout="NCHW"),
     Extract("output_0", as_="scores"),
+    # Optional generic postprocessing in Torch (Softmax, FilterTensors, etc.)
+    ...,
     ToNumpyRegistry(),
-    ...
+    # NumPy-side task finalization (ProjectBoxes, DrawMasks, etc.)
+    ...,
 ])
 ```
-
-Use this when the model is Torch-native but the rest of the pipeline is
-already clear and standardized in NumPy.
 
 For models that expect a named input such as `pixel_values=...`, use
 `input_name="..."`. If the model returns a mapping of named tensors, those

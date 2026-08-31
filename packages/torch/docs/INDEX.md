@@ -3,14 +3,12 @@
 This page catalogs the Torch package surface in `ml_pipes.torch`.
 For package overview, scope, design principles, and usage patterns, see
 [`README.md`](./README.md).
-For the Tensor and Vision operator coverage matrix, see
-[`COVERAGE.md`](./COVERAGE.md).
 
-Internally, the package is organized into boundary, runtime, and tensor
-modules while the public import surface remains `ml_pipes.torch`.
 The package mirrors `ml_pipes.tensor` for shared tensor postprocess,
 and `ml_pipes.onnx` for runtime staging shape. Use those package indexes for
 the NumPy-side variants and typed vision outputs.
+For the Tensor and ONNX operator coverage matrix, see
+[`COVERAGE.md`](./COVERAGE.md).
 
 For framework-wide operator concepts, see
 [`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
@@ -24,14 +22,6 @@ For the cross-package package catalogs, see
 | `TensorPayload` | One-tensor Torch boundary type. |
 | `TensorRegistry` | Multi-tensor Torch working set used by most postprocess operators in this package. |
 | `RuntimeOutputs` | Value type used between Torch runtime invocation and output extraction or distribution. |
-
-## Public Aliases
-
-| Public alias | Primary name | Note |
-|---|---|---|
-| `GatherScores(...)` | `GatherRows(...)` | `scores` comes from the common use of gathering one selected score from each row. |
-| `BinarizeTensor(...)` | `CreateTensorMask(...)` | `binarize` comes from older wording for turning a tensor into a boolean mask. |
-| `BinarizeTensorByThreshold(...)` | `CreateTensorMaskByThreshold(...)` | `binarize` comes from threshold-based boolean mask creation. |
 
 ## Domain Boundaries And Device Movement
 
@@ -53,6 +43,14 @@ For the cross-package package catalogs, see
 | `Distribute()` | `RuntimeOutputs` -> `list[RuntimeOutputs]` | Splits a batched runtime output back into per-sample runtime outputs. |
 
 ## Generic Tensor Operators
+
+### Public Aliases
+
+| Public alias | Primary name | Note |
+|---|---|---|
+| `GatherScores(...)` | `GatherRows(...)` | `scores` comes from the common use of gathering one selected score from each row. |
+| `BinarizeTensor(...)` | `CreateTensorMask(...)` | `binarize` comes from older wording for turning a tensor into a boolean mask. |
+| `BinarizeTensorByThreshold(...)` | `CreateTensorMaskByThreshold(...)` | `binarize` comes from threshold-based boolean mask creation. |
 
 ### Dtype And Shape
 

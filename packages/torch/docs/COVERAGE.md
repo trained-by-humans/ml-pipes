@@ -1,90 +1,51 @@
 # Torch Operator Coverage
 
-This matrix shows which `ml_pipes.tensor` and `ml_pipes.vision` operators can
-currently remain in the Torch domain through an equivalent
-`ml_pipes.torch` operator.
+`ml_pipes.torch` mirrors the generic tensor postprocess surface of
+`ml_pipes.tensor` and the runtime staging shape of `ml_pipes.onnx`. This page
+shows the coverage of those mirrors and identifies the corresponding public
+operators.
 
-`ml_pipes.tensor` has a complete generic-operator mirror. `ml_pipes.vision`
-has no equivalent in the Torch package; Torch-resident Vision helpers remain
-example-local until they have a dedicated package owner.
+> [!CAUTION]
+> The same operator name indicates the same intended pipeline role; it does
+> not promise behavioral conformance. NumPy and Torch can differ in dtype
+> handling, numerical results, device behavior, and edge cases.
 
-An equivalent name here identifies the current Torch-side operator. It does
-not by itself guarantee behavioral conformance between NumPy and Torch
-implementations; the conformance requirements are tracked by [issue
-#70](https://github.com/trained-by-humans/ml-pipes/issues/70).
+## Tensor Package Coverage
 
-| Target package | Operator | Equivalent Torch operator |
+| `ml_pipes.tensor` | `ml_pipes.torch` | Note |
 |---|---|---|
-| `ml_pipes.tensor` | `AsType` | `AsType` |
-| `ml_pipes.tensor` | `Squeeze` | `Squeeze` |
-| `ml_pipes.tensor` | `Transpose` | `Transpose` |
-| `ml_pipes.tensor` | `Slice` | `Slice` |
-| `ml_pipes.tensor` | `Scale` | `Scale` |
-| `ml_pipes.tensor` | `GatherRows` | `GatherRows` |
-| `ml_pipes.tensor` | `TopK` | `TopK` |
-| `ml_pipes.tensor` | `TopKIndices2D` | `TopKIndices2D` |
-| `ml_pipes.tensor` | `ArgMax` | `ArgMax` |
-| `ml_pipes.tensor` | `CreateTensorMask` | `CreateTensorMask` |
-| `ml_pipes.tensor` | `CreateTensorMaskByThreshold` | `CreateTensorMaskByThreshold` |
-| `ml_pipes.tensor` | `ApplyTensorMask` | `ApplyTensorMask` |
-| `ml_pipes.tensor` | `SelectTensors` | `SelectTensors` |
-| `ml_pipes.tensor` | `FilterTensors` | `FilterTensors` |
-| `ml_pipes.tensor` | `SortTensorsBy` | `SortTensorsBy` |
-| `ml_pipes.tensor` | `Softmax` | `Softmax` |
-| `ml_pipes.tensor` | `Sigmoid` | `Sigmoid` |
-| `ml_pipes.tensor` | `MultiplyTensors` | `MultiplyTensors` |
-| `ml_pipes.tensor` | `MapTensor` | `MapTensor` |
-| `ml_pipes.tensor` | `Collate` | `Collate` |
-| `ml_pipes.vision` | `LoadFile` | — |
-| `ml_pipes.vision` | `Decode` | — |
-| `ml_pipes.vision` | `Resize` | — |
-| `ml_pipes.vision` | `ConvertColorSpace` | — |
-| `ml_pipes.vision` | `Normalize` | — |
-| `ml_pipes.vision` | `ConvertBoxFormat` | — |
-| `ml_pipes.vision` | `NMS` | — |
-| `ml_pipes.vision` | `NMM` | — |
-| `ml_pipes.vision` | `FilterTensorsByScore` | — |
-| `ml_pipes.vision` | `FilterTensorsByClasses` | — |
-| `ml_pipes.vision` | `FilterTensorsByBoxArea` | — |
-| `ml_pipes.vision` | `FilterTensorsByMasksArea` | — |
-| `ml_pipes.vision` | `ProjectBoxes` | — |
-| `ml_pipes.vision` | `ReconstructMasks` | — |
-| `ml_pipes.vision` | `ProjectMasks` | — |
-| `ml_pipes.vision` | `ProjectRoIMasks` | — |
-| `ml_pipes.vision` | `ResizeMasks` | — |
-| `ml_pipes.vision` | `MasksToBoxes` | — |
-| `ml_pipes.vision` | `WeightMasksByScores` | — |
-| `ml_pipes.vision` | `MeanMaskScores` | — |
-| `ml_pipes.vision` | `Tile` | — |
-| `ml_pipes.vision` | `Stitch` | — |
-| `ml_pipes.vision` | `BlendImages` | — |
-| `ml_pipes.vision` | `DrawBoxes` | — |
-| `ml_pipes.vision` | `DrawDensityOverlay` | — |
-| `ml_pipes.vision` | `DrawMasks` | — |
-| `ml_pipes.vision` | `SaveImage` | — |
-| `ml_pipes.vision` | `LogDetections` | — |
-| `ml_pipes.vision` | `ClampDensity` | — |
-| `ml_pipes.vision` | `SumDensity` | — |
-| `ml_pipes.vision` | `ProjectDensityMap` | — |
-| `ml_pipes.vision` | `DensityToHeatmap` | — |
+| `AsType` | `AsType` | |
+| `Squeeze` | `Squeeze` | |
+| `Transpose` | `Transpose` | |
+| `Slice` | `Slice` | |
+| `Scale` | `Scale` | |
+| `GatherRows` | `GatherRows` | |
+| `GatherScores` | `GatherScores` | Public alias of `GatherRows`. |
+| `TopK` | `TopK` | |
+| `TopKIndices2D` | `TopKIndices2D` | |
+| `ArgMax` | `ArgMax` | |
+| `CreateTensorMask` | `CreateTensorMask` | |
+| `CreateTensorMaskByThreshold` | `CreateTensorMaskByThreshold` | |
+| `BinarizeTensor` | `BinarizeTensor` | Public alias of `CreateTensorMask`. |
+| `BinarizeTensorByThreshold` | `BinarizeTensorByThreshold` | Public alias of `CreateTensorMaskByThreshold`. |
+| `ApplyTensorMask` | `ApplyTensorMask` | |
+| `SelectTensors` | `SelectTensors` | |
+| `FilterTensors` | `FilterTensors` | |
+| `SortTensorsBy` | `SortTensorsBy` | |
+| `Softmax` | `Softmax` | |
+| `Sigmoid` | `Sigmoid` | |
+| `MultiplyTensors` | `MultiplyTensors` | |
+| `MapTensor` | `MapTensor` | |
+| `Collate` | `Collate` | |
 
-## Public Aliases
+For operator details, see the [Tensor package index](../../tensor/docs/INDEX.md).
 
-The following Tensor aliases also have direct Torch aliases:
+## ONNX Package Coverage
 
-| Target package | Operator | Equivalent Torch operator |
+| `ml_pipes.onnx` | `ml_pipes.torch` | Note |
 |---|---|---|
-| `ml_pipes.tensor` | `GatherScores` | `GatherScores` |
-| `ml_pipes.tensor` | `BinarizeTensor` | `BinarizeTensor` |
-| `ml_pipes.tensor` | `BinarizeTensorByThreshold` | `BinarizeTensorByThreshold` |
+| `Infer` | `Infer` | Torch `Infer` accepts a `torch.nn.Module`; it is not interchangeable with ONNX Runtime model loading or configuration. |
+| `Extract` | `Extract` | |
+| `Distribute` | `Distribute` | |
 
-## Not Covered By This Matrix
-
-Torch-specific boundary and device operators (`ToTorch`, `ToNumpy`,
-`ToTorchRegistry`, `ToNumpyRegistry`, `ToDevice`, and
-`SynchronizeTensors`) have no Tensor or Vision counterpart because they
-make entry to, exit from, and movement within the Torch domain explicit.
-
-Torch runtime operators (`Infer`, `Extract`, and
-`Distribute`) parallel the ONNX runtime staging shape, not a Tensor or
-Vision operator.
+For operator details, see the [ONNX package index](../../onnx/docs/INDEX.md).

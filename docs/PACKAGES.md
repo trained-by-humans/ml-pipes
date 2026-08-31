@@ -25,7 +25,7 @@ under the shared `ml_pipes` namespace.
 - **Content**: the part of the framework the package carries, such as
   detection, segmentation, density, tracing, or benchmarking
 
-## Install ml-pipes
+## Install Packages
 
 `ml-pipes` is the umbrella install package. `pip install ml-pipes` installs
 `ml-pipes-core`, and extras add optional package chains.
@@ -75,7 +75,7 @@ details, open the linked package README.
 
 | Package                                         | Primary profile    | Depends on                                                          | Public modules                                                                                                                                                          | Delivers                                                                              |
 |-------------------------------------------------|--------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
-| [ml-pipes-core](../packages/core/README.md)     | `ml-pipes`         | `—`                                                                 | `ml_pipes.core`, `ml_pipes.standard`, `ml_pipes.validation`, `ml_pipes.tracing`, `ml_pipes.collectors`, `ml_pipes.factory`, `ml_pipes.benchmark`, `ml_pipes.inspection` | pipeline composition, generic data flow, and framework tooling                        |
+| [ml-pipes-core](../packages/core/README.md)     | `ml-pipes`         | `—`                                                                 | `ml_pipes.core`<br>`ml_pipes.standard`<br>`ml_pipes.validation`<br>`ml_pipes.tracing`<br>`ml_pipes.collectors`<br>`ml_pipes.factory`<br>`ml_pipes.benchmark`<br>`ml_pipes.inspection` | pipeline composition, generic data flow, and framework tooling                        |
 | [ml-pipes-tensor](../packages/tensor/README.md) | `ml-pipes[tensor]` | `ml-pipes-core`                                                     | `ml_pipes.tensor`                                                                                                                                                       | shared NumPy-side tensor handling and reusable tensor postprocess                     |
 | [ml-pipes-vision](../packages/vision/README.md) | `ml-pipes[vision]` | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.vision`                                                                                                                                                       | image preparation, typed vision results, tiling, and visualization                    |
 | [ml-pipes-onnx](../packages/onnx/README.md)     | `ml-pipes[onnx]`   | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.onnx`                                                                                                                                                         | ONNX Runtime inference boundary and output handoff                                    |

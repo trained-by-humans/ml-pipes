@@ -42,6 +42,3 @@ Package-owned guides live under `packages/<name>/docs/`.
 - [../packages/vision/docs/INDEX.md](../packages/vision/docs/INDEX.md)
 - [../packages/onnx/docs/INDEX.md](../packages/onnx/docs/INDEX.md)
 - [../packages/torch/docs/INDEX.md](../packages/torch/docs/INDEX.md)
-- [../packages/supervision/docs/INDEX.md](../packages/supervision/docs/INDEX.md) (proposed)
-- [../packages/openai/docs/INDEX.md](../packages/openai/docs/INDEX.md) (proposed)
-- [../packages/langchain/docs/INDEX.md](../packages/langchain/docs/INDEX.md) (proposed)
