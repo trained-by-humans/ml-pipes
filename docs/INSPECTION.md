@@ -200,10 +200,10 @@ fields, aliases, and arbitrary properties are not included. Register a
 formatter for a concrete response type when a concise domain-specific summary
 is more useful.
 
-`pydantic_model_formatter()` creates the generic formatter. Its limits default
-to `None`, so it processes every declared field and nested value; recursive
-references are always detected. Set any limit explicitly when inspection must
-bound its work:
+`pydantic_model_formatter()` creates the generic structural formatter. It
+processes every declared field and nested value, while always detecting
+recursive references. Set `max_depth` explicitly when inspection must bound
+nesting traversal:
 
 ```python
 from pydantic import BaseModel
@@ -212,15 +212,12 @@ from ml_pipes.inspection import PipelineInspector, pydantic_model_formatter
 
 inspector = PipelineInspector().register_value_formatter(
     BaseModel,
-    pydantic_model_formatter(max_depth=4, max_items=12, max_text_length=120),
+    pydantic_model_formatter(max_depth=4),
 )
 ```
 
-The available optional limits are `max_depth`, `max_members`, `max_items`,
-`max_text_length`, and `max_nodes`; each accepts a positive integer or `None`.
-They bound formatter work before the report is built. The inspector's normal
-report compaction still applies later when `build_views()` creates the rendered
-preview.
+`max_depth` accepts a positive integer or `None`; `None` leaves nesting
+unbounded.
 
 If a captured Pydantic model is encountered while Pydantic itself is
 unavailable, inspection emits `InspectionWarning` once for that model type and

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Literal
 
@@ -61,26 +60,6 @@ def _format_bytes(value: bytes) -> list[OutputBlock]:
     return [TextBlock("bytes", [("size", f"{len(value) / 1024:.1f} KB")])]
 
 
-@dataclass
-class _PydanticRenderState:
-    max_nodes: int | None
-    active_ids: set[int] = field(default_factory=set)
-    node_count: int = 0
-
-    def can_add_node(self) -> bool:
-        return self.max_nodes is None or self.node_count < self.max_nodes
-
-    def add_node(self) -> None:
-        self.node_count += 1
-
-
-def _validate_pydantic_limit(name: str, value: int | None) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(f"{name} must be a positive integer or None")
-
-
 def _pydantic_fields(value: Any) -> Mapping[Any, Any] | None:
     fields = getattr(type(value), "model_fields", None)
     if isinstance(fields, Mapping):
@@ -95,44 +74,31 @@ def _pydantic_fields(value: Any) -> Mapping[Any, Any] | None:
 def pydantic_model_formatter(
     *,
     max_depth: int | None = None,
-    max_members: int | None = None,
-    max_items: int | None = None,
-    max_text_length: int | None = None,
-    max_nodes: int | None = None,
 ) -> ValueFormatter[Any]:
     """Create a structural formatter for Pydantic v1 and v2 models.
 
-    Each limit is optional. ``None`` keeps the corresponding part of the
-    captured model unbounded; recursive references are still detected.
+    ``max_depth`` is optional. ``None`` allows arbitrary nesting; recursive
+    references are still detected.
     """
 
-    for name, value in {
-        "max_depth": max_depth,
-        "max_members": max_members,
-        "max_items": max_items,
-        "max_text_length": max_text_length,
-        "max_nodes": max_nodes,
-    }.items():
-        _validate_pydantic_limit(name, value)
-
-    def limit_text(text: str) -> str:
-        if max_text_length is None or len(text) <= max_text_length:
-            return text
-        return text[:max_text_length] + "…"
+    if max_depth is not None and (
+        isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 1
+    ):
+        raise ValueError("max_depth must be a positive integer or None")
 
     def text_for(value: Any) -> str:
         if isinstance(value, str):
-            return limit_text(value)
+            return value
         try:
-            return limit_text(repr(value))
+            return repr(value)
         except Exception as exc:  # pragma: no cover - hostile third-party repr
             return f"<unrepresentable {type(value).__name__}: {type(exc).__name__}>"
 
     def limit_block(message: str) -> TextBlock:
         return TextBlock("…", [("", message)])
 
-    def render_member(name: str, value: Any, state: _PydanticRenderState, depth: int) -> OutputBlock:
-        blocks = render_value(value, state, depth)
+    def render_member(name: str, value: Any, active_ids: set[int], depth: int) -> OutputBlock:
+        blocks = render_value(value, active_ids, depth)
         if len(blocks) == 1:
             block = blocks[0]
             if isinstance(block, GroupBlock):
@@ -143,68 +109,49 @@ def pydantic_model_formatter(
 
     def render_members(
         members: Iterable[tuple[str, Any]],
-        member_count: int,
-        state: _PydanticRenderState,
+        active_ids: set[int],
         depth: int,
-        member_limit: int | None,
         *,
-        wrap_items: bool = False,
+        render_as_items: bool = False,
     ) -> list[OutputBlock]:
         children: list[OutputBlock] = []
-        shown = 0
         for name, item in members:
-            if member_limit is not None and shown >= member_limit:
-                children.append(limit_block(f"+{member_count - shown} more"))
-                break
-            if not state.can_add_node():
-                children.append(limit_block("node limit reached"))
-                break
-            if wrap_items:
-                state.add_node()
-                children.append(GroupBlock(title=name, children=render_value(item, state, depth)))
+            if render_as_items:
+                children.append(GroupBlock(title=name, children=render_value(item, active_ids, depth)))
             else:
-                children.append(render_member(name, item, state, depth))
-            shown += 1
+                children.append(render_member(name, item, active_ids, depth))
         return children
 
     def render_group(
         title: str,
         members: Iterable[tuple[str, Any]],
-        member_count: int,
-        state: _PydanticRenderState,
+        active_ids: set[int],
         depth: int,
-        member_limit: int | None,
         value: Any,
         *,
-        wrap_items: bool = False,
+        render_as_items: bool = False,
     ) -> list[OutputBlock]:
         if max_depth is not None and depth >= max_depth:
             return [limit_block("maximum depth reached")]
-        if id(value) in state.active_ids:
+        if id(value) in active_ids:
             return [TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])]
-        if not state.can_add_node():
-            return [limit_block("node limit reached")]
-
-        state.add_node()
-        state.active_ids.add(id(value))
+        active_ids.add(id(value))
         try:
             return [
                 GroupBlock(
                     title=title,
                     children=render_members(
                         members,
-                        member_count,
-                        state,
+                        active_ids,
                         depth + 1,
-                        member_limit,
-                        wrap_items=wrap_items,
+                        render_as_items=render_as_items,
                     ),
                 )
             ]
         finally:
-            state.active_ids.remove(id(value))
+            active_ids.remove(id(value))
 
-    def render_value(value: Any, state: _PydanticRenderState, depth: int) -> list[OutputBlock]:
+    def render_value(value: Any, active_ids: set[int], depth: int) -> list[OutputBlock]:
         fields = _pydantic_fields(value)
         if fields is not None:
             def model_members() -> Iterable[tuple[str, Any]]:
@@ -217,10 +164,8 @@ def pydantic_model_formatter(
             return render_group(
                 type(value).__name__,
                 model_members(),
-                len(fields),
-                state,
+                active_ids,
                 depth,
-                max_members,
                 value,
             )
 
@@ -228,10 +173,8 @@ def pydantic_model_formatter(
             return render_group(
                 type(value).__name__,
                 ((str(key), item) for key, item in value.items()),
-                len(value),
-                state,
+                active_ids,
                 depth,
-                max_members,
                 value,
             )
 
@@ -240,21 +183,16 @@ def pydantic_model_formatter(
             return render_group(
                 f"{type(value).__name__}[{item_type}]  ×{len(value)}",
                 ((f"[{index}]", item) for index, item in enumerate(value)),
-                len(value),
-                state,
+                active_ids,
                 depth,
-                max_items,
                 value,
-                wrap_items=True,
+                render_as_items=True,
             )
 
-        if not state.can_add_node():
-            return [limit_block("node limit reached")]
-        state.add_node()
         return [TextBlock(type(value).__name__, [("", text_for(value))])]
 
     def format_pydantic_model(value: Any) -> list[OutputBlock]:
-        return render_value(value, _PydanticRenderState(max_nodes=max_nodes), 0)
+        return render_value(value, set(), 0)
 
     return format_pydantic_model
 

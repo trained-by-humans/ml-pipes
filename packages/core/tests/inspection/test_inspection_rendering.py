@@ -392,10 +392,6 @@ def test_pydantic_model_formatter_renders_declared_v1_fields():
     ("kwargs", "message"),
     [
         ({"max_depth": 0}, "max_depth"),
-        ({"max_members": False}, "max_members"),
-        ({"max_items": -1}, "max_items"),
-        ({"max_text_length": 0}, "max_text_length"),
-        ({"max_nodes": "12"}, "max_nodes"),
     ],
 )
 def test_pydantic_model_formatter_rejects_invalid_limits(kwargs: dict[str, object], message: str):
@@ -403,33 +399,7 @@ def test_pydantic_model_formatter_rejects_invalid_limits(kwargs: dict[str, objec
         pydantic_model_formatter(**kwargs)  # type: ignore[arg-type]
 
 
-def test_pydantic_model_formatter_applies_configured_limits():
-    inspector = PipelineInspector().register_value_formatter(
-        _PydanticBaseModel,
-        pydantic_model_formatter(
-            max_depth=1,
-            max_members=1,
-            max_items=1,
-            max_text_length=4,
-        ),
-    )
-
-    blocks = inspector._value_to_blocks(
-        _PydanticV2Model("long label", {"predictions": [{"class": "person"}, {"class": "cat"}]})
-    )
-
-    assert blocks == [
-        GroupBlock(
-            "_PydanticV2Model",
-            [
-                TextBlock("", [("label", "long…")]),
-                TextBlock("…", [("", "+1 more")]),
-            ],
-        )
-    ]
-
-
-def test_pydantic_model_formatter_applies_depth_and_item_limits():
+def test_pydantic_model_formatter_applies_depth_limit():
     depth_limited = PipelineInspector().register_value_formatter(
         _PydanticBaseModel,
         pydantic_model_formatter(max_depth=1),
@@ -445,22 +415,6 @@ def test_pydantic_model_formatter_applies_depth_and_item_limits():
             ],
         )
     ]
-
-    item_limited = PipelineInspector().register_value_formatter(
-        _PydanticBaseModel,
-        pydantic_model_formatter(max_items=1),
-    )
-    item_blocks = item_limited._value_to_blocks(_PydanticV2Model("detected", ["person", "cat"]))
-
-    list_group = item_blocks[0]
-    assert isinstance(list_group, GroupBlock)
-    payload = list_group.children[1]
-    assert isinstance(payload, GroupBlock)
-    assert payload.children == [
-        GroupBlock("[0]", [TextBlock("str", [("", "person")])]),
-        TextBlock("…", [("", "+1 more")]),
-    ]
-
 
 def test_pydantic_list_uses_standard_report_compaction():
     inspector = PipelineInspector().register_value_formatter(
@@ -490,17 +444,7 @@ def test_pydantic_list_uses_standard_report_compaction():
     assert predictions.rows[-1] == ("…", "+4 more")
 
 
-def test_pydantic_model_formatter_applies_node_limit_and_detects_cycles():
-    node_limited = PipelineInspector().register_value_formatter(
-        _PydanticBaseModel,
-        pydantic_model_formatter(max_nodes=1),
-    )
-    node_blocks = node_limited._value_to_blocks(_PydanticV2Model("detected", {}))
-
-    assert node_blocks == [
-        GroupBlock("_PydanticV2Model", [TextBlock("…", [("", "node limit reached")])])
-    ]
-
+def test_pydantic_model_formatter_detects_cycles():
     payload: dict[str, object] = {}
     payload["self"] = payload
     cyclic = PipelineInspector().register_value_formatter(
