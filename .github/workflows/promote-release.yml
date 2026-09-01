@@ -82,8 +82,7 @@ jobs:
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-core
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-tensor:
     name: Publish PyPI Tensor
@@ -96,8 +95,7 @@ jobs:
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-tensor
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-vision:
     name: Publish PyPI Vision
@@ -110,8 +108,7 @@ jobs:
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-vision
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-onnx:
     name: Publish PyPI ONNX
@@ -124,8 +121,7 @@ jobs:
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-onnx
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-torch:
     name: Publish PyPI Torch
@@ -138,8 +134,7 @@ jobs:
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-torch
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-meta:
     name: Publish PyPI Meta
@@ -152,8 +147,7 @@ jobs:
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   verify-pypi:
     name: Verify PyPI Packages

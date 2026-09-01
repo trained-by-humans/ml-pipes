@@ -19,15 +19,20 @@ on:
         description: Git ref to check out while staging and publishing artifacts.
         required: false
         type: string
-    secrets:
-      package_index_api_token:
-        description: Upload token for the target package index.
+      environment_name:
+        description: GitHub environment that supplies the package index token.
         required: true
+        type: string
+    secrets:
+      PYPI_API_TOKEN:
+        description: Package index token supplied by the selected environment.
+        required: false
 
 jobs:
   publish:
     name: Publish ${{ inputs.dist_name }}
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
     permissions:
       contents: read
     steps:
@@ -38,10 +43,10 @@ jobs:
 
       - name: Check package index token
         env:
-          PACKAGE_INDEX_API_TOKEN: ${{ secrets.package_index_api_token }}
+          PACKAGE_INDEX_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           if [ -z "${PACKAGE_INDEX_API_TOKEN}" ]; then
-            echo "Missing required package index token for the reusable publish workflow." >&2
+            echo "Missing PYPI_API_TOKEN environment secret for ${{ inputs.environment_name }}." >&2
             exit 1
           fi
 
@@ -72,6 +77,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__
-          password: ${{ secrets.package_index_api_token }}
+          password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: publish
           repository-url: ${{ inputs.repository_url }}
