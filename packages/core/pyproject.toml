@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-pipes-core"
-version = "0.1.0rc2"
+version = "0.1.1rc1"
 description = "Core runtime, validation, tracing, inspection, and standard operators for ml-pipes"
 readme = "README.md"
 license = "Apache-2.0"

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-pipes-onnx"
-version = "0.1.0rc2"
+version = "0.1.1rc1"
 description = "ONNX runtime operators and output types for ml-pipes"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,8 +30,8 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "ml-pipes-core==0.1.0rc2",
-    "ml-pipes-tensor==0.1.0rc2",
+    "ml-pipes-core==0.1.1rc1",
+    "ml-pipes-tensor==0.1.1rc1",
     "numpy>=1.26",
     "onnxruntime>=1.18",
 ]

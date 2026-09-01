@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-pipes"
-version = "0.1.0rc2"
+version = "0.1.1rc1"
 description = "Umbrella meta-package for ml-pipes component installs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,7 +30,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "ml-pipes-core==0.1.0rc2",
+    "ml-pipes-core==0.1.1rc1",
 ]
 
 [project.urls]
@@ -42,29 +42,29 @@ Changelog = "https://github.com/trained-by-humans/ml-pipes/releases"
 
 [project.optional-dependencies]
 inspection = [
-    "ml-pipes-core[inspection]==0.1.0rc2",
+    "ml-pipes-core[inspection]==0.1.1rc1",
 ]
 onnx = [
-    "ml-pipes-onnx==0.1.0rc2",
+    "ml-pipes-onnx==0.1.1rc1",
 ]
 otel = [
-    "ml-pipes-core[otel]==0.1.0rc2",
+    "ml-pipes-core[otel]==0.1.1rc1",
 ]
 tensor = [
-    "ml-pipes-tensor==0.1.0rc2",
+    "ml-pipes-tensor==0.1.1rc1",
 ]
 torch = [
-    "ml-pipes-torch==0.1.0rc2",
+    "ml-pipes-torch==0.1.1rc1",
 ]
 vision = [
-    "ml-pipes-vision==0.1.0rc2",
+    "ml-pipes-vision==0.1.1rc1",
 ]
 all = [
-    "ml-pipes-core[inspection,otel]==0.1.0rc2",
-    "ml-pipes-onnx==0.1.0rc2",
-    "ml-pipes-tensor==0.1.0rc2",
-    "ml-pipes-torch==0.1.0rc2",
-    "ml-pipes-vision==0.1.0rc2",
+    "ml-pipes-core[inspection,otel]==0.1.1rc1",
+    "ml-pipes-onnx==0.1.1rc1",
+    "ml-pipes-tensor==0.1.1rc1",
+    "ml-pipes-torch==0.1.1rc1",
+    "ml-pipes-vision==0.1.1rc1",
 ]
 
 [tool.hatch.build.targets.wheel]
