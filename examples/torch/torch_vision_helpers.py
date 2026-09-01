@@ -9,16 +9,16 @@ from ml_pipes.operator import Operator
 from ml_pipes.torch import FilterTensors, TensorRegistry
 
 __all__ = [
-    "TorchConvertBoxFormat",
-    "TorchFilterTensorsByScore",
-    "TorchFilterTensorsByClasses",
-    "TorchFilterTensorsByMasksArea",
-    "TorchWeightMasksByScores",
-    "TorchResizeMasks",
-    "TorchMeanMaskScores",
-    "TorchMasksToBoxes",
-    "TorchReconstructMasks",
-    "TorchNMS",
+    "ConvertBoxFormat",
+    "FilterTensorsByScore",
+    "FilterTensorsByClasses",
+    "FilterTensorsByMasksArea",
+    "WeightMasksByScores",
+    "ResizeMasks",
+    "MeanMaskScores",
+    "MasksToBoxes",
+    "ReconstructMasks",
+    "NMS",
 ]
 
 BoxFormat = Literal["xyxy", "xywh", "cxcywh"]
@@ -26,7 +26,7 @@ _BOX_FORMATS: frozenset[str] = frozenset(get_args(BoxFormat))
 
 
 @Operator
-class TorchConvertBoxFormat:
+class ConvertBoxFormat:
     def __init__(
         self,
         src: str = "boxes",
@@ -37,10 +37,10 @@ class TorchConvertBoxFormat:
     ):
         if from_ not in _BOX_FORMATS:
             raise ValueError(
-                f"TorchConvertBoxFormat: unknown from_ format {from_!r}. Choose from {sorted(_BOX_FORMATS)}"
+                f"ConvertBoxFormat: unknown from_ format {from_!r}. Choose from {sorted(_BOX_FORMATS)}"
             )
         if to not in _BOX_FORMATS:
-            raise ValueError(f"TorchConvertBoxFormat: unknown to format {to!r}. Choose from {sorted(_BOX_FORMATS)}")
+            raise ValueError(f"ConvertBoxFormat: unknown to format {to!r}. Choose from {sorted(_BOX_FORMATS)}")
         self.src = src
         self.from_ = from_
         self.to = to
@@ -77,7 +77,7 @@ class TorchConvertBoxFormat:
 
 
 @Operator
-class TorchFilterTensorsByScore:
+class FilterTensorsByScore:
     def __init__(
         self,
         *srcs: str,
@@ -98,7 +98,7 @@ class TorchFilterTensorsByScore:
 
 
 @Operator
-class TorchFilterTensorsByClasses:
+class FilterTensorsByClasses:
     """Filters tensors by class id membership."""
 
     def __init__(
@@ -125,7 +125,7 @@ class TorchFilterTensorsByClasses:
 
 
 @Operator
-class TorchFilterTensorsByMasksArea:
+class FilterTensorsByMasksArea:
     def __init__(
         self,
         *srcs: str,
@@ -146,7 +146,7 @@ class TorchFilterTensorsByMasksArea:
 
 
 @Operator
-class TorchWeightMasksByScores:
+class WeightMasksByScores:
     def __init__(self, masks: str = "masks", scores: str = "scores", *, as_: str):
         self.masks = masks
         self.scores = scores
@@ -161,7 +161,7 @@ class TorchWeightMasksByScores:
 
 
 @Operator
-class TorchResizeMasks:
+class ResizeMasks:
     """Resizes a stack of masks to a target shape."""
 
     def __init__(self, masks: str = "masks", as_: str | None = None):
@@ -181,7 +181,7 @@ class TorchResizeMasks:
 
 
 @Operator
-class TorchMeanMaskScores:
+class MeanMaskScores:
     """Computes one score per instance by averaging dense mask scores over its mask."""
 
     def __init__(
@@ -208,7 +208,7 @@ class TorchMeanMaskScores:
 
 
 @Operator
-class TorchMasksToBoxes:
+class MasksToBoxes:
     def __init__(self, masks: str = "masks", *, as_: str):
         self.masks = masks
         self.as_ = as_
@@ -235,7 +235,7 @@ class TorchMasksToBoxes:
 
 
 @Operator
-class TorchReconstructMasks:
+class ReconstructMasks:
     def __init__(self, coefficients: str, prototypes: str, as_: str):
         self.coefficients = coefficients
         self.prototypes = prototypes
@@ -251,7 +251,7 @@ class TorchReconstructMasks:
 
 
 @Operator
-class TorchNMS:
+class NMS:
     def __init__(
         self,
         boxes: str = "boxes",

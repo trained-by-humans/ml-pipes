@@ -5,16 +5,16 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from examples.torch.torch_vision_helpers import (
-    TorchConvertBoxFormat,
-    TorchFilterTensorsByClasses,
-    TorchFilterTensorsByMasksArea,
-    TorchFilterTensorsByScore,
-    TorchMasksToBoxes,
-    TorchMeanMaskScores,
-    TorchNMS,
-    TorchReconstructMasks,
-    TorchResizeMasks,
-    TorchWeightMasksByScores,
+    ConvertBoxFormat,
+    FilterTensorsByClasses,
+    FilterTensorsByMasksArea,
+    FilterTensorsByScore,
+    MasksToBoxes,
+    MeanMaskScores,
+    NMS,
+    ReconstructMasks,
+    ResizeMasks,
+    WeightMasksByScores,
 )
 from ml_pipes.torch import TensorRegistry
 
@@ -22,7 +22,7 @@ from ml_pipes.torch import TensorRegistry
 def test_torch_convert_box_format_cxcywh_to_xyxy():
     registry = TensorRegistry({"boxes": torch.tensor([[10.0, 20.0, 4.0, 6.0]], dtype=torch.float32)})
 
-    result = TorchConvertBoxFormat(from_="cxcywh")(registry)
+    result = ConvertBoxFormat(from_="cxcywh")(registry)
 
     assert torch.allclose(result["boxes"], torch.tensor([[8.0, 17.0, 12.0, 23.0]], dtype=torch.float32))
 
@@ -41,7 +41,7 @@ def test_torch_weight_masks_by_scores_broadcasts_scores_over_masks():
         }
     )
 
-    result = TorchWeightMasksByScores(as_="weighted_masks")(registry)
+    result = WeightMasksByScores(as_="weighted_masks")(registry)
 
     assert torch.allclose(
         result["weighted_masks"],
@@ -67,7 +67,7 @@ def test_torch_resize_masks_to_image_resizes_mask_stack():
         }
     )
 
-    TorchResizeMasks(masks="masks", as_="resized_masks")(registry, (4, 6))
+    ResizeMasks(masks="masks", as_="resized_masks")(registry, (4, 6))
 
     assert registry["resized_masks"].shape == (1, 4, 6)
     assert registry["resized_masks"].dtype == torch.float32
@@ -93,7 +93,7 @@ def test_torch_mean_mask_scores_computes_mean_over_mask_support():
         }
     )
 
-    TorchMeanMaskScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
+    MeanMaskScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert torch.allclose(registry["mean_mask_scores"], torch.tensor([0.75, 0.5]))
 
@@ -106,7 +106,7 @@ def test_torch_mean_mask_scores_handles_empty_masks():
         }
     )
 
-    result = TorchMeanMaskScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
+    result = MeanMaskScores(mask_scores="selected_masks", as_="mean_mask_scores")(registry)
 
     assert tuple(result["mean_mask_scores"].shape) == (0,)
     assert result["mean_mask_scores"].dtype == torch.float32
@@ -125,7 +125,7 @@ def test_torch_masks_to_boxes_converts_masks_to_xyxy():
         }
     )
 
-    TorchMasksToBoxes(as_="boxes")(registry)
+    MasksToBoxes(as_="boxes")(registry)
 
     assert torch.allclose(registry["boxes"][0], torch.tensor([1.0, 0.0, 3.0, 2.0]))
     assert torch.allclose(registry["boxes"][1], torch.tensor([0.0, 0.0, 0.0, 0.0]))
@@ -146,7 +146,7 @@ def test_torch_filter_tensors_by_score_filters_parallel_tensors():
         }
     )
 
-    TorchFilterTensorsByScore("query_classes", "mask_probs", score="query_scores", min_score=0.2)(registry)
+    FilterTensorsByScore("query_classes", "mask_probs", score="query_scores", min_score=0.2)(registry)
 
     assert registry["query_scores"].shape == (1,)
     assert registry["query_classes"].tolist() == [1]
@@ -168,7 +168,7 @@ def test_torch_filter_tensors_by_masks_area_filters_parallel_tensors():
         }
     )
 
-    TorchFilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
+    FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
 
     assert registry["masks"].shape[0] == 1
     assert torch.allclose(registry["scores"], torch.tensor([0.9]))
@@ -184,7 +184,7 @@ def test_torch_filter_tensors_by_masks_area_handles_empty_masks():
         }
     )
 
-    result = TorchFilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
+    result = FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=2)(registry)
 
     assert tuple(result["masks"].shape) == (0, 2, 2)
     assert tuple(result["scores"].shape) == (0,)
@@ -199,7 +199,7 @@ def test_torch_filter_tensors_by_score_can_write_to_new_keys():
         }
     )
 
-    TorchFilterTensorsByScore(
+    FilterTensorsByScore(
         "classes",
         score="scores",
         min_score=0.75,
@@ -226,7 +226,7 @@ def test_torch_filter_tensors_by_masks_area_can_write_to_new_keys():
         }
     )
 
-    TorchFilterTensorsByMasksArea(
+    FilterTensorsByMasksArea(
         "scores",
         "classes",
         masks="masks",
@@ -248,7 +248,7 @@ def test_torch_filter_tensors_by_classes_can_write_to_new_keys():
         }
     )
 
-    TorchFilterTensorsByClasses(
+    FilterTensorsByClasses(
         "scores",
         classes="classes",
         keep_classes=[0, 2],
@@ -265,7 +265,7 @@ def test_torch_reconstruct_masks_produces_correct_shape():
     prototypes = torch.ones((3, 4, 4), dtype=torch.float32)
     registry = TensorRegistry({"coefficients": coefficients, "prototypes": prototypes})
 
-    result = TorchReconstructMasks("coefficients", "prototypes", as_="masks")(registry)
+    result = ReconstructMasks("coefficients", "prototypes", as_="masks")(registry)
 
     assert result["masks"].shape == (2, 4, 4)
 
@@ -280,7 +280,7 @@ def test_torch_nms_keeps_overlapping_boxes_from_different_classes():
         }
     )
 
-    result = TorchNMS()(registry)
+    result = NMS()(registry)
 
     assert tuple(result["boxes"].shape) == (2, 4)
     assert result["classes"].tolist() == [0, 1]
@@ -296,7 +296,7 @@ def test_torch_nms_suppresses_same_class_overlap():
         }
     )
 
-    result = TorchNMS()(registry)
+    result = NMS()(registry)
 
     assert tuple(result["boxes"].shape) == (2, 4)
     assert torch.allclose(result["scores"], torch.tensor([0.95, 0.8]))
@@ -315,7 +315,7 @@ def test_torch_nms_filters_and_stores_indices():
         }
     )
 
-    result = TorchNMS(kept_as="kept", iou_threshold=0.5)(registry)
+    result = NMS(kept_as="kept", iou_threshold=0.5)(registry)
 
     assert result["boxes"].shape[0] == 2
     assert result["kept"].dtype == torch.int64

@@ -47,12 +47,12 @@ from .mask2former_infer import (
     resolve_output_path,
 )
 from .torch_vision_helpers import (
-    TorchFilterTensorsByMasksArea,
-    TorchFilterTensorsByScore,
-    TorchMasksToBoxes,
-    TorchMeanMaskScores,
-    TorchResizeMasks,
-    TorchWeightMasksByScores,
+    FilterTensorsByMasksArea,
+    FilterTensorsByScore,
+    MasksToBoxes,
+    MeanMaskScores,
+    ResizeMasks,
+    WeightMasksByScores,
 )
 
 _TOP_K = 100
@@ -201,16 +201,16 @@ def build_torch_postprocess_pipeline(
     if bundle.task == "panoptic":
         postprocess_pipeline = Pipeline([
             Recall("image_shape"),
-            TorchResizeMasks(masks="masks_queries_logits"),
+            ResizeMasks(masks="masks_queries_logits"),
             Softmax("class_queries_logits", as_="class_probs"),
             Slice("class_probs", slice(None, -1)),
             Sigmoid("masks_queries_logits", as_="mask_probs"),
             ArgMax("class_probs", as_="query_classes"),
             GatherScores("class_probs", "query_classes", as_="query_scores"),
-            TorchFilterTensorsByScore(
+            FilterTensorsByScore(
                 "query_classes", "mask_probs", score="query_scores", min_score=_SCORE_THRESHOLD
             ),
-            TorchWeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
+            WeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
             ArgMax("weighted_masks", axis=0, as_="winner_ids"),
             TorchPanopticSegmentsFromQueries(
                 thing_class_ids=bundle.thing_class_ids,
@@ -221,7 +221,7 @@ def build_torch_postprocess_pipeline(
                 mask_threshold=_MASK_THRESHOLD,
                 overlap_threshold=_OVERLAP_THRESHOLD,
             ),
-            TorchMasksToBoxes(as_="boxes"),
+            MasksToBoxes(as_="boxes"),
             ToNumpyRegistry(),
             inline(visualize_and_store(output_path, bundle.class_names)),
             LogDetections(bundle.model_id, input_path, output_path, at=1),
@@ -229,7 +229,7 @@ def build_torch_postprocess_pipeline(
     else:
         postprocess_pipeline = Pipeline([
             Recall("image_shape"),
-            TorchResizeMasks(masks="masks_queries_logits"),
+            ResizeMasks(masks="masks_queries_logits"),
             Softmax("class_queries_logits", as_="class_probs"),
             Slice("class_probs", slice(None, -1)),
             Sigmoid("masks_queries_logits", as_="mask_probs"),
@@ -242,12 +242,12 @@ def build_torch_postprocess_pipeline(
             ),
             SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
             BinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="masks"),
-            TorchMeanMaskScores(mask_scores="selected_masks", masks="masks", as_="mean_mask_scores"),
+            MeanMaskScores(mask_scores="selected_masks", masks="masks", as_="mean_mask_scores"),
             MultiplyTensors("top_scores", "mean_mask_scores", as_="scores"),
-            TorchFilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=1),
-            TorchFilterTensorsByScore("masks", "classes", score="scores", min_score=_SCORE_THRESHOLD),
+            FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=1),
+            FilterTensorsByScore("masks", "classes", score="scores", min_score=_SCORE_THRESHOLD),
             SortTensorsBy("masks", "classes", by="scores"),
-            TorchMasksToBoxes(masks="masks", as_="boxes"),
+            MasksToBoxes(masks="masks", as_="boxes"),
             ToNumpyRegistry(),
             inline(visualize_and_store(output_path, bundle.class_names)),
             LogDetections(bundle.model_id, input_path, output_path, at=1),
