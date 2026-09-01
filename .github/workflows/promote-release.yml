@@ -77,6 +77,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -90,6 +91,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -103,6 +105,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -116,6 +119,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -129,6 +133,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -142,6 +147,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
@@ -155,6 +161,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/verify-published-packages.yml
+    secrets: inherit
     with:
       target_name: PyPI
       index_url: https://pypi.org/simple/

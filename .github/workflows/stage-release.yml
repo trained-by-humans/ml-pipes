@@ -104,6 +104,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
@@ -117,6 +118,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
@@ -130,6 +132,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
@@ -143,6 +146,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
@@ -156,6 +160,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
@@ -169,6 +174,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
@@ -182,6 +188,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/verify-published-packages.yml
+    secrets: inherit
     with:
       target_name: TestPyPI
       index_url: https://test.pypi.org/simple/
