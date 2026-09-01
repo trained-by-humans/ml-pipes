@@ -25,7 +25,7 @@ jobs:
       changed_packages: ${{ steps.package-filter.outputs.changed_packages }}
     steps:
       - name: Check out repository
-        if: ${{ !(github.event_name == 'workflow_call' && inputs.run_all_package_checks) }}
+        if: ${{ !inputs.run_all_package_checks }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -33,7 +33,7 @@ jobs:
       - name: Detect changed workspace packages
         id: package-filter
         env:
-          RUN_ALL_PACKAGE_CHECKS: ${{ github.event_name == 'workflow_call' && inputs.run_all_package_checks }}
+          RUN_ALL_PACKAGE_CHECKS: ${{ inputs.run_all_package_checks }}
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -137,7 +137,7 @@ jobs:
   torch-smoke:
     name: Torch Smoke (Py3.12)
     needs: detect-package-changes
-    if: ${{ (github.event_name == 'workflow_call' && inputs.run_all_package_checks) || contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'core') || contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'torch') }}
+    if: ${{ inputs.run_all_package_checks || contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'core') || contains(fromJson(needs.detect-package-changes.outputs.changed_packages), 'torch') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
