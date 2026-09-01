@@ -78,7 +78,8 @@ In `ml-pipes`, that model step can be as small as:
 onnx.Infer("model.onnx")
 
 # Torch-native model
-torch.Infer(model, input_layout="NCHW")
+model = load_my_model()  # returns a torch.nn.Module
+torch.Infer(model)
 
 # Any other runtime
 RunMyModel()
