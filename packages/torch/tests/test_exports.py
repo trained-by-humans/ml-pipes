@@ -22,7 +22,6 @@ MODULE_PATHS = [
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "boundary_ops.py",
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "runtime_ops.py",
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "tensor_ops.py",
-    ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "vision_ops.py",
     ROOT / "packages" / "torch" / "src" / "ml_pipes" / "torch" / "types.py",
 ]
 
@@ -71,6 +70,6 @@ def test_ml_pipes_torch_alias_exports_preserve_identity() -> None:
     pytest.importorskip("torch")
     ml_pipes_torch = pytest.importorskip("ml_pipes.torch")
 
-    assert ml_pipes_torch.TorchGatherScores is ml_pipes_torch.TorchGatherRows
-    assert ml_pipes_torch.TorchBinarizeTensor is ml_pipes_torch.TorchCreateTensorMask
-    assert ml_pipes_torch.TorchBinarizeTensorByThreshold is ml_pipes_torch.TorchCreateTensorMaskByThreshold
+    assert ml_pipes_torch.GatherScores is ml_pipes_torch.GatherRows
+    assert ml_pipes_torch.BinarizeTensor is ml_pipes_torch.CreateTensorMask
+    assert ml_pipes_torch.BinarizeTensorByThreshold is ml_pipes_torch.CreateTensorMaskByThreshold

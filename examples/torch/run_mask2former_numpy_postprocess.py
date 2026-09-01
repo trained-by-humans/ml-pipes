@@ -47,7 +47,6 @@ from ml_pipes.vision import (
     WeightMasksByScores,
 )
 from ml_pipes.torch import ToNumpyRegistry
-from ml_pipes.torch.types import TorchTensorRegistry
 from ml_pipes.tensor import TensorRegistry
 
 from .mask2former_infer import (
@@ -196,7 +195,7 @@ def build_numpy_postprocess_pipeline(
     bundle: Mask2FormerBundle,
     input_path: Path,
     output_path: Path,
-) -> Pipeline[TorchTensorRegistry, object]:
+) -> Pipeline[TensorRegistry, object]:
     if bundle.task == "panoptic":
         postprocess_pipeline = Pipeline([
             ToNumpyRegistry(),

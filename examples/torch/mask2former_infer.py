@@ -13,8 +13,8 @@ from examples.common import ASSETS_DIR, COCO_IMAGE_NAME, build_output_path
 from ml_pipes.core import Pipeline
 from ml_pipes.standard import Store
 from ml_pipes.tensor import TensorPayload
-from ml_pipes.torch import ToTorch, TorchExtract, TorchInfer, TorchSqueeze
-from ml_pipes.torch.types import TorchTensorRegistry
+from ml_pipes.torch import ToTorch, Extract, Infer, Squeeze
+from ml_pipes.torch.types import TensorRegistry
 from ml_pipes.vision import (
     ConvertColorSpace,
     Decode,
@@ -141,7 +141,7 @@ class PrepareHFImageInputs:
 def build_mask2former_infer_pipeline(
     bundle: Mask2FormerBundle,
     device: str,
-) -> Pipeline[str | Path, TorchTensorRegistry]:
+) -> Pipeline[str | Path, TensorRegistry]:
     return Pipeline(
         [
             LoadFile(),
@@ -151,14 +151,14 @@ def build_mask2former_infer_pipeline(
             ConvertColorSpace("RGB"),
             PrepareHFImageInputs(processor=bundle.processor, output_key="pixel_values"),
             ToTorch(device=device),
-            TorchInfer(
+            Infer(
                 bundle.model,
                 input_name="pixel_values",
                 input_layout="NCHW",
             ),
-            TorchExtract("class_queries_logits", "masks_queries_logits"),
-            TorchSqueeze("class_queries_logits", axis=0),
-            TorchSqueeze("masks_queries_logits", axis=0),
+            Extract("class_queries_logits", "masks_queries_logits"),
+            Squeeze("class_queries_logits", axis=0),
+            Squeeze("masks_queries_logits", axis=0),
         ]
     )
 

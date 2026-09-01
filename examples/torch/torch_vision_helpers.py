@@ -6,20 +6,19 @@ from typing import Literal, get_args
 import torch
 
 from ml_pipes.operator import Operator
-from .tensor_ops import TorchFilterTensors
-from .types import TorchTensorRegistry
+from ml_pipes.torch import FilterTensors, TensorRegistry
 
 __all__ = [
-    "TorchConvertBoxFormat",
-    "TorchFilterTensorsByScore",
-    "TorchFilterTensorsByClasses",
-    "TorchFilterTensorsByMasksArea",
-    "TorchWeightMasksByScores",
-    "TorchResizeMasks",
-    "TorchMeanMaskScores",
-    "TorchMasksToBoxes",
-    "TorchReconstructMasks",
-    "TorchNMS",
+    "ConvertBoxFormat",
+    "FilterTensorsByScore",
+    "FilterTensorsByClasses",
+    "FilterTensorsByMasksArea",
+    "WeightMasksByScores",
+    "ResizeMasks",
+    "MeanMaskScores",
+    "MasksToBoxes",
+    "ReconstructMasks",
+    "NMS",
 ]
 
 BoxFormat = Literal["xyxy", "xywh", "cxcywh"]
@@ -27,7 +26,7 @@ _BOX_FORMATS: frozenset[str] = frozenset(get_args(BoxFormat))
 
 
 @Operator
-class TorchConvertBoxFormat:
+class ConvertBoxFormat:
     def __init__(
         self,
         src: str = "boxes",
@@ -38,16 +37,16 @@ class TorchConvertBoxFormat:
     ):
         if from_ not in _BOX_FORMATS:
             raise ValueError(
-                f"TorchConvertBoxFormat: unknown from_ format {from_!r}. Choose from {sorted(_BOX_FORMATS)}"
+                f"ConvertBoxFormat: unknown from_ format {from_!r}. Choose from {sorted(_BOX_FORMATS)}"
             )
         if to not in _BOX_FORMATS:
-            raise ValueError(f"TorchConvertBoxFormat: unknown to format {to!r}. Choose from {sorted(_BOX_FORMATS)}")
+            raise ValueError(f"ConvertBoxFormat: unknown to format {to!r}. Choose from {sorted(_BOX_FORMATS)}")
         self.src = src
         self.from_ = from_
         self.to = to
         self.as_ = as_ or src
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         boxes = registry[self.src]
         registry[self.as_] = self._convert(boxes, self.from_, self.to)
         return registry
@@ -78,7 +77,7 @@ class TorchConvertBoxFormat:
 
 
 @Operator
-class TorchFilterTensorsByScore:
+class FilterTensorsByScore:
     def __init__(
         self,
         *srcs: str,
@@ -87,19 +86,19 @@ class TorchFilterTensorsByScore:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (score,) + tuple(src for src in srcs if src != score)
-        self._inner = TorchFilterTensors(
+        self._inner = FilterTensors(
             *all_srcs,
             by=score,
             predicate=lambda scores: scores >= min_score,
             as_=as_,
         )
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
 
 
 @Operator
-class TorchFilterTensorsByClasses:
+class FilterTensorsByClasses:
     """Filters tensors by class id membership."""
 
     def __init__(
@@ -111,7 +110,7 @@ class TorchFilterTensorsByClasses:
     ):
         all_srcs = (classes,) + tuple(src for src in srcs if src != classes)
         allowed = tuple(keep_classes)
-        self._inner = TorchFilterTensors(
+        self._inner = FilterTensors(
             *all_srcs,
             by=classes,
             predicate=lambda values: torch.isin(
@@ -121,12 +120,12 @@ class TorchFilterTensorsByClasses:
             as_=as_,
         )
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
 
 
 @Operator
-class TorchFilterTensorsByMasksArea:
+class FilterTensorsByMasksArea:
     def __init__(
         self,
         *srcs: str,
@@ -135,25 +134,25 @@ class TorchFilterTensorsByMasksArea:
         as_: str | tuple[str, ...] | None = None,
     ):
         all_srcs = (masks,) + tuple(src for src in srcs if src != masks)
-        self._inner = TorchFilterTensors(
+        self._inner = FilterTensors(
             *all_srcs,
             by=masks,
             predicate=lambda tensor: tensor.to(dtype=torch.bool).flatten(1).sum(dim=1) >= min_area,
             as_=as_,
         )
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         return self._inner(registry)
 
 
 @Operator
-class TorchWeightMasksByScores:
+class WeightMasksByScores:
     def __init__(self, masks: str = "masks", scores: str = "scores", *, as_: str):
         self.masks = masks
         self.scores = scores
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         scores = registry[self.scores]
         masks = registry[self.masks]
         expanded_scores = scores.reshape((scores.shape[0],) + (1,) * (masks.ndim - 1))
@@ -162,14 +161,14 @@ class TorchWeightMasksByScores:
 
 
 @Operator
-class TorchResizeMasks:
+class ResizeMasks:
     """Resizes a stack of masks to a target shape."""
 
     def __init__(self, masks: str = "masks", as_: str | None = None):
         self.masks = masks
         self.as_ = as_ or masks
 
-    def __call__(self, registry: TorchTensorRegistry, image_shape: tuple[int, int]) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry, image_shape: tuple[int, int]) -> TensorRegistry:
         masks = registry[self.masks]
         resized = torch.nn.functional.interpolate(
             masks[:, None, :, :],
@@ -182,7 +181,7 @@ class TorchResizeMasks:
 
 
 @Operator
-class TorchMeanMaskScores:
+class MeanMaskScores:
     """Computes one score per instance by averaging dense mask scores over its mask."""
 
     def __init__(
@@ -196,7 +195,7 @@ class TorchMeanMaskScores:
         self.masks = masks
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         mask_scores = registry[self.mask_scores]
         masks = registry[self.masks]
         areas = masks.flatten(1).sum(dim=1)
@@ -209,12 +208,12 @@ class TorchMeanMaskScores:
 
 
 @Operator
-class TorchMasksToBoxes:
+class MasksToBoxes:
     def __init__(self, masks: str = "masks", *, as_: str):
         self.masks = masks
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         masks = registry[self.masks]
         count = masks.shape[0]
         if count == 0:
@@ -236,13 +235,13 @@ class TorchMasksToBoxes:
 
 
 @Operator
-class TorchReconstructMasks:
+class ReconstructMasks:
     def __init__(self, coefficients: str, prototypes: str, as_: str):
         self.coefficients = coefficients
         self.prototypes = prototypes
         self.as_ = as_
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         coefficients = registry[self.coefficients]
         prototypes = registry[self.prototypes]
         channels, mask_h, mask_w = prototypes.shape
@@ -252,7 +251,7 @@ class TorchReconstructMasks:
 
 
 @Operator
-class TorchNMS:
+class NMS:
     def __init__(
         self,
         boxes: str = "boxes",
@@ -271,7 +270,7 @@ class TorchNMS:
         self.iou_threshold = iou_threshold
         self.max_detections = max_detections
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         boxes = registry[self.boxes]
         scores = registry[self.scores]
         classes = registry[self.classes]

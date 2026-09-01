@@ -113,9 +113,9 @@ runtime step itself.
 The nearby package crossings are:
 
 - Task-package preprocessing creates a `TensorPayload`
-- `Extract()` from `ml_pipes.onnx` creates a `TensorRegistry`
-- `ToNumpy()` and `ToNumpyRegistry()` from `ml_pipes.torch` return back to the
-  Tensor domain
+- `onnx.Extract()` creates a `TensorRegistry`
+- `torch.ToNumpy()` and `torch.ToNumpyRegistry()` return back to the Tensor
+  domain
 - Task packages interpret, render, log, or otherwise finalize named tensors in
   the registry
 
@@ -131,7 +131,7 @@ At a high level, a common flow looks like this:
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Runtime Domain                                           │
-├─ Infer / TorchInfer / ...                                │
+├─ onnx.Infer / torch.Infer / ...                        │
 └────────┬─────────────────────────────────────────────────┘
          |
          | Extract / ToNumpyRegistry

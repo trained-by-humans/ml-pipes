@@ -289,8 +289,8 @@ uv sync --group shared-framework --group torch
 # Published package setup
 python -m pip install 'ml-pipes[torch,vision]'
 
-# Model-specific dependencies for the Mask2Former weights
-python -m pip install transformers safetensors scipy
+# Model-specific dependencies for the Mask2Former weights and local Torch Vision helpers
+python -m pip install transformers safetensors scipy torchvision
 ```
 
 Example command:

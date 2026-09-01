@@ -28,29 +28,31 @@ from ml_pipes.standard import Recall
 from ml_pipes.vision import LogDetections
 from ml_pipes.torch import (
     ToNumpyRegistry,
-    TorchArgMax,
-    TorchBinarizeTensorByThreshold,
-    TorchFilterTensorsByMasksArea,
-    TorchFilterTensorsByScore,
-    TorchGatherScores,
-    TorchMasksToBoxes,
-    TorchMeanMaskScores,
-    TorchMultiplyTensors,
-    TorchResizeMasks,
-    TorchSelectTensors,
-    TorchSigmoid,
-    TorchSlice,
-    TorchSortTensorsBy,
-    TorchSoftmax,
-    TorchTopKIndices2D,
-    TorchWeightMasksByScores,
+    ArgMax,
+    BinarizeTensorByThreshold,
+    GatherScores,
+    MultiplyTensors,
+    SelectTensors,
+    Sigmoid,
+    Slice,
+    SortTensorsBy,
+    Softmax,
+    TopKIndices2D,
 )
-from ml_pipes.torch.types import TorchTensorRegistry
+from ml_pipes.torch.types import TensorRegistry
 from .mask2former_infer import (
     Mask2FormerBundle,
     add_mask2former_args,
     build_mask2former_infer_pipeline,
     resolve_output_path,
+)
+from .torch_vision_helpers import (
+    FilterTensorsByMasksArea,
+    FilterTensorsByScore,
+    MasksToBoxes,
+    MeanMaskScores,
+    ResizeMasks,
+    WeightMasksByScores,
 )
 
 _TOP_K = 100
@@ -136,7 +138,7 @@ class TorchPanopticSegmentsFromQueries:
         self.mask_threshold = mask_threshold
         self.overlap_threshold = overlap_threshold
 
-    def __call__(self, registry: TorchTensorRegistry) -> TorchTensorRegistry:
+    def __call__(self, registry: TensorRegistry) -> TensorRegistry:
         kept_scores = registry[self.scores]
         kept_classes = registry[self.classes]
         kept_masks = registry[self.masks]
@@ -195,21 +197,21 @@ def build_torch_postprocess_pipeline(
     bundle: Mask2FormerBundle,
     input_path: Path,
     output_path: Path,
-) -> Pipeline[TorchTensorRegistry, object]:
+) -> Pipeline[TensorRegistry, object]:
     if bundle.task == "panoptic":
         postprocess_pipeline = Pipeline([
             Recall("image_shape"),
-            TorchResizeMasks(masks="masks_queries_logits"),
-            TorchSoftmax("class_queries_logits", as_="class_probs"),
-            TorchSlice("class_probs", slice(None, -1)),
-            TorchSigmoid("masks_queries_logits", as_="mask_probs"),
-            TorchArgMax("class_probs", as_="query_classes"),
-            TorchGatherScores("class_probs", "query_classes", as_="query_scores"),
-            TorchFilterTensorsByScore(
+            ResizeMasks(masks="masks_queries_logits"),
+            Softmax("class_queries_logits", as_="class_probs"),
+            Slice("class_probs", slice(None, -1)),
+            Sigmoid("masks_queries_logits", as_="mask_probs"),
+            ArgMax("class_probs", as_="query_classes"),
+            GatherScores("class_probs", "query_classes", as_="query_scores"),
+            FilterTensorsByScore(
                 "query_classes", "mask_probs", score="query_scores", min_score=_SCORE_THRESHOLD
             ),
-            TorchWeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
-            TorchArgMax("weighted_masks", axis=0, as_="winner_ids"),
+            WeightMasksByScores("mask_probs", "query_scores", as_="weighted_masks"),
+            ArgMax("weighted_masks", axis=0, as_="winner_ids"),
             TorchPanopticSegmentsFromQueries(
                 thing_class_ids=bundle.thing_class_ids,
                 scores="query_scores",
@@ -219,7 +221,7 @@ def build_torch_postprocess_pipeline(
                 mask_threshold=_MASK_THRESHOLD,
                 overlap_threshold=_OVERLAP_THRESHOLD,
             ),
-            TorchMasksToBoxes(as_="boxes"),
+            MasksToBoxes(as_="boxes"),
             ToNumpyRegistry(),
             inline(visualize_and_store(output_path, bundle.class_names)),
             LogDetections(bundle.model_id, input_path, output_path, at=1),
@@ -227,25 +229,25 @@ def build_torch_postprocess_pipeline(
     else:
         postprocess_pipeline = Pipeline([
             Recall("image_shape"),
-            TorchResizeMasks(masks="masks_queries_logits"),
-            TorchSoftmax("class_queries_logits", as_="class_probs"),
-            TorchSlice("class_probs", slice(None, -1)),
-            TorchSigmoid("masks_queries_logits", as_="mask_probs"),
-            TorchTopKIndices2D(
+            ResizeMasks(masks="masks_queries_logits"),
+            Softmax("class_queries_logits", as_="class_probs"),
+            Slice("class_probs", slice(None, -1)),
+            Sigmoid("masks_queries_logits", as_="mask_probs"),
+            TopKIndices2D(
                 "class_probs",
                 k=_TOP_K,
                 values_as="top_scores",
                 row_indices_as="query_indices",
                 col_indices_as="classes",
             ),
-            TorchSelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
-            TorchBinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="masks"),
-            TorchMeanMaskScores(mask_scores="selected_masks", masks="masks", as_="mean_mask_scores"),
-            TorchMultiplyTensors("top_scores", "mean_mask_scores", as_="scores"),
-            TorchFilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=1),
-            TorchFilterTensorsByScore("masks", "classes", score="scores", min_score=_SCORE_THRESHOLD),
-            TorchSortTensorsBy("masks", "classes", by="scores"),
-            TorchMasksToBoxes(masks="masks", as_="boxes"),
+            SelectTensors("mask_probs", indices="query_indices", as_="selected_masks"),
+            BinarizeTensorByThreshold("selected_masks", threshold=_MASK_THRESHOLD, as_="masks"),
+            MeanMaskScores(mask_scores="selected_masks", masks="masks", as_="mean_mask_scores"),
+            MultiplyTensors("top_scores", "mean_mask_scores", as_="scores"),
+            FilterTensorsByMasksArea("scores", "classes", masks="masks", min_area=1),
+            FilterTensorsByScore("masks", "classes", score="scores", min_score=_SCORE_THRESHOLD),
+            SortTensorsBy("masks", "classes", by="scores"),
+            MasksToBoxes(masks="masks", as_="boxes"),
             ToNumpyRegistry(),
             inline(visualize_and_store(output_path, bundle.class_names)),
             LogDetections(bundle.model_id, input_path, output_path, at=1),

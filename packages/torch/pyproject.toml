@@ -34,7 +34,6 @@ dependencies = [
     "ml-pipes-tensor==0.1.0rc2",
     "numpy>=1.26",
     "torch",
-    "torchvision",
 ]
 
 [project.urls]

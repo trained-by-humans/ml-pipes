@@ -368,7 +368,8 @@ inspect, trace, and benchmark as standalone boundaries.
 - In-place mutation is acceptable when the payload is already mutation-oriented
   and that keeps the pipeline clearer.
 - Use a registry-style payload when many operators cooperatively read and write
-  named intermediate slots, as with `TensorRegistry` or `TorchTensorRegistry`.
+  named intermediate slots, as with `tensor.TensorRegistry` or
+  `torch.TensorRegistry`.
 
 ### Naming And Aliases
 

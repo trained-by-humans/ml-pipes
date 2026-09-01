@@ -79,21 +79,21 @@ At a high level, a common flow looks like this:
 ├─ LoadFile -> Decode -> Resize -> Normalize               │
 └────────┬─────────────────────────────────────────────────┘
          |
-         | TensorPayload
+         | tensor.TensorPayload
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Runtime + Tensor Domains                                 │
-├─ Infer / TorchInfer -> Extract -> Slice -> ArgMax -> ... │
+├─ Infer -> Extract -> Slice -> ArgMax -> ...              │
 └────────┬─────────────────────────────────────────────────┘
          |
-         | TensorRegistry
+         | tensor.TensorRegistry
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Vision Tensor Postprocess                                │
 ├─ ProjectBoxes / ProjectMasks / ResizeMasks -> ...        │
 └────────┬─────────────────────────────────────────────────┘
          |
-         | TensorRegistry
+         | tensor.TensorRegistry
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Registry Rendering And Side Effects                       │
