@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -13,15 +14,36 @@ from ml_pipes.inspection import (
     GroupBlock,
     HtmlRenderer,
     ImageBlock,
+    InspectionWarning,
     InspectionResult,
     PipelineInspector,
     StepView,
     TextBlock,
     ndarray_image_formatter,
-    register_value_formatter,
+    pydantic_model_formatter,
 )
+from ml_pipes.inspection._global_registry import register_value_formatter
 from ml_pipes.inspection.registry import FormatterRegistry
 from ml_pipes.tracing import StepSpan
+
+
+class _PydanticBaseModel:
+    pass
+
+
+class _PydanticV2Model(_PydanticBaseModel):
+    model_fields = {"label": object(), "payload": object()}
+
+    def __init__(self, label: str, payload: object) -> None:
+        self.label = label
+        self.payload = payload
+
+
+class _PydanticV1Model:
+    __fields__ = {"score": object()}
+
+    def __init__(self, score: float) -> None:
+        self.score = score
 
 
 def _inspection_result() -> InspectionResult:
@@ -103,12 +125,12 @@ def test_formatter_registry_requires_explicit_value_formatter_override() -> None
         ValueError,
         match=(
             "A value formatter is already registered for type 'builtins\\.str'\\. "
-            "Set allow_override=True to explicitly replace it\\."
+            "Set override=True to explicitly replace it\\."
         ),
     ):
         registry.register_value_formatter(str, formatter)
 
-    registry.register_value_formatter(str, formatter, allow_override=True)
+    registry.register_value_formatter(str, formatter, override=True)
 
 
 def test_formatter_registry_requires_explicit_step_formatter_override() -> None:
@@ -125,11 +147,11 @@ def test_formatter_registry_requires_explicit_step_formatter_override() -> None:
 
     with pytest.raises(
         ValueError,
-        match="A step formatter is already registered.*allow_override=True to explicitly replace it",
+        match="A step formatter is already registered.*override=True to explicitly replace it",
     ):
         registry.register_step_formatter(PacketOp, formatter)
 
-    registry.register_step_formatter(PacketOp, formatter, allow_override=True)
+    registry.register_step_formatter(PacketOp, formatter, override=True)
 
 
 def test_pipeline_inspector_render_supports_vertical_orientation():
@@ -326,6 +348,157 @@ def test_pipeline_inspector_formats_mapping_as_group_blocks():
     started_at = blocks[0].children[1]
     assert isinstance(started_at, TextBlock)
     assert started_at.rows == [("started_at", "2.5")]
+
+
+def test_pydantic_model_formatter_renders_declared_v2_fields_without_limits():
+    inspector = PipelineInspector().register_value_formatter(
+        _PydanticBaseModel,
+        pydantic_model_formatter(),
+    )
+    value = _PydanticV2Model(
+        "detected",
+        {"predictions": [{"class": "person"} for _ in range(13)]},
+    )
+
+    blocks = inspector._value_to_blocks(value)
+
+    assert len(blocks) == 1
+    assert isinstance(blocks[0], GroupBlock)
+    assert blocks[0].title == "_PydanticV2Model"
+    assert blocks[0].children[0] == TextBlock("", [("label", "detected")])
+
+    payload = blocks[0].children[1]
+    assert isinstance(payload, GroupBlock)
+    assert payload.title == "payload: dict"
+    predictions = payload.children[0]
+    assert isinstance(predictions, GroupBlock)
+    assert predictions.title == "predictions: list[dict]  ×13"
+    assert len(predictions.children) == 13
+    assert [child.title for child in predictions.children[:3]] == ["[0]", "[1]", "[2]"]
+
+
+def test_pydantic_model_formatter_renders_declared_v1_fields():
+    inspector = PipelineInspector().register_value_formatter(
+        _PydanticV1Model,
+        pydantic_model_formatter(),
+    )
+
+    blocks = inspector._value_to_blocks(_PydanticV1Model(0.9))
+
+    assert blocks == [GroupBlock("_PydanticV1Model", [TextBlock("", [("score", "0.9")])])]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_depth": 0}, "max_depth"),
+    ],
+)
+def test_pydantic_model_formatter_rejects_invalid_limits(kwargs: dict[str, object], message: str):
+    with pytest.raises(ValueError, match=message):
+        pydantic_model_formatter(**kwargs)  # type: ignore[arg-type]
+
+
+def test_pydantic_model_formatter_applies_depth_limit():
+    depth_limited = PipelineInspector().register_value_formatter(
+        _PydanticBaseModel,
+        pydantic_model_formatter(max_depth=1),
+    )
+    depth_blocks = depth_limited._value_to_blocks(_PydanticV2Model("detected", {"prediction": "person"}))
+
+    assert depth_blocks == [
+        GroupBlock(
+            "_PydanticV2Model",
+            [
+                TextBlock("", [("label", "detected")]),
+                TextBlock("", [("payload", "maximum depth reached")]),
+            ],
+        )
+    ]
+
+def test_pydantic_list_uses_standard_report_compaction():
+    inspector = PipelineInspector().register_value_formatter(
+        _PydanticBaseModel,
+        pydantic_model_formatter(),
+    )
+    result = InspectionResult(
+        [
+            StepSpan(
+                label="0:response",
+                start_time=0.0,
+                duration_s=0.01,
+                output_value=_PydanticV2Model(
+                    "detected",
+                    [{"class": "person"} for _ in range(10)],
+                ),
+            )
+        ]
+    )
+
+    block = inspector.build_views(result)[0].blocks[0]
+
+    assert isinstance(block, GroupBlock)
+    predictions = block.children[1]
+    assert isinstance(predictions, TextBlock)
+    assert predictions.title == "payload: list  ×10"
+    assert predictions.rows[-1] == ("…", "+4 more")
+
+
+def test_pydantic_model_formatter_detects_cycles():
+    payload: dict[str, object] = {}
+    payload["self"] = payload
+    cyclic = PipelineInspector().register_value_formatter(
+        _PydanticBaseModel,
+        pydantic_model_formatter(),
+    )
+    cyclic_blocks = cyclic._value_to_blocks(_PydanticV2Model("detected", payload))
+
+    payload_group = cyclic_blocks[0]
+    assert isinstance(payload_group, GroupBlock)
+    recursive = payload_group.children[1]
+    assert isinstance(recursive, GroupBlock)
+    assert recursive.children == [TextBlock("", [("self", "<recursive dict>")])]
+
+
+def test_pydantic_model_formatter_can_be_overridden_for_a_concrete_model():
+    class ConcretePydanticModel(_PydanticV2Model):
+        pass
+
+    inspector = PipelineInspector().register_value_formatter(
+        _PydanticBaseModel,
+        pydantic_model_formatter(),
+    ).register_value_formatter(
+        ConcretePydanticModel,
+        lambda _value: [TextBlock("custom", [("source", "application")])],
+    )
+
+    assert inspector._value_to_blocks(ConcretePydanticModel("detected", {})) == [
+        TextBlock("custom", [("source", "application")])
+    ]
+
+
+def test_pipeline_inspector_warns_and_falls_back_for_unavailable_pydantic_models():
+    class MissingPydanticBaseModel:
+        pass
+
+    MissingPydanticBaseModel.__name__ = "BaseModel"
+    MissingPydanticBaseModel.__module__ = "pydantic.main"
+
+    class MissingPydanticModel(MissingPydanticBaseModel):
+        pass
+
+    inspector = PipelineInspector()
+    inspector.register_value_formatter(object, lambda _value: [TextBlock("object", [("", "unexpected")])])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        first = inspector._value_to_blocks(MissingPydanticModel())
+        second = inspector._value_to_blocks(MissingPydanticModel())
+
+    matching = [warning for warning in caught if issubclass(warning.category, InspectionWarning)]
+    assert len(matching) == 1
+    assert "Pydantic is unavailable" in str(matching[0].message)
+    assert first[0].title == "MissingPydanticModel"
+    assert second[0].title == "MissingPydanticModel"
 
 
 def test_pipeline_inspector_keeps_full_scalar_text_before_compaction():

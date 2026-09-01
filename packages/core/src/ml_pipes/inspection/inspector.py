@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -48,6 +49,17 @@ def _is_primitive_tuple(value: tuple[Any, ...]) -> bool:
     return bool(value) and all(isinstance(item, primitive_types) for item in value)
 
 
+class InspectionWarning(UserWarning):
+    """Warning emitted when inspection must degrade its value rendering."""
+
+
+def _pydantic_base_model_type(value: Any) -> type[Any] | None:
+    for base in type(value).__mro__:
+        if base.__name__ == "BaseModel" and base.__module__.startswith("pydantic"):
+            return base
+    return None
+
+
 class PipelineInspector:
     """Converts an InspectionResult into views and renders them."""
 
@@ -58,20 +70,21 @@ class PipelineInspector:
         ensure_builtin_formatters_registered()
         self._renderer: HtmlRenderer = HtmlRenderer()
         self._formatters = FormatterRegistry(parent=global_formatter_registry())
+        self._warned_value_types: set[type[Any]] = set()
 
     def register_value_formatter(
         self,
         value_type: type[ValueT],
         formatter: ValueFormatter[ValueT],
         *,
-        allow_override: bool = False,
+        override: bool = False,
     ) -> "PipelineInspector":
         """Register a formatter for inspected values of *value_type*. Returns self for chaining."""
 
         self._formatters.register_value_formatter(
             value_type,
             formatter,
-            allow_override=allow_override,
+            override=override,
         )
         return self
 
@@ -80,16 +93,23 @@ class PipelineInspector:
         operator_type: type[Any],
         formatter: StepFormatter,
         *,
-        allow_override: bool = False,
+        override: bool = False,
     ) -> "PipelineInspector":
         """Register a formatter for inspected steps of *operator_type*. Returns self for chaining."""
 
         self._formatters.register_step_formatter(
             operator_type,
             formatter,
-            allow_override=allow_override,
+            override=override,
         )
         return self
+
+    def _warn_for_value(self, value: Any, message: str) -> None:
+        value_type = type(value)
+        if value_type in self._warned_value_types:
+            return
+        warnings.warn(message, InspectionWarning, stacklevel=3)
+        self._warned_value_types.add(value_type)
 
     def build_views(self, result: InspectionResult) -> list[StepView]:
         """Prepare the intermediate StepView tree from spans for built-in or custom renderers."""
@@ -200,6 +220,20 @@ class PipelineInspector:
                 return [self._list_to_group(value, active_ids)]
             finally:
                 active_ids.remove(value_id)
+
+        pydantic_base_model = _pydantic_base_model_type(value)
+        if (
+            pydantic_base_model is not None
+            and self._formatters._find_exact_value_formatter(pydantic_base_model) is None
+        ):
+            value_type = type(value)
+            self._warn_for_value(
+                value,
+                f"Pydantic is unavailable, so inspection cannot structurally render "
+                f"{value_type.__module__}.{value_type.__qualname__}; using repr instead.",
+            )
+            text = value if isinstance(value, str) else repr(value)
+            return [TextBlock(type(value).__name__, [("", text)])]
 
         formatter = self._formatters.find_value_formatter(type(value))
         if formatter is not None:

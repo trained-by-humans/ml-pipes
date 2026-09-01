@@ -7,6 +7,7 @@ __all__ = [
     "GroupBlock",
     "HtmlRenderer",
     "ImageBlock",
+    "InspectionWarning",
     "InspectionResult",
     "InspectionSerializer",
     "Orientation",
@@ -16,14 +17,14 @@ __all__ = [
     "StepView",
     "TextBlock",
     "ndarray_image_formatter",
-    "register_step_formatter",
-    "register_value_formatter",
+    "pydantic_model_formatter",
 ]
 
 _LAZY_EXPORTS = {
     "GroupBlock": (".views", "GroupBlock"),
     "HtmlRenderer": (".html_renderer", "HtmlRenderer"),
     "ImageBlock": (".views", "ImageBlock"),
+    "InspectionWarning": (".inspector", "InspectionWarning"),
     "InspectionResult": (".artifacts", "InspectionResult"),
     "InspectionSerializer": (".artifacts", "InspectionSerializer"),
     "Orientation": (".renderer", "Orientation"),
@@ -33,17 +34,15 @@ _LAZY_EXPORTS = {
     "StepView": (".views", "StepView"),
     "TextBlock": (".views", "TextBlock"),
     "ndarray_image_formatter": ("._builtin_formatters", "ndarray_image_formatter"),
-    "register_step_formatter": ("._global_registry", "register_step_formatter"),
-    "register_value_formatter": ("._global_registry", "register_value_formatter"),
+    "pydantic_model_formatter": ("._builtin_formatters", "pydantic_model_formatter"),
 }
 
 if TYPE_CHECKING:
     from ml_pipes.inspection.artifacts import InspectionResult, InspectionSerializer
     from ml_pipes.inspection.html_renderer import HtmlRenderer
     from ml_pipes.inspection.renderer import Orientation, Renderer
-    from ml_pipes.inspection.inspector import PipelineInspector
-    from ml_pipes.inspection._builtin_formatters import ndarray_image_formatter
-    from ml_pipes.inspection._global_registry import register_step_formatter, register_value_formatter
+    from ml_pipes.inspection.inspector import InspectionWarning, PipelineInspector
+    from ml_pipes.inspection._builtin_formatters import ndarray_image_formatter, pydantic_model_formatter
     from ml_pipes.inspection.views import GroupBlock, ImageBlock, OutputBlock, StepView, TextBlock
 
 

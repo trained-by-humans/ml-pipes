@@ -150,6 +150,8 @@ Out of the box, inspection can render:
 - primitive and otherwise unformatted values as text
 - tuples and lists as ordered values or groups
 - mappings and dataclasses as named groups
+- Pydantic v1 and v2 models as groups of their declared public fields when
+  Pydantic is installed
 - nested structures, with recursive-reference protection and preview
   compaction
 
@@ -186,36 +188,40 @@ inspector.register_step_formatter(MyOperator, format_my_operator_step)
 
 > [!IMPORTANT]
 > Registering a formatter for the same type twice raises an error by default.
-> Set `allow_override=True` only when you intentionally want to replace that
+> Set `override=True` only when you intentionally want to replace that
 > inspector's existing formatter.
 
-### Register Formatters Automatically
+### Pydantic Models
 
-Register a formatter globally when it should be used every time your application
-or package inspects a pipeline. Register it once at import time instead of
-passing the formatter to each `PipelineInspector`. Global formatters are
-available to all inspectors, unless an inspector registers its own formatter
-for the same type.
+When Pydantic is installed, inspection automatically registers a generic
+formatter for `pydantic.BaseModel`. It renders declared model fields using the
+v2 `model_fields` or v1 `__fields__` API; private attributes, extras, computed
+fields, aliases, and arbitrary properties are not included. Register a
+formatter for a concrete response type when a concise domain-specific summary
+is more useful.
+
+`pydantic_model_formatter()` creates the generic structural formatter. It
+processes every declared field and nested value, while always detecting
+recursive references. Set `max_depth` explicitly when inspection must bound
+nesting traversal:
 
 ```python
-from ml_pipes.inspection import (
-    TextBlock,
-    register_step_formatter,
-    register_value_formatter,
-)
+from pydantic import BaseModel
 
-# Register a value formatter at import time.
-register_value_formatter(
-    Prediction,
-    lambda value: [TextBlock("Prediction", [("label", value.label)])],
+from ml_pipes.inspection import PipelineInspector, pydantic_model_formatter
+
+inspector = PipelineInspector().register_value_formatter(
+    BaseModel,
+    pydantic_model_formatter(max_depth=4),
 )
-# Register an operator-step formatter at import time.
-register_step_formatter(MyOperator, format_my_operator_step)
 ```
 
-> [!IMPORTANT]
-> The same duplicate-registration guard applies globally. Set
-> `allow_override=True` only when intentionally replacing a global formatter.
+`max_depth` accepts a positive integer or `None`; `None` leaves nesting
+unbounded.
+
+If a captured Pydantic model is encountered while Pydantic itself is
+unavailable, inspection emits `InspectionWarning` once for that model type and
+uses the normal text representation instead.
 
 ### Raw Image Arrays
 

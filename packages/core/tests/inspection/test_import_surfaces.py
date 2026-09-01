@@ -105,6 +105,93 @@ def test_pipeline_inspector_follows_imported_package_chain_without_vision_or_onn
     assert lines[4] == "[]"
 
 
+def test_pipeline_inspector_registers_pydantic_formatter_when_pydantic_is_available() -> None:
+    result = _run_python(
+        "import sys\n"
+        "from types import ModuleType\n"
+        "pydantic = ModuleType('pydantic')\n"
+        "class BaseModel:\n"
+        "    pass\n"
+        "pydantic.BaseModel = BaseModel\n"
+        "sys.modules['pydantic'] = pydantic\n"
+        "from ml_pipes.inspection import GroupBlock, PipelineInspector\n"
+        "class Response(BaseModel):\n"
+        "    model_fields = {'prediction_count': object()}\n"
+        "    def __init__(self):\n"
+        "        self.prediction_count = 2\n"
+        "blocks = PipelineInspector()._value_to_blocks(Response())\n"
+        "print(type(blocks[0]).__name__)\n"
+        "print(blocks[0].title)\n"
+        "print(blocks[0].children[0].rows[0][0])\n"
+        "print(blocks[0].children[0].rows[0][1])\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines() == [
+        "GroupBlock",
+        "Response",
+        "prediction_count",
+        "2",
+    ]
+
+
+def test_pipeline_inspector_registers_pydantic_v1_compatibility_formatter() -> None:
+    result = _run_python(
+        "import sys\n"
+        "from types import ModuleType\n"
+        "pydantic = ModuleType('pydantic')\n"
+        "pydantic.__path__ = []\n"
+        "pydantic_v1 = ModuleType('pydantic.v1')\n"
+        "class BaseModel:\n"
+        "    pass\n"
+        "class PydanticV1BaseModel:\n"
+        "    pass\n"
+        "pydantic.BaseModel = BaseModel\n"
+        "pydantic_v1.BaseModel = PydanticV1BaseModel\n"
+        "sys.modules['pydantic'] = pydantic\n"
+        "sys.modules['pydantic.v1'] = pydantic_v1\n"
+        "from ml_pipes.inspection import GroupBlock, PipelineInspector\n"
+        "class Response(PydanticV1BaseModel):\n"
+        "    __fields__ = {'prediction_count': object()}\n"
+        "    def __init__(self):\n"
+        "        self.prediction_count = 2\n"
+        "blocks = PipelineInspector()._value_to_blocks(Response())\n"
+        "print(type(blocks[0]).__name__)\n"
+        "print(blocks[0].title)\n"
+        "print(blocks[0].children[0].rows[0][0])\n"
+        "print(blocks[0].children[0].rows[0][1])\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines() == [
+        "GroupBlock",
+        "Response",
+        "prediction_count",
+        "2",
+    ]
+
+
+def test_global_formatter_registration_initializes_builtins_before_overriding_them() -> None:
+    result = _run_python(
+        "import numpy as np\n"
+        "from ml_pipes.inspection._global_registry import (\n"
+        "    global_formatter_registry, register_step_formatter, register_value_formatter\n"
+        ")\n"
+        "from ml_pipes.inspection.views import TextBlock\n"
+        "from ml_pipes.region import RegionOpener\n"
+        "value_formatter = lambda _: [TextBlock('custom', [])]\n"
+        "step_formatter = lambda span, image: (None, image)\n"
+        "register_value_formatter(np.ndarray, value_formatter, override=True)\n"
+        "register_step_formatter(RegionOpener, step_formatter, override=True)\n"
+        "registry = global_formatter_registry()\n"
+        "print(registry.get_value_formatter(np.ndarray) is value_formatter)\n"
+        "print(registry.get_step_formatter(RegionOpener) is step_formatter)\n"
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines() == ["True", "True"]
+
+
 def test_type_only_inspection_exports_import_without_inspection_extra() -> None:
     result = _run_python(
         "import importlib.abc\n"
