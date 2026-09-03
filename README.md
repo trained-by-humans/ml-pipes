@@ -1,12 +1,19 @@
 # ml-pipes
 
-[![CI](https://github.com/trained-by-humans/ml-pipes/actions/workflows/ci.yml/badge.svg)](https://github.com/trained-by-humans/ml-pipes/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](https://github.com/trained-by-humans/ml-pipes)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/ml-pipes)](https://pypi.org/project/ml-pipes/)
 
+Join the [GitHub Discussions](https://github.com/trained-by-humans/ml-pipes/discussions) · Raise a request by [opening an issue](https://github.com/trained-by-humans/ml-pipes/issues)
+
 Build explicit ML pipelines you can validate, run, inspect, trace, and
 benchmark.
+
+> [!IMPORTANT]
+> **Project status: Alpha (pre-1.0).** `ml-pipes` is under active development.
+> Its core concepts and intended workflows are taking shape, while APIs,
+> package boundaries, and edge-case behavior may still change before `1.0`.
+> Pin dependency versions where reproducibility matters.
 
 `ml-pipes` is a framework for composing explicit ML pipelines. It consists of
 a core pipeline runtime and a set of installable domain-specific operator
@@ -354,16 +361,3 @@ Try it: [examples/benchmarks/run_yolo8_benchmark.py](examples/benchmarks/run_yol
 - **Browse the documentation** in [docs/README.md](docs/README.md).
 - **Wrap your own model** with
   [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
-
-## Help Shape ml-pipes
-
-> [!TIP]
-> Join the [GitHub Discussions](https://github.com/trained-by-humans/ml-pipes/discussions)
-> to help guide our development efforts by sharing what you're building and
-> your feedback.
->
-> Whether you're already using `ml-pipes` or just exploring explicit ML
-> pipelines, your input is useful.
->
-> If you hit a problem or want to request a feature, open an
-> [issue](https://github.com/trained-by-humans/ml-pipes/issues).
