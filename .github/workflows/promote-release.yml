@@ -77,13 +77,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-core
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-tensor:
     name: Publish PyPI Tensor
@@ -91,13 +91,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-tensor
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-vision:
     name: Publish PyPI Vision
@@ -105,13 +105,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-vision
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-onnx:
     name: Publish PyPI ONNX
@@ -119,13 +119,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-onnx
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-torch:
     name: Publish PyPI Torch
@@ -133,13 +133,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-torch
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   publish-pypi-meta:
     name: Publish PyPI Meta
@@ -147,13 +147,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes
       checkout_ref: ${{ inputs.tag }}
-    secrets:
-      package_index_api_token: ${{ secrets.PYPI_API_TOKEN }}
+      environment_name: pypi
 
   verify-pypi:
     name: Verify PyPI Packages
@@ -161,6 +161,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/verify-published-packages.yml
+    secrets: inherit
     with:
       target_name: PyPI
       index_url: https://pypi.org/simple/

@@ -104,13 +104,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-core
       checkout_ref: ${{ github.ref }}
-    secrets:
-      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      environment_name: test-pypi
 
   publish-testpypi-tensor:
     name: Publish TestPyPI Tensor
@@ -118,13 +118,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-tensor
       checkout_ref: ${{ github.ref }}
-    secrets:
-      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      environment_name: test-pypi
 
   publish-testpypi-vision:
     name: Publish TestPyPI Vision
@@ -132,13 +132,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-vision
       checkout_ref: ${{ github.ref }}
-    secrets:
-      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      environment_name: test-pypi
 
   publish-testpypi-onnx:
     name: Publish TestPyPI ONNX
@@ -146,13 +146,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-onnx
       checkout_ref: ${{ github.ref }}
-    secrets:
-      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      environment_name: test-pypi
 
   publish-testpypi-torch:
     name: Publish TestPyPI Torch
@@ -160,13 +160,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes-torch
       checkout_ref: ${{ github.ref }}
-    secrets:
-      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      environment_name: test-pypi
 
   publish-testpypi-meta:
     name: Publish TestPyPI Meta
@@ -174,13 +174,13 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/publish-artifacts-to-index.yml
+    secrets: inherit
     with:
       index_url_base: https://test.pypi.org
       repository_url: https://test.pypi.org/legacy/
       dist_name: ml-pipes
       checkout_ref: ${{ github.ref }}
-    secrets:
-      package_index_api_token: ${{ secrets.TEST_PYPI_API_TOKEN }}
+      environment_name: test-pypi
 
   verify-testpypi:
     name: Verify TestPyPI Packages
@@ -188,6 +188,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/verify-published-packages.yml
+    secrets: inherit
     with:
       target_name: TestPyPI
       index_url: https://test.pypi.org/simple/
