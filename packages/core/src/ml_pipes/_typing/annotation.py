@@ -20,6 +20,11 @@ except ImportError:  # pragma: no cover
 
 from typing_extensions import Self as _ExtensionSelf
 from ml_pipes._typing.signatures import match_method_signatures
+from ml_pipes._typing.generic_semantics import (
+    bare_arguments as _registered_bare_arguments,
+    strict_argument_indices as _strict_argument_indices,
+    variances as _registered_variances,
+)
 
 _UNBOUND = object()
 _NONE_TYPE = type(None)
@@ -576,8 +581,11 @@ def is_concrete_annotation(annotation: Annotation) -> bool:
     shape = _annotation_shape(annotation)
     if shape is None:
         return True
-    _, child_annotations = shape
-    return all(is_concrete_annotation(child_annotation) for child_annotation in child_annotations)
+    origin, child_annotations = shape
+    return all(
+        is_concrete_annotation(child_annotations[index])
+        for index in _strict_argument_indices(origin, len(child_annotations))
+    )
 
 
 def format_annotation(annotation: Annotation) -> str:
@@ -1034,11 +1042,7 @@ def _generic_variances(
     origin: Annotation,
     args: tuple[Annotation, ...],
 ) -> tuple[str, ...]:
-    if origin in {AbstractSet, Collection, Iterable, Sequence, frozenset, tuple, type}:
-        return (_COVARIANT,) * len(args)
-    if origin is Mapping and len(args) == 2:
-        return (_INVARIANT, _COVARIANT)
-    return (_INVARIANT,) * len(args)
+    return _registered_variances(origin, len(args))
 
 
 def _typevar_constraint_annotation(typevar: TypeVar) -> Annotation:
@@ -1380,6 +1384,10 @@ def _annotation_shape(annotation: Annotation) -> AnnotationShape | None:
     if isinstance(annotation, tuple):
         return tuple, annotation
 
+    expanded_alias = _expand_runtime_type_alias(annotation)
+    if expanded_alias is not None:
+        return _annotation_shape(expanded_alias)
+
     origin = get_origin(annotation)
     if origin is not None:
         origin_args = get_args(annotation)
@@ -1409,24 +1417,52 @@ def _annotation_shape(annotation: Annotation) -> AnnotationShape | None:
 
 
 def _bare_generic_args(annotation: Annotation) -> tuple[Annotation, ...] | None:
-    if annotation in {
-        AbstractSet,
-        Collection,
-        Iterable,
-        MutableSequence,
-        MutableSet,
-        Sequence,
-        frozenset,
-        list,
-        set,
-        type,
-    }:
-        return (Any,)
-    if annotation in {Mapping, MutableMapping, dict}:
-        return (Any, Any)
-    if annotation is tuple:
-        return (Any, Ellipsis)
+    registered = _registered_bare_arguments(annotation)
+    if registered is not None:
+        return registered
+    parameters = _generic_parameters(annotation)
+    if parameters:
+        return (Any,) * len(parameters)
     return None
+
+
+def _expand_runtime_type_alias(annotation: Annotation) -> Annotation | None:
+    """Return a safely specialized runtime alias value, if *annotation* is one.
+
+    ``TypeAliasType`` and NumPy's legacy alias implementation both expose a
+    ``__value__`` template.  Keeping expansion here makes aliases canonical
+    for matching without changing the annotation retained by contracts.
+    """
+    alias = get_origin(annotation) or annotation
+    value = getattr(alias, "__value__", None)
+    if value is None or value is alias:
+        return None
+    alias_name = getattr(alias, "__name__", None)
+    if alias_name and _contains_alias_forward_reference(value, alias_name):
+        return None
+    parameters = _generic_parameters(alias)
+    supplied_args = get_args(annotation) if alias is not annotation else ()
+    if not supplied_args:
+        supplied_args = (Any,) * len(parameters)
+    if len(parameters) != len(supplied_args):
+        return None
+    try:
+        bindings = dict(zip(parameters, supplied_args, strict=True))
+        expanded = _apply_typevar_bindings(value, bindings)
+    except (TypeError, ValueError, RecursionError):
+        return None
+    if expanded is alias or expanded == annotation:
+        return None
+    return expanded
+
+
+def _contains_alias_forward_reference(annotation: Annotation, alias_name: str) -> bool:
+    if isinstance(annotation, str):
+        return alias_name in annotation
+    return any(
+        _contains_alias_forward_reference(argument, alias_name)
+        for argument in get_args(annotation)
+    )
 
 
 def _generic_parameters(annotation: Annotation) -> tuple[Annotation, ...]:
@@ -1498,6 +1534,9 @@ def _rebuild_annotation_like(
 ) -> Annotation:
     if isinstance(annotation, tuple):
         return tuple(args)
+    expanded_alias = _expand_runtime_type_alias(annotation)
+    if expanded_alias is not None:
+        return _rebuild_annotation_like(expanded_alias, args)
     rebuilt_variadic_tuple = _rebuild_variadic_tuple_annotation(annotation, args)
     if rebuilt_variadic_tuple is not None:
         return rebuilt_variadic_tuple
