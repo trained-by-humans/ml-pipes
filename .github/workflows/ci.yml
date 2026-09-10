@@ -65,7 +65,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install test tooling
-        run: python -m pip install -U pip pytest tomli
+        run: python -m pip install -U pip pytest tomli mypy
 
       - name: Install shared framework packages
         run: |
@@ -89,6 +89,8 @@ jobs:
             tests/scripts/github/test_validate_release_metadata.py \
             tests/scripts/github/test_stage_release_artifacts.py \
             packages/core/tests/validation/test_validation.py \
+            packages/core/tests/validation/test_strict.py \
+            packages/core/tests/typing \
             packages/core/tests/cli/test_cli.py \
             packages/core/tests/description/test_description.py \
             packages/tensor/tests/test_registry_ops.py \

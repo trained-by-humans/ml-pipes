@@ -21,6 +21,7 @@ from typing import (
     TypedDict,
     TypeVar,
 )
+from typing_extensions import TypeAliasType
 
 import pytest
 
@@ -50,6 +51,36 @@ except ImportError:  # pragma: no cover
 
 class _Box(Generic[_T]):
     pass
+
+
+_CovariantT = TypeVar("_CovariantT", covariant=True)
+_ContravariantT = TypeVar("_ContravariantT", contravariant=True)
+_InvariantT = TypeVar("_InvariantT")
+_AliasT = TypeVar("_AliasT")
+
+
+class _Base:
+    pass
+
+
+class _Child(_Base):
+    pass
+
+
+class _CovariantBox(Generic[_CovariantT]):
+    pass
+
+
+class _ContravariantBox(Generic[_ContravariantT]):
+    pass
+
+
+class _InvariantBox(Generic[_InvariantT]):
+    pass
+
+
+_BoxAlias = TypeAliasType("_BoxAlias", _Box[_AliasT], type_params=(_AliasT,))
+_RecursiveAlias = TypeAliasType("_RecursiveAlias", list["_RecursiveAlias"])
 
 
 class _GenericProtocolBox(Generic[_SourceBoxT]):
@@ -392,9 +423,35 @@ def test_annotation_shape_restores_missing_generic_arguments(annotation: Any, ex
     assert _annotation_shape(annotation) == expected
 
 
-def test_annotation_shape_rejects_unsupported_bare_generic() -> None:
-    with pytest.raises(ValueError, match="Unsupported bare generic annotation"):
-        _annotation_shape(_Box)
+def test_annotation_shape_normalizes_bare_runtime_generic() -> None:
+    assert _annotation_shape(_Box) == (_Box, (Any,))
+
+
+@pytest.mark.parametrize(
+    ("source_annotation", "target_annotation", "expected"),
+    [
+        (_CovariantBox[_Child], _CovariantBox[_Base], True),
+        (_CovariantBox[_Base], _CovariantBox[_Child], False),
+        (_ContravariantBox[_Base], _ContravariantBox[_Child], True),
+        (_ContravariantBox[_Child], _ContravariantBox[_Base], False),
+        (_InvariantBox[_Child], _InvariantBox[_Base], False),
+    ],
+)
+def test_is_assignable_honors_runtime_declared_generic_variance(
+    source_annotation: Any,
+    target_annotation: Any,
+    expected: bool,
+) -> None:
+    assert is_assignable(source_annotation, target_annotation) is expected
+
+
+def test_annotation_shape_expands_runtime_type_alias_with_bound_arguments() -> None:
+    assert _annotation_shape(_BoxAlias[_Child]) == (_Box, (_Child,))
+    assert is_assignable(_BoxAlias[_Child], _Box[_Child])
+
+
+def test_annotation_shape_leaves_recursive_runtime_type_alias_unexpanded() -> None:
+    assert _annotation_shape(_RecursiveAlias) is None
 
 
 @pytest.mark.parametrize(
@@ -901,17 +958,15 @@ def test_tighten_annotation_applies_sequence_constraint_per_fixed_tuple_item() -
         pytest.param(_Box[int], _Box, id="target"),
     ],
 )
-def test_is_assignable_rejects_unsupported_bare_generic(
+def test_is_assignable_normalizes_bare_runtime_generic(
     source_annotation: Any,
     target_annotation: Any,
 ) -> None:
-    with pytest.raises(ValueError, match="Unsupported bare generic annotation"):
-        is_assignable(source_annotation, target_annotation)
+    assert is_assignable(source_annotation, target_annotation)
 
 
-def test_normalize_published_annotation_rejects_unsupported_bare_generic() -> None:
-    with pytest.raises(ValueError, match="Unsupported bare generic annotation"):
-        normalize_published_annotation(_Box)
+def test_normalize_published_annotation_normalizes_bare_runtime_generic() -> None:
+    assert normalize_published_annotation(_Box) == _Box[Any]
 
 
 @pytest.mark.parametrize(

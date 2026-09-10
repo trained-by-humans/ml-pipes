@@ -207,7 +207,10 @@ are interchangeable.
 | Unions | `A \| B` | Supported directionally. Every produced option must be assignable to the downstream expectation. |
 | Fixed-length tuples | `tuple[int, str]` | Supported and can route positionally into multi-parameter operators. |
 | Variadic tuples | `tuple[int, ...]` | Supported as single values. They are not expanded into multiple pipeline inputs. |
-| Common built-in and `collections.abc` generics | `list[T]`, `set[T]`, `frozenset[T]`, `dict[K, V]`, `Iterable[T]`, `Collection[T]`, `Sequence[T]`, `Mapping[K, V]`, `MutableSequence[T]`, `MutableMapping[K, V]`, `MutableSet[T]`, `type[T]` | Supported with the variance rules implemented by the core annotation matcher. |
+| Runtime generic classes | A user `class Box(Generic[T_co])` | Supported using the `TypeVar` variance retained by the class at runtime: covariant, contravariant, or invariant. |
+| Runtime type aliases | A resolvable alias such as `NDArray[S]` | Resolvable, non-recursive aliases are expanded and their supplied type arguments are bound before matching. |
+| Erased-runtime generics | `list[T]`, `Sequence[T]`, `Mapping[K, V]` | These do not expose sufficient runtime parameter metadata for the matcher. Selected built-ins use private registry rules: mutable containers are invariant, `Sequence` is covariant, and `Mapping` has invariant keys with covariant values. Unsupported generic forms conservatively remain invariant. |
+| NumPy arrays and dtypes | `numpy.typing.NDArray[np.uint8]`, `numpy.ndarray[tuple[Any, ...], numpy.dtype[np.uint8]]`, `numpy.dtype[np.uint8]` | Supported through the same generic matcher. `NDArray[S]` resolves to native `ndarray` form; `ndarray` shape and dtype parameters and `dtype` scalar parameter are covariant. Bare `ndarray` and `dtype` normalize to `Any` arguments, so they remain broad normal-mode contracts. Partially parameterized fixed-arity forms are rejected. |
 | Structural `Protocol`s | `Protocol` with annotated fields and methods | Supported when used as downstream expectations or `TypeVar` bounds. The current supported protocol shape is non-parameterized structural protocols, including annotated data members and `Self`-preserving methods.<br><br>Note: method matching strips the receiver first, then requires exact callable shape: order, keyword-visible names, kinds, and defaults. Parameter annotations are checked contravariantly; return annotations covariantly.<br><br>Not supported: class-object boundaries such as `type[Proto]`. |
 | Other typing features | `Annotated`, `Literal`, generic `Protocol[T]`, `ParamSpec`, overload-oriented typing constructs | Not part of the current documented compatibility contract. Some cases may work incidentally, but they are not guaranteed. Prefer a simpler boundary annotation or use `resolve_contract(...)` when you need a more explicit contract. |
 
@@ -307,6 +310,10 @@ In practice, strict mode means:
 - unresolved `Any` in an operator input or output is rejected
 - unresolved `Any` inside containers such as `list[Any]` or `tuple[int, Any]`
   is also rejected
+- for NumPy arrays, shape is non-contractual in strict mode but dtype is
+  contract-significant: `NDArray[np.uint8]` and
+  `ndarray[tuple[Any, ...], dtype[np.uint8]]` are concrete, while bare
+  `ndarray` or `dtype` annotations are not
 - the check is orthogonal to default mode, declared input mode, and inference
 - `auto_validate=True` remains non-strict
 

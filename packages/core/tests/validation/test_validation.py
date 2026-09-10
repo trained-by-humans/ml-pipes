@@ -1186,12 +1186,11 @@ def test_pipeline_validate_accepts_bare_mutable_generic_aliases() -> None:
         pytest.param(Pipeline([BareBoxConsumer()]), _Box, id="input"),
     ],
 )
-def test_pipeline_validate_rejects_unsupported_bare_generic_annotations(
+def test_pipeline_validate_normalizes_bare_runtime_generic_annotations(
     pipeline,
     pipeline_input_type,
 ):
-    with pytest.raises(ValueError, match="Unsupported bare generic annotation"):
-        pipeline.validate(pipeline_input_type=pipeline_input_type)
+    pipeline.validate(pipeline_input_type=pipeline_input_type)
 
 
 def test_pipeline_validate_accepts_tuple_output_for_multi_arg_operator():
