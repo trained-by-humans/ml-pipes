@@ -947,7 +947,12 @@ def _generic_argument_pairs(
     source_origin, source_args = source_shape
     target_origin, target_args = target_shape
 
-    if source_origin != target_origin and not is_concrete_assignable(source_origin, target_origin):
+    if not _generic_origins_are_compatible(
+        template_annotation,
+        candidate_annotation,
+        source_origin,
+        target_origin,
+    ):
         return None
 
     adapted_source_args = source_args
@@ -999,9 +1004,11 @@ def _tighten_generic_argument_pairs(
     current_origin, current_args = current_shape
     candidate_origin, candidate_args = candidate_shape
 
-    if (
-        current_origin != candidate_origin
-        and not is_concrete_assignable(current_origin, candidate_origin)
+    if not _generic_origins_are_compatible(
+        current_annotation,
+        candidate_annotation,
+        current_origin,
+        candidate_origin,
     ):
         return None
 
@@ -1043,6 +1050,29 @@ def _generic_variances(
     args: tuple[Annotation, ...],
 ) -> tuple[str, ...]:
     return _registered_variances(origin, len(args))
+
+
+def _generic_origins_are_compatible(
+    source_annotation: Annotation,
+    target_annotation: Annotation,
+    source_origin: Annotation,
+    target_origin: Annotation,
+) -> bool:
+    """Treat equivalent union spellings as one generic shape.
+
+    Python 3.10 and 3.11 expose ``int | None`` and ``Optional[int]`` through
+    distinct runtime origins.  They already match in the top-level assignable
+    path; TypeVar binding needs the same normalization when nested in a
+    generic.
+    """
+    return (
+        source_origin == target_origin
+        or (
+            is_union_annotation(source_annotation)
+            and is_union_annotation(target_annotation)
+        )
+        or is_concrete_assignable(source_origin, target_origin)
+    )
 
 
 def _typevar_constraint_annotation(typevar: TypeVar) -> Annotation:
