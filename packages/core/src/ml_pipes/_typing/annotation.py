@@ -22,6 +22,7 @@ from typing_extensions import Self as _ExtensionSelf
 from ml_pipes._typing.signatures import match_method_signatures
 from ml_pipes._typing.generic_semantics import (
     bare_arguments as _registered_bare_arguments,
+    is_partial_fixed_arity as _is_partial_fixed_arity,
     strict_argument_indices as _strict_argument_indices,
     variances as _registered_variances,
 )
@@ -1422,6 +1423,7 @@ def _annotation_shape(annotation: Annotation) -> AnnotationShape | None:
     if origin is not None:
         origin_args = get_args(annotation)
         if origin_args:
+            _raise_if_partial_fixed_arity_generic(origin, origin_args, annotation)
             return origin, origin_args
 
         bare_generic_args = _bare_generic_args(origin)
@@ -1454,6 +1456,29 @@ def _bare_generic_args(annotation: Annotation) -> tuple[Annotation, ...] | None:
     if parameters:
         return (Any,) * len(parameters)
     return None
+
+
+def _raise_if_partial_fixed_arity_generic(
+    origin: Annotation,
+    supplied_args: tuple[Annotation, ...],
+    annotation: Annotation,
+) -> None:
+    """Reject partial fixed-arity annotations before comparison or strictness.
+
+    A bare form is deliberately broadened by the registry.  Once an annotation
+    supplies arguments, however, a fixed-arity generic must supply every
+    argument.  ``Ellipsis`` in the bare form marks the supported variable-arity
+    tuple grammar and therefore opts out of this check.
+    """
+    if _is_partial_fixed_arity(
+        origin,
+        len(supplied_args),
+        len(_generic_parameters(origin)),
+    ):
+        raise ValueError(
+            f"Partial fixed-arity generic annotation {annotation}. "
+            "Use every type argument, or use the bare generic annotation."
+        )
 
 
 def _expand_runtime_type_alias(annotation: Annotation) -> Annotation | None:
@@ -1497,12 +1522,12 @@ def _contains_alias_forward_reference(annotation: Annotation, alias_name: str) -
 
 def _generic_parameters(annotation: Annotation) -> tuple[Annotation, ...]:
     type_parameters = getattr(annotation, "__type_params__", ())
-    if type_parameters:
-        return tuple(type_parameters)
+    if isinstance(type_parameters, tuple) and type_parameters:
+        return type_parameters
 
     parameters = getattr(annotation, "__parameters__", ())
-    if parameters:
-        return tuple(parameters)
+    if isinstance(parameters, tuple) and parameters:
+        return parameters
 
     return ()
 

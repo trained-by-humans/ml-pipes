@@ -68,6 +68,32 @@ def bare_arguments(origin: object) -> tuple[object, ...] | None:
     return _BARE_ARGUMENTS.get(origin)
 
 
+def is_partial_fixed_arity(
+    origin: object,
+    supplied_argument_count: int,
+    runtime_parameter_count: int,
+) -> bool:
+    """Whether a supported fixed-arity generic has missing arguments.
+
+    Registry entries describe erased-runtime generics.  For ordinary runtime
+    generics, the retained parameter count supplies the same arity metadata.
+    A bare form containing ``Ellipsis`` uses the supported variable-arity
+    grammar and is exempt from fixed-arity validation.
+    """
+    bare_args = bare_arguments(origin)
+    if bare_args is not None:
+        if Ellipsis in bare_args:
+            return False
+        expected_argument_count = len(bare_args)
+    else:
+        expected_argument_count = runtime_parameter_count
+
+    return (
+        expected_argument_count > 0
+        and supplied_argument_count != expected_argument_count
+    )
+
+
 def variances(origin: object, parameter_count: int) -> tuple[str, ...]:
     registered = _VARIANCES.get(origin)
     if registered is not None:

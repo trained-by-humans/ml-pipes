@@ -231,3 +231,19 @@ def test_strict_treats_ndarray_shape_as_non_contractual_but_requires_dtype() -> 
         Pipeline([BareArray()]).validate(strict=True)
     with pytest.raises(PipelineValidationError, match="unresolved"):
         Pipeline([BareDType()]).validate(strict=True)
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        pytest.param(np.ndarray[np.uint8], id="dtype-in-shape-slot"),
+        pytest.param(np.ndarray[tuple[int, ...]], id="shape-without-dtype"),
+    ],
+)
+@pytest.mark.parametrize("strict", [False, True], ids=["normal", "strict"])
+def test_pipeline_validation_rejects_partial_fixed_arity_ndarray_annotations(
+    annotation: object,
+    strict: bool,
+) -> None:
+    with pytest.raises(ValueError, match="Partial fixed-arity generic annotation"):
+        Pipeline([_producer(annotation)]).validate(strict=strict)
