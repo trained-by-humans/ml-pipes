@@ -16,56 +16,77 @@ from collections.abc import (
     Sequence,
     Set as AbstractSet,
 )
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 
 
-COVARIANT = "covariant"
-INVARIANT = "invariant"
-CONTRAVARIANT = "contravariant"
+Variance: TypeAlias = Literal["covariant", "invariant", "contravariant"]
+
+COVARIANT: Variance = "covariant"
+INVARIANT: Variance = "invariant"
+CONTRAVARIANT: Variance = "contravariant"
 
 
-_BARE_ARGUMENTS: dict[object, tuple[object, ...]] = {
-    AbstractSet: (Any,),
-    Collection: (Any,),
-    Iterable: (Any,),
-    MutableSequence: (Any,),
-    MutableSet: (Any,),
-    Sequence: (Any,),
-    frozenset: (Any,),
-    list: (Any,),
-    set: (Any,),
-    type: (Any,),
-    Mapping: (Any, Any),
-    MutableMapping: (Any, Any),
-    dict: (Any, Any),
-    tuple: (Any, Ellipsis),
-    np.dtype: (Any,),
-    np.ndarray: (tuple[Any, ...], np.dtype[Any]),
-}
+@dataclass(frozen=True)
+class GenericSemantics:
+    """Compatibility rules retained privately for an erased runtime generic.
 
-_VARIANCES: dict[object, tuple[str, ...]] = {
-    AbstractSet: (COVARIANT,),
-    Collection: (COVARIANT,),
-    Iterable: (COVARIANT,),
-    Sequence: (COVARIANT,),
-    frozenset: (COVARIANT,),
-    tuple: (COVARIANT,),
-    type: (COVARIANT,),
-    Mapping: (INVARIANT, COVARIANT),
-    np.dtype: (COVARIANT,),
-    np.ndarray: (COVARIANT, COVARIANT),
-}
+    Attributes:
+        bare_arguments: Canonical arguments used when the origin is bare.
+        variances: Per-parameter compatibility direction:
 
-# Array shape is intentionally not a strict pipeline contract.  Dtype is.
-_STRICT_ARGUMENT_INDICES: dict[object, tuple[int, ...]] = {
-    np.ndarray: (1,),
+            * ``covariant`` accepts ``G[Child]`` where ``G[Base]`` is expected.
+            * ``contravariant`` reverses that direction.
+            * ``invariant`` requires arguments to be mutually compatible.
+
+            A single entry applies to every parameter when the generic has
+            variable arity.
+        strict_argument_indices: Argument positions that must be concrete in
+            strict validation. ``None`` requires every argument to be concrete.
+    """
+
+    bare_arguments: tuple[object, ...]
+    variances: tuple[Variance, ...]
+    strict_argument_indices: tuple[int, ...] | None = None
+
+    @property
+    def is_variable_arity(self) -> bool:
+        """Whether the bare form marks a variable-arity generic grammar."""
+        return Ellipsis in self.bare_arguments
+
+_GENERIC_SEMANTICS: dict[object, GenericSemantics] = {
+    AbstractSet: GenericSemantics((Any,), (COVARIANT,)),
+    Collection: GenericSemantics((Any,), (COVARIANT,)),
+    Iterable: GenericSemantics((Any,), (COVARIANT,)),
+    MutableSequence: GenericSemantics((Any,), (INVARIANT,)),
+    MutableSet: GenericSemantics((Any,), (INVARIANT,)),
+    Sequence: GenericSemantics((Any,), (COVARIANT,)),
+    frozenset: GenericSemantics((Any,), (COVARIANT,)),
+    list: GenericSemantics((Any,), (INVARIANT,)),
+    set: GenericSemantics((Any,), (INVARIANT,)),
+    type: GenericSemantics((Any,), (COVARIANT,)),
+    Mapping: GenericSemantics((Any, Any), (INVARIANT, COVARIANT)),
+    MutableMapping: GenericSemantics((Any, Any), (INVARIANT, INVARIANT)),
+    dict: GenericSemantics((Any, Any), (INVARIANT, INVARIANT)),
+    tuple: GenericSemantics(
+        (Any, Ellipsis),
+        (COVARIANT,),
+    ),
+    np.dtype: GenericSemantics((Any,), (COVARIANT,)),
+    # Array shape is intentionally not a strict pipeline contract. Dtype is.
+    np.ndarray: GenericSemantics(
+        bare_arguments=(tuple[Any, ...], np.dtype[Any]),
+        variances=(COVARIANT, COVARIANT),
+        strict_argument_indices=(1,),
+    ),
 }
 
 
 def bare_arguments(origin: object) -> tuple[object, ...] | None:
-    return _BARE_ARGUMENTS.get(origin)
+    semantics = _semantics_for(origin)
+    return semantics.bare_arguments if semantics is not None else None
 
 
 def is_partial_fixed_arity(
@@ -80,27 +101,22 @@ def is_partial_fixed_arity(
     A bare form containing ``Ellipsis`` uses the supported variable-arity
     grammar and is exempt from fixed-arity validation.
     """
-    bare_args = bare_arguments(origin)
-    if bare_args is not None:
-        if Ellipsis in bare_args:
-            return False
-        expected_argument_count = len(bare_args)
-    else:
-        expected_argument_count = runtime_parameter_count
-
-    return (
-        expected_argument_count > 0
-        and supplied_argument_count != expected_argument_count
-    )
+    semantics = _semantics_for(origin)
+    if semantics is not None:
+        return (
+            not semantics.is_variable_arity
+            and supplied_argument_count != len(semantics.bare_arguments)
+        )
+    return 0 < runtime_parameter_count != supplied_argument_count
 
 
-def variances(origin: object, parameter_count: int) -> tuple[str, ...]:
-    registered = _VARIANCES.get(origin)
-    if registered is not None:
-        if len(registered) == parameter_count:
-            return registered
-        if len(registered) == 1:
-            return registered * parameter_count
+def variances(origin: object, parameter_count: int) -> tuple[Variance, ...]:
+    semantics = _semantics_for(origin)
+    if semantics is not None:
+        if len(semantics.variances) == parameter_count:
+            return semantics.variances
+        if len(semantics.variances) == 1:
+            return semantics.variances * parameter_count
 
     parameters = getattr(origin, "__type_params__", ()) or getattr(origin, "__parameters__", ())
     if not isinstance(parameters, tuple):
@@ -116,4 +132,11 @@ def variances(origin: object, parameter_count: int) -> tuple[str, ...]:
 
 
 def strict_argument_indices(origin: object, argument_count: int) -> tuple[int, ...]:
-    return _STRICT_ARGUMENT_INDICES.get(origin, tuple(range(argument_count)))
+    semantics = _semantics_for(origin)
+    if semantics is not None and semantics.strict_argument_indices is not None:
+        return semantics.strict_argument_indices
+    return tuple(range(argument_count))
+
+
+def _semantics_for(origin: object) -> GenericSemantics | None:
+    return _GENERIC_SEMANTICS.get(origin)
