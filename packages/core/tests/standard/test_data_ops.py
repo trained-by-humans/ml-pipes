@@ -411,6 +411,38 @@ def test_map_validation_rejects_mapper_without_usable_output_annotations() -> No
         )
 
 
+def test_map_validation_resolves_contract_from_generic_definition() -> None:
+    pipeline = Pipeline(
+        [
+            Map[str, int](lambda text: len(text.strip())),
+            AcceptInt(),
+        ]
+    )
+
+    contract = pipeline.validate(strict=True)
+
+    assert pipeline("  hello  ") == "5"
+    assert contract.input_type is str
+    assert contract.output_type is str
+
+
+def test_map_generic_definition_checks_upstream_input_type() -> None:
+    with pytest.raises(PipelineValidationError, match="Map definition expects"):
+        Pipeline([Map[str, int](lambda text: len(text))]).validate(
+            pipeline_input_type=int,
+        )
+
+
+def test_map_generic_definition_must_accept_mapper_input_type() -> None:
+    with pytest.raises(PipelineValidationError, match="Map fn input expects"):
+        Pipeline([Map[object, int](_text_length)]).validate()
+
+
+def test_map_generic_definition_must_accept_mapper_output_type() -> None:
+    with pytest.raises(PipelineValidationError, match="Map definition output expects"):
+        Pipeline([Map[str, str](_text_length)]).validate()
+
+
 def test_map_validation_accepts_mapper_without_input_annotation_when_upstream_is_concrete() -> None:
     contract = Pipeline([Map(_box_int)]).validate(
         pipeline_input_type=int,

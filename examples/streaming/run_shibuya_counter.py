@@ -72,10 +72,6 @@ _PERSON_CLASS_ID = 0  # COCO: person
 _MAX_PERSON_AREA = 1_000  # px² — keeps the count focused on smaller pedestrians in the crowd
 
 
-def _count_detections(registry: TensorRegistry) -> int:
-    return len(registry["boxes"])
-
-
 def _infer_pipeline(model_path: Path, conf_threshold: float) -> Pipeline[ImagePayload, TensorRegistry]:
     return Pipeline([
         Resize((640, 640)),
@@ -127,7 +123,7 @@ def build_pipeline(
         ),
         FilterTensorsByBoxArea("scores", "classes", max_area=_MAX_PERSON_AREA),
         Store("filtered_detections"),
-        Map(_count_detections),
+        Map[TensorRegistry, int](lambda registry: len(registry["boxes"])),
         Store("count"),
         Recall("filtered_detections", prepend=True),
         Pick(0),
