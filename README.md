@@ -22,8 +22,6 @@ boundaries.
 
 ## Quick Start
 
-`ml-pipes` requires Python 3.10+.
-
 To run one example as fast as possible, install only the stack it needs and
 execute it directly:
 
@@ -32,10 +30,10 @@ pip install 'ml-pipes[onnx,vision]'
 python examples/run_yolo8_onnx.py
 ```
 
-For runnable example details, bundled starter assets, and repository-local
-setup guidance, see [examples/README.md](examples/README.md). For the full
-package matrix and the public component import model, see
-[docs/PACKAGES.md](docs/PACKAGES.md).
+> [!TIP]
+> Most examples run with minimal setup out of the box. See
+> [examples/README.md](examples/README.md) for runnable entry points and any
+> example-specific setup.
 
 ## Supported Use-cases/Domains
 
@@ -43,54 +41,20 @@ package matrix and the public component import model, see
 current package coverage, install profiles, and public imports, see
 [docs/PACKAGES.md](docs/PACKAGES.md).
 
-One concrete example is vision inference with `ml-pipes[vision,onnx]`, as
-shown in [examples/run_yolo8_onnx.py](examples/run_yolo8_onnx.py):
+| Package | Type | Description | Use-cases |
+|---|---|---|---|
+| [`ml-pipes-core`](packages/core/README.md) | Official | Pipeline runtime and shared validation, inspection, tracing, and benchmarking tooling. | Explicit data-flow pipelines; reusable operators; pipeline diagnostics. |
+| [`ml-pipes-tensor`](packages/tensor/README.md) | Official | Shared NumPy-side tensor values and postprocessing operators. | Tensor registries; classification and detection postprocessing. |
+| [`ml-pipes-vision`](packages/vision/README.md) | Official | Image preparation, typed vision values, tiling, and visualization. | Image preprocessing; tiled inference; rendering detections. |
+| [`ml-pipes-onnx`](packages/onnx/README.md) | Official | ONNX Runtime inference boundary and output handoff. | Portable ONNX model inference; CPU or accelerator deployment. |
+| [`ml-pipes-torch`](packages/torch/README.md) | Official | Torch execution boundaries and explicit NumPy/Torch crossings. | PyTorch models; on-device inference and postprocessing. |
+| [`ml-pipes-supervision`](https://github.com/trained-by-humans/ml-pipes-supervision) | Community-Verified | Supervision, tracker, and optional Roboflow Inference compatibility wrappers. | Detection annotations; zones; object tracking; Supervision-based pipelines. |
+| [`ml-pipes-ultralytics`](https://github.com/trained-by-humans/ml-pipes-ultralytics) | Community-Verified | Ultralytics YOLO operators and result adapters. | YOLO detection; segmentation; embeddings; tracking. |
 
-```python
-from ml_pipes.core import Pipeline
-from ml_pipes.onnx import Extract, Infer
-from ml_pipes.standard import Pick, Recall, Store
-from ml_pipes.tensor import ArgMax, GatherRows, Slice, Squeeze, TensorRegistry, Transpose
-from ml_pipes.vision import (
-    ConvertBoxFormat,
-    ImagePayload,
-    NMS,
-    Normalize,
-    ProjectBoxes,
-    Resize,
-)
-
-
-def yolo8_inference_pipeline(
-    model_path: Path,
-    conf_threshold: float = 0.25,
-) -> Pipeline[ImagePayload, TensorRegistry]:
-    return Pipeline(
-        [
-            Resize((640, 640)),
-            Store("resize_transform", source=1),
-            Pick(0),
-            Normalize(),
-            Infer(model_path),
-            Extract("output0", as_="preds"),
-            Squeeze("preds"),
-            Transpose("preds"),
-            Slice("preds", slice(None, 4), as_="boxes"),
-            Slice("preds", slice(4, None), as_="scores"),
-            ArgMax("scores", as_="classes"),
-            GatherRows("scores", "classes"),
-            ConvertBoxFormat(from_="cxcywh"),
-            NMS(conf_threshold=conf_threshold),
-            Recall("resize_transform"),
-            ProjectBoxes(),
-        ],
-        auto_validate=True,
-    )
-```
-
-Most examples run with minimal setup out of the box. See
-[examples/README.md](examples/README.md) for runnable entry points and any
-example-specific setup.
+Community-Verified packages are independent, opt-in distributions with their
+own runtime and licensing terms. See
+[docs/VERIFIED_COMMUNITY_PACKAGES.md](docs/VERIFIED_COMMUNITY_PACKAGES.md) for
+their support and release policy.
 
 ## Why ml-pipes
 
