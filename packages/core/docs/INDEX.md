@@ -48,7 +48,7 @@ package catalogs, see
 | Operator | Input -> Output | Notes |
 |---|---|---|
 | `WrapMappingInObject(target, state_factory)` | mapping -> object | Wraps a mapping input into a typed state object. |
-| `Map(fn)` | `T` -> `U` | Applies a unary transform to the current value. |
+| `Map(fn)` / `Map[T, U](fn)` | `T` -> `U` | Applies a unary transform. `Map[T, U](fn)` declares the boundary explicitly, including for inline lambdas; callable annotations, when present, must be compatible. |
 | `MapNotNull(fn)` | `T` -> `U` or drop | Drops items whose mapped result is `None`. |
 | `MapValue(fn, source, target)` | `T` -> `T` | Reads a source field, maps it, and stores the result on the current object. |
 | `Filter(predicate, source=None)` | `T` -> `T` or drop | Keeps the current value when a predicate matches. |

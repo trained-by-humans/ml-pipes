@@ -642,32 +642,59 @@ class Map(Generic[ValueT, MappedT]):
         upstream_annotation: Any,
         validation_error_type: type[Exception],
     ) -> tuple[tuple[Any, ...], Any]:
+        definition_annotations = get_args(
+            getattr(self, "__orig_class__", None),
+        )
+        has_definition_contract = len(definition_annotations) == 2
         fn_annotations = resolve_callable_signature_annotations(self.fn)
-        if upstream_annotation is Any:
-            input_type = _require_callable_annotation(
+        if has_definition_contract:
+            mapper_input, output_type = definition_annotations
+            _require_assignment_compatible(
+                mapper_input,
                 fn_annotations.parameter_annotations[0],
                 operator_name=type(self).__name__,
-                callable_label="fn",
-                annotation_label="input type",
+                source_label="definition input",
+                target_label="fn input",
                 validation_error_type=validation_error_type,
             )
+            _require_assignment_compatible(
+                fn_annotations.return_annotation,
+                output_type,
+                operator_name=type(self).__name__,
+                source_label="fn return type",
+                target_label="definition output",
+                validation_error_type=validation_error_type,
+            )
+        else:
+            mapper_input = fn_annotations.parameter_annotations[0]
+            if upstream_annotation is Any:
+                mapper_input = _require_callable_annotation(
+                    mapper_input,
+                    operator_name=type(self).__name__,
+                    callable_label="fn",
+                    annotation_label="input type",
+                    validation_error_type=validation_error_type,
+                )
+            output_type = _require_callable_annotation(
+                fn_annotations.return_annotation,
+                operator_name=type(self).__name__,
+                callable_label="fn",
+                annotation_label="return type",
+                validation_error_type=validation_error_type,
+            )
+
+        if upstream_annotation is Any:
+            input_type = mapper_input
         else:
             input_type = upstream_annotation
             _require_assignment_compatible(
                 upstream_annotation,
-                fn_annotations.parameter_annotations[0],
+                mapper_input,
                 operator_name=type(self).__name__,
                 source_label="current value",
-                target_label="fn",
+                target_label="definition" if has_definition_contract else "fn",
                 validation_error_type=validation_error_type,
             )
-        output_type = _require_callable_annotation(
-            fn_annotations.return_annotation,
-            operator_name=type(self).__name__,
-            callable_label="fn",
-            annotation_label="return type",
-            validation_error_type=validation_error_type,
-        )
 
         del validation_error_type
         return (input_type,), output_type
