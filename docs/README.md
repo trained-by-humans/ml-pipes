@@ -47,3 +47,8 @@ Package-owned guides live under `packages/<name>/docs/`.
 
 - [privacy.md](privacy.md) describes hosting, optional analytics, cookies,
   and privacy choices for the ml-pipes documentation sites.
+
+## Community Packages
+
+- [VERIFIED_COMMUNITY_PACKAGES.md](VERIFIED_COMMUNITY_PACKAGES.md) for the
+  ownership, support, security, and release policy for verified integrations.

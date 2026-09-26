@@ -1,15 +1,16 @@
 # Packages
 
-This page is the reference for published packages, primary install profiles,
-and public imports.
-
-## Why Packages
 `ml-pipes` uses a multi-package layout so the core pipeline harness can stay
 small and generic while heavier domains such as vision, ONNX, and Torch stay
 optional.
 
 Each package owns one coherent part of the framework surface and publishes it
 under the shared `ml_pipes` namespace.
+
+Some integrations are maintained as independent, opt-in distributions rather
+than workspace packages or umbrella profiles. See
+[Verified Community Packages](VERIFIED_COMMUNITY_PACKAGES.md) for their
+ownership, support, and release policy.
 
 ## Packaging Terms
 
