@@ -311,4 +311,4 @@ rationale behind these boundaries, return to [DESIGN.md](DESIGN.md).
 
 If your next step is building with the framework, continue to
 [SCAFFOLDING.md](SCAFFOLDING.md) or the runnable examples in
-[examples/README.md](../examples/README.md).
+[examples/README.md](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/README.md).

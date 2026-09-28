@@ -122,7 +122,7 @@ Start from the shared building blocks, then move outward only as needed:
   package already exists for the current domain or task boundary; for example,
   tensor-shaped postprocess should usually start from the `ml_pipes.tensor` package
 - if you still cannot find the right package surface, check the runnable
-  examples in [../examples/README.md](../examples/README.md) to see whether a
+  examples in [examples/README.md](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/README.md) to see whether a
   similar pipeline already exists before adding new local operators
 
 ### Add New Operators Only Where Needed
@@ -132,9 +132,9 @@ When you do need a new operator, keep it narrow and follow
 
 Examples in this repo:
 
-- [../examples/run_yolo8_onnx.py](../examples/run_yolo8_onnx.py) starts from
+- [examples/run_yolo8_onnx.py](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/run_yolo8_onnx.py) starts from
   existing vision and inference operators
-- [../examples/run_sms_spam_prepare.py](../examples/run_sms_spam_prepare.py)
+- [examples/run_sms_spam_prepare.py](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/run_sms_spam_prepare.py)
   shows composition around data preparation and cleanup where local operators
   still make sense
 
