@@ -41,9 +41,9 @@ PipelineInspector().show(result)
 ```
 
 For a complete runnable inspection example, see
-[`examples/run_inspect.py`](../examples/run_inspect.py).
+[`examples/run_inspect.py`](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/run_inspect.py).
 
-![Inspection report overview](../.github/assets/yolo8_tiled_inspection_overview.png)
+![Inspection report overview](https://raw.githubusercontent.com/trained-by-humans/ml-pipes/main/.github/assets/yolo8_tiled_inspection_overview.png)
 
 ## How Inspection Works
 

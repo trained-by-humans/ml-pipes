@@ -1,0 +1,69 @@
+site_name: ml-pipes
+site_description: Build explicit ML pipelines you can validate, run, inspect, trace, and benchmark.
+site_url: https://ml-pipes.com/
+repo_url: https://github.com/trained-by-humans/ml-pipes
+repo_name: trained-by-humans/ml-pipes
+exclude_docs: README.md
+
+theme:
+  name: material
+  font:
+    text: Inter
+    code: IBM Plex Mono
+  features:
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Start Here:
+      - Packages: PACKAGES.md
+      - Design: DESIGN.md
+      - Architecture: ARCHITECTURE.md
+  - Build Pipelines:
+      - Operators: OPERATORS.md
+      - Composition: COMPOSITION.md
+      - Regions: REGIONS.md
+      - Model Scaffolding: SCAFFOLDING.md
+  - Tooling:
+      - Validation: VALIDATION.md
+      - Inspection: INSPECTION.md
+      - Tracing: TRACING.md
+      - Benchmarking: BENCHMARKING.md
+      - Performance: PERFORMANCE.md
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - attr_list
+  - md_in_html
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true

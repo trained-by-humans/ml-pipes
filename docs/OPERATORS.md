@@ -238,7 +238,7 @@ result = pipeline.inspect(value)
 PipelineInspector().show(result)
 ```
 
-![Inspection report overview](../.github/assets/yolo8_tiled_inspection_overview.png)
+![Inspection report overview](https://raw.githubusercontent.com/trained-by-humans/ml-pipes/main/.github/assets/yolo8_tiled_inspection_overview.png)
 
 For setup, rendering, and custom formatters, see [INSPECTION.md](INSPECTION.md).
 
@@ -434,4 +434,4 @@ routing, context, regions, and data-preparation work.
 
 Example: if postprocess is still tensor-shaped, start from the tensor package
 and its index in
-[packages/tensor/docs/INDEX.md](../packages/tensor/docs/INDEX.md).
+[packages/tensor/docs/INDEX.md](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/INDEX.md).

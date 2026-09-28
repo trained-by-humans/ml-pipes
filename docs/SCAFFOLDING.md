@@ -1,6 +1,6 @@
 # Model Scaffolding Tutorial
 
-This guide shows how to scaffold a model integration with `ml-pipes`. Before you start, read [README.md](../README.md) and
+This guide shows how to scaffold a model integration with `ml-pipes`. Before you start, read [README.md](https://github.com/trained-by-humans/ml-pipes/blob/main/README.md) and
 [COMPOSITION.md](COMPOSITION.md).
 
 A scaffold is the smallest useful pipeline around model execution. In ML
@@ -88,7 +88,7 @@ RunMyModel()
 Use the built-in runtime operators when they fit. If your model runs through a
 different library, wrap that call in a small callable or operator so the model
 itself is still one visible step in the pipeline. For Torch-specific
-boundaries, see [packages/torch/docs/README.md](../packages/torch/docs/README.md).
+boundaries, see [packages/torch/docs/README.md](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/README.md).
 
 ## Step 2 — Prepare The Model Inputs
 
@@ -326,10 +326,10 @@ stays the same.
 ## More Examples
 
 See [INSPECTION.md](INSPECTION.md) for usage and
-[run_inspect.py](../examples/run_inspect.py) for a runnable example.
+[run_inspect.py](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/run_inspect.py) for a runnable example.
 
 For segmentation variants or heavier postprocessing, see:
 
-- [run_maskrcnn.py](../examples/run_maskrcnn.py) for RoI-mask segmentation with a small label remap
-- [run_yolo11n_seg.py](../examples/run_yolo11n_seg.py) for a YOLO segmentation scaffold with prototype masks
-- [run_mask2former_numpy_postprocess.py](../examples/torch/run_mask2former_numpy_postprocess.py) for a more involved NumPy postprocess built from generic steps
+- [run_maskrcnn.py](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/run_maskrcnn.py) for RoI-mask segmentation with a small label remap
+- [run_yolo11n_seg.py](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/run_yolo11n_seg.py) for a YOLO segmentation scaffold with prototype masks
+- [run_mask2former_numpy_postprocess.py](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/torch/run_mask2former_numpy_postprocess.py) for a more involved NumPy postprocess built from generic steps

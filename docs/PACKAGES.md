@@ -47,7 +47,7 @@ could be installed.
 
 > [!NOTE]
 > For more on the umbrella package itself, see
-> [`packages/meta/README.md`](../packages/meta/README.md).
+> [`packages/meta/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/meta/README.md).
 
 ## How To Use Packages
 
@@ -75,11 +75,11 @@ details, open the linked package README.
 
 | Package                                         | Primary profile    | Depends on                                                          | Public modules                                                                                                                                                          | Delivers                                                                              |
 |-------------------------------------------------|--------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
-| [ml-pipes-core](../packages/core/README.md)     | `ml-pipes`         | `—`                                                                 | `ml_pipes.core`<br>`ml_pipes.standard`<br>`ml_pipes.validation`<br>`ml_pipes.tracing`<br>`ml_pipes.collectors`<br>`ml_pipes.factory`<br>`ml_pipes.benchmark`<br>`ml_pipes.inspection` | pipeline composition, generic data flow, and framework tooling                        |
-| [ml-pipes-tensor](../packages/tensor/README.md) | `ml-pipes[tensor]` | `ml-pipes-core`                                                     | `ml_pipes.tensor`                                                                                                                                                       | shared NumPy-side tensor handling and reusable tensor postprocess                     |
-| [ml-pipes-vision](../packages/vision/README.md) | `ml-pipes[vision]` | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.vision`                                                                                                                                                       | image preparation, typed vision results, tiling, and visualization                    |
-| [ml-pipes-onnx](../packages/onnx/README.md)     | `ml-pipes[onnx]`   | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.onnx`                                                                                                                                                         | ONNX Runtime inference boundary and output handoff                                    |
-| [ml-pipes-torch](../packages/torch/README.md)   | `ml-pipes[torch]`  | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.torch`                                                                                                                                                        | Torch execution stages, explicit NumPy/Torch crossing, and on-device postprocess      |
+| [ml-pipes-core](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/core/README.md)     | `ml-pipes`         | `—`                                                                 | `ml_pipes.core`<br>`ml_pipes.standard`<br>`ml_pipes.validation`<br>`ml_pipes.tracing`<br>`ml_pipes.collectors`<br>`ml_pipes.factory`<br>`ml_pipes.benchmark`<br>`ml_pipes.inspection` | pipeline composition, generic data flow, and framework tooling                        |
+| [ml-pipes-tensor](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/README.md) | `ml-pipes[tensor]` | `ml-pipes-core`                                                     | `ml_pipes.tensor`                                                                                                                                                       | shared NumPy-side tensor handling and reusable tensor postprocess                     |
+| [ml-pipes-vision](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/README.md) | `ml-pipes[vision]` | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.vision`                                                                                                                                                       | image preparation, typed vision results, tiling, and visualization                    |
+| [ml-pipes-onnx](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/onnx/README.md)     | `ml-pipes[onnx]`   | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.onnx`                                                                                                                                                         | ONNX Runtime inference boundary and output handoff                                    |
+| [ml-pipes-torch](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/README.md)   | `ml-pipes[torch]`  | `ml-pipes-core`, `ml-pipes-tensor`                                  | `ml_pipes.torch`                                                                                                                                                        | Torch execution stages, explicit NumPy/Torch crossing, and on-device postprocess      |
 
 > [!NOTE]
 > The table lists only primary profiles. For package-specific optional
@@ -129,4 +129,4 @@ packages/<name>/
   repository-wide project license text or package-specific license terms.
 - `examples/` is optional; use it when examples are truly package-specific
   rather than general framework examples under the repository-level
-  [examples/README.md](../examples/README.md).
+  [examples/README.md](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/README.md).
