@@ -26,11 +26,6 @@ uv sync --group full-workspace
 > For the full set of available groups, see `[dependency-groups]` in
 > [`pyproject.toml`](pyproject.toml).
 
-> [!NOTE]
-> These workspace commands are for local contributor development. Once the
-> packages are published, consumer installs should use the published package
-> names and profiles from the package docs instead.
-
 ## Run Tests
 
 From the repository root:
@@ -60,6 +55,27 @@ uv sync --group torch --group inspection-otel
 
 uv run pytest packages/torch/tests/test_inspection.py
 ```
+
+## Run Documentation Site Locally
+
+The public documentation site is built with Pixel Lab from the repository's
+`docs/` directory. To preview it locally from the repository root, run:
+
+```bash
+uv run --with "mkdocs-pixel-lab==0.1.0rc2" mkdocs serve
+```
+
+Open the local address printed by MkDocs (normally
+`http://127.0.0.1:8000/`). Before opening a documentation pull request, run
+the same strict build used by GitHub Pages:
+
+```bash
+uv run --with "mkdocs-pixel-lab==0.1.0rc2" mkdocs build --strict
+```
+
+The `Pages` workflow deploys the site to `https://ml-pipes.com/` after a
+documentation change is merged to `main`. It deploys GitHub Pages artifacts;
+contributors do not push a `gh-pages` branch.
 
 ## CI
 
