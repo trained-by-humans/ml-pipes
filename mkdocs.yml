@@ -8,6 +8,7 @@ exclude_docs: README.md
 
 theme:
   name: pixel-lab
+  favicon: assets/favicon.svg
   footer_text: Build explicit ML pipelines
 
 nav:
