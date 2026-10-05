@@ -19,25 +19,33 @@ extra:
     consent_domain: ml-pipes.com
     privacy_policy: privacy/
   site_navigation:
-    show_header: false
+    header_mode: dropdown
+    dropdown_label: Packages
     footer_label: Packages
     footer_size: 8
     items:
       - title: Core
         url: https://ml-pipes.com/
         active: true
-      - title: Supervision
-        url: https://supervision.ml-pipes.com/
-      - title: Ultralytics
-        url: https://ultralytics.ml-pipes.com/
-      - title: Vision
-        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/vision
+        icon: assets/site-navigation/core.svg
       - title: Tensor
         url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/tensor
+        icon: assets/site-navigation/tensor.svg
       - title: ONNX
         url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/onnx
+        icon: assets/site-navigation/onnx.svg
       - title: Torch
         url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/torch
+        icon: assets/site-navigation/torch.svg
+      - title: Vision
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/vision
+        icon: assets/site-navigation/vision.svg
+      - title: Supervision
+        url: https://supervision.ml-pipes.com/
+        icon: assets/site-navigation/supervision.svg
+      - title: Ultralytics
+        url: https://ultralytics.ml-pipes.com/
+        icon: assets/site-navigation/ultralytics.svg
     catalog:
       title: All Packages →
       url: https://ml-pipes.com/PACKAGES/
