@@ -5,11 +5,19 @@ site_dir: _site
 repo_url: https://github.com/trained-by-humans/ml-pipes
 repo_name: trained-by-humans/ml-pipes
 exclude_docs: README.md
+not_in_nav: privacy.md
 
 theme:
   name: pixel-lab
   favicon: assets/favicon.svg
   footer_text: Build explicit ML pipelines
+
+extra:
+  analytics:
+    provider: google
+    measurement_id: G-CE2N1XKFVT
+    consent_domain: ml-pipes.com
+    privacy_policy: privacy/
 
 nav:
   - Home: index.md

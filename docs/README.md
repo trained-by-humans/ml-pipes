@@ -42,3 +42,8 @@ Package-owned guides live under `packages/<name>/docs/`.
 - [../packages/vision/docs/INDEX.md](../packages/vision/docs/INDEX.md)
 - [../packages/onnx/docs/INDEX.md](../packages/onnx/docs/INDEX.md)
 - [../packages/torch/docs/INDEX.md](../packages/torch/docs/INDEX.md)
+
+## Documentation Website
+
+- [privacy.md](privacy.md) describes hosting, optional analytics, cookies,
+  and privacy choices for the ml-pipes documentation sites.
