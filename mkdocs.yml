@@ -31,21 +31,27 @@ extra:
       - title: Tensor
         url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/tensor
         icon: assets/site-navigation/tensor.svg
+        icon_hover: assets/site-navigation/tensor.svg#icon-hover
       - title: ONNX
         url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/onnx
         icon: assets/site-navigation/onnx.svg
+        icon_hover: assets/site-navigation/onnx.svg#icon-hover
       - title: Torch
         url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/torch
         icon: assets/site-navigation/torch.svg
+        icon_hover: assets/site-navigation/torch.svg#icon-hover
       - title: Vision
         url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/vision
         icon: assets/site-navigation/vision.svg
+        icon_hover: assets/site-navigation/vision.svg#icon-hover
       - title: Supervision
         url: https://supervision.ml-pipes.com/
         icon: assets/site-navigation/supervision.svg
+        icon_hover: assets/site-navigation/supervision.svg#icon-hover
       - title: Ultralytics
         url: https://ultralytics.ml-pipes.com/
         icon: assets/site-navigation/ultralytics.svg
+        icon_hover: assets/site-navigation/ultralytics.svg#icon-hover
     catalog:
       title: All Packages →
       url: https://ml-pipes.com/PACKAGES/

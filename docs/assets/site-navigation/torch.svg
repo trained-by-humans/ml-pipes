@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="30.7288 19.3205 85.256 99.5776" width="85.256px" height="99.5776px">
+<svg id="icon-hover" xmlns="http://www.w3.org/2000/svg" viewBox="30.7288 -22.1702 85.256 182.559" width="85.256px" height="182.559px">
+  <style>
+    @keyframes package-icon-drop {
+      from { transform: translateY(-65px); }
+      to { transform: translateY(0); }
+    }
+    @keyframes package-icon-fade {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      :root:target .package-icon__drop {
+        animation: package-icon-drop 1.12s cubic-bezier(0, .55, .45, 1) both,
+                   package-icon-fade .53s linear both;
+      }
+    }
+  </style>
   <g transform="matrix(0.6500000953674316, 0, 0, 0.6500000953674316, 16.897478103637695, -7.586795806884765)">
     <g transform="translate(0, 40.351)">
       <g>
@@ -117,6 +133,7 @@
         </g>
       </g>
     </g>
+    <g class="package-icon__drop">
     <g transform="matrix(1, 0, 0, 1, 43.721001, 47.581337)">
       <g>
         <g>
@@ -168,6 +185,7 @@
           </g>
         </g>
       </g>
+    </g>
     </g>
   </g>
 </svg>
