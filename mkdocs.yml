@@ -18,6 +18,29 @@ extra:
     measurement_id: G-CE2N1XKFVT
     consent_domain: ml-pipes.com
     privacy_policy: privacy/
+  site_navigation:
+    show_header: false
+    footer_label: Packages
+    footer_size: 8
+    items:
+      - title: Core
+        url: https://ml-pipes.com/
+        active: true
+      - title: Supervision
+        url: https://supervision.ml-pipes.com/
+      - title: Ultralytics
+        url: https://ultralytics.ml-pipes.com/
+      - title: Vision
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/vision
+      - title: Tensor
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/tensor
+      - title: ONNX
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/onnx
+      - title: Torch
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/torch
+    catalog:
+      title: All Packages →
+      url: https://ml-pipes.com/PACKAGES/
 
 nav:
   - Home: index.md
