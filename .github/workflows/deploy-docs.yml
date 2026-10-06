@@ -29,7 +29,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install documentation dependencies
-        run: python -m pip install "mkdocs-pixel-lab==0.1.0rc2"
+        run: python -m pip install "mkdocs-pixel-lab==0.1.1"
 
       - name: Configure GitHub Pages
         id: pages
