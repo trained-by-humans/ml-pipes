@@ -5,10 +5,56 @@ site_dir: _site
 repo_url: https://github.com/trained-by-humans/ml-pipes
 repo_name: trained-by-humans/ml-pipes
 exclude_docs: README.md
+not_in_nav: privacy.md
 
 theme:
   name: pixel-lab
+  favicon: assets/favicon.svg
   footer_text: Build explicit ML pipelines
+
+extra:
+  analytics:
+    provider: google
+    measurement_id: G-CE2N1XKFVT
+    consent_domain: ml-pipes.com
+    privacy_policy: privacy/
+  site_navigation:
+    header_mode: dropdown
+    dropdown_label: Packages
+    footer_label: Packages
+    footer_size: 8
+    items:
+      - title: Core
+        url: https://ml-pipes.com/
+        active: true
+        icon: assets/site-navigation/core.svg
+      - title: Tensor
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/tensor
+        icon: assets/site-navigation/tensor.svg
+        icon_hover: assets/site-navigation/tensor.svg#icon-hover
+      - title: ONNX
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/onnx
+        icon: assets/site-navigation/onnx.svg
+        icon_hover: assets/site-navigation/onnx.svg#icon-hover
+      - title: Torch
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/torch
+        icon: assets/site-navigation/torch.svg
+        icon_hover: assets/site-navigation/torch.svg#icon-hover
+      - title: Vision
+        url: https://github.com/trained-by-humans/ml-pipes/tree/main/packages/vision
+        icon: assets/site-navigation/vision.svg
+        icon_hover: assets/site-navigation/vision.svg#icon-hover
+      - title: Supervision
+        url: https://supervision.ml-pipes.com/
+        icon: assets/site-navigation/supervision.svg
+        icon_hover: assets/site-navigation/supervision.svg#icon-hover
+      - title: Ultralytics
+        url: https://ultralytics.ml-pipes.com/
+        icon: assets/site-navigation/ultralytics.svg
+        icon_hover: assets/site-navigation/ultralytics.svg#icon-hover
+    catalog:
+      title: All Packages →
+      url: https://ml-pipes.com/PACKAGES/
 
 nav:
   - Home: index.md
