@@ -62,7 +62,7 @@ The public documentation site is built with Pixel Lab from the repository's
 `docs/` directory. To preview it locally from the repository root, run:
 
 ```bash
-uv run --with "mkdocs-pixel-lab==0.1.1" mkdocs serve
+uv run --with "mkdocs-pixel-lab==0.1.2" mkdocs serve
 ```
 
 Open the local address printed by MkDocs (normally
@@ -70,7 +70,7 @@ Open the local address printed by MkDocs (normally
 the same strict build used by GitHub Pages:
 
 ```bash
-uv run --with "mkdocs-pixel-lab==0.1.1" mkdocs build --strict
+uv run --with "mkdocs-pixel-lab==0.1.2" mkdocs build --strict
 ```
 
 The `Pages` workflow deploys the site to `https://ml-pipes.com/` after a
