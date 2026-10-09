@@ -75,6 +75,9 @@ nav:
       - Performance: PERFORMANCE.md
 plugins:
   - search
+  - pixel-lab/metadata
+  - pixel-lab/git-lastmod
+  - pixel-lab/robots
 
 markdown_extensions:
   - mkdocs_pixel_lab.github_alerts
