@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,6 +39,21 @@ jobs:
 
       - name: Build documentation
         run: mkdocs build --strict --site-dir _site
+
+      - name: Verify SEO output
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          robots = Path('_site/robots.txt').read_text().splitlines()
+          assert 'User-agent: *' in robots and 'Allow: /' in robots
+          assert 'Sitemap: https://ml-pipes.com/sitemap.xml' in robots
+          urls = ET.parse('_site/sitemap.xml').getroot()
+          ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
+          assert len(urls) > 0
+          assert all(url.findtext(ns + 'lastmod') for url in urls)
+          PY
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
