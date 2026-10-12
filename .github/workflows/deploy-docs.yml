@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    name: Documentation Paths and Build
+    name: Build Documentation
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -70,6 +70,7 @@ jobs:
           path: _site
 
   deploy:
+    name: Deploy Site
     needs: build
     if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
