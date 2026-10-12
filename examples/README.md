@@ -54,7 +54,7 @@ python -m pip install 'ml-pipes[onnx,vision]'             # most vision + ONNX e
 
 > [!NOTE]
 > For the package matrix and public import model behind these installs, see
-> [docs/PACKAGES.md](../docs/PACKAGES.md).
+> [docs/packages.md](../docs/packages.md).
 
 ## Bundled Starter Example
 

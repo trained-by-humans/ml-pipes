@@ -10,7 +10,7 @@ Run from the repo root:
     python examples/benchmarks/run_yolo8_benchmark.py --runs 30
     python examples/benchmarks/run_yolo8_benchmark.py --model-path path/to/model.onnx --save results/
 
-See `docs/BENCHMARKING.md` for shared measurement options, result formats, and the
+See `docs/benchmarking.md` for shared measurement options, result formats, and the
 higher-level sweep / CLI APIs.
 """
 from __future__ import annotations

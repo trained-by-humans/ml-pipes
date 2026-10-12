@@ -12,7 +12,7 @@ Run from the repo root:
     python -m ml_pipes benchmark examples.benchmarks.run_yolo8_benchmark_cli \
         --arg model_path=path/to/model.onnx
 
-See `docs/BENCHMARKING.md` for sweep variants, shared CLI options, and factory
+See `docs/benchmarking.md` for sweep variants, shared CLI options, and factory
 rules.
 """
 from __future__ import annotations

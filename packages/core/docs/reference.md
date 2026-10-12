@@ -1,9 +1,9 @@
-# ml-pipes-core Index
+# ml-pipes-core Reference
 
 For framework-wide operator concepts, see
-[`docs/OPERATORS.md`](../../../docs/OPERATORS.md). For the cross-package
+[`docs/operators.md`](../../../docs/operators.md). For the cross-package
 package catalogs, see
-[`docs/OPERATORS.md#package-catalogs`](../../../docs/OPERATORS.md#package-catalogs).
+[`docs/operators.md#package-catalogs`](../../../docs/operators.md#package-catalogs).
 
 ## User-Facing Modules
 

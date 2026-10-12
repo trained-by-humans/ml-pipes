@@ -2,7 +2,7 @@
 
 Inspection runs a pipeline once and captures the output at every operator
 boundary. It is the tool for understanding what values actually flowed through
-one call; use [TRACING.md](TRACING.md) when you need timings, failures, or
+one call; use [tracing.md](tracing.md) when you need timings, failures, or
 collector-driven observation instead.
 
 ## Quick Example

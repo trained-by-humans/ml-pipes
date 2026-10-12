@@ -18,10 +18,10 @@ an `ml-pipes` pipeline.
 |----------------|-----------------------------------------------------------------------------------------------------------|
 | Package        | `ml-pipes-torch`                                                                                          |
 | Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/README.md) |
-| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/INDEX.md)   |
+| Reference      | [`docs/reference.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/torch/docs/reference.md) |
 | Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                        |
 | Public modules | `ml_pipes.torch`                                                                                          |
 | Content        | Torch execution stages; NumPy/Torch boundary crossing; device placement; mirrored Torch-native tensor postprocess |
 
-See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+See [`docs/packages.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/packages.md)
 for direct package installs, umbrella profiles, and the full package matrix.

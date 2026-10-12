@@ -77,7 +77,7 @@ That property is read-only; attach or remove collectors through
 
 Tracing stays focused on runtime step timing, failures, and region structure.
 If you need per-step outputs and richer debug snapshots, use
-[`Pipeline.inspect()` and the inspection guide](INSPECTION.md) instead.
+[`Pipeline.inspect()` and the inspection guide](inspection.md) instead.
 
 > [!NOTE]
 > The trace delivered to the collector is a frozen snapshot, so collectors can
@@ -96,7 +96,7 @@ Tracing is useful when you want to:
 - support performance tuning by seeing how time is distributed within calls
 
 > [!TIP]
-> Use [`Benchmark`](BENCHMARKING.md) when you want to measure repeated-run
+> Use [`Benchmark`](benchmarking.md) when you want to measure repeated-run
 > behavior or compare configuration changes.
 
 ## Built-in Collectors

@@ -1,6 +1,6 @@
 # Benchmarking
 
-Tracing (see [TRACING.md](TRACING.md)) gives you a per-operator breakdown of a
+Tracing (see [tracing.md](tracing.md)) gives you a per-operator breakdown of a
 single pipeline call. Benchmarking builds on top of tracing to give you the
 statistical spread across many: mean, percentiles, and stddev per operator,
 collected over a controlled warmup + measurement loop and returned as a
@@ -480,5 +480,5 @@ python run_yolo8_benchmark_variants.py --variants n s --runs 20
 
 ## See also
 
-- `TRACING.md` — the underlying per-operator tracing system that benchmarking builds on
-- `PERFORMANCE.md` — throughput and batching guidance
+- `tracing.md` — the underlying per-operator tracing system that benchmarking builds on
+- `performance.md` — throughput and batching guidance

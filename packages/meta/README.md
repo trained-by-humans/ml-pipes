@@ -34,4 +34,4 @@ not with nested extra syntax such as `ml-pipes[core[otel]]`.
 
 For existing install profiles, the package matrix, and the public component
 import model, see the
-[package guide](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md).
+[package guide](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/packages.md).

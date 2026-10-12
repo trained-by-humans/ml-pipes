@@ -81,6 +81,6 @@ relevant docs, examples, and tests together so the repository stays coherent.
 For workflow-specific guidance:
 
 - use `docs/README.md` as the shared doc index
-- use `docs/PACKAGES.md` to resolve package ownership
+- use `docs/packages.md` to resolve package ownership
 - then start with `.agents/skills/README.md` and read the matching
   `SKILL.md`

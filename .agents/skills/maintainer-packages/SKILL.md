@@ -24,8 +24,8 @@ and package-doc alignment are complete.
 ## Follow This Workflow
 
 1. Confirm the routed package target.
-   Read `docs/PACKAGES.md`, `packages/<name>/README.md`, and
-   `packages/<name>/docs/INDEX.md` to confirm the routed public module
+   Read `docs/packages.md`, `packages/<name>/README.md`, and
+   `packages/<name>/docs/reference.md` to confirm the routed public module
    really belongs to the selected package.
 
 2. Confirm package fit.
@@ -49,7 +49,7 @@ and package-doc alignment are complete.
 
 6. Check the implementation against the shared operator rules when needed.
    If the change adds, changes, or updates an operator, read
-   `docs/OPERATORS.md` and make sure the implementation follows those rules.
+   `docs/operators.md` and make sure the implementation follows those rules.
 
 7. Place the public package surface.
    If the public package surface changed, update the package `__init__`
@@ -63,7 +63,7 @@ and package-doc alignment are complete.
 
 9. Align package docs to the verified surface.
    If the verified package surface changed, update
-   `packages/<name>/README.md` and `packages/<name>/docs/INDEX.md` to
+   `packages/<name>/README.md` and `packages/<name>/docs/reference.md` to
    describe that final public surface.
 
 ## Output

@@ -1,7 +1,7 @@
 # Model Scaffolding Tutorial
 
 This guide shows how to scaffold a model integration with `ml-pipes`. Before you start, read [README.md](https://github.com/trained-by-humans/ml-pipes/blob/main/README.md) and
-[COMPOSITION.md](COMPOSITION.md).
+[composition.md](composition.md).
 
 A scaffold is the smallest useful pipeline around model execution. In ML
 terms, it is the explicit path from raw input to final predictions:
@@ -145,7 +145,7 @@ If you run the model through your own callable, return the same named tensors
 directly or build a small adapter around that runtime. The important part is
 that after this step, the rest of the scaffold can talk about semantic values
 instead of raw graph ids. For more operator patterns, see
-[OPERATORS.md](OPERATORS.md).
+[operators.md](operators.md).
 
 ## Step 4 — Adapt The Raw Output Layout
 
@@ -195,7 +195,7 @@ MapTensor("labels", fn=lambda t: t.astype("int32") - 1, as_="classes")
 If the quirk still does not fit the existing steps, keep it in a small local
 callable or operator instead of folding it into the entire scaffold. If that
 logic becomes reusable, turn it into a real operator; see
-[OPERATORS.md](OPERATORS.md). For more involved postprocessing examples, see
+[operators.md](operators.md). For more involved postprocessing examples, see
 the examples at the end of this guide.
 
 Some models will not need this step at all. Keep it optional and local.
@@ -247,7 +247,7 @@ If score thresholding is all you need, `NMS(conf_threshold=...)` may already
 be enough by itself.
 
 For more filtering and selection operators, start with
-[PACKAGES.md](PACKAGES.md) and then check the relevant package docs for your
+[packages.md](packages.md) and then check the relevant package docs for your
 domain.
 
 The exact operators can change by model family. The important point is the
@@ -317,15 +317,15 @@ stays the same.
 
 - Run `pipeline.validate()` as you shape the scaffold. For validation rules and
   advanced hooks such as `resolve_contract(...)`, see
-  [VALIDATION.md](VALIDATION.md).
+  [validation.md](validation.md).
 - Use `pipeline.inspect(sample_input)` to look at intermediate tensors and find
   the first wrong step.
 - If local logic grows into reusable pipeline code, see
-  [OPERATORS.md](OPERATORS.md) and [COMPOSITION.md](COMPOSITION.md).
+  [operators.md](operators.md) and [composition.md](composition.md).
 
 ## More Examples
 
-See [INSPECTION.md](INSPECTION.md) for usage and
+See [inspection.md](inspection.md) for usage and
 [run_inspect.py](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/run_inspect.py) for a runnable example.
 
 For segmentation variants or heavier postprocessing, see:

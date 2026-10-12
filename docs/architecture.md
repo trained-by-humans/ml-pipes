@@ -1,6 +1,6 @@
 # Architecture
 
-Following up on [DESIGN.md](DESIGN.md), this document is a map of how
+Following up on [design.md](design.md), this document is a map of how
 `ml-pipes` is split internally. It focuses on ownership boundaries: what each
 layer owns, how one invocation moves through the system, and where a change
 should usually land.
@@ -76,7 +76,7 @@ Architecturally, that means:
   tracing, and description something concrete to work with
 
 For operator boundaries and creation guidelines, see
-[OPERATORS.md](OPERATORS.md).
+[operators.md](operators.md).
 
 ### Context
 
@@ -107,7 +107,7 @@ Regions are embedded in the same operator list; they do not create a separate
 pipeline type. `Batch`/`UnBatch` and `Scatter`/`Gather` are the main built-in
 examples.
 
-For region semantics and examples, see [REGIONS.md](REGIONS.md).
+For region semantics and examples, see [regions.md](regions.md).
 
 ### Composition
 
@@ -123,7 +123,7 @@ boundaries:
 This distinction matters architecturally because it changes both runtime
 isolation and what the tooling can see as one step.
 
-For the user-facing composition model, see [COMPOSITION.md](COMPOSITION.md).
+For the user-facing composition model, see [composition.md](composition.md).
 
 ## Execution Flow
 
@@ -177,7 +177,7 @@ Main components:
 - typing and signature inspection helpers
 
 For the concrete validation rules and contract-resolution model, see
-[VALIDATION.md](VALIDATION.md).
+[validation.md](validation.md).
 
 ### Tracing
 
@@ -200,7 +200,7 @@ Main components:
   `AggregateCollector`
 
 For trace lifecycle, built-in collectors, and custom collector patterns, see
-[TRACING.md](TRACING.md).
+[tracing.md](tracing.md).
 
 ### Inspection
 
@@ -227,7 +227,7 @@ Main components:
 - `PipelineInspector` as the display-oriented inspection layer
 - step formatters, value formatters, and renderers
 
-For inspection setup and user-facing APIs, see [INSPECTION.md](INSPECTION.md).
+For inspection setup and user-facing APIs, see [inspection.md](inspection.md).
 
 ### Benchmarking
 
@@ -248,8 +248,8 @@ Main components:
 - `BenchmarkBuilder` as the fluent benchmark setup layer
 
 For benchmarking workflows, sweeps, and CLI usage, see
-[BENCHMARKING.md](BENCHMARKING.md). For tuning guidance, see
-[PERFORMANCE.md](PERFORMANCE.md).
+[benchmarking.md](benchmarking.md). For tuning guidance, see
+[performance.md](performance.md).
 
 ### Pipeline Description
 
@@ -307,8 +307,8 @@ Main components:
 ## Where To Go Next
 
 This document has mapped how `ml-pipes` is split internally. If you want the
-rationale behind these boundaries, return to [DESIGN.md](DESIGN.md).
+rationale behind these boundaries, return to [design.md](design.md).
 
 If your next step is building with the framework, continue to
-[SCAFFOLDING.md](SCAFFOLDING.md) or the runnable examples in
+[scaffolding.md](scaffolding.md) or the runnable examples in
 [examples/README.md](https://github.com/trained-by-humans/ml-pipes/blob/main/examples/README.md).

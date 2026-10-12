@@ -18,10 +18,10 @@ an `ml-pipes` pipeline.
 |----------------|---------------------------------------------------------------------------------------------------------------------|
 | Package        | `ml-pipes-vision`                                                                                                    |
 | Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/docs/README.md)         |
-| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/docs/INDEX.md)           |
+| Reference      | [`docs/reference.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/vision/docs/reference.md)   |
 | Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                                  |
 | Public modules | `ml_pipes.vision`                                                                                                   |
 | Content        | image input handling; preprocessing; vision tensor postprocess; tiling; rendering and logging                      |
 
-See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+See [`docs/packages.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/packages.md)
 for direct package installs, umbrella profiles, and the full package matrix.

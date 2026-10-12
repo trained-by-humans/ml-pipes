@@ -3,7 +3,7 @@
 `ml_pipes.vision` owns image inputs, reusable vision semantics, and vision
 postprocess inside `ml-pipes`.
 
-For the full package surface and operator catalog, see [`INDEX.md`](./INDEX.md).
+For the full package surface and operator catalog, see [`reference.md`](./reference.md).
 
 ## Package Profile
 
@@ -216,7 +216,7 @@ This shape appears in
 
 ## Further Reading
 
-- [`INDEX.md`](./INDEX.md) for the full surface catalog
+- [`reference.md`](./reference.md) for the full surface catalog
 - [`docs/README.md`](../../../docs/README.md) for the shared framework docs index
 - [`Tensor guide`](../../tensor/docs/README.md) for the shared tensor domain
   that Vision builds on

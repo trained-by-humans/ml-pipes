@@ -18,17 +18,17 @@ pip install ml-pipes
 pip install 'ml-pipes[onnx,vision]'
 ```
 
-See [Packages](PACKAGES.md) for the package matrix, install profiles, and
+See [Packages](packages.md) for the package matrix, install profiles, and
 public import surfaces. The repository’s [examples](https://github.com/trained-by-humans/ml-pipes/tree/main/examples)
 provide runnable starting points.
 
 ## Explore the Framework
 
-- [Design](DESIGN.md) explains the composition-first model behind
+- [Design](design.md) explains the composition-first model behind
   `ml-pipes`.
-- [Architecture](ARCHITECTURE.md) maps that model to the framework’s runtime
+- [Architecture](architecture.md) maps that model to the framework’s runtime
   and ownership boundaries.
-- [Build Pipelines](OPERATORS.md) covers operators, composition, execution
+- [Build Pipelines](operators.md) covers operators, composition, execution
   regions, and model scaffolding.
-- [Tooling](VALIDATION.md) covers validation, inspection, tracing,
+- [Tooling](validation.md) covers validation, inspection, tracing,
   benchmarking, and performance guidance.

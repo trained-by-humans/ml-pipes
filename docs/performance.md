@@ -5,15 +5,15 @@ throughput, latency, tail latency, and hardware utilization.
 
 Performance work in `ml-pipes` usually has three connected parts:
 
-- Use [TRACING.md](TRACING.md) when you want to monitor live pipeline behavior
+- Use [tracing.md](tracing.md) when you want to monitor live pipeline behavior
   or inspect where time is going within a call.
 - Use this guide when you are ready to tune the pipeline itself through levers
-  such as concurrency, batching, and [regions](REGIONS.md).
-- Use [BENCHMARKING.md](BENCHMARKING.md) when you want repeated-run
+  such as concurrency, batching, and [regions](regions.md).
+- Use [benchmarking.md](benchmarking.md) when you want repeated-run
   measurements or to compare configuration changes.
 
 A practical loop is: establish a baseline with
-[`Benchmark`](BENCHMARKING.md), use traces when you need to understand the
+[`Benchmark`](benchmarking.md), use traces when you need to understand the
 current behavior, change one execution lever at a time, then benchmark again
 to confirm the effect across repeated runs.
 
@@ -56,10 +56,10 @@ Start with the simplest lever that matches how work already arrives:
 - Many independent requests already reach the pipeline separately: start with
   coarse-grained concurrency.
 - One request contains a `list` of independent items: use
-  [`Scatter/Gather`](REGIONS.md).
+  [`Scatter/Gather`](regions.md).
 - The caller already produces batches: use coarse-grained batching.
 - Separate threads need to meet at one inference stage: use
-  [`Batch/UnBatch`](REGIONS.md).
+  [`Batch/UnBatch`](regions.md).
 
 ## Concurrency
 
@@ -111,7 +111,7 @@ with ThreadPoolExecutor(max_workers=8) as pool:
 ### Fine-grained concurrency (Scatter/Gather)
 
 A single request fans out a `list[T]` to N worker threads at a specific point inside
-the pipeline. This is a [region-based](REGIONS.md) pattern: only the enclosed
+the pipeline. This is a [region-based](regions.md) pattern: only the enclosed
 steps run concurrently, while steps before and after remain sequential. Each
 worker runs the region independently with its own `Context`; the original thread
 resumes with `list[results]` after `Gather`.
@@ -210,7 +210,7 @@ results = pipeline(batch)
 ### Fine-grained batching (Batch/UnBatch)
 
 Concurrent requests rendezvous at a specific point *inside* the pipeline at the `Batch`
-operator. This is a [region-based](REGIONS.md) pattern: steps before and after
+operator. This is a [region-based](regions.md) pattern: steps before and after
 the batch region run independently per thread, and only the enclosed region is
 batched. `Batch/UnBatch` does not create concurrency by itself; it coordinates
 callers that are already in flight. The first thread to fill the batch becomes

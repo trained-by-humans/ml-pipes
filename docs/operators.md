@@ -101,14 +101,14 @@ participate in framework mechanisms beyond a normal transform:
   boundary.
 - When the behavior cannot be expressed as one operator's transform and
   instead defines how a bounded group of operators should execute together,
-  read [REGIONS.md](REGIONS.md). Region operators are implemented through the
+  read [regions.md](regions.md). Region operators are implemented through the
   `RegionOpener[In, BodyIn]` and `RegionCloser[BodyOut, Out]` superclasses.
 - Reach for the `SideEffectOp[T]` superclass when an operator should pass the
   value through unchanged while observing, logging, drawing, or saving.
 
 These are still operators, but they participate in extra execution mechanics.
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for how context and regions fit into
-pipeline execution, and [REGIONS.md](REGIONS.md) for region semantics and
+Read [architecture.md](architecture.md) for how context and regions fit into
+pipeline execution, and [regions.md](regions.md) for region semantics and
 examples.
 
 ## Features Built On Operators
@@ -240,7 +240,7 @@ PipelineInspector().show(result)
 
 ![Inspection report overview](https://raw.githubusercontent.com/trained-by-humans/ml-pipes/main/.github/assets/yolo8_tiled_inspection_overview.png)
 
-For setup, rendering, and custom formatters, see [INSPECTION.md](INSPECTION.md).
+For setup, rendering, and custom formatters, see [inspection.md](inspection.md).
 
 > [!TIP]
 > Inspection is easier to read when each operator marks one clear step instead
@@ -410,7 +410,7 @@ inspect, trace, and benchmark as standalone boundaries.
   Do not extend `ContextOp` just to read one specific key from context. If the
   operator has a specific dependency, define it in the operator signature and
   let pipeline composition provide it explicitly.
-- Reach for the region mechanism (explained in [REGIONS.md](REGIONS.md)) when
+- Reach for the region mechanism (explained in [regions.md](regions.md)) when
   the behavior cannot be expressed as one operator's transform and instead
   defines how a bounded group of operators should execute together.
 
@@ -426,12 +426,12 @@ inspect, trace, and benchmark as standalone boundaries.
 
 So far this page has focused on what operators are and how to create them.
 In practice, many reusable operators already exist, so most users should start
-from [PACKAGES.md](PACKAGES.md) and then check the linked package index for
+from [packages.md](packages.md) and then check the linked package reference for
 the operators they need.
 
 Start from `ml_pipes.standard` for shared generic building blocks such as
 routing, context, regions, and data-preparation work.
 
 Example: if postprocess is still tensor-shaped, start from the tensor package
-and its index in
-[packages/tensor/docs/INDEX.md](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/INDEX.md).
+and its reference in
+[packages/tensor/docs/reference.md](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/reference.md).

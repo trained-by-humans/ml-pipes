@@ -2,7 +2,7 @@
 
 `ml_pipes.torch` brings Torch-backed execution and on-device tensor postprocess into `ml-pipes`.
 
-For the full package surface, aliases, and operator signatures, see [`INDEX.md`](./INDEX.md).
+For the full package surface, aliases, and operator signatures, see [`reference.md`](./reference.md).
 
 ## Package Profile
 
@@ -247,7 +247,7 @@ timed step sees completed work instead of queued work.
 
 ## Further Reading
 
-- [`INDEX.md`](./INDEX.md) for the full surface catalog
+- [`reference.md`](./reference.md) for the full surface catalog
 - [`docs/README.md`](../../../docs/README.md) for the shared framework docs index
 - [`examples/README.md`](../../../examples/README.md) for runnable pipeline entry points
   - [`examples/torch/run_mask2former_torch_postprocess.py`](../../../examples/torch/run_mask2former_torch_postprocess.py)
