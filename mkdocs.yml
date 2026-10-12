@@ -54,25 +54,25 @@ extra:
         icon_hover: assets/site-navigation/ultralytics.svg#icon-hover
     catalog:
       title: All Packages →
-      url: https://ml-pipes.com/PACKAGES/
+      url: https://ml-pipes.com/packages/
 
 nav:
   - Home: index.md
   - Start Here:
-      - Packages: PACKAGES.md
-      - Design: DESIGN.md
-      - Architecture: ARCHITECTURE.md
+      - Packages: packages.md
+      - Design: design.md
+      - Architecture: architecture.md
   - Build Pipelines:
-      - Operators: OPERATORS.md
-      - Composition: COMPOSITION.md
-      - Regions: REGIONS.md
-      - Model Scaffolding: SCAFFOLDING.md
+      - Operators: operators.md
+      - Composition: composition.md
+      - Regions: regions.md
+      - Model Scaffolding: scaffolding.md
   - Tooling:
-      - Validation: VALIDATION.md
-      - Inspection: INSPECTION.md
-      - Tracing: TRACING.md
-      - Benchmarking: BENCHMARKING.md
-      - Performance: PERFORMANCE.md
+      - Validation: validation.md
+      - Inspection: inspection.md
+      - Tracing: tracing.md
+      - Benchmarking: benchmarking.md
+      - Performance: performance.md
 plugins:
   - search
   - pixel-lab/metadata

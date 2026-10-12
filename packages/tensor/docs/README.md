@@ -4,7 +4,7 @@
 packages and task packages.
 
 For the full package surface, aliases, and operator catalog, see
-[`INDEX.md`](./INDEX.md).
+[`reference.md`](./reference.md).
 
 ## Package Profile
 
@@ -182,13 +182,13 @@ This is the shape used in
 [`examples/run_rfdetr_nano.py`](../../../examples/run_rfdetr_nano.py).
 
 For the full guide on how to build scaffolding around the model, see
-[`SCAFFOLDING.md`](../../../docs/SCAFFOLDING.md).
+[`scaffolding.md`](../../../docs/scaffolding.md).
 
 ## Further Reading
 
-- [`INDEX.md`](./INDEX.md) for the full surface catalog
+- [`reference.md`](./reference.md) for the full surface catalog
 - [`docs/README.md`](../../../docs/README.md) for the shared framework docs index
-- [`REGIONS.md`](../../../docs/REGIONS.md) for batching and regions
+- [`regions.md`](../../../docs/regions.md) for batching and regions
 - [`Torch guide`](../../torch/docs/README.md) for Torch/NumPy crossover pipelines
 - [`examples/README.md`](../../../examples/README.md) for runnable pipeline entry points
   - [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py)

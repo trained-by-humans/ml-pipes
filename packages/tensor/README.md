@@ -17,10 +17,10 @@ an `ml-pipes` pipeline.
 |----------------|------------------------------------------------------------------------------------------------------------------|
 | Package        | `ml-pipes-tensor`                                                                                                |
 | Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/README.md)       |
-| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/INDEX.md)         |
+| Reference      | [`docs/reference.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/tensor/docs/reference.md) |
 | Depends on     | `ml-pipes-core`                                                                                                  |
 | Public modules | `ml_pipes.tensor`                                                                                                |
 | Content        | shared tensor values; NumPy-side tensor shaping and selection; masking, ranking, collation, and light arithmetic |
 
-See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+See [`docs/packages.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/packages.md)
 for direct package installs, umbrella profiles, and the full package matrix.

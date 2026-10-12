@@ -33,7 +33,7 @@ reduced to concrete follow-up targets.
 
 3. Validate composition first.
    Run `validate()` before deeper runtime debugging.
-   Read `docs/VALIDATION.md` when boundary mismatch or contract failure is a
+   Read `docs/validation.md` when boundary mismatch or contract failure is a
    likely cause.
 
 4. Inspect the value flow.
@@ -45,7 +45,7 @@ reduced to concrete follow-up targets.
 5. Trace only when runtime behavior matters.
    Use tracing only when inspection is not enough or the problem is about
    timing, runtime order, concurrency, or slow steps.
-   Read `docs/TRACING.md` only when tracing is actually needed.
+   Read `docs/tracing.md` only when tracing is actually needed.
 
 6. Record the concrete follow-up targets.
    For the first confirmed failure, identify the narrowest concrete targets

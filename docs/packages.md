@@ -9,7 +9,7 @@ under the shared `ml_pipes` namespace.
 
 Some integrations are maintained as independent, opt-in distributions rather
 than workspace packages or umbrella profiles. See
-[Verified Community Packages](VERIFIED_COMMUNITY_PACKAGES.md) for their
+[Verified Community Packages](verified_community_packages.md) for their
 ownership, support, and release policy.
 
 ## Packaging Terms
@@ -122,7 +122,8 @@ packages/<name>/
 - `pyproject.toml` defines the published package metadata and dependencies.
 - `README.md` explains what that package carries in framework terms.
 - `docs/` holds package-specific guides that do not belong in the shared
-  framework docs under the repository-level `docs/`.
+  framework docs under the repository-level `docs/`. Use `reference.md` for
+  the package surface catalog and reserve `index.md` for a MkDocs landing page.
 - `src/ml_pipes/...` contains the code that package publishes into the shared
   `ml_pipes` namespace.
 - `LICENSE` is the package-local license file shipped with that distribution

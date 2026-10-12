@@ -17,10 +17,10 @@ an `ml-pipes` pipeline.
 |----------------|-----------------------------------------------------------------------------------------------------------------|
 | Package        | `ml-pipes-onnx`                                                                                                |
 | Guide          | [`docs/README.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/onnx/docs/README.md)      |
-| Reference      | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/onnx/docs/INDEX.md)        |
+| Reference      | [`docs/reference.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/onnx/docs/reference.md) |
 | Depends on     | `ml-pipes-core`, `ml-pipes-tensor`                                                                              |
 | Public modules | `ml_pipes.onnx`                                                                                                 |
 | Content        | ONNX Runtime integration; runtime-output handling; output extraction and batch distribution                     |
 
-See [`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+See [`docs/packages.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/packages.md)
 for direct package installs, umbrella profiles, and the full package matrix.

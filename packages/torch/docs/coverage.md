@@ -38,7 +38,7 @@ operators.
 | `MapTensor` | `MapTensor` | |
 | `Collate` | `Collate` | |
 
-For operator details, see the [Tensor package index](../../tensor/docs/INDEX.md).
+For operator details, see the [Tensor package reference](../../tensor/docs/reference.md).
 
 ## ONNX Package Coverage
 
@@ -48,4 +48,4 @@ For operator details, see the [Tensor package index](../../tensor/docs/INDEX.md)
 | `Extract` | `Extract` | |
 | `Distribute` | `Distribute` | |
 
-For operator details, see the [ONNX package index](../../onnx/docs/INDEX.md).
+For operator details, see the [ONNX package reference](../../onnx/docs/reference.md).

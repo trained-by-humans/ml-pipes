@@ -12,7 +12,7 @@ Run from the repo root:
     python examples/benchmarks/run_yolo8_benchmark_sweep.py --runs 20
     python examples/benchmarks/run_yolo8_benchmark_sweep.py --model-path path/to/model.onnx --save results/
 
-See `docs/BENCHMARKING.md` for shared sweep concepts, measurement options, and
+See `docs/benchmarking.md` for shared sweep concepts, measurement options, and
 factory rules.
 """
 from __future__ import annotations

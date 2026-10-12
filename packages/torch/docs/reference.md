@@ -1,19 +1,19 @@
-# ml-pipes-torch Index
+# ml-pipes-torch Reference
 
 This page catalogs the Torch package surface in `ml_pipes.torch`.
 For package overview, scope, design principles, and usage patterns, see
 [`README.md`](./README.md).
 
 The package mirrors `ml_pipes.tensor` for shared tensor postprocess,
-and `ml_pipes.onnx` for runtime staging shape. Use those package indexes for
+and `ml_pipes.onnx` for runtime staging shape. Use those package references for
 the NumPy-side variants and typed vision outputs.
 For the Tensor and ONNX operator coverage matrix, see
-[`COVERAGE.md`](./COVERAGE.md).
+[`coverage.md`](./coverage.md).
 
 For framework-wide operator concepts, see
-[`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
+[`docs/operators.md`](../../../docs/operators.md).
 For the cross-package package catalogs, see
-[`docs/OPERATORS.md#package-catalogs`](../../../docs/OPERATORS.md#package-catalogs).
+[`docs/operators.md#package-catalogs`](../../../docs/operators.md#package-catalogs).
 
 ## Package Primitives
 

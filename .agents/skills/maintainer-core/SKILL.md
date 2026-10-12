@@ -23,16 +23,16 @@ surfaces.
 ## Follow This Workflow
 
 1. Confirm framework ownership.
-   Read `docs/PACKAGES.md`, `packages/core/README.md`, and
-   `packages/core/docs/INDEX.md` to confirm the routed target really belongs
+   Read `docs/packages.md`, `packages/core/README.md`, and
+   `packages/core/docs/reference.md` to confirm the routed target really belongs
    to the shared framework layer rather than to one package-owned domain
    surface.
 
 2. Confirm the semantic intent.
-   Read `docs/DESIGN.md` before touching shared behavior.
+   Read `docs/design.md` before touching shared behavior.
 
 3. Locate the owning framework surface.
-   Read `docs/ARCHITECTURE.md`, then locate the owner under
+   Read `docs/architecture.md`, then locate the owner under
    `packages/core/src/ml_pipes/`.
    Use the existing architecture sections as the ownership map:
    - `Pipeline`
@@ -47,8 +47,8 @@ surfaces.
    - `Pipeline Description`
 
 4. Read subsystem docs only when needed.
-   Read `docs/COMPOSITION.md`, `docs/VALIDATION.md`, `docs/TRACING.md`, or
-   `docs/BENCHMARKING.md` only when that subsystem is part of the change.
+   Read `docs/composition.md`, `docs/validation.md`, `docs/tracing.md`, or
+   `docs/benchmarking.md` only when that subsystem is part of the change.
 
 5. Confirm framework fit.
    If the docs show the change does not fit the shared framework layer handled
@@ -61,7 +61,7 @@ surfaces.
 
 7. Check the implementation against the shared operator rules when needed.
    If the change adds, changes, or updates a generic reusable operator in
-   `ml_pipes.standard`, read `docs/OPERATORS.md` and make sure the
+   `ml_pipes.standard`, read `docs/operators.md` and make sure the
    implementation follows those rules.
 
 8. Verify the framework behavior.

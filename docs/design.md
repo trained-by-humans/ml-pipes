@@ -177,8 +177,8 @@ natural fit even when some stages still involve side effects at the edges.
 This document has explained the conceptual model behind `ml-pipes`: what the
 framework is built around and why those choices were made. To see how that
 design is realized in the codebase, continue to
-[ARCHITECTURE.md](ARCHITECTURE.md).
+[architecture.md](architecture.md).
 
-Taken together, the two docs answer different questions. `DESIGN.md` explains
-why `ml-pipes` looks this way. `ARCHITECTURE.md` explains ownership
+Taken together, the two docs answer different questions. `design.md` explains
+why `ml-pipes` looks this way. `architecture.md` explains ownership
 boundaries, runtime structure, and where changes should usually land.

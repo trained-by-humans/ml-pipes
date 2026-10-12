@@ -215,7 +215,7 @@ are interchangeable.
 | Other typing features | `Annotated`, `Literal`, generic `Protocol[T]`, `ParamSpec`, overload-oriented typing constructs | Not part of the current documented compatibility contract. Some cases may work incidentally, but they are not guaranteed. Prefer a simpler boundary annotation or use `resolve_contract(...)` when you need a more explicit contract. |
 
 For more information regarding call signatures and operator contracts, see
-[OPERATORS.md](OPERATORS.md).
+[operators.md](operators.md).
 
 If a boundary is incompatible, validation raises with the step label:
 
@@ -283,7 +283,7 @@ A representative error looks like:
 Pipeline step 0:Batch has no matching UnBatch
 ```
 
-For region semantics and built-in region pairs, see [REGIONS.md](REGIONS.md).
+For region semantics and built-in region pairs, see [regions.md](regions.md).
 
 ## Strict Mode
 

@@ -7,41 +7,41 @@ Package-owned guides live under `packages/<name>/docs/`.
 
 - [../README.md](../README.md) for the framework overview and quick start
 - [../examples/README.md](../examples/README.md) to run a concrete example first
-- [PACKAGES.md](PACKAGES.md) to choose the right package and import surface
+- [packages.md](packages.md) to choose the right package and import surface
 
 ## Understand The Pipeline Model
 
-- [OPERATORS.md](OPERATORS.md) for operator boundaries, naming, and design rules
-- [COMPOSITION.md](COMPOSITION.md) for pipeline composition
+- [operators.md](operators.md) for operator boundaries, naming, and design rules
+- [composition.md](composition.md) for pipeline composition
 
 ## Design And Architecture
 
-- [DESIGN.md](DESIGN.md) for the conceptual model and rationale
-- [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and runtime shape
+- [design.md](design.md) for the conceptual model and rationale
+- [architecture.md](architecture.md) for ownership boundaries and runtime shape
 
 ## Tooling
 
-- [VALIDATION.md](VALIDATION.md) for static pipeline contract checking
-- [INSPECTION.md](INSPECTION.md) for one-run output capture and rendering
-- [TRACING.md](TRACING.md) for one-run timing and collectors
-- [BENCHMARKING.md](BENCHMARKING.md) for repeated-run measurement and sweeps
+- [validation.md](validation.md) for static pipeline contract checking
+- [inspection.md](inspection.md) for one-run output capture and rendering
+- [tracing.md](tracing.md) for one-run timing and collectors
+- [benchmarking.md](benchmarking.md) for repeated-run measurement and sweeps
 
 ## Advanced Topics
 
-- [REGIONS.md](REGIONS.md) for batching, scatter/gather, and custom region
+- [regions.md](regions.md) for batching, scatter/gather, and custom region
   semantics
-- [PERFORMANCE.md](PERFORMANCE.md) for practical guidance on batching,
+- [performance.md](performance.md) for practical guidance on batching,
   concurrency, and throughput tradeoffs
-- [SCAFFOLDING.md](SCAFFOLDING.md) to wrap a new model inside an explicit
+- [scaffolding.md](scaffolding.md) to wrap a new model inside an explicit
   pipeline
 
 ## Package-Owned Docs
 
-- [../packages/core/docs/INDEX.md](../packages/core/docs/INDEX.md)
-- [../packages/tensor/docs/INDEX.md](../packages/tensor/docs/INDEX.md)
-- [../packages/vision/docs/INDEX.md](../packages/vision/docs/INDEX.md)
-- [../packages/onnx/docs/INDEX.md](../packages/onnx/docs/INDEX.md)
-- [../packages/torch/docs/INDEX.md](../packages/torch/docs/INDEX.md)
+- [../packages/core/docs/reference.md](../packages/core/docs/reference.md)
+- [../packages/tensor/docs/reference.md](../packages/tensor/docs/reference.md)
+- [../packages/vision/docs/reference.md](../packages/vision/docs/reference.md)
+- [../packages/onnx/docs/reference.md](../packages/onnx/docs/reference.md)
+- [../packages/torch/docs/reference.md](../packages/torch/docs/reference.md)
 
 ## Documentation Website
 
@@ -50,5 +50,5 @@ Package-owned guides live under `packages/<name>/docs/`.
 
 ## Community Packages
 
-- [VERIFIED_COMMUNITY_PACKAGES.md](VERIFIED_COMMUNITY_PACKAGES.md) for the
+- [verified_community_packages.md](verified_community_packages.md) for the
   ownership, support, security, and release policy for verified integrations.

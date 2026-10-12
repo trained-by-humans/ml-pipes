@@ -24,7 +24,7 @@ inputs and expected outputs, or the remaining issue needs debugging.
    State the pipeline input and output before selecting operators.
 
 2. Identify the package chain.
-   Read `docs/PACKAGES.md` and decide which package surfaces the pipeline
+   Read `docs/packages.md` and decide which package surfaces the pipeline
    should cross.
    Common chains include:
    - `vision -> onnx -> tensor -> vision`
@@ -33,8 +33,8 @@ inputs and expected outputs, or the remaining issue needs debugging.
 
 3. Choose the main guide.
    Use:
-   - `docs/SCAFFOLDING.md` for model wrapping and runtime scaffolding
-   - `docs/COMPOSITION.md` for general pipeline composition
+   - `docs/scaffolding.md` for model wrapping and runtime scaffolding
+   - `docs/composition.md` for general pipeline composition
 
 4. Check runnable examples first.
    Read `examples/README.md` and start from the closest example or repro
@@ -42,7 +42,7 @@ inputs and expected outputs, or the remaining issue needs debugging.
 
 5. Inspect the owning package surfaces.
    For each package in the chain, read the package `README.md` and
-   `docs/INDEX.md` to find the current exported operators and value types.
+   `docs/reference.md` to find the current exported operators and value types.
 
 6. List the meaningful transformations.
    Break the pipeline into explicit stages and map each stage to the package
@@ -51,13 +51,13 @@ inputs and expected outputs, or the remaining issue needs debugging.
 7. Add local steps only when needed.
    If existing package surfaces do not cover a stage, add the missing local
    functions or local operators in the example or downstream code.
-   Use `docs/OPERATORS.md` only when you need guidance for a local operator.
+   Use `docs/operators.md` only when you need guidance for a local operator.
    Do not introduce new shared package or core behavior while building the
    pipeline.
 
 8. Compose and validate.
    Build the explicit pipeline and run `validate()`.
-   Read `docs/VALIDATION.md` when boundary mismatch or contract issues appear.
+   Read `docs/validation.md` when boundary mismatch or contract issues appear.
 
 9. Run the pipeline on a representative input.
    Execute the pipeline on a realistic input and compare against the expected

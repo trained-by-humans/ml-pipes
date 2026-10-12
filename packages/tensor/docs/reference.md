@@ -1,13 +1,13 @@
-# ml-pipes-tensor Index
+# ml-pipes-tensor Reference
 
 This page catalogs the tensor package surface in `ml_pipes.tensor`.
 For package overview, scope, design principles, and usage patterns, see
 [`README.md`](./README.md).
 
 For framework-wide operator concepts, see
-[`docs/OPERATORS.md`](../../../docs/OPERATORS.md).
+[`docs/operators.md`](../../../docs/operators.md).
 For the cross-package package catalogs, see
-[`docs/OPERATORS.md#package-catalogs`](../../../docs/OPERATORS.md#package-catalogs).
+[`docs/operators.md#package-catalogs`](../../../docs/operators.md#package-catalogs).
 
 ## Package Primitives
 

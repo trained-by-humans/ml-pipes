@@ -17,7 +17,7 @@ body:
     attributes:
       label: Doc page, section, or missing area
       description: Paste the page URL or repo path if one exists. If the docs are missing entirely, describe the topic or page you expected to find.
-      placeholder: "https://github.com/.../blob/main/docs/VALIDATION.md, docs/VALIDATION.md#operator-compatibility, or missing page for package ownership"
+      placeholder: "https://github.com/.../blob/main/docs/validation.md, docs/validation.md#operator-compatibility, or missing page for package ownership"
     validations:
       required: true
   - type: input
@@ -54,5 +54,5 @@ body:
       placeholder: |
         https://github.com/<org>/<repo>/blob/main/docs/<page>.md
         https://arxiv.org/abs/<paper-id>
-        docs/PACKAGES.md
+        docs/packages.md
         PR #123

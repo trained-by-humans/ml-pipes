@@ -2,7 +2,7 @@
 
 `ml_pipes.onnx` keeps ONNX Runtime invocation as one explicit pipeline boundary inside `ml-pipes`.
 
-For the full package surface and operator signatures, see [`INDEX.md`](./INDEX.md).
+For the full package surface and operator signatures, see [`reference.md`](./reference.md).
 
 ## Package Profile
 
@@ -173,7 +173,7 @@ The main expectations are:
 
 ## Further Reading
 
-- [`INDEX.md`](./INDEX.md) for the full surface catalog
+- [`reference.md`](./reference.md) for the full surface catalog
 - [`docs/README.md`](../../../docs/README.md) for the shared framework docs index
 - [`examples/README.md`](../../../examples/README.md) for runnable pipeline entry points
   - [`examples/run_yolo8_onnx.py`](../../../examples/run_yolo8_onnx.py)

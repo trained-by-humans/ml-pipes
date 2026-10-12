@@ -17,7 +17,7 @@ for the framework overview, installation model, and end-to-end examples.
 | Field             | Value                                                                                                                                                                                  |
 |-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Package           | `ml-pipes-core`                                                                                                                                                                         |
-| Reference         | [`docs/INDEX.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/core/docs/INDEX.md)                                                                                 |
+| Reference         | [`docs/reference.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/packages/core/docs/reference.md)                                                                         |
 | Optional installs | `inspection`, `otel`                                                                                                                                                                   |
 | Depends on        | `—`                                                                                                                                                                                    |
 | Public modules    | `ml_pipes.core`, `ml_pipes.standard`, `ml_pipes.validation`, `ml_pipes.tracing`, `ml_pipes.collectors`, `ml_pipes.factory`, `ml_pipes.benchmark`, `ml_pipes.inspection`                |
@@ -28,5 +28,5 @@ dependencies only. Package-owned inspection formatting comes from the package
 modules you also install and import.
 
 See
-[`docs/PACKAGES.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md)
+[`docs/packages.md`](https://github.com/trained-by-humans/ml-pipes/blob/main/docs/packages.md)
 for direct package installs, umbrella profiles, and the full package matrix.

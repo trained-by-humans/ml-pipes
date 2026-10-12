@@ -35,7 +35,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/trained-by-humans/ml-pipes"
-Documentation = "https://github.com/trained-by-humans/ml-pipes/blob/main/docs/PACKAGES.md"
+Documentation = "https://github.com/trained-by-humans/ml-pipes/blob/main/docs/packages.md"
 Repository = "https://github.com/trained-by-humans/ml-pipes"
 Issues = "https://github.com/trained-by-humans/ml-pipes/issues"
 Changelog = "https://github.com/trained-by-humans/ml-pipes/releases"

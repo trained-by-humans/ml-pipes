@@ -118,7 +118,7 @@ Start from the shared building blocks, then move outward only as needed:
 - begin with `ml_pipes.standard`, which provides the generic building blocks
   for data manipulation, routing, context, regions, and other reusable steps
   that shape composition and performance
-- then check the package index in [PACKAGES.md](PACKAGES.md) to see whether a
+- then check the package reference in [packages.md](packages.md) to see whether a
   package already exists for the current domain or task boundary; for example,
   tensor-shaped postprocess should usually start from the `ml_pipes.tensor` package
 - if you still cannot find the right package surface, check the runnable
@@ -128,7 +128,7 @@ Start from the shared building blocks, then move outward only as needed:
 ### Add New Operators Only Where Needed
 
 When you do need a new operator, keep it narrow and follow
-[OPERATORS.md](OPERATORS.md).
+[operators.md](operators.md).
 
 Examples in this repo:
 
@@ -141,7 +141,7 @@ Examples in this repo:
 ## Composition Best Practices
 
 Composition quality still depends on operator quality, so the operator best
-practices in [OPERATORS.md](OPERATORS.md) apply here as well.
+practices in [operators.md](operators.md) apply here as well.
 
 The points below focus on how multiple steps work together inside one
 pipeline.

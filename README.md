@@ -39,7 +39,7 @@ python examples/run_yolo8_onnx.py
 
 `ml-pipes` supports multiple domains through installable packages. For the
 current package coverage, install profiles, and public imports, see
-[docs/PACKAGES.md](docs/PACKAGES.md).
+[docs/packages.md](docs/packages.md).
 
 | Package | Type | Description | Use-cases |
 |---|---|---|---|
@@ -53,7 +53,7 @@ current package coverage, install profiles, and public imports, see
 
 Community-Verified packages are independent, opt-in distributions with their
 own runtime and licensing terms. See
-[docs/VERIFIED_COMMUNITY_PACKAGES.md](docs/VERIFIED_COMMUNITY_PACKAGES.md) for
+[docs/verified_community_packages.md](docs/verified_community_packages.md) for
 their support and release policy.
 
 ## Why ml-pipes
@@ -70,7 +70,7 @@ their support and release policy.
   other execution strategies without rewriting pipeline logic.
 
 For the design rationale and internal structure behind this model, see
-[docs/DESIGN.md](docs/DESIGN.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+[docs/design.md](docs/design.md) and [docs/architecture.md](docs/architecture.md).
 
 ## Pipeline Tooling
 
@@ -324,4 +324,4 @@ Try it: [examples/benchmarks/run_yolo8_benchmark.py](examples/benchmarks/run_yol
   [examples/run_inspect.py](examples/run_inspect.py).
 - **Browse the documentation** in [docs/README.md](docs/README.md).
 - **Wrap your own model** with
-  [docs/SCAFFOLDING.md](docs/SCAFFOLDING.md).
+  [docs/scaffolding.md](docs/scaffolding.md).

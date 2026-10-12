@@ -31,7 +31,7 @@ target available.
    reasoning here instead of restarting from scratch.
 
 2. Check the most likely final location for each change.
-   Read `examples/README.md`, `docs/PACKAGES.md`, and the relevant package or
+   Read `examples/README.md`, `docs/packages.md`, and the relevant package or
    core docs only as needed to identify where the change should end up.
 
 3. Split mixed requests by target.
