@@ -417,7 +417,8 @@ def test_pydantic_list_preserves_all_items_for_renderers():
     assert predictions.title == "payload: list[dict]  ×10"
     assert len(predictions.children) == 10
     html = HtmlRenderer().render([StepView("response", {}, [block])])
-    assert html.count('<details class="insp-group insp-list-item">') == 6
+    assert html.count('<details class="insp-group insp-list-item">') == 10
+    assert '<button class="insp-list-more"' in html
     assert "+4 more" in html
 
 
@@ -723,7 +724,8 @@ def test_pipeline_inspector_build_views_preserves_list_of_strings_with_registere
         GroupBlock("[1]", [TextBlock("str", [("", "world")])]),
     ])]
     html = HtmlRenderer().render(views)
-    assert "<details" not in html
+    assert '<details class="insp-group insp-list" open>' in html
+    assert '<details class="insp-group insp-list-item"' not in html
     assert "hello" in html
     assert "world" in html
 
@@ -831,9 +833,12 @@ def test_pipeline_inspector_preserves_large_list_and_renderer_limits_preview():
     assert len(block.children) == 13
     assert block.children[-1].title == "[12]"
     html = HtmlRenderer().render(views)
-    assert html.count('<details class="insp-group insp-list-item">') == 6
+    assert html.count('<details class="insp-group insp-list-item">') == 13
     assert "+7 more" in html
-    assert "[6]" not in html
+    preview, remaining = html.split('<button class="insp-list-more"', 1)
+    assert "[6]" not in preview
+    assert "<summary>[6] dict</summary>" in remaining
+    assert "<summary>[12] dict</summary>" in remaining
 
 
 @pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
@@ -858,16 +863,77 @@ def test_html_renderer_renders_closed_list_disclosures_without_mutating_views(or
 
     parser = Disclosures()
     parser.feed(html)
-    assert len(parser.details) == 6
-    assert all("open" not in attrs and "name" not in attrs for attrs in parser.details)
+    assert len(parser.details) == 8
+    lists = [attrs for attrs in parser.details if "insp-list" in attrs["class"].split()]
+    entries = [attrs for attrs in parser.details if "insp-list-item" in attrs["class"].split()]
+    assert len(lists) == 1
+    assert "open" in lists[0]
+    assert len(entries) == 7
+    assert all("open" not in attrs and "name" not in attrs for attrs in entries)
     assert "<summary>[0] Prediction &lt;&amp;&gt;</summary>" in html
     assert "field_11" in html
     assert "field_12" not in html
-    assert "[6]" not in html
+    preview, remaining = html.split('<button class="insp-list-more"', 1)
+    assert "[6]" not in preview
+    assert "<summary>[6] Prediction &lt;&amp;&gt;</summary>" in remaining
     assert ("x" * 120) + "…" in html
     assert "x" * 121 not in html
     assert "+1 more" in html
     assert views == original
+
+
+@pytest.mark.parametrize("length", [0, 6, 7, 12, 13, 19])
+@pytest.mark.parametrize("item_kind", ["scalar", "structured", "mixed"])
+def test_html_renderer_list_remainder_contains_all_entries(length, item_kind):
+    payload = [
+        {"label": f"item-{i}"} if item_kind == "structured" or (item_kind == "mixed" and i % 2)
+        else f"item-{i}"
+        for i in range(length)
+    ]
+    result = InspectionResult([StepSpan("list", 0.0, 0.01, output_value=payload)])
+    views = PipelineInspector().build_views(result)
+    original = deepcopy(views)
+
+    html = HtmlRenderer().render(views)
+
+    if length <= 6:
+        assert '<button class="insp-list-more"' not in html
+    else:
+        preview, remaining = html.split('<button class="insp-list-more"', 1)
+        assert f'data-remaining="{length - 6}"' in remaining
+        assert f'>+{length - 6} more</button>' in remaining
+        assert '<template class="insp-list-batch"' in remaining
+        class Batches(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.sizes = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "template":
+                    self.sizes.append(int(dict(attrs)["data-count"]))
+
+        batches = Batches()
+        batches.feed(remaining)
+        assert batches.sizes == [min(6, length - start) for start in range(6, length, 6)]
+        assert 'Show fewer' not in html
+        assert "item-5" in preview
+        assert "item-6" not in preview
+        assert "item-6" in remaining
+        assert f"item-{length - 1}" in remaining
+    assert views == original
+
+
+def test_html_renderer_nested_list_remainders_remain_independent():
+    payload = [0] * 6 + [[{"label": f"nested-{i}"} for i in range(8)]]
+    result = InspectionResult([StepSpan("nested", 0.0, 0.01, output_value=payload)])
+
+    html = PipelineInspector().render(result)
+
+    assert html.count('<button class="insp-list-more"') == 2
+    assert '>+1 more</button>' in html
+    assert '>+2 more</button>' in html
+    assert '<summary>[6] list[dict]  ×8</summary>' in html
+    assert "nested-7" in html
 
 
 def test_html_renderer_handles_mixed_items_nested_lists_and_recursive_references():

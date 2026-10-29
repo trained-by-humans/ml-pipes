@@ -39,6 +39,23 @@ _LIST_TITLE_RE = re.compile(
     r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
 )
 
+_LIST_MORE_ONCLICK = """
+var batch = this.nextElementSibling;
+if (!batch || !batch.matches('template.insp-list-batch')) return;
+var remaining = Number(this.dataset.remaining) - Number(batch.dataset.count);
+this.before(batch.content);
+batch.remove();
+if (remaining > 0) {
+  this.dataset.remaining = remaining;
+  this.textContent = '+' + remaining + ' more';
+} else {
+  var focused = document.activeElement === this;
+  var header = this.closest('.insp-list').querySelector(':scope > summary');
+  this.remove();
+  if (focused) header.focus();
+}
+"""
+
 
 def _preview_text(text: str) -> str:
     return text[:_TEXT_PREVIEW_LIMIT] + ("…" if len(text) > _TEXT_PREVIEW_LIMIT else "")
@@ -108,18 +125,28 @@ _CSS = """
   margin-bottom: 8px;
 }
 .insp-group--dim { opacity: 0.6; }
-.insp-list-item { margin-bottom: 1px; }
-.insp-list-item > summary {
+.insp-list-item, .insp-list-more { margin-bottom: 1px; }
+.insp-list-item > summary, .insp-list > summary, .insp-list-more {
   cursor: pointer;
-  font-size: 11px;
   color: #555;
   overflow-wrap: anywhere;
 }
-.insp-list-item > summary:focus-visible {
+.insp-list-item > summary, .insp-list-more { font-size: 11px; }
+.insp-list-item > summary:focus-visible,
+.insp-list > summary:focus-visible,
+.insp-list-more:focus-visible {
   outline: 2px solid #7aaef5;
   outline-offset: 2px;
 }
 .insp-list-item[open] > summary { margin-bottom: 1px; }
+.insp-list-more {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+}
 .insp-group-body {
   margin-left: 12px;
 }
@@ -351,28 +378,11 @@ class HtmlRenderer:
             return None
         return image
 
-    def _render_list(self, block: GroupBlock, match: re.Match[str], depth: int) -> str:
-        label = match.group("label")
-        count = int(match.group("count"))
-        items = block.children
-        image_items = items[:_IMAGE_PREVIEW_LIMIT]
-        images = [self._item_image(item) for item in image_items if isinstance(item, GroupBlock)]
-        if image_items and len(images) == len(image_items) and all(image is not None for image in images):
-            preview_images = [image for image in images if image is not None]
-            title = f"{preview_images[0].title.split('  ')[0]}  ×{count}"
-            if len(preview_images) < count:
-                title += f"  (showing {len(preview_images)} out of {count})"
-            if label:
-                title = f"{label}: {title}"
-            return self._render_block(
-                ImageBlock(title, _make_grid([image.array for image in preview_images], divider=2), dim=block.dim),
-                depth,
-            )
-
+    def _render_list_items(self, items: list[OutputBlock], depth: int) -> str:
         parts: list[str] = []
-        for item in items[:_LIST_PREVIEW_LIMIT]:
+        for item in items:
             if not isinstance(item, GroupBlock):
-                parts.append(self._render_block(item, depth + 1))
+                parts.append(self._render_block(item, depth))
                 continue
             if len(item.children) == 1:
                 child = item.children[0]
@@ -392,7 +402,7 @@ class HtmlRenderer:
                 if isinstance(child, GroupBlock) and _LIST_TITLE_RE.fullmatch(child.title) is None:
                     content = child.children
                     dim = dim or child.dim
-            body = self._render_group_children(content, depth + 1)
+            body = self._render_group_children(content, depth)
             if not body:
                 body = '<div class="insp-group-empty">empty</div>'
             dim_class = " insp-group--dim" if dim else ""
@@ -401,17 +411,50 @@ class HtmlRenderer:
                 f'<summary>{_html.escape(title)}</summary>'
                 f'<div class="insp-group-body">{body}</div></details>'
             )
-        if count > _LIST_PREVIEW_LIMIT:
-            parts.append(self._render_more(count - _LIST_PREVIEW_LIMIT, depth + 1))
+        return "".join(parts)
+
+    def _render_list(self, block: GroupBlock, match: re.Match[str], depth: int) -> str:
+        label = match.group("label")
+        count = int(match.group("count"))
+        items = block.children
+        image_items = items[:_IMAGE_PREVIEW_LIMIT]
+        images = [self._item_image(item) for item in image_items if isinstance(item, GroupBlock)]
+        if image_items and len(images) == len(image_items) and all(image is not None for image in images):
+            preview_images = [image for image in images if image is not None]
+            title = f"{preview_images[0].title.split('  ')[0]}  ×{count}"
+            if len(preview_images) < count:
+                title += f"  (showing {len(preview_images)} out of {count})"
+            if label:
+                title = f"{label}: {title}"
+            return self._render_block(
+                ImageBlock(title, _make_grid([image.array for image in preview_images], divider=2), dim=block.dim),
+                depth,
+            )
+
+        parts = [self._render_list_items(items[:_LIST_PREVIEW_LIMIT], depth + 1)]
+        remaining = items[_LIST_PREVIEW_LIMIT:]
+        if remaining:
+            parts.append(
+                '<button class="insp-list-more" type="button"'
+                f' data-remaining="{len(remaining)}"'
+                f' onclick="{_html.escape(_LIST_MORE_ONCLICK, quote=True)}">'
+                f'+{len(remaining)} more</button>'
+            )
+            for start in range(0, len(remaining), _LIST_PREVIEW_LIMIT):
+                batch = remaining[start:start + _LIST_PREVIEW_LIMIT]
+                parts.append(
+                    f'<template class="insp-list-batch" data-count="{len(batch)}">'
+                    f'{self._render_list_items(batch, depth + 1)}</template>'
+                )
         title = f"list  ×{count}"
         if label:
             title = f"{label}: {title}"
         dim_class = " insp-group--dim" if block.dim else ""
         body = "".join(parts) or '<div class="insp-group-empty">empty</div>'
         return (
-            f'<div class="insp-group{dim_class}">'
-            f'<div style="{_TITLE_STYLE}">{_html.escape(title)}</div>'
-            f'<div class="insp-group-body">{body}</div></div>'
+            f'<details class="insp-group insp-list{dim_class}" open>'
+            f'<summary style="{_TITLE_STYLE}">{_html.escape(title)}</summary>'
+            f'<div class="insp-group-body">{body}</div></details>'
         )
 
     def _render_block(self, block: OutputBlock, depth: int = 0) -> str:
