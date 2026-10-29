@@ -4,6 +4,7 @@ import base64
 import html as _html
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 from typing import Any
@@ -17,6 +18,7 @@ from ml_pipes.inspection.views import (
     OutputBlock,
     StepView,
     TextBlock,
+    _make_grid,
 )
 
 cv2 = load_cv2()
@@ -29,6 +31,25 @@ _TITLE_STYLE = (
     "font-size:10px;font-weight:600;text-transform:uppercase;"
     "letter-spacing:0.04em;margin-bottom:3px;"
 )
+_GROUP_PREVIEW_LIMIT = 12
+_LIST_PREVIEW_LIMIT = 6
+_TEXT_PREVIEW_LIMIT = 120
+_IMAGE_PREVIEW_LIMIT = 12
+_LIST_TITLE_RE = re.compile(
+    r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
+)
+
+
+def _preview_text(text: str) -> str:
+    return text[:_TEXT_PREVIEW_LIMIT] + ("…" if len(text) > _TEXT_PREVIEW_LIMIT else "")
+
+
+def _preview_rows(rows: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    preview = [(key, _preview_text(value)) for key, value in rows[:_GROUP_PREVIEW_LIMIT]]
+    if len(rows) > _GROUP_PREVIEW_LIMIT:
+        preview.append(("…", f"+{len(rows) - _GROUP_PREVIEW_LIMIT} more"))
+    return preview
+
 
 _CSS = """
 <style>
@@ -87,6 +108,18 @@ _CSS = """
   margin-bottom: 8px;
 }
 .insp-group--dim { opacity: 0.6; }
+.insp-list-item { margin-bottom: 1px; }
+.insp-list-item > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #555;
+  overflow-wrap: anywhere;
+}
+.insp-list-item > summary:focus-visible {
+  outline: 2px solid #7aaef5;
+  outline-offset: 2px;
+}
+.insp-list-item[open] > summary { margin-bottom: 1px; }
 .insp-group-body {
   margin-left: 12px;
 }
@@ -164,6 +197,8 @@ def _flatten_step_views(views: list[StepView], depth: int = 0) -> list[tuple[Ste
 
 class HtmlRenderer:
     """Renders a list of StepViews as HTML cards.
+
+    Display limits and list-item expansion are applied without changing views.
 
     Example::
 
@@ -273,12 +308,12 @@ class HtmlRenderer:
             f'<div class="insp-inline-key">{_html.escape(key)}</div>'
             f'<div class="insp-inline-val">{_html.escape(value)}</div>'
             for block in blocks
-            for key, value in block.rows
+            for key, value in _preview_rows(block.rows)
         )
         dim_class = " insp-inline-grid--dim" if dim else ""
         return f'<div class="insp-inline-grid{dim_class}">{rows}</div>'
 
-    def _render_group_children(self, children: list[OutputBlock]) -> str:
+    def _render_group_children(self, children: list[OutputBlock], depth: int = 0) -> str:
         parts: list[str] = []
         inline_rows: list[TextBlock] = []
 
@@ -288,17 +323,98 @@ class HtmlRenderer:
                 parts.append(self._render_inline_rows(inline_rows))
                 inline_rows = []
 
-        for child in children:
+        for child in children[:_GROUP_PREVIEW_LIMIT]:
             if self._is_inline_row_block(child):
                 inline_rows.append(child)
                 continue
             flush_inline_rows()
-            parts.append(self._render_block(child))
+            parts.append(self._render_block(child, depth))
 
         flush_inline_rows()
+        if len(children) > _GROUP_PREVIEW_LIMIT:
+            parts.append(self._render_more(len(children) - _GROUP_PREVIEW_LIMIT, depth))
         return "".join(parts)
 
-    def _render_block(self, block: OutputBlock) -> str:
+    def _render_more(self, count: int, depth: int) -> str:
+        return self._render_block(TextBlock("…", [("", f"+{count} more")]), depth)
+
+    @staticmethod
+    def _item_image(item: GroupBlock) -> ImageBlock | None:
+        if not item.children or not isinstance(item.children[0], ImageBlock):
+            return None
+        image = item.children[0]
+        metadata_title = image.title.split("  ")[0]
+        if any(
+            not isinstance(child, TextBlock) or child.title not in {"", metadata_title}
+            for child in item.children[1:]
+        ):
+            return None
+        return image
+
+    def _render_list(self, block: GroupBlock, match: re.Match[str], depth: int) -> str:
+        label = match.group("label")
+        count = int(match.group("count"))
+        items = block.children
+        image_items = items[:_IMAGE_PREVIEW_LIMIT]
+        images = [self._item_image(item) for item in image_items if isinstance(item, GroupBlock)]
+        if image_items and len(images) == len(image_items) and all(image is not None for image in images):
+            preview_images = [image for image in images if image is not None]
+            title = f"{preview_images[0].title.split('  ')[0]}  ×{count}"
+            if len(preview_images) < count:
+                title += f"  (showing {len(preview_images)} out of {count})"
+            if label:
+                title = f"{label}: {title}"
+            return self._render_block(
+                ImageBlock(title, _make_grid([image.array for image in preview_images], divider=2), dim=block.dim),
+                depth,
+            )
+
+        parts: list[str] = []
+        for item in items[:_LIST_PREVIEW_LIMIT]:
+            if not isinstance(item, GroupBlock):
+                parts.append(self._render_block(item, depth + 1))
+                continue
+            if len(item.children) == 1:
+                child = item.children[0]
+                if isinstance(child, TextBlock) and len(child.rows) == 1 and not child.rows[0][0]:
+                    parts.append(self._render_inline_rows([
+                        TextBlock("", [(item.title, child.rows[0][1])], dim=item.dim),
+                    ]))
+                    continue
+            title = item.title
+            content = item.children
+            dim = item.dim
+            if len(item.children) == 1 and item.children[0].title:
+                child = item.children[0]
+                title += f" {child.title}"
+                # The disclosure header already names this object. Render its
+                # fields directly; nested lists still need their list renderer.
+                if isinstance(child, GroupBlock) and _LIST_TITLE_RE.fullmatch(child.title) is None:
+                    content = child.children
+                    dim = dim or child.dim
+            body = self._render_group_children(content, depth + 1)
+            if not body:
+                body = '<div class="insp-group-empty">empty</div>'
+            dim_class = " insp-group--dim" if dim else ""
+            parts.append(
+                f'<details class="insp-group insp-list-item{dim_class}">'
+                f'<summary>{_html.escape(title)}</summary>'
+                f'<div class="insp-group-body">{body}</div></details>'
+            )
+        if count > _LIST_PREVIEW_LIMIT:
+            parts.append(self._render_more(count - _LIST_PREVIEW_LIMIT, depth + 1))
+        title = f"list  ×{count}"
+        if label:
+            title = f"{label}: {title}"
+        dim_class = " insp-group--dim" if block.dim else ""
+        body = "".join(parts) or '<div class="insp-group-empty">empty</div>'
+        return (
+            f'<div class="insp-group{dim_class}">'
+            f'<div style="{_TITLE_STYLE}">{_html.escape(title)}</div>'
+            f'<div class="insp-group-body">{body}</div></div>'
+        )
+
+    def _render_block(self, block: OutputBlock, depth: int = 0) -> str:
         if isinstance(block, ImageBlock):
             dim = block.dim
             title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
@@ -330,12 +446,15 @@ class HtmlRenderer:
             return f'<div style="margin-bottom:8px;">{title_html}{img_html}</div>'
 
         if isinstance(block, GroupBlock):
+            list_match = _LIST_TITLE_RE.fullmatch(block.title)
+            if list_match is not None:
+                return self._render_list(block, list_match, depth)
             dim = block.dim
             dim_class = " insp-group--dim" if dim else ""
             title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
             title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
             children = (
-                self._render_group_children(block.children)
+                self._render_group_children(block.children, depth + 1)
                 if block.children
                 else '<div class="insp-group-empty">empty</div>'
             )
@@ -359,7 +478,7 @@ class HtmlRenderer:
         inner = "".join(
             f'<tr><td style="{_TD_K}">{_html.escape(key)}</td>'
             f'<td style="{_TD_V}">{_html.escape(value)}</td></tr>'
-            for key, value in block.rows
+            for key, value in _preview_rows(block.rows)
         )
         table = f'<table style="{_TBL_STYLE}">{inner}</table>'
         return f'<div style="margin-bottom:8px;">{title_html}{table}</div>'

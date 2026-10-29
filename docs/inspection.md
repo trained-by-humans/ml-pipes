@@ -56,8 +56,10 @@ the same ordered span tree as tracing, with two additional conditions:
 
 `PipelineInspector` transforms those captured values into `StepView` and output
 blocks. A renderer then turns the views into a presentation such as the built-in
-HTML report. Inspection is observational: it does not alter pipeline execution
-or its returned output.
+HTML report. `build_views()` preserves all formatter-produced fields, list
+entries, text, and nesting. Renderers own display limits and expansion; the
+HTML renderer does not modify the supplied views. Inspection is observational:
+it does not alter pipeline execution or its returned output.
 
 ```text
 [input] -> Pipeline.inspect() -> [InspectionResult] -> PipelineInspector.build_views() -> [list[StepView]] -> Renderer.render() -> [HTML report]
@@ -91,6 +93,16 @@ from ml_pipes.inspection import PipelineInspector
 
 PipelineInspector().show(result, orientation="horizontal")
 ```
+
+Structured list entries start collapsed. Click an entry's index and type header,
+or focus it and press Enter or Space, to expand or collapse its contents.
+Scalar list entries appear inline.
+
+The HTML renderer previews six list entries, 12 object fields or text-table rows,
+and 120 characters per text value at each nesting level. Generic image lists
+receive a grid preview of up to 12 images. Trailing `+x more` indicators describe
+omitted entries or fields and are not interactive. These limits apply only to
+the HTML presentation; custom renderers receive the complete formatted blocks.
 
 ### Save And Load A Captured Run
 
@@ -152,8 +164,8 @@ Out of the box, inspection can render:
 - mappings and dataclasses as named groups
 - Pydantic v1 and v2 models as groups of their declared public fields when
   Pydantic is installed
-- nested structures, with recursive-reference protection and preview
-  compaction
+- nested structures, with recursive-reference protection; renderers control
+  preview compaction
 
 ### Built-In Formatters
 
@@ -202,8 +214,8 @@ is more useful.
 
 `pydantic_model_formatter()` creates the generic structural formatter. It
 processes every declared field and nested value, while always detecting
-recursive references. Set `max_depth` explicitly when inspection must bound
-nesting traversal:
+recursive references. Nesting traversal is unrestricted; the HTML renderer
+controls how the resulting blocks are displayed:
 
 ```python
 from pydantic import BaseModel
@@ -212,12 +224,9 @@ from ml_pipes.inspection import PipelineInspector, pydantic_model_formatter
 
 inspector = PipelineInspector().register_value_formatter(
     BaseModel,
-    pydantic_model_formatter(max_depth=4),
+    pydantic_model_formatter(),
 )
 ```
-
-`max_depth` accepts a positive integer or `None`; `None` leaves nesting
-unbounded.
 
 If a captured Pydantic model is encountered while Pydantic itself is
 unavailable, inspection emits `InspectionWarning` once for that model type and
