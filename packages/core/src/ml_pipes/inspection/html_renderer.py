@@ -132,6 +132,11 @@ _CSS = """
   overflow-wrap: anywhere;
 }
 .insp-list-item > summary, .insp-list-more { font-size: 11px; }
+.insp-list-item > summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .insp-list-item > summary:focus-visible,
 .insp-list > summary:focus-visible,
 .insp-list-more:focus-visible {
