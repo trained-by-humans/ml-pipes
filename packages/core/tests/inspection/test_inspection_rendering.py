@@ -624,11 +624,56 @@ def test_html_renderer_renders_group_block_boundaries(orientation):
     )
 
     assert html.count('<details class="insp-group" open>') == 2
+    assert HtmlRenderer().initial_expanded_depth == 2
     assert html.count('</details>') == 2
     assert html.count('<summary style=') == 2
     assert "run: _Run" in html
     assert "stats: _Stats" in html
     assert "kept" in html
+
+
+@pytest.mark.parametrize("depth", [0, 1, 2, 3, 4, 99])
+def test_html_renderer_initial_expansion_follows_rendered_depth_including_batches(depth):
+    items = [GroupBlock(f"[{i}]", [GroupBlock("Record", [
+        GroupBlock("field: dict", [TextBlock("", [("value", "kept")])]),
+    ])]) for i in range(7)]
+    views = [StepView("depth", {}, [GroupBlock("Root", [
+        GroupBlock("Nested", [GroupBlock("Deep", [])]),
+        GroupBlock("list[Record]  ×7", items),
+    ])])]
+    original = deepcopy(views)
+
+    html = HtmlRenderer(initial_expanded_depth=depth).render(views)
+
+    class Disclosures(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.depth = 0
+            self.states = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "details":
+                self.states.append((self.depth, "open" in dict(attrs)))
+                self.depth += 1
+
+        def handle_endtag(self, tag):
+            if tag == "details":
+                self.depth -= 1
+
+    parser = Disclosures()
+    parser.feed(html)
+    assert len(parser.states) == 18
+    assert max(level for level, _ in parser.states) == 3
+    assert all(is_open == (level < depth) for level, is_open in parser.states)
+    assert '<template class="insp-list-batch" data-count="1">' in html
+    assert "kept" in html
+    assert views == original
+
+
+@pytest.mark.parametrize("depth", [-1, 1.5, True, "1", None])
+def test_html_renderer_rejects_invalid_initial_expanded_depth(depth):
+    with pytest.raises(ValueError, match="initial_expanded_depth must be a non-negative integer"):
+        HtmlRenderer(initial_expanded_depth=depth)
 
 
 def test_html_renderer_renders_empty_dim_group_as_open_disclosure_without_mutation():
@@ -784,7 +829,7 @@ def test_pipeline_inspector_build_views_preserves_metadata_for_list_of_image_rec
     assert isinstance(crop, GroupBlock)
     assert isinstance(crop.children[0], ImageBlock)
     html = HtmlRenderer().render(views)
-    assert html.count('<details class="insp-group insp-list-item">') == 2
+    assert html.count('<details class="insp-group insp-list-item" open>') == 2
     assert html.count('<img ') == 2
     assert "cat" in html
     assert "dog" in html
@@ -910,7 +955,7 @@ def test_pipeline_inspector_preserves_large_list_and_renderer_limits_preview():
     assert len(block.children) == 13
     assert block.children[-1].title == "[12]"
     html = HtmlRenderer().render(views)
-    assert html.count('<details class="insp-group insp-list-item">') == 13
+    assert html.count('<details class="insp-group insp-list-item" open>') == 13
     assert "+7 more" in html
     preview, remaining = html.split('<button class="insp-list-more"', 1)
     assert "[6]" not in preview
@@ -927,7 +972,7 @@ def test_html_renderer_renders_closed_list_disclosures_without_mutating_views(or
     ])])]
     original = deepcopy(views)
 
-    html = HtmlRenderer().render(views, orientation=orientation)
+    html = HtmlRenderer(initial_expanded_depth=1).render(views, orientation=orientation)
 
     class Disclosures(HTMLParser):
         def __init__(self):

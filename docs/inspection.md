@@ -94,10 +94,8 @@ from ml_pipes.inspection import PipelineInspector
 PipelineInspector().show(result, orientation="horizontal")
 ```
 
-The report presents key information at a glance. Expand lists or individual
-items to explore their contents, and click `+x more` to reveal more list entries.
-Object and dictionary groups start expanded; click their headers to collapse
-or reopen them.
+The report presents key information at a glance. Expand lists or objects to
+explore their contents, and click `+x more` to reveal more list entries.
 
 ### Save And Load A Captured Run
 
@@ -130,11 +128,15 @@ formats or environments.
 The built-in `HtmlRenderer` produces a self-contained browser report. The
 default `PipelineInspector` uses it for `render()`, `save()`, and `show()`.
 
-`HtmlRenderer` accepts preview limits per instance: `max_items_per_list` controls
-the initial list entries and how many each `+x more` click reveals.
-`max_fields_per_item` limits group children and key/value rows at each nesting
-level, `max_chars_per_field` limits characters per field value, and
-`max_images_per_grid` limits images per grid. All limits must be positive integers. Renderers receive the complete formatted blocks.
+`HtmlRenderer` accepts configuration per instance:
+
+- `max_images_per_grid`: images shown per grid.
+- `max_items_per_list`: initial list entries and entries revealed per `+x more` click.
+- `max_fields_per_item`: group children and key/value rows shown at each nesting level.
+- `max_chars_per_field`: characters shown per field value.
+- `initial_expanded_depth`: nesting levels that start expanded.
+
+Renderers receive the complete formatted blocks.
 
 ```python
 inspector = PipelineInspector()

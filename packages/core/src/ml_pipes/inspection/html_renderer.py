@@ -231,6 +231,7 @@ class HtmlRenderer:
         max_fields_per_item: int = 12,
         max_chars_per_field: int = 120,
         max_images_per_grid: int = 12,
+        initial_expanded_depth: int = 2,
     ) -> None:
         """Configure positive preview limits for this renderer.
 
@@ -238,6 +239,8 @@ class HtmlRenderer:
         ``max_fields_per_item`` limits group children and text-table rows at each level.
         ``max_chars_per_field`` counts characters per text value.
         ``max_images_per_grid`` limits images in generic image-list grids.
+        ``initial_expanded_depth`` opens structured blocks below this depth,
+        starting at zero for top-level blocks. It must be a non-negative integer.
         """
         for name, value in (
             ("max_items_per_list", max_items_per_list),
@@ -247,10 +250,22 @@ class HtmlRenderer:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
+        if (
+            isinstance(initial_expanded_depth, bool)
+            or not isinstance(initial_expanded_depth, int)
+            or initial_expanded_depth < 0
+        ):
+            raise ValueError("initial_expanded_depth must be a non-negative integer")
         self.max_items_per_list = max_items_per_list
         self.max_fields_per_item = max_fields_per_item
         self.max_chars_per_field = max_chars_per_field
         self.max_images_per_grid = max_images_per_grid
+        self.initial_expanded_depth = initial_expanded_depth
+
+    def _initial_open_attribute(self, depth: int) -> str:
+        if depth < self.initial_expanded_depth:
+            return " open"
+        return ""
 
     def _preview_text(self, text: str) -> str:
         limit = self.max_chars_per_field
@@ -435,12 +450,12 @@ class HtmlRenderer:
                 if isinstance(child, GroupBlock) and _LIST_TITLE_RE.fullmatch(child.title) is None:
                     content = child.children
                     dim = dim or child.dim
-            body = self._render_group_children(content, depth)
+            body = self._render_group_children(content, depth + 1)
             if not body:
                 body = '<div class="insp-group-empty">empty</div>'
             dim_class = " insp-group--dim" if dim else ""
             parts.append(
-                f'<details class="insp-group insp-list-item{dim_class}">'
+                f'<details class="insp-group insp-list-item{dim_class}"{self._initial_open_attribute(depth)}>'
                 f'<summary>{_html.escape(title)}</summary>'
                 f'<div class="insp-group-body">{body}</div></details>'
             )
@@ -485,7 +500,7 @@ class HtmlRenderer:
         dim_class = " insp-group--dim" if block.dim else ""
         body = "".join(parts) or '<div class="insp-group-empty">empty</div>'
         return (
-            f'<details class="insp-group insp-list{dim_class}" open>'
+            f'<details class="insp-group insp-list{dim_class}"{self._initial_open_attribute(depth)}>'
             f'<summary style="{_TITLE_STYLE}">{_html.escape(title)}</summary>'
             f'<div class="insp-group-body">{body}</div></details>'
         )
@@ -539,7 +554,7 @@ class HtmlRenderer:
                 else '<div class="insp-group-empty">empty</div>'
             )
             return (
-                f'<details class="insp-group{dim_class}" open>'
+                f'<details class="insp-group{dim_class}"{self._initial_open_attribute(depth)}>'
                 f"{title_html}"
                 f'<div class="insp-group-body">{children}</div>'
                 f"</details>"
