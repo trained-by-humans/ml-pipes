@@ -775,6 +775,68 @@ def test_pipeline_inspector_build_views_preserves_metadata_for_list_of_image_rec
     assert "dog" in html
 
 
+@pytest.mark.parametrize("name", [
+    "max_items_per_list", "max_fields_per_item", "max_chars_per_field", "max_images_per_grid",
+])
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, None])
+def test_html_renderer_rejects_invalid_preview_limits(name, value):
+    with pytest.raises(ValueError, match=f"{name} must be a positive integer"):
+        HtmlRenderer(**{name: value})
+
+
+def test_html_renderer_preview_limits_are_per_instance_and_preserve_views():
+    fields = [TextBlock("", [(f"field_{i}", "abcdefgh")]) for i in range(4)]
+    views = [StepView("custom", {}, [GroupBlock("list[Record]  ×7", [
+        GroupBlock(f"[{i}]", [GroupBlock("Record", fields)]) for i in range(7)
+    ])])]
+    original = deepcopy(views)
+    renderer = HtmlRenderer(max_items_per_list=2, max_fields_per_item=1, max_chars_per_field=3)
+
+    html = renderer.render(views)
+
+    preview, remaining = html.split('<button class="insp-list-more"', 1)
+    assert "[1] Record" in preview
+    assert "[2] Record" not in preview
+    assert '>+5 more</button>' in remaining
+    assert remaining.count('data-count="2"') == 2
+    assert remaining.count('data-count="1"') == 1
+    assert "field_0" in html
+    assert "field_1" not in html
+    assert "abc…" in html
+    assert "abcdefgh" not in html
+    assert "+3 more" in html
+
+    table_html = renderer.render([StepView("table", {}, [TextBlock("table", [
+        (f"row_{i}", "abcdefgh") for i in range(4)
+    ])])])
+    assert "row_0" in table_html
+    assert "row_1" not in table_html
+    assert "abc…" in table_html
+    assert "+3 more" in table_html
+
+    default_html = HtmlRenderer().render(views)
+    default_preview = default_html.split('<button class="insp-list-more"', 1)[0]
+    assert "[5] Record" in default_preview
+    assert "field_3" in default_html
+    assert "abcdefgh" in default_html
+    assert views == original
+
+
+def test_html_renderer_configures_image_grid_preview():
+    result = InspectionResult([StepSpan(
+        "images", 0.0, 0.01,
+        output_value=[np.zeros((4, 4, 3), dtype=np.uint8) for _ in range(3)],
+    )])
+    views = PipelineInspector().build_views(result)
+
+    html = HtmlRenderer(max_images_per_grid=1).render(views)
+
+    assert "showing 1 out of 3" in html
+    assert html.count('<img ') == 1
+    assert "showing" not in HtmlRenderer().render(views)
+    assert len(views[0].blocks[0].children) == 3
+
+
 def test_pipeline_inspector_preserves_images_and_renderer_limits_grid_preview():
     result = InspectionResult(
         [

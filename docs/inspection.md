@@ -128,15 +128,26 @@ formats or environments.
 The built-in `HtmlRenderer` produces a self-contained browser report. The
 default `PipelineInspector` uses it for `render()`, `save()`, and `show()`.
 
-`HtmlRenderer` limits the list entries, object fields, text-table rows, text
-length, and images per grid shown at a glance. These presentation limits are
-internal to the renderer; renderers receive the complete formatted blocks.
+`HtmlRenderer` accepts preview limits per instance: `max_items_per_list` controls
+the initial list entries and how many each `+x more` click reveals.
+`max_fields_per_item` limits group children and key/value rows at each nesting
+level, `max_chars_per_field` limits characters per field value, and
+`max_images_per_grid` limits images per grid. All limits must be positive integers. Renderers receive the complete formatted blocks.
 
 ```python
 inspector = PipelineInspector()
 
 html = inspector.render(result, orientation="horizontal")
 inspector.save(result, "inspection.html", orientation="horizontal")
+```
+
+To customize the previews, render the views with a configured instance:
+
+```python
+from ml_pipes.inspection import HtmlRenderer
+
+renderer = HtmlRenderer(max_items_per_list=10, max_chars_per_field=200)
+html = renderer.render(inspector.build_views(result))
 ```
 
 ### Adding Custom Renderers

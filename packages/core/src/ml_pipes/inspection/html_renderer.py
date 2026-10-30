@@ -31,10 +31,6 @@ _TITLE_STYLE = (
     "font-size:10px;font-weight:600;text-transform:uppercase;"
     "letter-spacing:0.04em;margin-bottom:3px;"
 )
-_GROUP_PREVIEW_LIMIT = 12
-_LIST_PREVIEW_LIMIT = 6
-_TEXT_PREVIEW_LIMIT = 120
-_IMAGE_PREVIEW_LIMIT = 12
 _LIST_TITLE_RE = re.compile(
     r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
 )
@@ -55,17 +51,6 @@ if (remaining > 0) {
   if (focused) header.focus();
 }
 """
-
-
-def _preview_text(text: str) -> str:
-    return text[:_TEXT_PREVIEW_LIMIT] + ("…" if len(text) > _TEXT_PREVIEW_LIMIT else "")
-
-
-def _preview_rows(rows: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    preview = [(key, _preview_text(value)) for key, value in rows[:_GROUP_PREVIEW_LIMIT]]
-    if len(rows) > _GROUP_PREVIEW_LIMIT:
-        preview.append(("…", f"+{len(rows) - _GROUP_PREVIEW_LIMIT} more"))
-    return preview
 
 
 _CSS = """
@@ -239,6 +224,45 @@ class HtmlRenderer:
         HtmlRenderer().save(views, "report.html")
     """
 
+    def __init__(
+        self,
+        *,
+        max_items_per_list: int = 6,
+        max_fields_per_item: int = 12,
+        max_chars_per_field: int = 120,
+        max_images_per_grid: int = 12,
+    ) -> None:
+        """Configure positive preview limits for this renderer.
+
+        ``max_items_per_list`` also sets the number of entries loaded per click.
+        ``max_fields_per_item`` limits group children and text-table rows at each level.
+        ``max_chars_per_field`` counts characters per text value.
+        ``max_images_per_grid`` limits images in generic image-list grids.
+        """
+        for name, value in (
+            ("max_items_per_list", max_items_per_list),
+            ("max_fields_per_item", max_fields_per_item),
+            ("max_chars_per_field", max_chars_per_field),
+            ("max_images_per_grid", max_images_per_grid),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        self.max_items_per_list = max_items_per_list
+        self.max_fields_per_item = max_fields_per_item
+        self.max_chars_per_field = max_chars_per_field
+        self.max_images_per_grid = max_images_per_grid
+
+    def _preview_text(self, text: str) -> str:
+        limit = self.max_chars_per_field
+        return text[:limit] + ("…" if len(text) > limit else "")
+
+    def _preview_rows(self, rows: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        limit = self.max_fields_per_item
+        preview = [(key, self._preview_text(value)) for key, value in rows[:limit]]
+        if len(rows) > limit:
+            preview.append(("…", f"+{len(rows) - limit} more"))
+        return preview
+
     def render(
         self,
         views: list[StepView],
@@ -340,7 +364,7 @@ class HtmlRenderer:
             f'<div class="insp-inline-key">{_html.escape(key)}</div>'
             f'<div class="insp-inline-val">{_html.escape(value)}</div>'
             for block in blocks
-            for key, value in _preview_rows(block.rows)
+            for key, value in self._preview_rows(block.rows)
         )
         dim_class = " insp-inline-grid--dim" if dim else ""
         return f'<div class="insp-inline-grid{dim_class}">{rows}</div>'
@@ -355,7 +379,7 @@ class HtmlRenderer:
                 parts.append(self._render_inline_rows(inline_rows))
                 inline_rows = []
 
-        for child in children[:_GROUP_PREVIEW_LIMIT]:
+        for child in children[:self.max_fields_per_item]:
             if self._is_inline_row_block(child):
                 inline_rows.append(child)
                 continue
@@ -363,12 +387,16 @@ class HtmlRenderer:
             parts.append(self._render_block(child, depth))
 
         flush_inline_rows()
-        if len(children) > _GROUP_PREVIEW_LIMIT:
-            parts.append(self._render_more(len(children) - _GROUP_PREVIEW_LIMIT, depth))
+        if len(children) > self.max_fields_per_item:
+            parts.append(self._render_more(len(children) - self.max_fields_per_item, depth))
         return "".join(parts)
 
     def _render_more(self, count: int, depth: int) -> str:
-        return self._render_block(TextBlock("…", [("", f"+{count} more")]), depth)
+        return (
+            '<div class="insp-inline-grid">'
+            '<div class="insp-inline-key">…</div>'
+            f'<div class="insp-inline-val">+{count} more</div></div>'
+        )
 
     @staticmethod
     def _item_image(item: GroupBlock) -> ImageBlock | None:
@@ -422,7 +450,7 @@ class HtmlRenderer:
         label = match.group("label")
         count = int(match.group("count"))
         items = block.children
-        image_items = items[:_IMAGE_PREVIEW_LIMIT]
+        image_items = items[:self.max_images_per_grid]
         images = [self._item_image(item) for item in image_items if isinstance(item, GroupBlock)]
         if image_items and len(images) == len(image_items) and all(image is not None for image in images):
             preview_images = [image for image in images if image is not None]
@@ -436,8 +464,8 @@ class HtmlRenderer:
                 depth,
             )
 
-        parts = [self._render_list_items(items[:_LIST_PREVIEW_LIMIT], depth + 1)]
-        remaining = items[_LIST_PREVIEW_LIMIT:]
+        parts = [self._render_list_items(items[:self.max_items_per_list], depth + 1)]
+        remaining = items[self.max_items_per_list:]
         if remaining:
             parts.append(
                 '<button class="insp-list-more" type="button"'
@@ -445,8 +473,8 @@ class HtmlRenderer:
                 f' onclick="{_html.escape(_LIST_MORE_ONCLICK, quote=True)}">'
                 f'+{len(remaining)} more</button>'
             )
-            for start in range(0, len(remaining), _LIST_PREVIEW_LIMIT):
-                batch = remaining[start:start + _LIST_PREVIEW_LIMIT]
+            for start in range(0, len(remaining), self.max_items_per_list):
+                batch = remaining[start:start + self.max_items_per_list]
                 parts.append(
                     f'<template class="insp-list-batch" data-count="{len(batch)}">'
                     f'{self._render_list_items(batch, depth + 1)}</template>'
@@ -526,7 +554,7 @@ class HtmlRenderer:
         inner = "".join(
             f'<tr><td style="{_TD_K}">{_html.escape(key)}</td>'
             f'<td style="{_TD_V}">{_html.escape(value)}</td></tr>'
-            for key, value in _preview_rows(block.rows)
+            for key, value in self._preview_rows(block.rows)
         )
         table = f'<table style="{_TBL_STYLE}">{inner}</table>'
         return f'<div style="margin-bottom:8px;">{title_html}{table}</div>'
