@@ -119,6 +119,12 @@ PipelineInspector().show(saved_result)
 
 ## Renderers
 
+Renderers turn formatted `StepView` trees into reports. They control layout and
+presentation, allowing the same inspection data to be displayed in different
+formats or environments.
+
+### Built-In HTML Renderer
+
 The built-in `HtmlRenderer` produces a self-contained browser report. The
 default `PipelineInspector` uses it for `render()`, `save()`, and `show()`.
 
@@ -132,6 +138,8 @@ inspector = PipelineInspector()
 html = inspector.render(result, orientation="horizontal")
 inspector.save(result, "inspection.html", orientation="horizontal")
 ```
+
+### Adding Custom Renderers
 
 For a different presentation, call `inspector.build_views(result)` and pass the
 resulting `StepView` tree to an implementation of the `Renderer` protocol.
