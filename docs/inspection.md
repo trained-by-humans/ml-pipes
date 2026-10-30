@@ -94,21 +94,8 @@ from ml_pipes.inspection import PipelineInspector
 PipelineInspector().show(result, orientation="horizontal")
 ```
 
-Structured list entries start collapsed. Click an entry's index and type header,
-or focus it and press Enter or Space, to expand or collapse its contents.
-Scalar list entries appear inline.
-
-The HTML renderer previews six list entries, 12 object fields or text-table rows,
-and 120 characters per text value at each nesting level. Generic image lists
-receive a grid preview of up to 12 images. Trailing `+x more` indicators describe
-additional entries or fields. For lists, click `+x more` to load the next six
-entries. The remaining count updates after each click, and the control disappears
-when every entry is shown. Click the list header to collapse or reopen the list;
-loaded entries and expanded items retain their state. Each structured entry can
-be expanded independently, including newly loaded entries. These controls also
-work with Enter or Space. Field and text-table remainder
-indicators are not interactive. These limits apply only to the HTML
-presentation; custom renderers receive the complete formatted blocks.
+The report presents key information at a glance. Expand lists or individual
+items to explore their contents, and click `+x more` to reveal more list entries.
 
 ### Save And Load A Captured Run
 
@@ -134,6 +121,10 @@ PipelineInspector().show(saved_result)
 
 The built-in `HtmlRenderer` produces a self-contained browser report. The
 default `PipelineInspector` uses it for `render()`, `save()`, and `show()`.
+
+`HtmlRenderer` limits the list entries, object fields, text-table rows, text
+length, and images per grid shown at a glance. These presentation limits are
+internal to the renderer; renderers receive the complete formatted blocks.
 
 ```python
 inspector = PipelineInspector()
