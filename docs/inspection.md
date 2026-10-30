@@ -96,6 +96,8 @@ PipelineInspector().show(result, orientation="horizontal")
 
 The report presents key information at a glance. Expand lists or individual
 items to explore their contents, and click `+x more` to reveal more list entries.
+Object and dictionary groups start expanded; click their headers to collapse
+or reopen them.
 
 ### Save And Load A Captured Run
 

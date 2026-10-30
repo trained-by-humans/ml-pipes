@@ -600,7 +600,8 @@ def test_pipeline_inspector_formats_cyclic_lists_without_recursing_forever():
     assert nested.children[0].rows == [("", "<recursive list>")]
 
 
-def test_html_renderer_renders_group_block_boundaries():
+@pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
+def test_html_renderer_renders_group_block_boundaries(orientation):
     html = HtmlRenderer().render(
         [
             StepView(
@@ -619,13 +620,27 @@ def test_html_renderer_renders_group_block_boundaries():
                 ],
             )
         ],
-        orientation="vertical",
+        orientation=orientation,
     )
 
-    assert 'class="insp-group"' in html
+    assert html.count('<details class="insp-group" open>') == 2
+    assert html.count('</details>') == 2
+    assert html.count('<summary style=') == 2
     assert "run: _Run" in html
     assert "stats: _Stats" in html
     assert "kept" in html
+
+
+def test_html_renderer_renders_empty_dim_group_as_open_disclosure_without_mutation():
+    views = [StepView("empty", {}, [GroupBlock("metadata <&>", [], dim=True)])]
+    original = deepcopy(views)
+
+    html = HtmlRenderer().render(views)
+
+    assert '<details class="insp-group insp-group--dim" open>' in html
+    assert 'metadata &lt;&amp;&gt;</summary>' in html
+    assert '<div class="insp-group-empty">empty</div>' in html
+    assert views == original
 
 
 def test_html_renderer_coalesces_inline_group_rows_into_one_table():

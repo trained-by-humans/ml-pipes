@@ -107,11 +107,11 @@ _CSS = """
 .insp-card-error .insp-card-name { color: #c00; }
 .insp-container--vertical .insp-card-name { white-space: normal; }
 .insp-group {
-  margin-bottom: 8px;
+  margin-bottom: 1px;
 }
 .insp-group--dim { opacity: 0.6; }
 .insp-list-item, .insp-list-more { margin-bottom: 1px; }
-.insp-list-item > summary, .insp-list > summary, .insp-list-more {
+.insp-group > summary, .insp-list-more {
   cursor: pointer;
   color: #555;
   overflow-wrap: anywhere;
@@ -122,8 +122,7 @@ _CSS = """
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.insp-list-item > summary:focus-visible,
-.insp-list > summary:focus-visible,
+.insp-group > summary:focus-visible,
 .insp-list-more:focus-visible {
   outline: 2px solid #7aaef5;
   outline-offset: 2px;
@@ -155,6 +154,7 @@ _CSS = """
   margin-bottom: 4px;
 }
 .insp-inline-grid--dim { opacity: 0.6; }
+.insp-group-body > .insp-inline-grid { margin-bottom: 1px; }
 .insp-inline-key {
   color: #555;
   white-space: nowrap;
@@ -215,7 +215,7 @@ def _flatten_step_views(views: list[StepView], depth: int = 0) -> list[tuple[Ste
 class HtmlRenderer:
     """Renders a list of StepViews as HTML cards.
 
-    Display limits and list-item expansion are applied without changing views.
+    Display limits and group expansion are applied without changing views.
 
     Example::
 
@@ -527,18 +527,22 @@ class HtmlRenderer:
                 return self._render_list(block, list_match, depth)
             dim = block.dim
             dim_class = " insp-group--dim" if dim else ""
-            title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
-            title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
+            title_style = (
+                "font-size:11px;font-weight:600;text-transform:uppercase;"
+                "letter-spacing:0.04em;"
+                + ("color:#bbb;" if dim else "color:#555;")
+            )
+            title_html = f'<summary style="{title_style}">{_html.escape(block.title)}</summary>'
             children = (
                 self._render_group_children(block.children, depth + 1)
                 if block.children
                 else '<div class="insp-group-empty">empty</div>'
             )
             return (
-                f'<div class="insp-group{dim_class}">'
+                f'<details class="insp-group{dim_class}" open>'
                 f"{title_html}"
                 f'<div class="insp-group-body">{children}</div>'
-                f"</div>"
+                f"</details>"
             )
 
         dim = block.dim
