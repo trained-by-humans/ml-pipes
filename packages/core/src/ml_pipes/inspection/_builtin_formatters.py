@@ -197,6 +197,8 @@ def _region_summary_block(span: StepSpan) -> list[OutputBlock]:
 
     ct = span.child_trace
     rows: list[tuple[str, str]] = []
+    if ct is None:
+        return [TextBlock(span.label.split(":", 1)[-1], [("steps", "0")])]
     if ct.workers is not None:
         rows.append(("items", _fmt_batch_size(ct.batch_size)))
         rows.append(("concurrency", str(ct.workers)))

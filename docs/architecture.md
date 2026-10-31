@@ -210,6 +210,10 @@ operator, and `Pipeline.inspect()` captures that operator's output in the span.
 The resulting `InspectionResult` shows how values move through the operator
 chain.
 
+> [NOTE!]
+> Inspection additionally records region-closing boundaries with the
+> region's returned output, to help users understand the output of the region.
+
 `PipelineInspector` turns the captured artifact into browser output through
 formatters and renderers. Core owns the shared inspection artifact, registry,
 and renderers, while package-owned types register their specialized formatters

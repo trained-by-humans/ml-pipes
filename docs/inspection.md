@@ -99,6 +99,13 @@ the same ordered span tree as tracing, with two additional conditions:
 2. Each captured output is a snapshot, so later mutations to the live value do
    not change the `InspectionResult`.
 
+Inspection also captures region outputs at their closing boundaries, such as
+`UnBatch`, `Gather`, and `CollectItems`. Their cards appear after the enclosed
+steps and show the value passed to the next step. These boundaries have zero
+duration because the closing markers are not separate executions. `StreamItems`
+shows a lazy stream descriptor without consuming it; consumption counts remain
+on the region's opening span.
+
 And then, `PipelineInspector` coordinates the following components to turn captured
 results into a report:
 

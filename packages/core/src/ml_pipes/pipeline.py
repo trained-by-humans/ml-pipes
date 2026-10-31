@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Iterable, TypeVar
 
@@ -271,6 +272,21 @@ class Pipeline(Generic[InputT, OutputT]):
             return self._execute(value, trace=child_trace, cfg=cfg, region=(region_start, region_end))
 
         result = operator.run_region(current, label, execute_region, trace, cfg)
+        if cfg and cfg._capture_outputs:
+            closer = self.operators[region_end]
+            lazy = isinstance(result, Iterator)
+            trace.spans.append(
+                StepSpan(
+                    self._label_for(region_end),
+                    time.perf_counter(),
+                    0.0,
+                    operator_config=operator_config(closer) if cfg.capture_config else {},
+                    attributes={"lazy": True} if lazy else {},
+                    output_shape=_extract_shape(result) if cfg.capture_shapes else None,
+                    output_value=repr(result) if lazy else capture_value(result),
+                    operator_type=type(closer),
+                )
+            )
         return result, context
 
     def _label_for(self, i: int) -> str:

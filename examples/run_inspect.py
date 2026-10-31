@@ -7,6 +7,7 @@ Choose `simple` for the plain image pipeline, `tiled` for sliced inference, or
 In the HTML report, click a structured list entry's header to expand its fields.
 Click a list's +x more control to load six more entries at a time. Click its
 header to collapse or reopen the list.
+Region-closing cards show the output returned after the enclosed steps.
 Preview limits are applied by the HTML renderer; build_views() retains complete
 formatted blocks for custom renderers.
 
