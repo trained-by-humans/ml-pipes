@@ -28,7 +28,7 @@ _TBL_STYLE = "font-size:11px;border-collapse:collapse;width:100%;"
 _TD_K = "padding:1px 6px 1px 0;color:#555;white-space:nowrap;vertical-align:top;"
 _TD_V = "padding:1px 0;word-break:break-all;vertical-align:top;"
 _TITLE_STYLE = (
-    "font-size:10px;font-weight:600;text-transform:uppercase;"
+    "font-size:10px;"
     "letter-spacing:0.04em;margin-bottom:3px;"
 )
 _LIST_TITLE_RE = re.compile(
@@ -500,16 +500,18 @@ class HtmlRenderer:
             title = f"{label}: {title}"
         dim_class = " insp-group--dim" if block.dim else ""
         body = "".join(parts) or '<div class="insp-group-empty">empty</div>'
+        title_style = _TITLE_STYLE + ("font-weight:600;" if depth == 0 else "")
         return (
             f'<details class="insp-group insp-list{dim_class}"{self._initial_open_attribute(depth)}>'
-            f'<summary style="{_TITLE_STYLE}">{_html.escape(title)}</summary>'
+            f'<summary style="{title_style}">{_html.escape(title)}</summary>'
             f'<div class="insp-group-body">{body}</div></details>'
         )
 
     def _render_block(self, block: OutputBlock, depth: int = 0) -> str:
+        title_weight = "font-weight:600;" if depth == 0 else ""
         if isinstance(block, ImageBlock):
             dim = block.dim
-            title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
+            title_style = _TITLE_STYLE + title_weight + ("color:#bbb;" if dim else "color:#555;")
             title_html = f'<div style="{title_style}">{_html.escape(block.title)}</div>'
             _, buf = cv2.imencode(".png", cv2.cvtColor(block.array, cv2.COLOR_RGB2BGR))
             uri = "data:image/png;base64," + base64.b64encode(buf).decode()
@@ -544,8 +546,9 @@ class HtmlRenderer:
             dim = block.dim
             dim_class = " insp-group--dim" if dim else ""
             title_style = (
-                "font-size:11px;font-weight:600;text-transform:uppercase;"
+                "font-size:11px;"
                 "letter-spacing:0.04em;"
+                + title_weight
                 + ("color:#bbb;" if dim else "color:#555;")
             )
             title_html = f'<summary style="{title_style}">{_html.escape(block.title)}</summary>'
@@ -566,7 +569,7 @@ class HtmlRenderer:
         if leaf_row is not None:
             return self._render_inline_rows([TextBlock("", [leaf_row], dim=dim)])
 
-        title_style = _TITLE_STYLE + ("color:#bbb;" if dim else "color:#555;")
+        title_style = _TITLE_STYLE + title_weight + ("color:#bbb;" if dim else "color:#555;")
         title_html = (
             f'<div style="{title_style}">{_html.escape(block.title)}</div>'
             if block.title else ""
