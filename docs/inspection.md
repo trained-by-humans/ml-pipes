@@ -45,33 +45,6 @@ For a complete runnable inspection example, see
 
 ![Inspection report overview](https://raw.githubusercontent.com/trained-by-humans/ml-pipes/main/.github/assets/yolo8_tiled_inspection_overview.png)
 
-## How Inspection Works
-
-`Pipeline.inspect(value)` works by tracing one pipeline execution. It follows
-the same ordered span tree as tracing, with two additional conditions:
-
-1. The output of every successful step is captured.
-2. Each captured output is a snapshot, so later mutations to the live value do
-   not change the `InspectionResult`.
-
-`PipelineInspector` transforms those captured values into `StepView` and output
-blocks. A renderer then turns the views into a presentation such as the built-in
-HTML report. `build_views()` preserves all formatter-produced fields, list
-entries, text, and nesting. Renderers own display limits and expansion; the
-HTML renderer does not modify the supplied views. Inspection is observational:
-it does not alter pipeline execution or its returned output.
-
-```text
-[input] -> Pipeline.inspect() -> [InspectionResult] -> PipelineInspector.build_views() -> [list[StepView]] -> Renderer.render() -> [HTML report]
-```
-
-> [!CAUTION]
-> Inspection runs the complete pipeline and retains a snapshot of every step
-> output. It therefore adds execution work and can consume substantial memory,
-> especially for large images, tensors, batches, or nested regions. Use it for
-> focused debugging and representative inputs rather than memory-sensitive or
-> high-throughput production paths.
-
 ## When Inspection Is Useful
 
 Use inspection when you want to:
@@ -116,6 +89,38 @@ PipelineInspector().show(saved_result)
 > [!CAUTION]
 > Inspection results are serialized with Python pickle. Load only inspection
 > files from sources you trust.
+
+## How Inspection Works
+
+`Pipeline.inspect(value)` works by tracing one pipeline execution. It follows
+the same ordered span tree as tracing, with two additional conditions:
+
+1. The output of every successful step is captured.
+2. Each captured output is a snapshot, so later mutations to the live value do
+   not change the `InspectionResult`.
+
+And then, `PipelineInspector` coordinates the following components to turn captured
+results into a report:
+
+- **Formatters** translate captured values into output blocks.
+- **`PipelineInspector`** assembles the blocks into `StepView` trees, preserving
+  all formatted fields, list entries, text, and nesting.
+- **Renderers** turn those views into a presentation, such as the built-in HTML
+  report. They control display limits and expansion; the HTML renderer does not
+  modify the supplied views.
+
+The inspection data flows end to end:
+
+```text
+[input] -> Pipeline.inspect() -> [InspectionResult] -> PipelineInspector.build_views() -> [list[StepView]] -> Renderer.render() -> [HTML report]
+```
+
+> [!CAUTION]
+> Inspection runs the complete pipeline and retains a snapshot of every step
+> output. It therefore adds execution work and can consume substantial memory,
+> especially for large images, tensors, batches, or nested regions. Use it for
+> focused debugging and representative inputs rather than memory-sensitive or
+> high-throughput production paths.
 
 ## Renderers
 
