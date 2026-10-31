@@ -109,6 +109,7 @@ _CSS = """
 .insp-group {
   margin-bottom: 1px;
 }
+.insp-group[open] { padding-bottom: 4px; }
 .insp-group--dim { opacity: 0.6; }
 .insp-list-item, .insp-list-more { margin-bottom: 1px; }
 .insp-group > summary, .insp-list-more {
