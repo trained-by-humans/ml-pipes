@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import re
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,17 +27,9 @@ from ml_pipes.inspection.views import (
     TextBlock,
     _apply_image_carry,
     _build_span_metadata,
-    _make_grid,
-    _summarize_blocks,
 )
 
 ValueT = TypeVar("ValueT")
-_DEFAULT_GROUP_PREVIEW_LIMIT = 12
-_DEFAULT_LIST_PREVIEW_LIMIT = 6
-_DEFAULT_TEXT_PREVIEW_LIMIT = 120
-_LIST_TITLE_RE = re.compile(
-    r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
-)
 
 if TYPE_CHECKING:
     from ml_pipes.inspection.html_renderer import HtmlRenderer
@@ -112,7 +103,7 @@ class PipelineInspector:
         self._warned_value_types.add(value_type)
 
     def build_views(self, result: InspectionResult) -> list[StepView]:
-        """Prepare the intermediate StepView tree from spans for built-in or custom renderers."""
+        """Prepare complete formatted blocks without display limits for any renderer."""
 
         views, _ = self._trace_to_views(result, None)
         return views
@@ -185,8 +176,7 @@ class PipelineInspector:
             return dataclasses.replace(view, children=children), image_to_carry
 
         raw_blocks = self._value_to_blocks(span.output_value)
-        compacted_blocks = self._compact_blocks(raw_blocks)
-        blocks, image_to_carry = _apply_image_carry(compacted_blocks, last_image)
+        blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
         children, _ = self._trace_to_views(span.child_trace, image_to_carry)
         return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
 
@@ -330,144 +320,6 @@ class PipelineInspector:
             title=f"{name}: {type(value).__name__}",
             children=blocks,
         )
-
-    def _compact_blocks(
-        self,
-        blocks: list[OutputBlock],
-        *,
-        group_preview_limit: int = _DEFAULT_GROUP_PREVIEW_LIMIT,
-        list_preview_limit: int = _DEFAULT_LIST_PREVIEW_LIMIT,
-        text_preview_limit: int = _DEFAULT_TEXT_PREVIEW_LIMIT,
-    ) -> list[OutputBlock]:
-        def preview_text(text: str) -> str:
-            return text[:text_preview_limit] + ("…" if len(text) > text_preview_limit else "")
-
-        def preview_group(block: GroupBlock) -> GroupBlock:
-            if len(block.children) <= group_preview_limit:
-                return block
-            return GroupBlock(
-                title=block.title,
-                children=block.children[:group_preview_limit] + [
-                    TextBlock("…", [("", f"+{len(block.children) - group_preview_limit} more")], dim=block.dim)
-                ],
-                dim=block.dim,
-            )
-
-        def compact_list_group(block: GroupBlock) -> OutputBlock:
-            parts = self._list_title_parts(block.title)
-            if parts is None:
-                return block
-
-            label, item_type, count = parts
-            item_groups = self._item_groups(block.children)
-            preview_item_groups = item_groups[:group_preview_limit]
-            preview_images = [self._preview_item_image_block(item) for item in preview_item_groups]
-            if preview_item_groups and all(image is not None for image in preview_images):
-                images = [image for image in preview_images if image is not None]
-                title = self._image_grid_title(
-                    label,
-                    images[0].title.split("  ")[0],
-                    count,
-                    shown_count=len(images),
-                )
-                return ImageBlock(
-                    title=title,
-                    array=_make_grid(
-                        [image.array for image in images],
-                        divider=2,
-                    ),
-                    dim=block.dim,
-                )
-
-            if item_groups:
-                rows = [
-                    (item.title, self._list_item_summary(item.children))
-                    for item in item_groups[:list_preview_limit]
-                ]
-                if count > list_preview_limit:
-                    rows.append(("…", f"+{count - list_preview_limit} more"))
-                return TextBlock(self._list_summary_title(label, count), rows, dim=block.dim)
-
-            return TextBlock(self._list_placeholder_title(label, item_type, count), [("", "…")], dim=block.dim)
-
-        def compact_block(block: OutputBlock) -> OutputBlock:
-            if isinstance(block, TextBlock):
-                return TextBlock(
-                    title=block.title,
-                    rows=[(key, preview_text(value)) for key, value in block.rows],
-                    dim=block.dim,
-                )
-            if not isinstance(block, GroupBlock):
-                return block
-
-            compacted = GroupBlock(
-                title=block.title,
-                children=[compact_block(child) for child in block.children],
-                dim=block.dim,
-            )
-            list_compacted = compact_list_group(compacted)
-            if isinstance(list_compacted, GroupBlock):
-                return preview_group(list_compacted)
-            return list_compacted
-
-        return [compact_block(block) for block in blocks]
-
-    def _list_title_parts(self, title: str) -> tuple[str | None, str, int] | None:
-        match = _LIST_TITLE_RE.fullmatch(title)
-        if match is None:
-            return None
-        return match.group("label"), match.group("item_type"), int(match.group("count"))
-
-    def _item_groups(self, children: list[OutputBlock]) -> list[GroupBlock]:
-        groups: list[GroupBlock] = []
-        for child in children:
-            if isinstance(child, GroupBlock) and child.title.startswith("[") and child.title.endswith("]"):
-                groups.append(child)
-        return groups
-
-    def _preview_item_image_block(self, item: GroupBlock) -> ImageBlock | None:
-        if not item.children:
-            return None
-        first_child = item.children[0]
-        if not isinstance(first_child, ImageBlock):
-            return None
-
-        metadata_title = first_child.title.split("  ")[0]
-        for child in item.children[1:]:
-            if not isinstance(child, TextBlock):
-                return None
-            if child.title not in {"", metadata_title}:
-                return None
-
-        return first_child
-
-    def _list_summary_title(self, label: str | None, count: int) -> str:
-        title = f"list  ×{count}"
-        return f"{label}: {title}" if label else title
-
-    def _list_item_summary(self, blocks: list[OutputBlock]) -> str:
-        if len(blocks) == 1:
-            text_block = self._anonymous_single_row_text_block(blocks[0])
-            if text_block is not None:
-                return text_block.rows[0][1]
-        return _summarize_blocks(blocks)
-
-    def _list_placeholder_title(self, label: str | None, item_type: str, count: int) -> str:
-        title = f"list[{item_type}]  ×{count}"
-        return f"{label}: {title}" if label else title
-
-    def _image_grid_title(
-        self,
-        label: str | None,
-        item_title: str,
-        count: int,
-        *,
-        shown_count: int,
-    ) -> str:
-        title = f"{item_title}  ×{count}"
-        if shown_count < count:
-            title = f"{title}  (showing {shown_count} out of {count})"
-        return f"{label}: {title}" if label else title
 
     def _recursive_reference_block(self, value: Any) -> TextBlock:
         return TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])

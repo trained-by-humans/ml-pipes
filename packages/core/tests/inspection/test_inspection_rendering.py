@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import sys
 import warnings
+from copy import deepcopy
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from types import ModuleType
 
@@ -388,35 +390,7 @@ def test_pydantic_model_formatter_renders_declared_v1_fields():
     assert blocks == [GroupBlock("_PydanticV1Model", [TextBlock("", [("score", "0.9")])])]
 
 
-@pytest.mark.parametrize(
-    ("kwargs", "message"),
-    [
-        ({"max_depth": 0}, "max_depth"),
-    ],
-)
-def test_pydantic_model_formatter_rejects_invalid_limits(kwargs: dict[str, object], message: str):
-    with pytest.raises(ValueError, match=message):
-        pydantic_model_formatter(**kwargs)  # type: ignore[arg-type]
-
-
-def test_pydantic_model_formatter_applies_depth_limit():
-    depth_limited = PipelineInspector().register_value_formatter(
-        _PydanticBaseModel,
-        pydantic_model_formatter(max_depth=1),
-    )
-    depth_blocks = depth_limited._value_to_blocks(_PydanticV2Model("detected", {"prediction": "person"}))
-
-    assert depth_blocks == [
-        GroupBlock(
-            "_PydanticV2Model",
-            [
-                TextBlock("", [("label", "detected")]),
-                TextBlock("", [("payload", "maximum depth reached")]),
-            ],
-        )
-    ]
-
-def test_pydantic_list_uses_standard_report_compaction():
+def test_pydantic_list_preserves_all_items_for_renderers():
     inspector = PipelineInspector().register_value_formatter(
         _PydanticBaseModel,
         pydantic_model_formatter(),
@@ -439,9 +413,13 @@ def test_pydantic_list_uses_standard_report_compaction():
 
     assert isinstance(block, GroupBlock)
     predictions = block.children[1]
-    assert isinstance(predictions, TextBlock)
-    assert predictions.title == "payload: list  ×10"
-    assert predictions.rows[-1] == ("…", "+4 more")
+    assert isinstance(predictions, GroupBlock)
+    assert predictions.title == "payload: list[dict]  ×10"
+    assert len(predictions.children) == 10
+    html = HtmlRenderer().render([StepView("response", {}, [block])])
+    assert html.count('<details class="insp-group insp-list-item">') == 10
+    assert '<button class="insp-list-more"' in html
+    assert "+4 more" in html
 
 
 def test_pydantic_model_formatter_detects_cycles():
@@ -509,7 +487,7 @@ def test_pipeline_inspector_keeps_full_scalar_text_before_compaction():
     assert blocks == [TextBlock("str", [("", text)])]
 
 
-def test_pipeline_inspector_build_views_trims_long_scalar_text_during_compaction():
+def test_pipeline_inspector_build_views_preserves_long_scalar_text():
     text = "x" * 121
     result = InspectionResult(
         [
@@ -524,7 +502,10 @@ def test_pipeline_inspector_build_views_trims_long_scalar_text_during_compaction
 
     views = PipelineInspector().build_views(result)
 
-    assert views[0].blocks == [TextBlock("str", [("", ("x" * 120) + "…")])]
+    assert views[0].blocks == [TextBlock("str", [("", text)])]
+    html = HtmlRenderer().render(views)
+    assert ("x" * 120) + "…" in html
+    assert text not in html
 
 
 def test_pipeline_inspector_keeps_all_mapping_members_before_compaction():
@@ -539,7 +520,7 @@ def test_pipeline_inspector_keeps_all_mapping_members_before_compaction():
     assert all(child.title != "…" for child in blocks[0].children)
 
 
-def test_pipeline_inspector_build_views_trims_large_mapping_during_compaction():
+def test_pipeline_inspector_build_views_preserves_large_mapping():
     payload = {f"k{i}": i for i in range(13)}
     result = InspectionResult(
         [
@@ -561,8 +542,10 @@ def test_pipeline_inspector_build_views_trims_large_mapping_during_compaction():
     assert block.title == "dict"
     assert len(block.children) == 13
     assert isinstance(block.children[-1], TextBlock)
-    assert block.children[-1].title == "…"
-    assert block.children[-1].rows == [("", "+1 more")]
+    assert block.children[-1].rows == [("k12", "12")]
+    html = HtmlRenderer().render(views)
+    assert "+1 more" in html
+    assert "k12" not in html
 
 
 def test_pipeline_inspector_build_views_handles_cyclic_mappings():
@@ -617,7 +600,8 @@ def test_pipeline_inspector_formats_cyclic_lists_without_recursing_forever():
     assert nested.children[0].rows == [("", "<recursive list>")]
 
 
-def test_html_renderer_renders_group_block_boundaries():
+@pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
+def test_html_renderer_renders_group_block_boundaries(orientation):
     html = HtmlRenderer().render(
         [
             StepView(
@@ -636,13 +620,72 @@ def test_html_renderer_renders_group_block_boundaries():
                 ],
             )
         ],
-        orientation="vertical",
+        orientation=orientation,
     )
 
-    assert 'class="insp-group"' in html
+    assert html.count('<details class="insp-group" open>') == 2
+    assert HtmlRenderer().initial_expanded_depth == 2
+    assert html.count('</details>') == 2
+    assert html.count('<summary style=') == 2
     assert "run: _Run" in html
     assert "stats: _Stats" in html
     assert "kept" in html
+
+
+@pytest.mark.parametrize("depth", [0, 1, 2, 3, 4, 99])
+def test_html_renderer_initial_expansion_follows_rendered_depth_including_batches(depth):
+    items = [GroupBlock(f"[{i}]", [GroupBlock("Record", [
+        GroupBlock("field: dict", [TextBlock("", [("value", "kept")])]),
+    ])]) for i in range(7)]
+    views = [StepView("depth", {}, [GroupBlock("Root", [
+        GroupBlock("Nested", [GroupBlock("Deep", [])]),
+        GroupBlock("list[Record]  ×7", items),
+    ])])]
+    original = deepcopy(views)
+
+    html = HtmlRenderer(initial_expanded_depth=depth).render(views)
+
+    class Disclosures(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.depth = 0
+            self.states = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "details":
+                self.states.append((self.depth, "open" in dict(attrs)))
+                self.depth += 1
+
+        def handle_endtag(self, tag):
+            if tag == "details":
+                self.depth -= 1
+
+    parser = Disclosures()
+    parser.feed(html)
+    assert len(parser.states) == 18
+    assert max(level for level, _ in parser.states) == 3
+    assert all(is_open == (level < depth) for level, is_open in parser.states)
+    assert '<template class="insp-list-batch" data-count="1">' in html
+    assert "kept" in html
+    assert views == original
+
+
+@pytest.mark.parametrize("depth", [-1, 1.5, True, "1", None])
+def test_html_renderer_rejects_invalid_initial_expanded_depth(depth):
+    with pytest.raises(ValueError, match="initial_expanded_depth must be a non-negative integer"):
+        HtmlRenderer(initial_expanded_depth=depth)
+
+
+def test_html_renderer_renders_empty_dim_group_as_open_disclosure_without_mutation():
+    views = [StepView("empty", {}, [GroupBlock("metadata <&>", [], dim=True)])]
+    original = deepcopy(views)
+
+    html = HtmlRenderer().render(views)
+
+    assert '<details class="insp-group insp-group--dim" open>' in html
+    assert 'metadata &lt;&amp;&gt;</summary>' in html
+    assert '<div class="insp-group-empty">empty</div>' in html
+    assert views == original
 
 
 def test_html_renderer_coalesces_inline_group_rows_into_one_table():
@@ -690,7 +733,7 @@ def test_pipeline_inspector_maps_list_of_mappings_to_group_blocks():
     assert first.children[0].title == "dict"
 
 
-def test_pipeline_inspector_build_views_summarizes_list_of_mappings_without_generic_ellipsis():
+def test_pipeline_inspector_build_views_preserves_structured_list_items():
     result = InspectionResult(
         [
             StepSpan(
@@ -704,10 +747,21 @@ def test_pipeline_inspector_build_views_summarizes_list_of_mappings_without_gene
 
     views = PipelineInspector().build_views(result)
 
-    assert views[0].blocks == [TextBlock("list  ×2", [("[0]", "dict  label spam"), ("[1]", "dict  label ham")])]
+    block = views[0].blocks[0]
+    assert isinstance(block, GroupBlock)
+    assert block.title == "list[dict]  ×2"
+    assert block.children == [
+        GroupBlock("[0]", [GroupBlock("dict", [TextBlock("", [("label", "spam")])])]),
+        GroupBlock("[1]", [GroupBlock("dict", [TextBlock("", [("label", "ham")])])]),
+    ]
+    html = HtmlRenderer().render(views)
+    assert "<summary>[0] dict</summary>" in html
+    assert "<summary>[1] dict</summary>" in html
+    assert "spam" in html
+    assert "ham" in html
 
 
-def test_pipeline_inspector_build_views_summarizes_list_of_strings_with_registered_formatter():
+def test_pipeline_inspector_build_views_preserves_list_of_strings_with_registered_formatter():
     inspector = PipelineInspector().register_value_formatter(
         str,
         lambda value: [TextBlock("str", [("", value)])],
@@ -725,7 +779,15 @@ def test_pipeline_inspector_build_views_summarizes_list_of_strings_with_register
 
     views = inspector.build_views(result)
 
-    assert views[0].blocks == [TextBlock("list  ×2", [("[0]", "hello"), ("[1]", "world")])]
+    assert views[0].blocks == [GroupBlock("list[str]  ×2", [
+        GroupBlock("[0]", [TextBlock("str", [("", "hello")])]),
+        GroupBlock("[1]", [TextBlock("str", [("", "world")])]),
+    ])]
+    html = HtmlRenderer().render(views)
+    assert '<details class="insp-group insp-list" open>' in html
+    assert '<details class="insp-group insp-list-item"' not in html
+    assert "hello" in html
+    assert "world" in html
 
 
 def test_pipeline_inspector_build_views_preserves_metadata_for_list_of_image_records():
@@ -755,18 +817,87 @@ def test_pipeline_inspector_build_views_preserves_metadata_for_list_of_image_rec
     views = PipelineInspector().build_views(result)
 
     assert len(views) == 1
-    assert views[0].blocks == [
-        TextBlock(
-            "list  ×2",
-            [
-                ("[0]", "dict  label cat  |  score 0.91  |  +1 more"),
-                ("[1]", "dict  label dog  |  score 0.87  |  +1 more"),
-            ],
-        )
+    block = views[0].blocks[0]
+    assert isinstance(block, GroupBlock)
+    first_record = block.children[0].children[0]
+    assert isinstance(first_record, GroupBlock)
+    assert first_record.children[:2] == [
+        TextBlock("", [("label", "cat")]),
+        TextBlock("", [("score", "0.91")]),
     ]
+    crop = first_record.children[2]
+    assert isinstance(crop, GroupBlock)
+    assert isinstance(crop.children[0], ImageBlock)
+    html = HtmlRenderer().render(views)
+    assert html.count('<details class="insp-group insp-list-item" open>') == 2
+    assert html.count('<img ') == 2
+    assert "cat" in html
+    assert "dog" in html
 
 
-def test_pipeline_inspector_build_views_marks_truncated_image_grid_preview():
+@pytest.mark.parametrize("name", [
+    "max_items_per_list", "max_fields_per_item", "max_chars_per_field", "max_images_per_grid",
+])
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, None])
+def test_html_renderer_rejects_invalid_preview_limits(name, value):
+    with pytest.raises(ValueError, match=f"{name} must be a positive integer"):
+        HtmlRenderer(**{name: value})
+
+
+def test_html_renderer_preview_limits_are_per_instance_and_preserve_views():
+    fields = [TextBlock("", [(f"field_{i}", "abcdefgh")]) for i in range(4)]
+    views = [StepView("custom", {}, [GroupBlock("list[Record]  ×7", [
+        GroupBlock(f"[{i}]", [GroupBlock("Record", fields)]) for i in range(7)
+    ])])]
+    original = deepcopy(views)
+    renderer = HtmlRenderer(max_items_per_list=2, max_fields_per_item=1, max_chars_per_field=3)
+
+    html = renderer.render(views)
+
+    preview, remaining = html.split('<button class="insp-list-more"', 1)
+    assert "[1] Record" in preview
+    assert "[2] Record" not in preview
+    assert '>+5 more</button>' in remaining
+    assert remaining.count('data-count="2"') == 2
+    assert remaining.count('data-count="1"') == 1
+    assert "field_0" in html
+    assert "field_1" not in html
+    assert "abc…" in html
+    assert "abcdefgh" not in html
+    assert "+3 more" in html
+
+    table_html = renderer.render([StepView("table", {}, [TextBlock("table", [
+        (f"row_{i}", "abcdefgh") for i in range(4)
+    ])])])
+    assert "row_0" in table_html
+    assert "row_1" not in table_html
+    assert "abc…" in table_html
+    assert "+3 more" in table_html
+
+    default_html = HtmlRenderer().render(views)
+    default_preview = default_html.split('<button class="insp-list-more"', 1)[0]
+    assert "[5] Record" in default_preview
+    assert "field_3" in default_html
+    assert "abcdefgh" in default_html
+    assert views == original
+
+
+def test_html_renderer_configures_image_grid_preview():
+    result = InspectionResult([StepSpan(
+        "images", 0.0, 0.01,
+        output_value=[np.zeros((4, 4, 3), dtype=np.uint8) for _ in range(3)],
+    )])
+    views = PipelineInspector().build_views(result)
+
+    html = HtmlRenderer(max_images_per_grid=1).render(views)
+
+    assert "showing 1 out of 3" in html
+    assert html.count('<img ') == 1
+    assert "showing" not in HtmlRenderer().render(views)
+    assert len(views[0].blocks[0].children) == 3
+
+
+def test_pipeline_inspector_preserves_images_and_renderer_limits_grid_preview():
     result = InspectionResult(
         [
             StepSpan(
@@ -783,8 +914,12 @@ def test_pipeline_inspector_build_views_marks_truncated_image_grid_preview():
     assert len(views) == 1
     assert len(views[0].blocks) == 1
     block = views[0].blocks[0]
-    assert isinstance(block, ImageBlock)
-    assert block.title == "ndarray  ×13  (showing 12 out of 13)"
+    assert isinstance(block, GroupBlock)
+    assert len(block.children) == 13
+    assert all(isinstance(item.children[0], ImageBlock) for item in block.children)
+    html = HtmlRenderer().render(views)
+    assert "ndarray  ×13  (showing 12 out of 13)" in html
+    assert html.count('<img ') == 1
 
 
 def test_pipeline_inspector_keeps_all_list_items_before_compaction():
@@ -798,7 +933,7 @@ def test_pipeline_inspector_keeps_all_list_items_before_compaction():
     assert blocks[0].children[-1].title == "[12]"
 
 
-def test_pipeline_inspector_build_views_trims_large_list_during_compaction():
+def test_pipeline_inspector_preserves_large_list_and_renderer_limits_preview():
     result = InspectionResult(
         [
             StepSpan(
@@ -815,9 +950,191 @@ def test_pipeline_inspector_build_views_trims_large_list_during_compaction():
     assert len(views) == 1
     assert len(views[0].blocks) == 1
     block = views[0].blocks[0]
-    assert isinstance(block, TextBlock)
-    assert block.title == "list  ×13"
-    assert block.rows[-1] == ("…", "+7 more")
+    assert isinstance(block, GroupBlock)
+    assert block.title == "list[dict]  ×13"
+    assert len(block.children) == 13
+    assert block.children[-1].title == "[12]"
+    html = HtmlRenderer().render(views)
+    assert html.count('<details class="insp-group insp-list-item" open>') == 13
+    assert "+7 more" in html
+    preview, remaining = html.split('<button class="insp-list-more"', 1)
+    assert "[6]" not in preview
+    assert "<summary>[6] dict</summary>" in remaining
+    assert "<summary>[12] dict</summary>" in remaining
+
+
+@pytest.mark.parametrize("orientation", ["horizontal", "vertical"])
+def test_html_renderer_renders_closed_list_disclosures_without_mutating_views(orientation):
+    fields = [TextBlock("", [(f"field_{i}", str(i))]) for i in range(13)]
+    fields[0] = TextBlock("", [("field_0", "x" * 121)])
+    views = [StepView("predictions", {}, [GroupBlock("list[Prediction]  ×7", [
+        GroupBlock(f"[{i}]", [GroupBlock("Prediction <&>", fields)]) for i in range(7)
+    ])])]
+    original = deepcopy(views)
+
+    html = HtmlRenderer(initial_expanded_depth=1).render(views, orientation=orientation)
+
+    class Disclosures(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.details = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "details":
+                self.details.append(dict(attrs))
+
+    parser = Disclosures()
+    parser.feed(html)
+    assert len(parser.details) == 8
+    lists = [attrs for attrs in parser.details if "insp-list" in attrs["class"].split()]
+    entries = [attrs for attrs in parser.details if "insp-list-item" in attrs["class"].split()]
+    assert len(lists) == 1
+    assert "open" in lists[0]
+    assert len(entries) == 7
+    assert all("open" not in attrs and "name" not in attrs for attrs in entries)
+    assert "<summary>[0] Prediction &lt;&amp;&gt;</summary>" in html
+    assert "field_11" in html
+    assert "field_12" not in html
+    preview, remaining = html.split('<button class="insp-list-more"', 1)
+    assert "[6]" not in preview
+    assert "<summary>[6] Prediction &lt;&amp;&gt;</summary>" in remaining
+    assert ("x" * 120) + "…" in html
+    assert "x" * 121 not in html
+    assert "+1 more" in html
+    assert views == original
+
+
+@pytest.mark.parametrize("length", [0, 6, 7, 12, 13, 19])
+@pytest.mark.parametrize("item_kind", ["scalar", "structured", "mixed"])
+def test_html_renderer_list_remainder_contains_all_entries(length, item_kind):
+    payload = [
+        {"label": f"item-{i}"} if item_kind == "structured" or (item_kind == "mixed" and i % 2)
+        else f"item-{i}"
+        for i in range(length)
+    ]
+    result = InspectionResult([StepSpan("list", 0.0, 0.01, output_value=payload)])
+    views = PipelineInspector().build_views(result)
+    original = deepcopy(views)
+
+    html = HtmlRenderer().render(views)
+
+    if length <= 6:
+        assert '<button class="insp-list-more"' not in html
+    else:
+        preview, remaining = html.split('<button class="insp-list-more"', 1)
+        assert f'data-remaining="{length - 6}"' in remaining
+        assert f'>+{length - 6} more</button>' in remaining
+        assert '<template class="insp-list-batch"' in remaining
+        class Batches(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.sizes = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "template":
+                    self.sizes.append(int(dict(attrs)["data-count"]))
+
+        batches = Batches()
+        batches.feed(remaining)
+        assert batches.sizes == [min(6, length - start) for start in range(6, length, 6)]
+        assert 'Show fewer' not in html
+        assert "item-5" in preview
+        assert "item-6" not in preview
+        assert "item-6" in remaining
+        assert f"item-{length - 1}" in remaining
+    assert views == original
+
+
+def test_html_renderer_nested_list_remainders_remain_independent():
+    payload = [0] * 6 + [[{"label": f"nested-{i}"} for i in range(8)]]
+    result = InspectionResult([StepSpan("nested", 0.0, 0.01, output_value=payload)])
+
+    html = PipelineInspector().render(result)
+
+    assert html.count('<button class="insp-list-more"') == 2
+    assert '>+1 more</button>' in html
+    assert '>+2 more</button>' in html
+    assert '<summary>[6] list[dict]  ×8</summary>' in html
+    assert "nested-7" in html
+
+
+def test_html_renderer_handles_mixed_items_nested_lists_and_recursive_references():
+    payload = ["plain", {"text": "<script>"}, [{"score": 0.9}], []]
+    payload[3].append(payload[3])
+    result = InspectionResult([StepSpan("mixed", 0.0, 0.01, output_value=payload)])
+    views = PipelineInspector().build_views(result)
+
+    html = HtmlRenderer().render(views)
+
+    assert '<div class="insp-inline-key">[0]</div>' in html
+    assert '<div class="insp-inline-val">plain</div>' in html
+    assert "<summary>[1] dict</summary>" in html
+    assert "&lt;script&gt;" in html
+    assert "<script>" not in html.split('<div class="insp-container', 1)[1]
+    assert "<summary>[2] list[dict]  ×1</summary>" in html
+    assert "score" in html
+    assert "&lt;recursive list&gt;" in html
+
+
+@pytest.mark.parametrize("title", ["custom table", ""])
+def test_html_renderer_limits_rows_in_direct_text_blocks(title):
+    block = TextBlock(title, [(f"field_{i}", "y" * 121) for i in range(13)])
+    view = StepView("custom", {}, [GroupBlock("container", [block])])
+    original = deepcopy(view)
+
+    html = HtmlRenderer().render([view])
+
+    assert "field_11" in html
+    assert "field_12" not in html
+    assert "+1 more" in html
+    assert ("y" * 120) + "…" in html
+    assert "y" * 121 not in html
+    assert view == original
+
+
+def test_pipeline_inspector_preserves_deep_pydantic_content_for_custom_renderers():
+    inspector = PipelineInspector().register_value_formatter(_PydanticBaseModel, pydantic_model_formatter())
+    payload = [{f"field_{i}": "z" * 121 for i in range(13)} for _ in range(13)]
+    for _ in range(8):
+        payload = {"nested": payload}
+    result = InspectionResult([StepSpan("response", 0.0, 0.01, output_value=_PydanticV2Model("ok", payload))])
+    views = inspector.build_views(result)
+
+    # A renderer can traverse the complete tree independently of HTML policy.
+    class FullRenderer:
+        def render(self, views, orientation="horizontal"):
+            block = views[0].blocks[0].children[1]
+            for _ in range(8):
+                block = block.children[0]
+            assert len(block.children) == 13
+            last_record = block.children[-1].children[0]
+            assert len(last_record.children) == 13
+            return last_record.children[-1].rows[0][1]
+
+    assert FullRenderer().render(views) == "z" * 121
+    html = HtmlRenderer().render(views)
+    assert "+7 more" in html
+    assert "+1 more" in html
+
+
+def test_pipeline_inspector_carries_source_image_from_complete_image_list():
+    source = np.full((2, 3, 3), 17, dtype=np.uint8)
+    result = InspectionResult([
+        StepSpan("images", 0.0, 0.01, output_value=[source, np.zeros_like(source)]),
+        StepSpan("text", 0.01, 0.01, output_value="done"),
+    ])
+
+    views = PipelineInspector().build_views(result)
+
+    assert isinstance(views[0].blocks[0], GroupBlock)
+    carried = views[1].blocks[0]
+    assert isinstance(carried, ImageBlock)
+    assert carried.dim
+    assert np.array_equal(carried.array, source)
+    html = HtmlRenderer().render(views)
+    assert "ndarray  ×2" in html
+    assert "↑ previous" in html
+    assert html.count('<img ') == 2
 
 
 def test_view_blocks_and_steps_expose_summary_text():

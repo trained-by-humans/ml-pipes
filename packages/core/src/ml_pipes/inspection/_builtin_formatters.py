@@ -71,20 +71,8 @@ def _pydantic_fields(value: Any) -> Mapping[Any, Any] | None:
     return None
 
 
-def pydantic_model_formatter(
-    *,
-    max_depth: int | None = None,
-) -> ValueFormatter[Any]:
-    """Create a structural formatter for Pydantic v1 and v2 models.
-
-    ``max_depth`` is optional. ``None`` allows arbitrary nesting; recursive
-    references are still detected.
-    """
-
-    if max_depth is not None and (
-        isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 1
-    ):
-        raise ValueError("max_depth must be a positive integer or None")
+def pydantic_model_formatter() -> ValueFormatter[Any]:
+    """Create complete structural blocks for Pydantic v1/v2, detecting cycles."""
 
     def text_for(value: Any) -> str:
         if isinstance(value, str):
@@ -94,11 +82,8 @@ def pydantic_model_formatter(
         except Exception as exc:  # pragma: no cover - hostile third-party repr
             return f"<unrepresentable {type(value).__name__}: {type(exc).__name__}>"
 
-    def limit_block(message: str) -> TextBlock:
-        return TextBlock("…", [("", message)])
-
-    def render_member(name: str, value: Any, active_ids: set[int], depth: int) -> OutputBlock:
-        blocks = render_value(value, active_ids, depth)
+    def render_member(name: str, value: Any, active_ids: set[int]) -> OutputBlock:
+        blocks = render_value(value, active_ids)
         if len(blocks) == 1:
             block = blocks[0]
             if isinstance(block, GroupBlock):
@@ -110,29 +95,25 @@ def pydantic_model_formatter(
     def render_members(
         members: Iterable[tuple[str, Any]],
         active_ids: set[int],
-        depth: int,
         *,
         render_as_items: bool = False,
     ) -> list[OutputBlock]:
         children: list[OutputBlock] = []
         for name, item in members:
             if render_as_items:
-                children.append(GroupBlock(title=name, children=render_value(item, active_ids, depth)))
+                children.append(GroupBlock(title=name, children=render_value(item, active_ids)))
             else:
-                children.append(render_member(name, item, active_ids, depth))
+                children.append(render_member(name, item, active_ids))
         return children
 
     def render_group(
         title: str,
         members: Iterable[tuple[str, Any]],
         active_ids: set[int],
-        depth: int,
         value: Any,
         *,
         render_as_items: bool = False,
     ) -> list[OutputBlock]:
-        if max_depth is not None and depth >= max_depth:
-            return [limit_block("maximum depth reached")]
         if id(value) in active_ids:
             return [TextBlock(type(value).__name__, [("", f"<recursive {type(value).__name__}>")])]
         active_ids.add(id(value))
@@ -143,7 +124,6 @@ def pydantic_model_formatter(
                     children=render_members(
                         members,
                         active_ids,
-                        depth + 1,
                         render_as_items=render_as_items,
                     ),
                 )
@@ -151,7 +131,7 @@ def pydantic_model_formatter(
         finally:
             active_ids.remove(id(value))
 
-    def render_value(value: Any, active_ids: set[int], depth: int) -> list[OutputBlock]:
+    def render_value(value: Any, active_ids: set[int]) -> list[OutputBlock]:
         fields = _pydantic_fields(value)
         if fields is not None:
             def model_members() -> Iterable[tuple[str, Any]]:
@@ -165,7 +145,6 @@ def pydantic_model_formatter(
                 type(value).__name__,
                 model_members(),
                 active_ids,
-                depth,
                 value,
             )
 
@@ -174,7 +153,6 @@ def pydantic_model_formatter(
                 type(value).__name__,
                 ((str(key), item) for key, item in value.items()),
                 active_ids,
-                depth,
                 value,
             )
 
@@ -184,7 +162,6 @@ def pydantic_model_formatter(
                 f"{type(value).__name__}[{item_type}]  ×{len(value)}",
                 ((f"[{index}]", item) for index, item in enumerate(value)),
                 active_ids,
-                depth,
                 value,
                 render_as_items=True,
             )
@@ -192,7 +169,7 @@ def pydantic_model_formatter(
         return [TextBlock(type(value).__name__, [("", text_for(value))])]
 
     def format_pydantic_model(value: Any) -> list[OutputBlock]:
-        return render_value(value, set(), 0)
+        return render_value(value, set())
 
     return format_pydantic_model
 

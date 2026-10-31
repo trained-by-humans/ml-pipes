@@ -213,7 +213,9 @@ chain.
 `PipelineInspector` turns the captured artifact into browser output through
 formatters and renderers. Core owns the shared inspection artifact, registry,
 and renderers, while package-owned types register their specialized formatters
-from the owning package at import time.
+from the owning package at import time. The inspector preserves the complete
+formatter-produced block tree. Renderers own text, field, and item preview
+limits and interactive expansion.
 
 Built on top of:
 

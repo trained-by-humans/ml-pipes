@@ -45,31 +45,6 @@ For a complete runnable inspection example, see
 
 ![Inspection report overview](https://raw.githubusercontent.com/trained-by-humans/ml-pipes/main/.github/assets/yolo8_tiled_inspection_overview.png)
 
-## How Inspection Works
-
-`Pipeline.inspect(value)` works by tracing one pipeline execution. It follows
-the same ordered span tree as tracing, with two additional conditions:
-
-1. The output of every successful step is captured.
-2. Each captured output is a snapshot, so later mutations to the live value do
-   not change the `InspectionResult`.
-
-`PipelineInspector` transforms those captured values into `StepView` and output
-blocks. A renderer then turns the views into a presentation such as the built-in
-HTML report. Inspection is observational: it does not alter pipeline execution
-or its returned output.
-
-```text
-[input] -> Pipeline.inspect() -> [InspectionResult] -> PipelineInspector.build_views() -> [list[StepView]] -> Renderer.render() -> [HTML report]
-```
-
-> [!CAUTION]
-> Inspection runs the complete pipeline and retains a snapshot of every step
-> output. It therefore adds execution work and can consume substantial memory,
-> especially for large images, tensors, batches, or nested regions. Use it for
-> focused debugging and representative inputs rather than memory-sensitive or
-> high-throughput production paths.
-
 ## When Inspection Is Useful
 
 Use inspection when you want to:
@@ -92,6 +67,9 @@ from ml_pipes.inspection import PipelineInspector
 PipelineInspector().show(result, orientation="horizontal")
 ```
 
+The report presents key information at a glance. Expand lists or objects to
+explore their contents, and click `+x more` to reveal more list entries.
+
 ### Save And Load A Captured Run
 
 `InspectionResult` is captured data, separate from presentation. Persist it
@@ -112,10 +90,58 @@ PipelineInspector().show(saved_result)
 > Inspection results are serialized with Python pickle. Load only inspection
 > files from sources you trust.
 
+## How Inspection Works
+
+`Pipeline.inspect(value)` works by tracing one pipeline execution. It follows
+the same ordered span tree as tracing, with two additional conditions:
+
+1. The output of every successful step is captured.
+2. Each captured output is a snapshot, so later mutations to the live value do
+   not change the `InspectionResult`.
+
+And then, `PipelineInspector` coordinates the following components to turn captured
+results into a report:
+
+- **Formatters** translate captured values into output blocks.
+- **`PipelineInspector`** assembles the blocks into `StepView` trees, preserving
+  all formatted fields, list entries, text, and nesting.
+- **Renderers** turn those views into a presentation, such as the built-in HTML
+  report. They control display limits and expansion; the HTML renderer does not
+  modify the supplied views.
+
+The inspection data flows end to end:
+
+```text
+[input] -> Pipeline.inspect() -> [InspectionResult] -> PipelineInspector.build_views() -> [list[StepView]] -> Renderer.render() -> [HTML report]
+```
+
+> [!CAUTION]
+> Inspection runs the complete pipeline and retains a snapshot of every step
+> output. It therefore adds execution work and can consume substantial memory,
+> especially for large images, tensors, batches, or nested regions. Use it for
+> focused debugging and representative inputs rather than memory-sensitive or
+> high-throughput production paths.
+
 ## Renderers
+
+Renderers turn formatted `StepView` trees into reports. They control layout and
+presentation, allowing the same inspection data to be displayed in different
+formats or environments.
+
+### Built-In HTML Renderer
 
 The built-in `HtmlRenderer` produces a self-contained browser report. The
 default `PipelineInspector` uses it for `render()`, `save()`, and `show()`.
+
+`HtmlRenderer` accepts configuration per instance:
+
+- `max_images_per_grid`: images shown per grid.
+- `max_items_per_list`: initial list entries and entries revealed per `+x more` click.
+- `max_fields_per_item`: group children and key/value rows shown at each nesting level.
+- `max_chars_per_field`: characters shown per field value.
+- `initial_expanded_depth`: nesting levels that start expanded.
+
+Renderers receive the complete formatted blocks.
 
 ```python
 inspector = PipelineInspector()
@@ -123,6 +149,17 @@ inspector = PipelineInspector()
 html = inspector.render(result, orientation="horizontal")
 inspector.save(result, "inspection.html", orientation="horizontal")
 ```
+
+To customize the previews, render the views with a configured instance:
+
+```python
+from ml_pipes.inspection import HtmlRenderer
+
+renderer = HtmlRenderer(max_items_per_list=10, max_chars_per_field=200)
+html = renderer.render(inspector.build_views(result))
+```
+
+### Adding Custom Renderers
 
 For a different presentation, call `inspector.build_views(result)` and pass the
 resulting `StepView` tree to an implementation of the `Renderer` protocol.
@@ -152,8 +189,8 @@ Out of the box, inspection can render:
 - mappings and dataclasses as named groups
 - Pydantic v1 and v2 models as groups of their declared public fields when
   Pydantic is installed
-- nested structures, with recursive-reference protection and preview
-  compaction
+- nested structures, with recursive-reference protection; renderers control
+  preview compaction
 
 ### Built-In Formatters
 
@@ -202,8 +239,8 @@ is more useful.
 
 `pydantic_model_formatter()` creates the generic structural formatter. It
 processes every declared field and nested value, while always detecting
-recursive references. Set `max_depth` explicitly when inspection must bound
-nesting traversal:
+recursive references. Nesting traversal is unrestricted; the HTML renderer
+controls how the resulting blocks are displayed:
 
 ```python
 from pydantic import BaseModel
@@ -212,12 +249,9 @@ from ml_pipes.inspection import PipelineInspector, pydantic_model_formatter
 
 inspector = PipelineInspector().register_value_formatter(
     BaseModel,
-    pydantic_model_formatter(max_depth=4),
+    pydantic_model_formatter(),
 )
 ```
-
-`max_depth` accepts a positive integer or `None`; `None` leaves nesting
-unbounded.
 
 If a captured Pydantic model is encountered while Pydantic itself is
 unavailable, inspection emits `InspectionWarning` once for that model type and

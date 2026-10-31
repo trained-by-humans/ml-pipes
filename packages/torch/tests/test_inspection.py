@@ -5,7 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from ml_pipes.inspection import InspectionResult
+from ml_pipes.inspection import GroupBlock, InspectionResult
 from ml_pipes.torch import TensorRegistry
 from ml_pipes.tracing import StepSpan
 
@@ -91,7 +91,13 @@ def test_pipeline_inspector_formats_list_of_dicts():
     )
 
     assert len(views) == 1
-    assert views[0].blocks == [TextBlock("list  ×2", [
-        ("[0]", "dict  class_id 1  |  score 0.9"),
-        ("[1]", "dict  class_id 2  |  score 0.8"),
+    assert views[0].blocks == [GroupBlock("list[dict]  ×2", [
+        GroupBlock("[0]", [GroupBlock("dict", [
+            TextBlock("", [("class_id", "1")]),
+            TextBlock("", [("score", "0.9")]),
+        ])]),
+        GroupBlock("[1]", [GroupBlock("dict", [
+            TextBlock("", [("class_id", "2")]),
+            TextBlock("", [("score", "0.8")]),
+        ])]),
     ])]
