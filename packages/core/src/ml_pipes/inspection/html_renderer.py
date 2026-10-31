@@ -23,7 +23,12 @@ from ml_pipes.inspection.views import (
 
 cv2 = load_cv2()
 _IN_JUPYTER: bool = "get_ipython" in dir(__builtins__) if isinstance(__builtins__, dict) else hasattr(__builtins__, "get_ipython")
-_IMG_STYLE = "max-width:240px;max-height:200px;object-fit:contain;display:block;"
+_IMG_MAX_WIDTH = 240
+_IMG_MAX_HEIGHT = 200
+_IMG_STYLE = (
+    f"max-width:{_IMG_MAX_WIDTH}px;max-height:{_IMG_MAX_HEIGHT}px;"
+    "object-fit:contain;display:block;"
+)
 _TBL_STYLE = "font-size:11px;border-collapse:collapse;width:100%;"
 _TD_K = "padding:1px 6px 1px 0;color:#555;white-space:nowrap;vertical-align:top;"
 _TD_V = "padding:1px 0;word-break:break-all;vertical-align:top;"
@@ -475,8 +480,20 @@ class HtmlRenderer:
                 title += f"  (showing {len(preview_images)} out of {count})"
             if label:
                 title = f"{label}: {title}"
+            arrays = [image.array for image in preview_images]
+            height, width = arrays[0].shape[:2]
+            count_preview = len(arrays)
+
+            def layout_cost(columns: int) -> tuple[float, int]:
+                rows = (count_preview + columns - 1) // columns
+                grid_width = columns * width + 2 * (columns - 1)
+                grid_height = rows * height + 2 * (rows - 1)
+                scale = min(_IMG_MAX_WIDTH / grid_width, _IMG_MAX_HEIGHT / grid_height)
+                return -scale, rows * columns - count_preview
+
+            columns = min(range(1, count_preview + 1), key=layout_cost)
             return self._render_block(
-                ImageBlock(title, _make_grid([image.array for image in preview_images], divider=2), dim=block.dim),
+                ImageBlock(title, _make_grid(arrays, divider=2, columns=columns), dim=block.dim),
                 depth,
             )
 
