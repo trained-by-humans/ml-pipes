@@ -79,7 +79,7 @@ def test_iterator_input_is_described_without_consuming_or_copying_it():
     source = Items()
     untouched = Pipeline([]).inspect(source)
     assert source.current == 0
-    assert untouched.spans[0].attributes == {"lazy": True}
+    assert untouched.spans[0].attributes == {}
     assert isinstance(untouched.spans[0].output_value, str)
     result = Pipeline([collect]).inspect(source)
     assert result.spans[1].output_value == [1, 2, 3]

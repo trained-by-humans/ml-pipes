@@ -20,4 +20,6 @@ def test_inspect_handles_generator_outputs_without_truncating_pipeline():
     assert not any(span.error for span in result.spans)
     assert isinstance(result.spans[1].output_value, str)
     assert "generator object" in result.spans[1].output_value
+    assert result.spans[1].attributes == {}
     assert result.spans[2].output_value == [0, 1, 2]
+    assert result.spans[2].attributes == {}

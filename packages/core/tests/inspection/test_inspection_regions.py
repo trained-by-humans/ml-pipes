@@ -107,7 +107,7 @@ def test_lazy_region_closer_does_not_consume_stream(consume):
         assert view.blocks == [TextBlock("LazyPerItem", [("status", "child trace unavailable")])]
     end = result.spans[2]
     assert end.label == "2:StreamItems"
-    assert end.attributes == {"lazy": True}
+    assert end.attributes == {}
     assert isinstance(end.output_value, str)
     assert "_MeasuredIterable" in end.output_value
     assert "2:StreamItems" in PipelineInspector().render(result)
