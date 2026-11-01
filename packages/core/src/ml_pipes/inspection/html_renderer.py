@@ -273,7 +273,7 @@ class HtmlRenderer:
     def __init__(
         self,
         *,
-        max_items_per_list: int = 6,
+        max_items_per_collection: int = 6,
         max_fields_per_item: int = 12,
         max_chars_per_field: int = 120,
         max_images_per_grid: int = 12,
@@ -281,7 +281,7 @@ class HtmlRenderer:
     ) -> None:
         """Configure positive preview limits for this renderer.
 
-        ``max_items_per_list`` limits list and tuple previews and entries loaded per click.
+        ``max_items_per_collection`` limits list and tuple previews and entries loaded per click.
         ``max_fields_per_item`` limits group children and text-table rows at each level.
         ``max_chars_per_field`` counts characters per text value.
         ``max_images_per_grid`` limits images in generic image-list grids.
@@ -289,7 +289,7 @@ class HtmlRenderer:
         starting at zero for top-level blocks. It must be a non-negative integer.
         """
         for name, value in (
-            ("max_items_per_list", max_items_per_list),
+            ("max_items_per_collection", max_items_per_collection),
             ("max_fields_per_item", max_fields_per_item),
             ("max_chars_per_field", max_chars_per_field),
             ("max_images_per_grid", max_images_per_grid),
@@ -302,7 +302,7 @@ class HtmlRenderer:
             or initial_expanded_depth < 0
         ):
             raise ValueError("initial_expanded_depth must be a non-negative integer")
-        self.max_items_per_list = max_items_per_list
+        self.max_items_per_collection = max_items_per_collection
         self.max_fields_per_item = max_fields_per_item
         self.max_chars_per_field = max_chars_per_field
         self.max_images_per_grid = max_images_per_grid
@@ -541,8 +541,8 @@ class HtmlRenderer:
                 depth,
             )
 
-        parts = [self._render_sequence_items(items[:self.max_items_per_list], depth + 1)]
-        remaining = items[self.max_items_per_list:]
+        parts = [self._render_sequence_items(items[:self.max_items_per_collection], depth + 1)]
+        remaining = items[self.max_items_per_collection:]
         if remaining:
             parts.append(
                 '<button class="insp-list-more" type="button"'
@@ -550,8 +550,8 @@ class HtmlRenderer:
                 f' onclick="{_html.escape(_LIST_MORE_ONCLICK, quote=True)}">'
                 f'+{len(remaining)} more</button>'
             )
-            for start in range(0, len(remaining), self.max_items_per_list):
-                batch = remaining[start:start + self.max_items_per_list]
+            for start in range(0, len(remaining), self.max_items_per_collection):
+                batch = remaining[start:start + self.max_items_per_collection]
                 parts.append(
                     f'<template class="insp-list-batch" data-count="{len(batch)}">'
                     f'{self._render_sequence_items(batch, depth + 1)}</template>'

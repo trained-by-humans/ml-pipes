@@ -839,7 +839,7 @@ def test_pipeline_inspector_build_views_preserves_metadata_for_list_of_image_rec
 
 
 @pytest.mark.parametrize("name", [
-    "max_items_per_list", "max_fields_per_item", "max_chars_per_field", "max_images_per_grid",
+    "max_items_per_collection", "max_fields_per_item", "max_chars_per_field", "max_images_per_grid",
 ])
 @pytest.mark.parametrize("value", [0, -1, 1.5, True, None])
 def test_html_renderer_rejects_invalid_preview_limits(name, value):
@@ -853,7 +853,7 @@ def test_html_renderer_preview_limits_are_per_instance_and_preserve_views():
         GroupBlock(f"[{i}]", [GroupBlock("Record", fields)]) for i in range(7)
     ])])]
     original = deepcopy(views)
-    renderer = HtmlRenderer(max_items_per_list=2, max_fields_per_item=1, max_chars_per_field=3)
+    renderer = HtmlRenderer(max_items_per_collection=2, max_fields_per_item=1, max_chars_per_field=3)
 
     html = renderer.render(views)
 

@@ -139,7 +139,7 @@ default `PipelineInspector` uses it for `render()`, `save()`, and `show()`.
 `HtmlRenderer` accepts configuration per instance:
 
 - `max_images_per_grid`: images shown per grid.
-- `max_items_per_list`: list or tuple entries shown initially and added with each `+x more` click.
+- `max_items_per_collection`: list or tuple entries shown initially and added with each `+x more` click.
 - `max_fields_per_item`: group children and key/value rows shown at each nesting level.
 - `max_chars_per_field`: characters shown per field value.
 - `initial_expanded_depth`: nesting levels that start expanded.
@@ -158,7 +158,7 @@ To customize the previews, render the views with a configured instance:
 ```python
 from ml_pipes.inspection import HtmlRenderer
 
-renderer = HtmlRenderer(max_items_per_list=10, max_chars_per_field=200)
+renderer = HtmlRenderer(max_items_per_collection=10, max_chars_per_field=200)
 html = renderer.render(inspector.build_views(result))
 ```
 

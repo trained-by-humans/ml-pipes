@@ -82,7 +82,7 @@ def test_nested_tuple_of_images_keeps_separate_indexed_previews():
 def test_tuple_field_uses_sequence_limits_instead_of_field_limits():
     views = _views({"metrics": tuple(ZoneVisitMetrics(i) for i in range(5))})
 
-    html = HtmlRenderer(max_items_per_list=2, max_fields_per_item=1).render(views)
+    html = HtmlRenderer(max_items_per_collection=2, max_fields_per_item=1).render(views)
 
     assert 'metrics: tuple  ×5</summary>' in html
     assert 'data-remaining="3"' in html
