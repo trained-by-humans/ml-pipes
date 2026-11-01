@@ -210,6 +210,9 @@ operator, and `Pipeline.inspect()` captures that operator's output in the span.
 The resulting `InspectionResult` shows how values move through the operator
 chain.
 
+An initial inspection-only `Input` span snapshots the pipeline input before
+execution, preserving it even if the first operator mutates it or fails.
+
 > [NOTE!]
 > Inspection additionally records region-closing boundaries with the
 > region's returned output, to help users understand the output of the region.

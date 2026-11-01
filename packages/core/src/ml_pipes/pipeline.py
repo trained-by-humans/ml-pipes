@@ -145,8 +145,18 @@ class Pipeline(Generic[InputT, OutputT]):
         )
 
     def inspect(self, value: InputT) -> InspectionResult:
-        """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
-        trace = InvocationTrace()
+        """Capture the pipeline input and each step's output during one execution."""
+        lazy = isinstance(value, Iterator)
+        trace = InvocationTrace(spans=[
+            StepSpan(
+                "Input",
+                time.perf_counter(),
+                0.0,
+                attributes={"lazy": True} if lazy else {},
+                output_shape=_extract_shape(value),
+                output_value=repr(value) if lazy else capture_value(value),
+            ),
+        ])
         cfg = TracingConfig(capture_shapes=True, _capture_outputs=True, capture_config=True)
         try:
             self._execute(value, trace=trace, cfg=cfg)

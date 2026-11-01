@@ -57,12 +57,12 @@ def test_region_closer_snapshot_precedes_downstream_mutations_and_survives_seria
 
     result = Pipeline([PerItem(), double, closer, mutate]).inspect([1, 2])
 
-    assert result.spans[1].output_value == [2, 4]
-    assert result.spans[1].operator_config == {"description": "collected outputs"}
-    assert result.spans[2].output_value == [2, 4, 99]
+    assert result.spans[2].output_value == [2, 4]
+    assert result.spans[2].operator_config == {"description": "collected outputs"}
+    assert result.spans[3].output_value == [2, 4, 99]
     loaded = InspectionResult.load(result.dump(tmp_path / "regions.pkl"))
-    assert loaded.spans[1].label == "2:CollectItems"
-    assert loaded.spans[1].output_value == [2, 4]
+    assert loaded.spans[2].label == "2:CollectItems"
+    assert loaded.spans[2].output_value == [2, 4]
     assert "2:CollectItems" in PipelineInspector().render(loaded)
 
 
@@ -71,9 +71,9 @@ def test_nested_region_closers_are_captured_at_their_own_boundary():
         PerItem(), PerItem(), double, CollectItems(), CollectItems(),
     ]).inspect([[1, 2], [3]])
 
-    assert [span.label for span in result.spans] == ["0:PerItem", "4:CollectItems"]
+    assert [span.label for span in result.spans] == ["Input", "0:PerItem", "4:CollectItems"]
     assert result.spans[-1].output_value == [[2, 4], [6]]
-    children = result.spans[0].child_trace.spans
+    children = result.spans[1].child_trace.spans
     assert [span.label for span in children] == ["1:PerItem", "3:CollectItems"]
     assert children[-1].output_value == [2, 4]
 
@@ -95,7 +95,7 @@ def test_lazy_region_closer_does_not_consume_stream(consume):
     result = Pipeline(operators).inspect([1, 2, 3])
 
     assert seen == ([1, 2, 3] if consume else [])
-    end = result.spans[1]
+    end = result.spans[2]
     assert end.label == "2:StreamItems"
     assert end.attributes == {"lazy": True}
     assert isinstance(end.output_value, str)
@@ -111,7 +111,7 @@ def test_unbatch_captures_each_invocations_own_output():
     assert [result.spans[-1].output_value for result in results] == [6, 14]
     for result in results:
         assert result.spans[-1].label == "2:UnBatch"
-        assert sorted(result.spans[1].child_trace.spans[0].output_value) == [6, 14]
+        assert sorted(result.spans[2].child_trace.spans[0].output_value) == [6, 14]
 
 
 @pytest.mark.parametrize("opener, closer", [(PerItem(), CollectItems()), (Scatter(), Gather())])
@@ -138,5 +138,5 @@ def test_failed_region_has_no_successful_closer_output():
 
     result = Pipeline([PerItem(), fail, CollectItems()]).inspect([1])
 
-    assert [span.label for span in result.spans] == ["0:PerItem"]
-    assert result.spans[0].error
+    assert [span.label for span in result.spans] == ["Input", "0:PerItem"]
+    assert result.spans[1].error

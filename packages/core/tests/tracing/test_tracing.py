@@ -260,13 +260,13 @@ def test_inspect_short_circuit_stops_downstream_and_round_trips() -> None:
 
     result = pipeline.inspect(3)
 
-    assert [span.label for span in result.spans] == ["0:_double", "1:_short_circuit"]
-    assert result.spans[1].output_value is SHORT_CIRCUIT
+    assert [span.label for span in result.spans] == ["Input", "0:_double", "1:_short_circuit"]
+    assert result.spans[2].output_value is SHORT_CIRCUIT
 
     restored = InspectionSerializer().loads(InspectionSerializer().dumps(result))
 
-    assert [span.label for span in restored.spans] == ["0:_double", "1:_short_circuit"]
-    assert restored.spans[1].output_value is SHORT_CIRCUIT
+    assert [span.label for span in restored.spans] == ["Input", "0:_double", "1:_short_circuit"]
+    assert restored.spans[2].output_value is SHORT_CIRCUIT
 
 
 def test_inspect_ignores_active_trace_collector() -> None:
@@ -279,8 +279,8 @@ def test_inspect_ignores_active_trace_collector() -> None:
 
     result = pipeline.inspect(3)
 
-    assert [span.label for span in result.spans] == ["0:_double"]
-    assert result.spans[0].output_value == 6
+    assert [span.label for span in result.spans] == ["Input", "0:_double"]
+    assert result.spans[1].output_value == 6
 
 
 def test_set_tracing_window():

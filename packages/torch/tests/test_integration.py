@@ -285,7 +285,8 @@ def test_torch_inspection_captures_device_shapes_and_operator_config() -> None:
 
     result = pipeline.inspect(payload)
 
-    spans = result.spans
+    assert result.spans[0].label == "Input"
+    spans = result.spans[1:]
     assert spans[0].output_shape == "TensorPayload (1, 3, 2, 2) @ cpu"
     assert spans[1].operator_config["device"] == "cpu"
     assert spans[2].output_shape == "RuntimeOutputs {output_0: (1, 3, 2, 2) @ cpu}"

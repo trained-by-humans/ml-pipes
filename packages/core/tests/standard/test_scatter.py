@@ -158,10 +158,10 @@ def test_scatter_inspect_preserves_failing_child_trace():
 
     result = Pipeline([Scatter(max_concurrency=2), _Boom(), Gather()]).inspect([1, 2, 3, 4])
 
-    assert [span.label for span in result.spans] == ["0:Scatter"]
-    assert result.spans[0].error
-    assert result.spans[0].child_trace is not None
-    assert any(span.label == "1:_Boom" and span.error for span in result.spans[0].child_trace.spans)
+    assert [span.label for span in result.spans] == ["Input", "0:Scatter"]
+    assert result.spans[1].error
+    assert result.spans[1].child_trace is not None
+    assert any(span.label == "1:_Boom" and span.error for span in result.spans[1].child_trace.spans)
 
 
 def test_pipeline_scatter_gather_type_contract():

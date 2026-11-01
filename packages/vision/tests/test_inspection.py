@@ -46,11 +46,12 @@ def test_pipeline_inspector_formats_tile_span_with_overlay() -> None:
     result = pipeline.inspect(payload)
     views = PipelineInspector().build_views(result)
 
-    assert len(views) == 1
-    assert len(views[0].blocks) == 1
-    assert isinstance(views[0].blocks[0], ImageBlock)
-    assert views[0].blocks[0].title.startswith("ImagePayload  ×")
-    assert views[0].blocks[0].overlay_array is not None
+    assert len(views) == 2
+    assert views[0].label == "Input"
+    assert len(views[1].blocks) == 1
+    assert isinstance(views[1].blocks[0], ImageBlock)
+    assert views[1].blocks[0].title.startswith("ImagePayload  ×")
+    assert views[1].blocks[0].overlay_array is not None
 
 
 def test_tile_inspection_grid_follows_tile_rect_geometry() -> None:
@@ -63,7 +64,7 @@ def test_tile_inspection_grid_follows_tile_rect_geometry() -> None:
 
     views = PipelineInspector().build_views(pipeline.inspect(payload))
 
-    block = views[0].blocks[0]
+    block = views[1].blocks[0]
     assert isinstance(block, ImageBlock)
     # Eight source columns by five rows, with two-pixel dividers.
     assert block.array.shape == (28, 46, 3)

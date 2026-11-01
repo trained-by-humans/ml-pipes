@@ -5,6 +5,7 @@ Choose `simple` for the plain image pipeline, `tiled` for sliced inference, or
 `error` for a synthetic mid-pipeline failure.
 
 In the HTML report, click a structured list entry's header to expand its fields.
+The initial Input card shows the value supplied to the pipeline.
 Click a list's +x more control to load six more entries at a time. Click its
 header to collapse or reopen the list.
 Region-closing cards show the output returned after the enclosed steps.
