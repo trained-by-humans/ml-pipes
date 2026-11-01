@@ -174,34 +174,74 @@ _CSS = """
   background: #1e1e1e; color: #d4d4d4; border-radius: 5px;
   padding: 8px 10px; font-size: 11px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.4);
-  pointer-events: none;
+  width: max-content; max-width: min(560px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px); box-sizing: border-box; overflow: auto;
+  white-space: normal; box-shadow: 0 4px 14px rgba(0,0,0,.4);
 }
-#insp-cfg-popup table { border-collapse: collapse; }
-#insp-cfg-popup td { padding: 1px 10px 1px 0; vertical-align: top; }
-.insp-cfg-key { color: #9cdcfe; }
+#insp-cfg-popup table { border-collapse: collapse; width: 100%; }
+#insp-cfg-popup td {
+  padding: 1px 10px 1px 0; vertical-align: top; overflow-wrap: anywhere;
+}
+.insp-cfg-key { color: #9cdcfe; min-width: 10ch; }
 .insp-cfg-val { color: #ce9178; }
+.insp-cfg-text { white-space: pre-wrap; line-height: 14px; }
+.insp-cfg-text--preview {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.insp-cfg-more {
+  border: 0; padding: 2px 0 0; background: none; color: #9cdcfe;
+  font: inherit; cursor: pointer;
+}
 
 </style>
 <div id="insp-cfg-popup"></div>
 <script>
 (function() {
   var popup = document.getElementById('insp-cfg-popup');
-  document.addEventListener('mouseover', function(e) {
-    var icon = e.target.closest('.insp-cfg-icon');
-    if (!icon) return;
-    popup.innerHTML = icon.dataset.cfg;
-    popup.style.display = 'block';
-    var r = icon.getBoundingClientRect();
-    var left = r.left;
-    var top = r.bottom + 6;
-    var pw = popup.offsetWidth;
-    if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+  var hideTimer;
+  var activeIcon;
+  function positionPopup() {
+    var r = activeIcon.getBoundingClientRect();
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - popup.offsetWidth - 8));
+    var top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - popup.offsetHeight - 8));
     popup.style.left = left + 'px';
     popup.style.top = top + 'px';
+  }
+  document.addEventListener('mouseover', function(e) {
+    if (popup.contains(e.target)) {
+      clearTimeout(hideTimer);
+      return;
+    }
+    var icon = e.target.closest('.insp-cfg-icon');
+    if (!icon) return;
+    clearTimeout(hideTimer);
+    activeIcon = icon;
+    popup.innerHTML = icon.dataset.cfg;
+    popup.style.display = 'block';
+    popup.style.left = '8px';
+    popup.style.top = '8px';
+    popup.querySelectorAll('.insp-cfg-more').forEach(function(button) {
+      var text = button.previousElementSibling;
+      text.classList.remove('insp-cfg-text--preview');
+      var fullHeight = text.clientHeight;
+      text.classList.add('insp-cfg-text--preview');
+      button.hidden = fullHeight <= text.clientHeight;
+    });
+    positionPopup();
+  });
+  popup.addEventListener('click', function(e) {
+    var button = e.target.closest('.insp-cfg-more');
+    if (!button) return;
+    button.previousElementSibling.classList.remove('insp-cfg-text--preview');
+    button.remove();
+    positionPopup();
   });
   document.addEventListener('mouseout', function(e) {
-    if (e.target.closest('.insp-cfg-icon')) popup.style.display = 'none';
+    if (!e.target.closest('.insp-cfg-icon') && !popup.contains(e.target)) return;
+    var next = e.relatedTarget;
+    if (next && (popup.contains(next) || next.closest('.insp-cfg-icon'))) return;
+    hideTimer = setTimeout(function() { popup.style.display = 'none'; }, 150);
   });
 })();
 </script>
@@ -604,7 +644,9 @@ class HtmlRenderer:
             return ""
         rows = "".join(
             f'<tr><td class="insp-cfg-key">{_html.escape(key)}</td>'
-            f'<td class="insp-cfg-val">{_html.escape(repr(value))}</td></tr>'
+            f'<td class="insp-cfg-val">'
+            f'<div class="insp-cfg-text insp-cfg-text--preview">{_html.escape(repr(value))}</div>'
+            f'<button class="insp-cfg-more" type="button" hidden>Show more</button></td></tr>'
             for key, value in cfg.items()
         )
         table_html = f"<table>{rows}</table>"
