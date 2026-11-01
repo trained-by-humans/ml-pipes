@@ -67,8 +67,8 @@ from ml_pipes.inspection import PipelineInspector
 PipelineInspector().show(result, orientation="horizontal")
 ```
 
-The report presents key information at a glance. Expand lists or objects to
-explore their contents, and click `+x more` to reveal more list entries.
+The report presents key information at a glance. Expand collections or objects
+to explore their contents, and click `+x more` to reveal more entries.
 
 ### Save And Load A Captured Run
 
@@ -139,7 +139,7 @@ default `PipelineInspector` uses it for `render()`, `save()`, and `show()`.
 `HtmlRenderer` accepts configuration per instance:
 
 - `max_images_per_grid`: images shown per grid.
-- `max_items_per_list`: initial list entries and entries revealed per `+x more` click.
+- `max_items_per_collection`: list or tuple entries shown initially and added with each `+x more` click.
 - `max_fields_per_item`: group children and key/value rows shown at each nesting level.
 - `max_chars_per_field`: characters shown per field value.
 - `initial_expanded_depth`: nesting levels that start expanded.
@@ -158,7 +158,7 @@ To customize the previews, render the views with a configured instance:
 ```python
 from ml_pipes.inspection import HtmlRenderer
 
-renderer = HtmlRenderer(max_items_per_list=10, max_chars_per_field=200)
+renderer = HtmlRenderer(max_items_per_collection=10, max_chars_per_field=200)
 html = renderer.render(inspector.build_views(result))
 ```
 
@@ -188,7 +188,7 @@ formatters can provide a specialized view for a particular operator.
 Out of the box, inspection can render:
 
 - primitive and otherwise unformatted values as text
-- tuples and lists as ordered values or groups
+- structured tuples and lists as indexed groups; primitive tuples as compact text
 - mappings and dataclasses as named groups
 - Pydantic v1 and v2 models as groups of their declared public fields when
   Pydantic is installed
