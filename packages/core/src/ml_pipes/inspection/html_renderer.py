@@ -18,7 +18,10 @@ from ml_pipes.inspection.views import (
     OutputBlock,
     StepView,
     TextBlock,
-    _make_grid,
+    _DEFAULT_MAX_IMAGES_PER_GRID,
+    _item_image,
+    _make_image_preview_grid,
+    _SEQUENCE_TITLE_RE,
 )
 
 cv2 = load_cv2()
@@ -36,10 +39,6 @@ _TITLE_STYLE = (
     "font-size:10px;"
     "letter-spacing:0.04em;margin-bottom:3px;"
 )
-_SEQUENCE_TITLE_RE = re.compile(
-    r"^(?:(?P<label>.+): )?(?P<kind>list|tuple)(?:\[(?P<item_type>[^\]]+)\])?\s+×(?P<count>\d+)$"
-)
-
 _LIST_MORE_ONCLICK = """
 var batch = this.nextElementSibling;
 if (!batch || !batch.matches('template.insp-list-batch')) return;
@@ -276,7 +275,7 @@ class HtmlRenderer:
         max_items_per_collection: int = 6,
         max_fields_per_item: int = 12,
         max_chars_per_field: int = 120,
-        max_images_per_grid: int = 12,
+        max_images_per_grid: int = _DEFAULT_MAX_IMAGES_PER_GRID,
         initial_expanded_depth: int = 2,
     ) -> None:
         """Configure positive preview limits for this renderer.
@@ -459,19 +458,6 @@ class HtmlRenderer:
             f'<div class="insp-inline-val">+{count} more</div></div>'
         )
 
-    @staticmethod
-    def _item_image(item: GroupBlock) -> ImageBlock | None:
-        if not item.children or not isinstance(item.children[0], ImageBlock):
-            return None
-        image = item.children[0]
-        metadata_title = image.title.split("  ")[0]
-        if any(
-            not isinstance(child, TextBlock) or child.title not in {"", metadata_title}
-            for child in item.children[1:]
-        ):
-            return None
-        return image
-
     def _render_sequence_items(self, items: list[OutputBlock], depth: int) -> str:
         parts: list[str] = []
         for item in items:
@@ -513,7 +499,7 @@ class HtmlRenderer:
         count = int(match.group("count"))
         items = block.children
         image_items = items[:self.max_images_per_grid]
-        images = [self._item_image(item) for item in image_items if isinstance(item, GroupBlock)]
+        images = [_item_image(item) for item in image_items if isinstance(item, GroupBlock)]
         if (
             kind == "list" and image_items and len(images) == len(image_items)
             and all(image is not None for image in images)
@@ -525,19 +511,12 @@ class HtmlRenderer:
             if label:
                 title = f"{label}: {title}"
             arrays = [image.array for image in preview_images]
-            height, width = arrays[0].shape[:2]
-            count_preview = len(arrays)
-
-            def layout_cost(columns: int) -> tuple[float, int]:
-                rows = (count_preview + columns - 1) // columns
-                grid_width = columns * width + 2 * (columns - 1)
-                grid_height = rows * height + 2 * (rows - 1)
-                scale = min(_IMG_MAX_WIDTH / grid_width, _IMG_MAX_HEIGHT / grid_height)
-                return -scale, rows * columns - count_preview
-
-            columns = min(range(1, count_preview + 1), key=layout_cost)
             return self._render_block(
-                ImageBlock(title, _make_grid(arrays, divider=2, columns=columns), dim=block.dim),
+                ImageBlock(
+                    title,
+                    _make_image_preview_grid(arrays, max_width=_IMG_MAX_WIDTH, max_height=_IMG_MAX_HEIGHT),
+                    dim=block.dim,
+                ),
                 depth,
             )
 

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import pytest
 
 from ml_pipes.control import SHORT_CIRCUIT
 from ml_pipes.core import Pipeline
-from ml_pipes.inspection import InspectionResult, PipelineInspector, TextBlock
+from ml_pipes.inspection import ImageBlock, InspectionResult, PipelineInspector, TextBlock
 from ml_pipes.standard import (
     Batch, CollectItems, Gather, LazyPerItem, PerItem, Scatter, StreamItems, UnBatch,
 )
@@ -75,6 +76,40 @@ def test_nested_region_closers_are_captured_at_their_own_boundary():
     children = result.spans[1].child_trace.spans
     assert [span.label for span in children] == ["1:PerItem", "3:CollectItems"]
     assert children[-1].output_value == [2, 4]
+
+
+@pytest.mark.parametrize("opener, closer", [(PerItem(), CollectItems()), (Scatter(max_concurrency=1), Gather())])
+def test_region_without_image_output_restores_parent_image_grid(opener, closer):
+    red = np.full((3, 4, 3), (255, 0, 0), dtype=np.uint8)
+    green = np.full((3, 4, 3), (0, 255, 0), dtype=np.uint8)
+    blue = np.full_like(red, (0, 0, 255))
+
+    def crops(value):
+        return [red, green]
+
+    def process(image):
+        return blue
+
+    def describe(image):
+        return "description"
+
+    def after(values):
+        return "parsed"
+
+    result = Pipeline([crops, opener, process, describe, closer, after]).inspect(None)
+    assert not any(span.error for span in result.spans)
+    views = PipelineInspector().build_views(result)
+
+    inside = views[2].children
+    assert np.array_equal(inside[0].blocks[0].array, blue)
+    assert np.array_equal(inside[1].blocks[0].array, blue)
+    closing_preview = views[3].blocks[0]
+    assert isinstance(closing_preview, ImageBlock)
+    assert closing_preview.dim
+    assert np.count_nonzero(np.all(closing_preview.array == (255, 0, 0), axis=-1)) == 12
+    assert np.count_nonzero(np.all(closing_preview.array == (0, 255, 0), axis=-1)) == 12
+    assert not np.any(np.all(closing_preview.array == (0, 0, 255), axis=-1))
+    assert np.array_equal(views[4].blocks[0].array, closing_preview.array)
 
 
 @pytest.mark.parametrize("consume", [False, True])
