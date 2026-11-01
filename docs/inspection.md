@@ -93,23 +93,14 @@ PipelineInspector().show(saved_result)
 ## How Inspection Works
 
 `Pipeline.inspect(value)` works by tracing one pipeline execution. It follows
-the same ordered span tree as tracing, with two additional conditions:
+the same ordered span tree as tracing, with these additional conditions:
 
-1. The pipeline input and the output of every successful step are captured.
-2. Each captured output is a snapshot, so later mutations to the live value do
-   not change the `InspectionResult`.
-
-The initial `Input` card shows the value before the first operator runs, without
-changing operator numbering. Iterator inputs are described without being
-consumed. A file-path input is shown as a path; its contents appear after the
-pipeline loads and decodes it.
-
-Inspection also captures region outputs at their closing boundaries, such as
-`UnBatch`, `Gather`, and `CollectItems`. Their cards appear after the enclosed
-steps and show the value passed to the next step. These boundaries have zero
-duration because the closing markers are not separate executions. `StreamItems`
-shows a lazy stream descriptor without consuming it; consumption counts remain
-on the region's opening span.
+- The pipeline input is captured as an initial `Input` step without changing
+  operator numbering.
+- Successful step outputs are captured as snapshots, so later mutations do not
+  change the `InspectionResult`.
+- Region outputs are captured at their closing boundaries.
+- Iterator inputs and lazy outputs are described without being consumed.
 
 And then, `PipelineInspector` coordinates the following components to turn captured
 results into a report:

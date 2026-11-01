@@ -205,17 +205,9 @@ For trace lifecycle, built-in collectors, and custom collector patterns, see
 ### Inspection
 
 Each operator creates an explicit data boundary. Inspection builds on tracing
-at those boundaries: while a pipeline runs, tracing records a span for each
-operator, and `Pipeline.inspect()` captures that operator's output in the span.
-The resulting `InspectionResult` shows how values move through the operator
-chain.
-
-An initial inspection-only `Input` span snapshots the pipeline input before
-execution, preserving it even if the first operator mutates it or fails.
-
-> [NOTE!]
-> Inspection additionally records region-closing boundaries with the
-> region's returned output, to help users understand the output of the region.
+at those boundaries: `Pipeline.inspect()` captures snapshots of the pipeline
+input and operator and region outputs in the span tree. The resulting
+`InspectionResult` shows how values move through the pipeline.
 
 `PipelineInspector` turns the captured artifact into browser output through
 formatters and renderers. Core owns the shared inspection artifact, registry,

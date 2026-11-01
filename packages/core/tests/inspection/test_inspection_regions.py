@@ -6,7 +6,7 @@ import pytest
 
 from ml_pipes.control import SHORT_CIRCUIT
 from ml_pipes.core import Pipeline
-from ml_pipes.inspection import InspectionResult, PipelineInspector
+from ml_pipes.inspection import InspectionResult, PipelineInspector, TextBlock
 from ml_pipes.standard import (
     Batch, CollectItems, Gather, LazyPerItem, PerItem, Scatter, StreamItems, UnBatch,
 )
@@ -103,6 +103,8 @@ def test_lazy_region_closer_does_not_consume_stream(consume):
         assert opener.duration_s == 0.0
         assert opener.attributes == {}
         assert opener.child_trace is None
+        view = PipelineInspector().build_views(result)[1]
+        assert view.blocks == [TextBlock("LazyPerItem", [("status", "child trace unavailable")])]
     end = result.spans[2]
     assert end.label == "2:StreamItems"
     assert end.attributes == {"lazy": True}
