@@ -1,14 +1,9 @@
 name: Release Promotion
 
-run-name: "Release: ${{ inputs.tag }}"
+run-name: "Release: ${{ github.ref_name }}"
 
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag to publish, for example v0.1.0rc1.
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -18,10 +13,13 @@ jobs:
     name: Validate Release Metadata
     runs-on: ubuntu-latest
     steps:
+      - name: Require a tag ref
+        run: test "${GITHUB_REF_TYPE}" = "tag"
+
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,7 +27,7 @@ jobs:
           python-version: "3.12"
 
       - name: Validate package versions and publish order
-        run: python .github/scripts/validate_release_metadata.py --tag "${{ inputs.tag }}"
+        run: python .github/scripts/validate_release_metadata.py --tag "${GITHUB_REF_NAME}"
 
   prepare-release-assets:
     name: Fetch Staged Release Assets
@@ -39,7 +37,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -51,14 +49,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dist/release
-          gh release download "${{ inputs.tag }}" --dir dist/release --clobber
+          gh release download "${GITHUB_REF_NAME}" --dir dist/release --clobber
 
       - name: Verify staged release artifact manifest
         run: |
           python .github/scripts/release_artifact_manifest.py verify \
             --artifacts-dir dist/release \
             --manifest dist/release/release-artifact-manifest.json \
-            --tag "${{ inputs.tag }}"
+            --tag "${GITHUB_REF_NAME}"
 
       - name: Check tracked files for mutations
         run: |
@@ -82,7 +80,7 @@ jobs:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-core
-      checkout_ref: ${{ inputs.tag }}
+      checkout_ref: ${{ github.ref }}
       environment_name: pypi
 
   publish-pypi-tensor:
@@ -96,7 +94,7 @@ jobs:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-tensor
-      checkout_ref: ${{ inputs.tag }}
+      checkout_ref: ${{ github.ref }}
       environment_name: pypi
 
   publish-pypi-vision:
@@ -110,7 +108,7 @@ jobs:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-vision
-      checkout_ref: ${{ inputs.tag }}
+      checkout_ref: ${{ github.ref }}
       environment_name: pypi
 
   publish-pypi-onnx:
@@ -124,7 +122,7 @@ jobs:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-onnx
-      checkout_ref: ${{ inputs.tag }}
+      checkout_ref: ${{ github.ref }}
       environment_name: pypi
 
   publish-pypi-torch:
@@ -138,7 +136,7 @@ jobs:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes-torch
-      checkout_ref: ${{ inputs.tag }}
+      checkout_ref: ${{ github.ref }}
       environment_name: pypi
 
   publish-pypi-meta:
@@ -152,7 +150,7 @@ jobs:
       index_url_base: https://pypi.org
       repository_url: https://upload.pypi.org/legacy/
       dist_name: ml-pipes
-      checkout_ref: ${{ inputs.tag }}
+      checkout_ref: ${{ github.ref }}
       environment_name: pypi
 
   verify-pypi:
@@ -165,6 +163,6 @@ jobs:
     with:
       target_name: PyPI
       index_url: https://pypi.org/simple/
-      checkout_ref: ${{ inputs.tag }}
-      tag: ${{ inputs.tag }}
+      checkout_ref: ${{ github.ref }}
+      tag: ${{ github.ref_name }}
       allow_failure: true
