@@ -27,6 +27,7 @@ from ml_pipes.standard import (
     Take,
     TakeWhile,
 )
+from ml_pipes.tracing import InvocationTrace, TracingConfig
 from ml_pipes.validation import PipelineValidationError
 
 
@@ -233,12 +234,6 @@ def _short_circuit_on_two(value: int) -> int | object:
 
 def _multiply_by_ten(value: int) -> int:
     return value * 10
-
-
-def _raise_on_two(value: int) -> int:
-    if value == 2:
-        raise ValueError("bad item")
-    return value
 
 
 def test_map_transforms_current_value() -> None:
@@ -1166,30 +1161,6 @@ def test_lazy_per_item_returns_measured_iterable_when_it_is_terminal() -> None:
     assert list(result) == [10, 20, 30]
 
 
-def test_inspect_does_not_materialize_terminal_lazy_stream() -> None:
-    seen: list[int] = []
-
-    def mark(value: int) -> int:
-        seen.append(value)
-        return value * 10
-
-    pipeline = Pipeline(
-        [
-            LazyPerItem(),
-            mark,
-            StreamItems(),
-        ]
-    )
-
-    result = pipeline.inspect([1, 2, 3])
-
-    assert seen == []
-    assert [span.label for span in result.spans] == ["Input", "0:LazyPerItem", "2:StreamItems"]
-    assert result.spans[1].duration_s == 0.0
-    assert result.spans[1].attributes == {}
-    assert result.spans[1].child_trace is None
-
-
 def test_lazy_per_item_trace_resolves_when_downstream_take_closes_stream() -> None:
     pipeline = Pipeline(
         [
@@ -1244,27 +1215,19 @@ def test_per_item_trace_reports_dropped_counts_per_operator() -> None:
     }
 
 
-def test_per_item_inspect_preserves_failing_child_trace() -> None:
-    pipeline = Pipeline(
-        [
-            PerItem(),
-            _raise_on_two,
-            _multiply_by_ten,
-            CollectItems(),
-        ]
-    )
+def test_per_item_trace_counts_items_until_failure() -> None:
+    def fail_on_two(value: int) -> int:
+        if value == 2:
+            raise ValueError("bad item")
+        return value
 
-    result = pipeline.inspect([1, 2, 3])
+    pipeline = Pipeline([PerItem(), fail_on_two, _multiply_by_ten, CollectItems()])
+    trace = InvocationTrace()
 
-    assert [span.label for span in result.spans] == ["Input", "0:PerItem"]
-    assert result.spans[1].error
-    assert result.spans[1].attributes == {
-        "seen": 2,
-        "emitted": 1,
-        "dropped": 0,
-    }
-    assert result.spans[1].child_trace is not None
-    assert any(span.label == "1:_raise_on_two" and span.error for span in result.spans[1].child_trace.spans)
+    with pytest.raises(ValueError, match="bad item"):
+        pipeline._execute([1, 2, 3], trace=trace, cfg=TracingConfig())
+
+    assert trace.spans[0].attributes == {"seen": 2, "emitted": 1, "dropped": 0}
 
 
 def test_lazy_per_item_trace_reports_dropped_counts_per_operator() -> None:

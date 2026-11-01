@@ -10,7 +10,6 @@ from ml_pipes.inspection import InspectionResult, PipelineInspector
 from ml_pipes.standard import (
     Batch, CollectItems, Gather, LazyPerItem, PerItem, Scatter, StreamItems, UnBatch,
 )
-from ml_pipes.tracing import InvocationTrace, TracingConfig
 
 
 def double(value):
@@ -95,6 +94,15 @@ def test_lazy_region_closer_does_not_consume_stream(consume):
     result = Pipeline(operators).inspect([1, 2, 3])
 
     assert seen == ([1, 2, 3] if consume else [])
+    assert [span.label for span in result.spans] == (
+        ["Input", "0:LazyPerItem", "2:StreamItems", "3:collect"]
+        if consume else ["Input", "0:LazyPerItem", "2:StreamItems"]
+    )
+    if not consume:
+        opener = result.spans[1]
+        assert opener.duration_s == 0.0
+        assert opener.attributes == {}
+        assert opener.child_trace is None
     end = result.spans[2]
     assert end.label == "2:StreamItems"
     assert end.attributes == {"lazy": True}
@@ -124,19 +132,20 @@ def test_region_closer_only_captures_emitted_items(opener, closer):
     assert result.spans[-1].output_value == [2, 6]
 
 
-def test_regular_tracing_does_not_add_region_closer_spans():
-    pipeline = Pipeline([PerItem(), double, CollectItems()])
-    output, trace = pipeline._execute([1, 2], trace=InvocationTrace(), cfg=TracingConfig())
+@pytest.mark.parametrize("opener, closer", [
+    (PerItem(), CollectItems()),
+    (Scatter(max_concurrency=2), Gather()),
+])
+def test_failed_region_preserves_child_error_without_successful_closer(opener, closer):
+    def fail_on_two(value):
+        if value == 2:
+            raise ValueError("bad item")
+        return value
 
-    assert output == [2, 4]
-    assert [span.label for span in trace.spans] == ["0:PerItem"]
+    result = Pipeline([opener, fail_on_two, double, closer]).inspect([1, 2, 3])
 
-
-def test_failed_region_has_no_successful_closer_output():
-    def fail(value):
-        raise ValueError("failed")
-
-    result = Pipeline([PerItem(), fail, CollectItems()]).inspect([1])
-
-    assert [span.label for span in result.spans] == ["Input", "0:PerItem"]
-    assert result.spans[1].error
+    assert [span.label for span in result.spans] == ["Input", f"0:{type(opener).__name__}"]
+    region = result.spans[1]
+    assert region.error
+    assert region.child_trace is not None
+    assert any(span.label == "1:fail_on_two" and span.error for span in region.child_trace.spans)

@@ -112,9 +112,10 @@ def test_global_value_formatter_applies_to_pipeline_inspectors() -> None:
     class Packet:
         pass
 
+    inspector = PipelineInspector()
     register_value_formatter(Packet, lambda _value: [TextBlock("packet", [("source", "global")])])
 
-    blocks = PipelineInspector()._value_to_blocks(Packet())
+    blocks = inspector._value_to_blocks(Packet())
 
     assert blocks == [TextBlock("packet", [("source", "global")])]
 
