@@ -1145,24 +1145,32 @@ def test_pipeline_inspector_preserves_deep_pydantic_content_for_custom_renderers
     assert "+1 more" in html
 
 
-def test_pipeline_inspector_carries_source_image_from_complete_image_list():
-    source = np.full((2, 3, 3), 17, dtype=np.uint8)
+@pytest.mark.parametrize("count", [2, 13])
+def test_pipeline_inspector_carries_grid_from_complete_image_list(count):
+    source = [np.full((2, 3, 3), index, dtype=np.uint8) for index in range(count)]
     result = InspectionResult([
-        StepSpan("images", 0.0, 0.01, output_value=[source, np.zeros_like(source)]),
+        StepSpan("images", 0.0, 0.01, output_value=source),
         StepSpan("text", 0.01, 0.01, output_value="done"),
     ])
 
     views = PipelineInspector().build_views(result)
 
     assert isinstance(views[0].blocks[0], GroupBlock)
+    assert len(views[0].blocks[0].children) == count
+    assert np.array_equal(views[0].blocks[0].children[-1].children[0].array, source[-1])
     carried = views[1].blocks[0]
     assert isinstance(carried, ImageBlock)
     assert carried.dim
-    assert np.array_equal(carried.array, source)
+    for index in range(min(count, 12)):
+        assert np.count_nonzero(np.all(carried.array == index, axis=-1)) == 6
+    if count > 12:
+        assert not np.any(np.all(carried.array == 12, axis=-1))
     html = HtmlRenderer().render(views)
-    assert "ndarray  ×2" in html
+    assert f"ndarray  ×{count}" in html
     assert "↑ previous" in html
     assert html.count('<img ') == 2
+    images = re.findall(r'src="data:image/png;base64,([^"]+)"', html)
+    assert images[0] == images[1]
 
 
 def test_view_blocks_and_steps_expose_summary_text():

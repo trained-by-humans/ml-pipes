@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Protocol
 
 import numpy as np
 
 from ml_pipes.inspection._deps import load_cv2
 from ml_pipes.tracing import StepSpan
+
+
+_SEQUENCE_TITLE_RE = re.compile(
+    r"^(?:(?P<label>.+): )?(?P<kind>list|tuple)(?:\[(?P<item_type>[^\]]+)\])?\s+×(?P<count>\d+)$"
+)
+_DEFAULT_MAX_IMAGES_PER_GRID = 12
 
 
 class Summarizable(Protocol):
@@ -108,11 +115,54 @@ def _make_grid(
     return grid
 
 
+def _item_image(item: GroupBlock) -> ImageBlock | None:
+    if not item.children or not isinstance(item.children[0], ImageBlock):
+        return None
+    image = item.children[0]
+    metadata_title = image.title.split("  ")[0]
+    if any(
+        not isinstance(child, TextBlock) or child.title not in {"", metadata_title}
+        for child in item.children[1:]
+    ):
+        return None
+    return image
+
+
+def _make_image_preview_grid(
+    images: list[np.ndarray], *, max_width: int = 240, max_height: int = 200,
+) -> np.ndarray:
+    height, width = images[0].shape[:2]
+    count = len(images)
+
+    def layout_cost(columns: int) -> tuple[float, int]:
+        rows = (count + columns - 1) // columns
+        grid_width = columns * width + 2 * (columns - 1)
+        grid_height = rows * height + 2 * (rows - 1)
+        scale = min(max_width / grid_width, max_height / grid_height)
+        return -scale, rows * columns - count
+
+    columns = min(range(1, count + 1), key=layout_cost)
+    return _make_grid(images, divider=2, columns=columns)
+
+
 def _find_image_in_blocks(blocks: list[OutputBlock]) -> np.ndarray | None:
     for block in blocks:
         if isinstance(block, ImageBlock):
             return block.array
         if isinstance(block, GroupBlock):
+            match = _SEQUENCE_TITLE_RE.fullmatch(block.title)
+            if match is not None and match.group("kind") == "list" and block.children:
+                images = [
+                    _item_image(item) if isinstance(item, GroupBlock) else None
+                    for item in block.children
+                ]
+                if all(image is not None for image in images):
+                    # Keep the legacy collection carry preview bounded while
+                    # preserving every source item in the formatted blocks.
+                    return _make_image_preview_grid([
+                        image.array for image in images[:_DEFAULT_MAX_IMAGES_PER_GRID]
+                        if image is not None
+                    ])
             nested = _find_image_in_blocks(block.children)
             if nested is not None:
                 return nested
