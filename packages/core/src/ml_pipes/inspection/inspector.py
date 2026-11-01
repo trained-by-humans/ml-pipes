@@ -175,7 +175,18 @@ class PipelineInspector:
             children, _ = self._trace_to_views(span.child_trace, image_to_carry)
             return dataclasses.replace(view, children=children), image_to_carry
 
-        raw_blocks = self._value_to_blocks(span.output_value)
+        value = span.output_value
+        if isinstance(value, tuple) and not _is_primitive_tuple(value):
+            # A step's outer tuple is a pipeline bundle; nested tuples retain
+            # their collection boundaries.
+            active_ids = {id(value)}
+            raw_blocks = [
+                block
+                for item in value
+                for block in self._value_to_blocks(item, active_ids)
+            ]
+        else:
+            raw_blocks = self._value_to_blocks(value)
         blocks, image_to_carry = _apply_image_carry(raw_blocks, last_image)
         children, _ = self._trace_to_views(span.child_trace, image_to_carry)
         return StepView(span.label, _build_span_metadata(span), blocks, children=children), image_to_carry
@@ -188,26 +199,21 @@ class PipelineInspector:
         if active_ids is None:
             active_ids = set()
 
-        if isinstance(value, tuple):
-            if _is_primitive_tuple(value):
-                return [TextBlock(type(value).__name__, [("", str(value))])]
-            blocks: list[OutputBlock] = []
-            for item in value:
-                blocks.extend(self._value_to_blocks(item, active_ids))
-            return blocks
+        if isinstance(value, tuple) and _is_primitive_tuple(value):
+            return [TextBlock(type(value).__name__, [("", str(value))])]
 
-        if isinstance(value, list) and value:
+        if isinstance(value, tuple) or (isinstance(value, list) and value):
             value_id = id(value)
             if value_id in active_ids:
                 return [
                     GroupBlock(
-                        title=f"list[{type(value[0]).__name__}]  ×{len(value)}",
+                        title=self._sequence_title(value),
                         children=[self._recursive_reference_block(value)],
                     )
                 ]
             active_ids.add(value_id)
             try:
-                return [self._list_to_group(value, active_ids)]
+                return [self._sequence_to_group(value, active_ids)]
             finally:
                 active_ids.remove(value_id)
 
@@ -253,13 +259,19 @@ class PipelineInspector:
         text = value if isinstance(value, str) else repr(value)
         return [TextBlock(name, [("", text)])]
 
-    def _list_to_group(
+    @staticmethod
+    def _sequence_title(value: list[Any] | tuple[Any, ...]) -> str:
+        if isinstance(value, tuple):
+            return f"tuple  ×{len(value)}"
+        return f"list[{type(value[0]).__name__}]  ×{len(value)}"
+
+    def _sequence_to_group(
         self,
-        value: list[Any],
+        value: list[Any] | tuple[Any, ...],
         active_ids: set[int],
     ) -> GroupBlock:
         return GroupBlock(
-            title=f"list[{type(value[0]).__name__}]  ×{len(value)}",
+            title=self._sequence_title(value),
             children=[
                 GroupBlock(
                     title=f"[{index}]",

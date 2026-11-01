@@ -36,8 +36,8 @@ _TITLE_STYLE = (
     "font-size:10px;"
     "letter-spacing:0.04em;margin-bottom:3px;"
 )
-_LIST_TITLE_RE = re.compile(
-    r"^(?:(?P<label>.+): )?list\[(?P<item_type>[^\]]+)\]\s+×(?P<count>\d+)$"
+_SEQUENCE_TITLE_RE = re.compile(
+    r"^(?:(?P<label>.+): )?(?P<kind>list|tuple)(?:\[(?P<item_type>[^\]]+)\])?\s+×(?P<count>\d+)$"
 )
 
 _LIST_MORE_ONCLICK = """
@@ -281,7 +281,7 @@ class HtmlRenderer:
     ) -> None:
         """Configure positive preview limits for this renderer.
 
-        ``max_items_per_list`` also sets the number of entries loaded per click.
+        ``max_items_per_list`` limits list and tuple previews and entries loaded per click.
         ``max_fields_per_item`` limits group children and text-table rows at each level.
         ``max_chars_per_field`` counts characters per text value.
         ``max_images_per_grid`` limits images in generic image-list grids.
@@ -472,7 +472,7 @@ class HtmlRenderer:
             return None
         return image
 
-    def _render_list_items(self, items: list[OutputBlock], depth: int) -> str:
+    def _render_sequence_items(self, items: list[OutputBlock], depth: int) -> str:
         parts: list[str] = []
         for item in items:
             if not isinstance(item, GroupBlock):
@@ -492,8 +492,8 @@ class HtmlRenderer:
                 child = item.children[0]
                 title += f" {child.title}"
                 # The disclosure header already names this object. Render its
-                # fields directly; nested lists still need their list renderer.
-                if isinstance(child, GroupBlock) and _LIST_TITLE_RE.fullmatch(child.title) is None:
+                # fields directly; nested sequences still need their own renderer.
+                if isinstance(child, GroupBlock) and _SEQUENCE_TITLE_RE.fullmatch(child.title) is None:
                     content = child.children
                     dim = dim or child.dim
             body = self._render_group_children(content, depth + 1)
@@ -507,13 +507,17 @@ class HtmlRenderer:
             )
         return "".join(parts)
 
-    def _render_list(self, block: GroupBlock, match: re.Match[str], depth: int) -> str:
+    def _render_sequence(self, block: GroupBlock, match: re.Match[str], depth: int) -> str:
         label = match.group("label")
+        kind = match.group("kind")
         count = int(match.group("count"))
         items = block.children
         image_items = items[:self.max_images_per_grid]
         images = [self._item_image(item) for item in image_items if isinstance(item, GroupBlock)]
-        if image_items and len(images) == len(image_items) and all(image is not None for image in images):
+        if (
+            kind == "list" and image_items and len(images) == len(image_items)
+            and all(image is not None for image in images)
+        ):
             preview_images = [image for image in images if image is not None]
             title = f"{preview_images[0].title.split('  ')[0]}  ×{count}"
             if len(preview_images) < count:
@@ -537,7 +541,7 @@ class HtmlRenderer:
                 depth,
             )
 
-        parts = [self._render_list_items(items[:self.max_items_per_list], depth + 1)]
+        parts = [self._render_sequence_items(items[:self.max_items_per_list], depth + 1)]
         remaining = items[self.max_items_per_list:]
         if remaining:
             parts.append(
@@ -550,9 +554,9 @@ class HtmlRenderer:
                 batch = remaining[start:start + self.max_items_per_list]
                 parts.append(
                     f'<template class="insp-list-batch" data-count="{len(batch)}">'
-                    f'{self._render_list_items(batch, depth + 1)}</template>'
+                    f'{self._render_sequence_items(batch, depth + 1)}</template>'
                 )
-        title = f"list  ×{count}"
+        title = f"{kind}  ×{count}"
         if label:
             title = f"{label}: {title}"
         dim_class = " insp-group--dim" if block.dim else ""
@@ -597,9 +601,9 @@ class HtmlRenderer:
             return f'<div style="margin-bottom:8px;">{title_html}{img_html}</div>'
 
         if isinstance(block, GroupBlock):
-            list_match = _LIST_TITLE_RE.fullmatch(block.title)
-            if list_match is not None:
-                return self._render_list(block, list_match, depth)
+            sequence_match = _SEQUENCE_TITLE_RE.fullmatch(block.title)
+            if sequence_match is not None:
+                return self._render_sequence(block, sequence_match, depth)
             dim = block.dim
             dim_class = " insp-group--dim" if dim else ""
             title_style = (
