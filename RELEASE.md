@@ -52,29 +52,13 @@ the tooling at different times.
 - Helper scripts under `.github/scripts/*.py` come from whatever tree
   `actions/checkout` places in the job workspace.
 
-That leads to one important difference between staging and promotion:
+Both staging and promotion use the release tag as their workflow ref, so the
+workflow definitions, reusable workflows, helper scripts, and package code come
+from the same tagged commit. Promotion requires a tag ref and rejects branch
+refs.
 
-- `stage-release` starts from the tag push, so the workflow definition, helper
-  scripts, and package code all line up with the tagged commit.
-- `promote-release` is started manually, but the run still follows the branch
-  or tag ref selected for that dispatch. Its workflow definition comes from
-  that dispatched ref, while its helper scripts come from the tag after
-  checkout.
-
-Promotion can therefore mix newer workflow orchestration with older
-tag-scoped helper scripts. That is workable when staging and promotion stay
-close together, but the gap is real.
-
-If staging and promotion drift apart, later workflow fixes, permission
-changes, or verification-policy changes may apply during promotion even though
-helper-script behavior still comes from the older staged tag.
-
-Treat this as an operational constraint of the current design:
-
-- keep staging and promotion close together
-- do not assume a post-tag tooling fix applies to an already staged release
-- if release tooling changes materially after staging, cut a new release
-  candidate and restage instead of promoting under drifted tooling
+Workflow changes apply to tags created after those changes. Existing tags keep
+their original release workflow; do not move a staged tag to update it.
 
 For the GitHub Actions mechanics behind this, see:
 
@@ -143,7 +127,8 @@ the GitHub release artifacts after the workflow finishes.
 ## Promote To PyPI
 
 1. Open the `promote-release` workflow in GitHub Actions.
-2. Run it with the exact staged tag, such as `v0.1.0`.
+2. In **Run workflow**, use the ref selector to select the staged tag, such as
+   `v0.1.0`, then start the workflow. There is no separate tag input.
 3. Wait for the PyPI publish jobs to complete and review the final verification
    job.
 
