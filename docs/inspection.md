@@ -96,7 +96,7 @@ PipelineInspector().show(saved_result)
 the same ordered span tree as tracing, with these additional conditions:
 
 - The pipeline input is captured as an initial `Input` step without changing
-  operator numbering.
+  operator numbering. Pass `capture_input=False` to `inspect()` to omit it.
 - Successful step outputs are captured as snapshots, so later mutations do not
   change the `InspectionResult`.
 - Region outputs are captured at their closing boundaries.

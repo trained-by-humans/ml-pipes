@@ -144,18 +144,20 @@ class Pipeline(Generic[InputT, OutputT]):
             cfg=self._tracing_config,
         )
 
-    def inspect(self, value: InputT) -> InspectionResult:
-        """Capture the pipeline input and each step's output during one execution."""
-        lazy = isinstance(value, Iterator)
-        trace = InvocationTrace(spans=[
-            StepSpan(
-                "Input",
-                time.perf_counter(),
-                0.0,
-                output_shape=_extract_shape(value),
-                output_value=repr(value) if lazy else capture_value(value),
-            ),
-        ])
+    def inspect(self, value: InputT, *, capture_input: bool = True) -> InspectionResult:
+        """Capture step outputs, optionally including the pipeline input snapshot."""
+        trace = InvocationTrace()
+        if capture_input:
+            lazy = isinstance(value, Iterator)
+            trace.spans.append(
+                StepSpan(
+                    "Input",
+                    time.perf_counter(),
+                    0.0,
+                    output_shape=_extract_shape(value),
+                    output_value=repr(value) if lazy else capture_value(value),
+                )
+            )
         cfg = TracingConfig(capture_shapes=True, _capture_outputs=True, capture_config=True)
         try:
             self._execute(value, trace=trace, cfg=cfg)
