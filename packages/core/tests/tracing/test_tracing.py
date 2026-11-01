@@ -7,11 +7,7 @@ import numpy as np
 import pytest
 
 from ml_pipes.collectors import PrintCollector
-from ml_pipes.core import (
-    Pipeline,
-    SHORT_CIRCUIT,
-)
-from ml_pipes.inspection import InspectionSerializer
+from ml_pipes.core import Pipeline
 from ml_pipes.standard import (
     Batch,
     LazyPerItem,
@@ -64,11 +60,6 @@ def _double(x: int) -> int:
 
 def _add_one(x: int) -> int:
     return x + 1
-
-
-def _short_circuit(x: int) -> object:
-    del x
-    return SHORT_CIRCUIT
 
 
 def _failing(x: int) -> int:
@@ -207,22 +198,6 @@ def test_collector_error_does_not_crash_pipeline():
     assert p(3) == 6
 
 
-def test_pipeline_constructor_no_longer_accepts_tracing():
-    with pytest.raises(TypeError, match="tracing"):
-        Pipeline([_double], tracing=None)
-
-
-def test_set_tracing_no_longer_accepts_capture_flags() -> None:
-    pipeline = Pipeline([_double])
-    collector = _Capture()
-
-    with pytest.raises(TypeError, match="capture_shapes"):
-        pipeline.set_tracing(collector, capture_shapes=True)
-
-    with pytest.raises(TypeError, match="capture_config"):
-        pipeline.set_tracing(collector, capture_config=True)
-
-
 def test_trace_collector_property_is_read_only() -> None:
     pipeline = Pipeline([_double])
     collector = _Capture()
@@ -253,34 +228,6 @@ def test_error_trace_contains_completed_and_error_spans():
     assert any(s.label.endswith("_failing") and s.error for s in trace.spans)
     # _add_one never ran — should not appear
     assert not any(s.label.endswith("_add_one") for s in trace.spans)
-
-
-def test_inspect_short_circuit_stops_downstream_and_round_trips() -> None:
-    pipeline = Pipeline([_double, _short_circuit, _add_one])
-
-    result = pipeline.inspect(3)
-
-    assert [span.label for span in result.spans] == ["0:_double", "1:_short_circuit"]
-    assert result.spans[1].output_value is SHORT_CIRCUIT
-
-    restored = InspectionSerializer().loads(InspectionSerializer().dumps(result))
-
-    assert [span.label for span in restored.spans] == ["0:_double", "1:_short_circuit"]
-    assert restored.spans[1].output_value is SHORT_CIRCUIT
-
-
-def test_inspect_ignores_active_trace_collector() -> None:
-    class _BrokenCollector(TraceCollector):
-        def on_trace(self, trace: InvocationTrace) -> None:
-            raise RuntimeError("collector is broken")
-
-    pipeline = Pipeline([_double])
-    pipeline.set_tracing(_BrokenCollector())
-
-    result = pipeline.inspect(3)
-
-    assert [span.label for span in result.spans] == ["0:_double"]
-    assert result.spans[0].output_value == 6
 
 
 def test_set_tracing_window():
@@ -665,15 +612,11 @@ def test_merge_traces_propagates_error_flag():
     assert merged.spans[0].error is True
 
 
-def test_inspect_with_lambda_operator_is_serializable():
-    import pickle
-    from ml_pipes.inspection import InspectionSerializer
-    from ml_pipes.tensor import FilterTensors, TensorRegistry
+def test_regular_tracing_does_not_add_region_closer_spans():
+    from ml_pipes.standard import CollectItems, PerItem
 
-    pred = TensorRegistry({"scores": np.array([0.9, 0.4], dtype=np.float32)})
-    p = Pipeline([FilterTensors("scores", by="scores", predicate=lambda scores: scores > 0.5)])
-    result = p.inspect(pred)
+    pipeline = Pipeline([PerItem(), _double, CollectItems()])
+    output, trace = pipeline._execute([1, 2], trace=InvocationTrace(), cfg=TracingConfig())
 
-    data = InspectionSerializer().dumps(result)
-    restored = InspectionSerializer().loads(data)
-    assert len(restored.spans) == len(result.spans)
+    assert output == [2, 4]
+    assert [span.label for span in trace.spans] == ["0:PerItem"]

@@ -84,13 +84,15 @@ def _summarize_blocks(blocks: list[OutputBlock]) -> str:
     return "  |  ".join(block.summary() for block in blocks)
 
 
-def _make_grid(images: list[np.ndarray], divider: int = 0) -> np.ndarray:
-    """Tile a list of HxWx3 RGB images into a square-ish grid."""
+def _make_grid(
+    images: list[np.ndarray], divider: int = 0, *, columns: int | None = None,
+) -> np.ndarray:
+    """Tile RGB images using the supplied columns or a square-ish layout."""
 
     import math
 
     n = len(images)
-    cols = math.ceil(math.sqrt(n))
+    cols = columns if columns is not None else math.ceil(math.sqrt(n))
     rows = math.ceil(n / cols)
     h, w = images[0].shape[:2]
     gh = rows * h + divider * (rows - 1)

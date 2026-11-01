@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import os
+import re
 import sys
 import warnings
 from copy import deepcopy
@@ -110,9 +112,10 @@ def test_global_value_formatter_applies_to_pipeline_inspectors() -> None:
     class Packet:
         pass
 
+    inspector = PipelineInspector()
     register_value_formatter(Packet, lambda _value: [TextBlock("packet", [("source", "global")])])
 
-    blocks = PipelineInspector()._value_to_blocks(Packet())
+    blocks = inspector._value_to_blocks(Packet())
 
     assert blocks == [TextBlock("packet", [("source", "global")])]
 
@@ -895,6 +898,31 @@ def test_html_renderer_configures_image_grid_preview():
     assert html.count('<img ') == 1
     assert "showing" not in HtmlRenderer().render(views)
     assert len(views[0].blocks[0].children) == 3
+
+
+@pytest.mark.parametrize("shape, count, columns", [
+    ((240, 120), 8, 4),
+    ((120, 240), 8, 2),
+    ((120, 120), 8, 3),
+    ((240, 120), 1, 1),
+])
+def test_html_renderer_image_grid_fits_preview_bounds_and_preserves_order(shape, count, columns):
+    from ml_pipes.inspection.html_renderer import cv2
+
+    images = [np.full((*shape, 3), i * 20, dtype=np.uint8) for i in range(count)]
+    blocks = PipelineInspector()._value_to_blocks(images)
+    html = HtmlRenderer().render([StepView("images", {}, blocks)])
+
+    encoded = re.search(r'data:image/png;base64,([^"\s]+)', html)
+    assert encoded is not None
+    grid = cv2.imdecode(np.frombuffer(base64.b64decode(encoded.group(1)), dtype=np.uint8), cv2.IMREAD_COLOR)
+    rows = (count + columns - 1) // columns
+    height, width = shape
+    assert grid.shape == (rows * height + 2 * (rows - 1), columns * width + 2 * (columns - 1), 3)
+    for index in range(count):
+        row, column = divmod(index, columns)
+        assert np.all(grid[row * (height + 2), column * (width + 2)] == index * 20)
+    assert "showing" not in html
 
 
 def test_pipeline_inspector_preserves_images_and_renderer_limits_grid_preview():

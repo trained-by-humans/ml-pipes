@@ -4,11 +4,7 @@ Inspect intermediate data for the YOLOv8 example pipelines.
 Choose `simple` for the plain image pipeline, `tiled` for sliced inference, or
 `error` for a synthetic mid-pipeline failure.
 
-In the HTML report, click a structured list entry's header to expand its fields.
-Click a list's +x more control to load six more entries at a time. Click its
-header to collapse or reopen the list.
-Preview limits are applied by the HTML renderer; build_views() retains complete
-formatted blocks for custom renderers.
+See docs/inspection.md for capture behavior, report controls, and customization.
 
 Run from the repo root:
     python examples/run_inspect.py

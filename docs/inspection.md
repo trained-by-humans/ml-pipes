@@ -93,11 +93,14 @@ PipelineInspector().show(saved_result)
 ## How Inspection Works
 
 `Pipeline.inspect(value)` works by tracing one pipeline execution. It follows
-the same ordered span tree as tracing, with two additional conditions:
+the same ordered span tree as tracing, with these additional conditions:
 
-1. The output of every successful step is captured.
-2. Each captured output is a snapshot, so later mutations to the live value do
-   not change the `InspectionResult`.
+- The pipeline input is captured as an initial `Input` step without changing
+  operator numbering.
+- Successful step outputs are captured as snapshots, so later mutations do not
+  change the `InspectionResult`.
+- Region outputs are captured at their closing boundaries.
+- Iterator inputs and lazy outputs are described without being consumed.
 
 And then, `PipelineInspector` coordinates the following components to turn captured
 results into a report:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Iterable, TypeVar
 
@@ -144,8 +145,17 @@ class Pipeline(Generic[InputT, OutputT]):
         )
 
     def inspect(self, value: InputT) -> InspectionResult:
-        """Execute the pipeline on *value* and return an InspectionResult capturing each step's output."""
-        trace = InvocationTrace()
+        """Capture the pipeline input and each step's output during one execution."""
+        lazy = isinstance(value, Iterator)
+        trace = InvocationTrace(spans=[
+            StepSpan(
+                "Input",
+                time.perf_counter(),
+                0.0,
+                output_shape=_extract_shape(value),
+                output_value=repr(value) if lazy else capture_value(value),
+            ),
+        ])
         cfg = TracingConfig(capture_shapes=True, _capture_outputs=True, capture_config=True)
         try:
             self._execute(value, trace=trace, cfg=cfg)
@@ -271,6 +281,20 @@ class Pipeline(Generic[InputT, OutputT]):
             return self._execute(value, trace=child_trace, cfg=cfg, region=(region_start, region_end))
 
         result = operator.run_region(current, label, execute_region, trace, cfg)
+        if cfg and cfg._capture_outputs:
+            closer = self.operators[region_end]
+            lazy = isinstance(result, Iterator)
+            trace.spans.append(
+                StepSpan(
+                    self._label_for(region_end),
+                    time.perf_counter(),
+                    0.0,
+                    operator_config=operator_config(closer) if cfg.capture_config else {},
+                    output_shape=_extract_shape(result) if cfg.capture_shapes else None,
+                    output_value=repr(result) if lazy else capture_value(result),
+                    operator_type=type(closer),
+                )
+            )
         return result, context
 
     def _label_for(self, i: int) -> str:

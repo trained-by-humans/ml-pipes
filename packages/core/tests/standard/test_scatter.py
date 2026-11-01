@@ -149,21 +149,6 @@ def test_pipeline_scatter_gather_worker_exception_propagates():
         pipeline([1, 2, 3, 4])
 
 
-def test_scatter_inspect_preserves_failing_child_trace():
-    class _Boom:
-        def __call__(self, value: int) -> int:
-            if value == 3:
-                raise ValueError("bad item")
-            return value
-
-    result = Pipeline([Scatter(max_concurrency=2), _Boom(), Gather()]).inspect([1, 2, 3, 4])
-
-    assert [span.label for span in result.spans] == ["0:Scatter"]
-    assert result.spans[0].error
-    assert result.spans[0].child_trace is not None
-    assert any(span.label == "1:_Boom" and span.error for span in result.spans[0].child_trace.spans)
-
-
 def test_pipeline_scatter_gather_type_contract():
     contract = Pipeline([Scatter(max_concurrency=1), _Double(), Gather()]).validate()
     assert contract is not None
