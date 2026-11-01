@@ -83,3 +83,45 @@ def test_iterator_input_is_described_without_consuming_or_copying_it():
     assert isinstance(untouched.spans[0].output_value, str)
     result = Pipeline([collect]).inspect(source)
     assert result.spans[1].output_value == [1, 2, 3]
+
+
+def test_skipping_input_avoids_snapshot_work_for_empty_pipeline():
+    copy_attempts = []
+
+    class Input:
+        def __deepcopy__(self, memo):
+            copy_attempts.append(True)
+            return Input()
+
+    result = Pipeline([]).inspect(Input(), capture_input=False)
+
+    assert result.spans == []
+    assert copy_attempts == []
+    assert PipelineInspector().build_views(result) == []
+
+
+def test_skipping_input_preserves_step_snapshots_and_serialization(tmp_path):
+    def append(value):
+        value.append(1)
+        return value
+
+    value = []
+    result = Pipeline([append, append]).inspect(value, capture_input=False)
+
+    assert value == [1, 1]
+    assert [span.label for span in result.spans] == ["0:append", "1:append"]
+    assert [span.output_value for span in result.spans] == [[1], [1, 1]]
+    loaded = InspectionResult.load(result.dump(tmp_path / "outputs.pkl"))
+    assert [span.label for span in loaded.spans] == ["0:append", "1:append"]
+    assert [span.output_value for span in loaded.spans] == [[1], [1, 1]]
+
+
+def test_skipping_input_preserves_first_operator_failure():
+    def fail(value):
+        raise ValueError("failed")
+
+    result = Pipeline([fail]).inspect("input", capture_input=False)
+
+    assert len(result.spans) == 1
+    assert result.spans[0].label == "0:fail"
+    assert result.spans[0].error
